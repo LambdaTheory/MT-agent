@@ -62,6 +62,26 @@ describe('analyzePublicTraffic', () => {
     expect(result.exposureOptimization[0]?.reason).toContain('访问率');
   });
 
+  it('prioritizes high exposure candidates by lowest visit rate before low exposure potential candidates', () => {
+    const result = analyzePublicTraffic({
+      date: '2026-06-09',
+      dailyDelta: [],
+      sevenDaySummary: [
+        summary({ platformProductId: 'low-exposure-high-amount', productName: '低曝高成交', exposure: 10, visits: 3, amount: 999, visitRate: 0.3 }),
+        summary({ platformProductId: 'high-higher-rate', productName: '高曝较低访', exposure: 5000, visits: 45, visitRate: 0.009 }),
+        summary({ platformProductId: 'high-lowest-rate', productName: '高曝最低访', exposure: 2000, visits: 2, visitRate: 0.001 }),
+      ],
+      thirtyDaySummary: [],
+      cumulativeProducts: [],
+      config: { ...DEFAULT_PUBLIC_TRAFFIC_RULES_CONFIG, topN: 2 },
+    });
+
+    expect(result.exposureOptimization.map((item) => item.identifier)).toEqual([
+      '平台商品ID high-lowest-rate',
+      '平台商品ID high-higher-rate',
+    ]);
+  });
+
   it('creates conversion optimization candidates', () => {
     const result = analyzePublicTraffic({
       date: '2026-06-09',

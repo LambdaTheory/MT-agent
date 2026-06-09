@@ -35,14 +35,18 @@ function exposureOptimization(input: AnalyzePublicTrafficInput): PublicTrafficRe
     .filter((row) => !row.flags.includes('missing'))
     .flatMap((row) => {
       if (row.exposure >= rules.highExposure && row.visitRate <= rules.lowVisitRate) {
-        return [{ row, score: row.exposure * (rules.lowVisitRate - row.visitRate + 0.0001), reason: `7日曝光 ${row.exposure}，访问率 ${percent(row.visitRate)}，低于阈值 ${percent(rules.lowVisitRate)}` }];
+        return [{ row, priority: 0, reason: `7日曝光 ${row.exposure}，访问率 ${percent(row.visitRate)}，低于阈值 ${percent(rules.lowVisitRate)}` }];
       }
       if (row.exposure <= rules.lowExposure && (row.visits >= rules.potentialVisits || row.amount >= rules.potentialAmount)) {
-        return [{ row, score: row.amount * 100 + row.visits, reason: `7日曝光 ${row.exposure} 偏低，但访问 ${row.visits}、金额 ${row.amount.toFixed(2)} 显示有潜力` }];
+        return [{ row, priority: 1, reason: `7日曝光 ${row.exposure} 偏低，但访问 ${row.visits}、金额 ${row.amount.toFixed(2)} 显示有潜力` }];
       }
       return [];
     })
-    .sort((a, b) => b.score - a.score);
+    .sort((a, b) => {
+      if (a.priority !== b.priority) return a.priority - b.priority;
+      if (a.priority === 0) return a.row.visitRate - b.row.visitRate || b.row.exposure - a.row.exposure;
+      return b.row.amount - a.row.amount || b.row.visits - a.row.visits;
+    });
 
   return topN(candidates, input.config.topN).map(({ row, reason }) => ({ identifier: identifier(row.platformProductId), action: '曝光优化', reason }));
 }
