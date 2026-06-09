@@ -1,29 +1,63 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { loadConfig } from '../config/loadConfig.js';
+import { crawlExposurePage } from '../crawler/exposureCrawler.js';
+import { sendFeishuText } from '../notify/feishu.js';
+import { computeExposureDailyDelta } from '../publicTraffic/exposureDelta.js';
 import { buildPublicTrafficFeishuText } from '../publicTraffic/buildPublicTrafficFeishu.js';
 import { buildPublicTrafficMarkdown } from '../publicTraffic/buildPublicTrafficMarkdown.js';
 import { writePublicTrafficWorkbookBuffer } from '../publicTraffic/buildPublicTrafficWorkbook.js';
 import { buildPublicTrafficPaths } from '../publicTraffic/paths.js';
-import type { PublicTrafficReportContext } from '../publicTraffic/types.js';
+import type { ExposureCumulativeProduct, PublicTrafficReportContext } from '../publicTraffic/types.js';
 import { createRunLog } from '../storage/runLog.js';
 
 function today(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+function yesterday(date: string): string {
+  const d = new Date(date);
+  d.setDate(d.getDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
+async function loadPreviousCumulative(outputDir: string, date: string): Promise<ExposureCumulativeProduct[]> {
+  const prev = buildPublicTrafficPaths(outputDir, yesterday(date));
+  try {
+    return JSON.parse(await readFile(prev.exposureCumulativeProducts, 'utf8')) as ExposureCumulativeProduct[];
+  } catch {
+    return [];
+  }
+}
+
 export async function runPublicTrafficReportCli(): Promise<void> {
   const config = await loadConfig();
   const date = today();
   const paths = buildPublicTrafficPaths(config.outputDir, date);
-  const log = createRunLog(new Date().toISOString(), config.targetUrl);
+  const log = createRunLog(new Date().toISOString(), config.exposureUrl ?? config.targetUrl);
 
   await mkdir(paths.dir, { recursive: true });
 
   try {
+    log.addEvent('开始抓取曝光数据');
+    const crawlResult = await crawlExposurePage(config);
+
+    await writeFile(paths.exposureCumulativeProducts, JSON.stringify(crawlResult.products, null, 2), 'utf8');
+    log.addEvent(`保存累计快照: ${crawlResult.products.length} 条商品`);
+
+    if (crawlResult.overview.length > 0) {
+      await writeFile(paths.exposureOverview, JSON.stringify(crawlResult.overview, null, 2), 'utf8');
+      log.addEvent(`保存总体概况: ${crawlResult.overview.length} 个周期`);
+    }
+
+    const previousProducts = await loadPreviousCumulative(config.outputDir, date);
+    const dailyDelta = computeExposureDailyDelta(date, previousProducts, crawlResult.products);
+    await writeFile(paths.exposureDailyDelta, JSON.stringify(dailyDelta, null, 2), 'utf8');
+    log.addEvent(`日差分: ${dailyDelta.length} 条, 新品=${dailyDelta.filter((row) => row.flags.includes('new_product')).length}`);
+
     const context: PublicTrafficReportContext = {
       date,
-      overview: [],
+      overview: crawlResult.overview,
       exposureOptimization: [],
       conversionOptimization: [],
       newProductObservation: [],
@@ -33,19 +67,21 @@ export async function runPublicTrafficReportCli(): Promise<void> {
     await writeFile(paths.reportContext, JSON.stringify(context, null, 2), 'utf8');
     await writeFile(paths.markdown, buildPublicTrafficMarkdown(context), 'utf8');
     await writeFile(paths.workbook, writePublicTrafficWorkbookBuffer(context));
-    log.addEvent(`Wrote report context: ${paths.reportContext}`);
-    log.addEvent(`Wrote markdown: ${paths.markdown}`);
-    log.addEvent(`Wrote workbook: ${paths.workbook}`);
+    log.addEvent(`报告已生成: ${paths.markdown}`);
 
     const feishuText = buildPublicTrafficFeishuText(context, {
       markdownPath: paths.markdown,
       workbookPath: paths.workbook,
     });
+
+    const feishuResult = await sendFeishuText(process.env, feishuText);
+    log.addEvent(feishuResult.sent ? '飞书通知已发送' : `飞书通知跳过: ${feishuResult.reason}`);
+
     console.log(feishuText);
 
-    console.log(`Wrote public traffic report skeleton to ${paths.dir}`);
+    console.log(`公域流量报告已生成: ${paths.dir}`);
   } catch (error) {
-    log.addEvent(`ERROR: ${error instanceof Error ? error.message : String(error)}`);
+    log.addEvent(`错误: ${error instanceof Error ? error.message : String(error)}`);
     throw error;
   } finally {
     await writeFile(paths.log, log.toText(), 'utf8');
