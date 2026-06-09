@@ -1,0 +1,8 @@
+node_modules/
+dist/
+output/
+.browser-profile/
+*.log
+.env
+.env.*
+!.env.example

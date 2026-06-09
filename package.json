@@ -1,0 +1,26 @@
+{
+  "name": "mt-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "daily-report": "tsx src/cli/dailyReport.ts",
+    "test-feishu": "tsx src/cli/testFeishu.ts",
+    "probe-page-size": "tsx src/cli/probePageSize.ts",
+    "sync-product-id-map": "tsx src/cli/syncProductIdMap.ts",
+    "refresh-product-id-map": "tsx src/cli/refreshProductIdMap.ts",
+    "rebuild-latest": "tsx src/cli/rebuildLatestReport.ts",
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "playwright": "^1.52.0",
+    "xlsx-js-style": "^1.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.30",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4"
+  }
+}

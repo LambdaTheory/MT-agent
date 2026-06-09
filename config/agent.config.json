@@ -1,0 +1,9 @@
+{
+  "targetUrl": "https://b.alipay.com/page/recycle-im/app/assistant-data-analysis/index/product/list?appId=2021005181665859",
+  "periods": ["1d", "7d", "30d"],
+  "preferredPageSize": 100,
+  "outputDir": "output",
+  "browserProfileDir": ".browser-profile",
+  "productIdMappingPath": "config/product-id-map.json",
+  "goodsExportUrl": "https://b.alipay.com/page/commerce/goods/list?appId=2021005181665859&itemSubType=RENT&itemType=NORMAL_ITEM"
+}
