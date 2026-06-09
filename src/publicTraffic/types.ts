@@ -15,3 +15,27 @@ export interface ExposureCumulativeProduct {
   custodyDays: number | null;
   raw: Record<string, string>;
 }
+
+export type ExposureDeltaFlag = 'new_product' | 'missing' | 'counter_reset_or_data_error';
+
+export interface ExposureDailyDelta {
+  date: string;
+  productName: string;
+  platformProductId: string;
+  exposure: number;
+  visits: number;
+  amount: number;
+  custodyDays: number | null;
+  flags: ExposureDeltaFlag[];
+}
+
+export interface ExposureProductSummary {
+  productName: string;
+  platformProductId: string;
+  exposure: number;
+  visits: number;
+  amount: number;
+  visitRate: number;
+  days: number;
+  flags: ExposureDeltaFlag[];
+}
