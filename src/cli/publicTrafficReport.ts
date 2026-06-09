@@ -81,6 +81,8 @@ export async function runPublicTrafficReportCli(): Promise<void> {
   await mkdir(paths.dir, { recursive: true });
 
   try {
+    const rulesConfig = await loadPublicTrafficRulesConfig();
+
     log.addEvent('开始抓取曝光数据');
     const crawlResult = await crawlExposurePage(config);
 
@@ -106,7 +108,6 @@ export async function runPublicTrafficReportCli(): Promise<void> {
     log.addEvent(`7日汇总: ${sevenDaySummary.length} 条商品`);
     log.addEvent(`30日汇总: ${thirtyDaySummary.length} 条商品`);
 
-    const rulesConfig = await loadPublicTrafficRulesConfig();
     const analysis = analyzePublicTraffic({
       date,
       dailyDelta,
