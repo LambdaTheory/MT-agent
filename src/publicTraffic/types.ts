@@ -50,3 +50,28 @@ export interface NewProductObservationItem extends GoodsSnapshotItem {
   date: string;
   source: 'goods_diff' | 'recent_internal_id';
 }
+
+export type ObservationStateName = 'new_observation' | 'watching' | 'candidate_action' | 'cooldown' | 'resolved_or_stable';
+
+export interface ProductObservationState {
+  platformProductId: string;
+  internalProductId?: string;
+  state: ObservationStateName;
+  abnormalDays: number;
+  cooldownUntil: string | null;
+  note: string;
+}
+
+export interface ProductObservationSignal {
+  abnormal: boolean;
+  improved: boolean;
+  newProduct: boolean;
+}
+
+export interface ProductObservationOverride {
+  platformProductId?: string;
+  internalProductId?: string;
+  state: ObservationStateName;
+  cooldownUntil?: string | null;
+  note?: string;
+}
