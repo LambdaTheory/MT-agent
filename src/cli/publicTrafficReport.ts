@@ -25,8 +25,21 @@ async function loadPreviousCumulative(outputDir: string, date: string): Promise<
   const prev = buildPublicTrafficPaths(outputDir, yesterday(date));
   try {
     return JSON.parse(await readFile(prev.exposureCumulativeProducts, 'utf8')) as ExposureCumulativeProduct[];
-  } catch {
-    return [];
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
+      return [];
+    }
+
+    throw error;
+  }
+}
+
+async function sendFeishuTextSafely(text: string, log: ReturnType<typeof createRunLog>): Promise<void> {
+  try {
+    const feishuResult = await sendFeishuText(process.env, text);
+    log.addEvent(feishuResult.sent ? '飞书通知已发送' : `飞书通知跳过: ${feishuResult.reason}`);
+  } catch (error) {
+    log.addEvent(`飞书通知失败: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
@@ -74,8 +87,7 @@ export async function runPublicTrafficReportCli(): Promise<void> {
       workbookPath: paths.workbook,
     });
 
-    const feishuResult = await sendFeishuText(process.env, feishuText);
-    log.addEvent(feishuResult.sent ? '飞书通知已发送' : `飞书通知跳过: ${feishuResult.reason}`);
+    await sendFeishuTextSafely(feishuText, log);
 
     console.log(feishuText);
 
