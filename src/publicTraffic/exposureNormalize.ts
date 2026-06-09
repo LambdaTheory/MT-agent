@@ -4,17 +4,23 @@ function normalize(value: unknown): string {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
 }
 
-function findColumn(headers: string[], candidates: string[]): number {
+function findColumn(headers: string[], candidates: string[], excludedFallbacks: string[] = []): number {
   const normalized = headers.map(normalize);
   for (const candidate of candidates) {
-    const exactIndex = normalized.findIndex((header) => header === candidate);
+    const exactIndex = normalized.findIndex(
+      (header) => header === candidate && !excludedFallbacks.some((excluded) => header.includes(excluded)),
+    );
     if (exactIndex >= 0) {
       return exactIndex;
     }
   }
 
   const index = candidates
-    .map((candidate) => normalized.findIndex((header) => header.includes(candidate)))
+    .map((candidate) =>
+      normalized.findIndex(
+        (header) => header.includes(candidate) && !excludedFallbacks.some((excluded) => header.includes(excluded)),
+      ),
+    )
     .find((candidateIndex) => candidateIndex >= 0) ?? -1;
   if (index < 0) {
     throw new Error(`Missing exposure column: ${candidates.join('/')}. Actual headers: ${headers.join(', ')}`);
@@ -34,11 +40,15 @@ export function parseMoney(value: unknown): number {
 }
 
 export function normalizeExposureProductRows(headers: string[], rows: string[][]): ExposureCumulativeProduct[] {
-  const nameIndex = findColumn(headers, ['商品名称', '商品']);
+  const nameIndex = findColumn(headers, ['商品名称', '商品标题', '名称', '标题']);
   const idIndex = findColumn(headers, ['商品ID', '平台商品ID', '平台侧编码']);
   const exposureIndex = findColumn(headers, ['曝光']);
   const visitsIndex = findColumn(headers, ['访问']);
-  const amountIndex = findColumn(headers, ['交易金额', '成交金额', '金额', '收入']);
+  const amountIndex = findColumn(headers, ['交易金额', '成交金额', '支付金额', 'GMV', '收入', '金额'], [
+    '退款',
+    '退货',
+    'refund',
+  ]);
   const custodyIndex = headers.findIndex((header) => normalize(header).includes('托管'));
 
   return rows

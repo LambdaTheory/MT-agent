@@ -65,4 +65,32 @@ describe('exposure normalization', () => {
       },
     ]);
   });
+
+  it('maps product name from product title without falling back to product id columns', () => {
+    const rows = normalizeExposureProductRows(
+      ['平台商品ID', '商品标题', '曝光', '访问', '交易金额'],
+      [['2026052122000827682227', 'DJI Pocket 3', '5,801', '159', '¥119.00']],
+    );
+
+    expect(rows[0]?.productName).toBe('DJI Pocket 3');
+    expect(rows[0]?.platformProductId).toBe('2026052122000827682227');
+  });
+
+  it('maps amount from transaction amount instead of refund amount', () => {
+    const rows = normalizeExposureProductRows(
+      ['商品名称', '商品ID', '曝光', '访问', '退款金额', '交易金额'],
+      [['DJI Pocket 3', '2026052122000827682227', '5,801', '159', '¥5.00', '¥119.00']],
+    );
+
+    expect(rows[0]?.amount).toBe(119);
+  });
+
+  it('does not use refund amount as amount fallback', () => {
+    expect(() =>
+      normalizeExposureProductRows(
+        ['商品名称', '商品ID', '曝光', '访问', '退款金额'],
+        [['DJI Pocket 3', '2026052122000827682227', '5,801', '159', '¥5.00']],
+      ),
+    ).toThrow('Missing exposure column');
+  });
 });
