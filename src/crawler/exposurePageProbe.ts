@@ -50,16 +50,27 @@ async function waitForExposureContent(page: Page): Promise<boolean> {
 
 async function ensureExposurePage(config: AgentConfig, page: Page): Promise<boolean> {
   const url = config.exposureUrl ?? 'https://b.alipay.com/page/self-operation-center/custody?custodyChannel=public';
-  await page.goto(url, { waitUntil: 'domcontentloaded' });
-  const state = await waitForSettledLoginState(page, { timeoutMs: 60000, intervalMs: 1000 });
-  if (state === 'login-page') {
+  await page.goto(config.targetUrl, { waitUntil: 'domcontentloaded' });
+
+  let loginState = await waitForSettledLoginState(page, { timeoutMs: 60000, intervalMs: 1000 });
+  if (loginState === 'login-page') {
     console.log('检测到支付宝登录页，请扫码登录；登录成功后程序会继续探测曝光页面。');
     await page.waitForURL((currentUrl) => !/auth\.alipay\.com|login/i.test(currentUrl.toString()), { timeout: 300000 });
+    loginState = await waitForSettledLoginState(page, { timeoutMs: 60000, intervalMs: 1000 });
   }
-  if (page.url().includes('select-identity')) {
+
+  if (loginState === 'select-identity' || page.url().includes('select-identity')) {
     await selectSubAccountIfNeeded(page);
   }
+
   await page.goto(url, { waitUntil: 'domcontentloaded' });
+  loginState = await waitForSettledLoginState(page, { timeoutMs: 60000, intervalMs: 1000 });
+
+  if (loginState === 'select-identity' || page.url().includes('select-identity')) {
+    await selectSubAccountIfNeeded(page);
+    await page.goto(url, { waitUntil: 'domcontentloaded' });
+  }
+
   return waitForExposureContent(page);
 }
 
