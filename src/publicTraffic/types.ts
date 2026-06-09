@@ -39,3 +39,14 @@ export interface ExposureProductSummary {
   days: number;
   flags: ExposureDeltaFlag[];
 }
+
+export interface GoodsSnapshotItem {
+  platformProductId: string;
+  internalProductId: string;
+  productName: string;
+}
+
+export interface NewProductObservationItem extends GoodsSnapshotItem {
+  date: string;
+  source: 'goods_diff' | 'recent_internal_id';
+}
