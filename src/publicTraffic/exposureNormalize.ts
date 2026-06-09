@@ -6,7 +6,16 @@ function normalize(value: unknown): string {
 
 function findColumn(headers: string[], candidates: string[]): number {
   const normalized = headers.map(normalize);
-  const index = normalized.findIndex((header) => candidates.some((candidate) => header.includes(candidate)));
+  for (const candidate of candidates) {
+    const exactIndex = normalized.findIndex((header) => header === candidate);
+    if (exactIndex >= 0) {
+      return exactIndex;
+    }
+  }
+
+  const index = candidates
+    .map((candidate) => normalized.findIndex((header) => header.includes(candidate)))
+    .find((candidateIndex) => candidateIndex >= 0) ?? -1;
   if (index < 0) {
     throw new Error(`Missing exposure column: ${candidates.join('/')}. Actual headers: ${headers.join(', ')}`);
   }
@@ -15,8 +24,9 @@ function findColumn(headers: string[], candidates: string[]): number {
 
 export function parseNumberText(value: unknown): number {
   const cleaned = normalize(value).replace(/[,%，]/g, '').replace(/天$/, '');
-  const parsed = Number.parseFloat(cleaned);
-  return Number.isFinite(parsed) ? parsed : 0;
+  const multiplier = cleaned.includes('亿') ? 100000000 : cleaned.includes('万') ? 10000 : 1;
+  const parsed = Number.parseFloat(cleaned.replace(/[万亿]/g, ''));
+  return Number.isFinite(parsed) ? parsed * multiplier : 0;
 }
 
 export function parseMoney(value: unknown): number {
@@ -28,7 +38,7 @@ export function normalizeExposureProductRows(headers: string[], rows: string[][]
   const idIndex = findColumn(headers, ['商品ID', '平台商品ID', '平台侧编码']);
   const exposureIndex = findColumn(headers, ['曝光']);
   const visitsIndex = findColumn(headers, ['访问']);
-  const amountIndex = findColumn(headers, ['金额', '收入', '交易']);
+  const amountIndex = findColumn(headers, ['交易金额', '成交金额', '金额', '收入']);
   const custodyIndex = headers.findIndex((header) => normalize(header).includes('托管'));
 
   return rows
