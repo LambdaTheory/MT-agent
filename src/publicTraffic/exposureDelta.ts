@@ -6,8 +6,9 @@ function byId(rows: ExposureCumulativeProduct[]): Map<string, ExposureCumulative
 
 export function computeExposureDailyDelta(date: string, previous: ExposureCumulativeProduct[], current: ExposureCumulativeProduct[]): ExposureDailyDelta[] {
   const previousById = byId(previous);
+  const currentById = byId(current);
 
-  return current.map((row) => {
+  const deltas: ExposureDailyDelta[] = current.map((row) => {
     const old = previousById.get(row.platformProductId);
     if (!old) {
       return { date, productName: row.productName, platformProductId: row.platformProductId, exposure: row.exposure, visits: row.visits, amount: row.amount, custodyDays: row.custodyDays, flags: ['new_product'] };
@@ -22,4 +23,12 @@ export function computeExposureDailyDelta(date: string, previous: ExposureCumula
 
     return { date, productName: row.productName, platformProductId: row.platformProductId, exposure, visits, amount, custodyDays: row.custodyDays, flags: [] };
   });
+
+  for (const row of previous) {
+    if (!currentById.has(row.platformProductId)) {
+      deltas.push({ date, productName: row.productName, platformProductId: row.platformProductId, exposure: 0, visits: 0, amount: 0, custodyDays: row.custodyDays, flags: ['missing'] });
+    }
+  }
+
+  return deltas;
 }

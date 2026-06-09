@@ -21,4 +21,24 @@ describe('aggregateExposureDeltas', () => {
       },
     ]);
   });
+
+  it('preserves unique flags across product rows', () => {
+    expect(
+      aggregateExposureDeltas([
+        { date: '2026-06-08', productName: 'B', platformProductId: '1002', exposure: 0, visits: 0, amount: 0, custodyDays: 10, flags: ['missing'] },
+        { date: '2026-06-09', productName: 'B', platformProductId: '1002', exposure: 0, visits: 0, amount: 0, custodyDays: 11, flags: ['missing', 'counter_reset_or_data_error'] },
+      ]),
+    ).toEqual([
+      {
+        productName: 'B',
+        platformProductId: '1002',
+        exposure: 0,
+        visits: 0,
+        amount: 0,
+        visitRate: 0,
+        days: 2,
+        flags: ['missing', 'counter_reset_or_data_error'],
+      },
+    ]);
+  });
 });
