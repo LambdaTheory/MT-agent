@@ -1,0 +1,36 @@
+import { describe, expect, it } from 'vitest';
+import { normalizeExposureProductRows, parseMoney, parseNumberText } from '../src/publicTraffic/exposureNormalize.js';
+
+describe('exposure normalization', () => {
+  it('parses number and money text', () => {
+    expect(parseNumberText('48,103.0')).toBe(48103);
+    expect(parseNumberText('3.31%')).toBe(3.31);
+    expect(parseMoney('¥3,018.80')).toBe(3018.8);
+  });
+
+  it('normalizes exposure cumulative product rows', () => {
+    const rows = normalizeExposureProductRows(
+      ['商品名称', '商品ID', '曝光', '访问', '交易金额', '托管天数'],
+      [['DJI Pocket 3', '2026052122000827682227', '5,801', '159', '¥119.00', '23天']],
+    );
+
+    expect(rows).toEqual([
+      {
+        productName: 'DJI Pocket 3',
+        platformProductId: '2026052122000827682227',
+        exposure: 5801,
+        visits: 159,
+        amount: 119,
+        custodyDays: 23,
+        raw: {
+          商品名称: 'DJI Pocket 3',
+          商品ID: '2026052122000827682227',
+          曝光: '5,801',
+          访问: '159',
+          交易金额: '¥119.00',
+          托管天数: '23天',
+        },
+      },
+    ]);
+  });
+});
