@@ -96,15 +96,17 @@ async function getCurrentTable(page: Page): Promise<{
   headers: string[];
   rows: string[][];
 }> {
-  return page.locator('table').first().evaluate((table) => {
-    const clean = (value: unknown) => String(value ?? '').replace(/\s+/g, ' ').trim();
+  return page.evaluate(`(() => {
+    const table = document.querySelector('table');
+    if (!table) return { headers: [], rows: [] };
+    const clean = (value) => String(value ?? '').replace(/\s+/g, ' ').trim();
     const headers = Array.from(table.querySelectorAll('thead th')).map((cell) => clean(cell.textContent));
     const rows = Array.from(table.querySelectorAll('tbody tr')).map((row) =>
       Array.from(row.querySelectorAll('td')).map((cell) => clean(cell.textContent)),
     );
 
     return { headers, rows };
-  });
+  })()`);
 }
 
 async function extractProductRows(page: Page): Promise<ExposureCumulativeProduct[]> {
