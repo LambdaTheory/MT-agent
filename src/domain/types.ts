@@ -8,6 +8,7 @@ export interface AgentConfig {
   browserProfileDir: string;
   productIdMappingPath?: string;
   goodsExportUrl?: string;
+  exposureUrl?: string;
 }
 
 export interface PeriodCollectionStats {

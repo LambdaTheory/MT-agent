@@ -5,5 +5,6 @@
   "outputDir": "output",
   "browserProfileDir": ".browser-profile",
   "productIdMappingPath": "config/product-id-map.json",
-  "goodsExportUrl": "https://b.alipay.com/page/commerce/goods/list?appId=2021005181665859&itemSubType=RENT&itemType=NORMAL_ITEM"
+  "goodsExportUrl": "https://b.alipay.com/page/commerce/goods/list?appId=2021005181665859&itemSubType=RENT&itemType=NORMAL_ITEM",
+  "exposureUrl": "https://b.alipay.com/page/self-operation-center/custody?custodyChannel=public"
 }

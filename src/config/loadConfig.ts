@@ -59,6 +59,7 @@ export function parseAgentConfig(value: unknown): AgentConfig {
     browserProfileDir: requireString(record.browserProfileDir, 'browserProfileDir'),
     productIdMappingPath: optionalString(record.productIdMappingPath, 'productIdMappingPath'),
     goodsExportUrl: optionalString(record.goodsExportUrl, 'goodsExportUrl'),
+    exposureUrl: optionalString(record.exposureUrl, 'exposureUrl'),
   };
 }
 

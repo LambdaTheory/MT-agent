@@ -22,6 +22,21 @@ describe('parseAgentConfig', () => {
     });
   });
 
+  it('parses optional exposure url', () => {
+    expect(
+      parseAgentConfig({
+        targetUrl: 'https://example.com/dashboard',
+        exposureUrl: 'https://example.com/exposure',
+        periods: ['1d', '7d', '30d'],
+        preferredPageSize: 100,
+        outputDir: 'output',
+        browserProfileDir: '.browser-profile',
+      }),
+    ).toMatchObject({
+      exposureUrl: 'https://example.com/exposure',
+    });
+  });
+
   it('rejects unsupported periods', () => {
     expect(() =>
       parseAgentConfig({
