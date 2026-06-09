@@ -1,0 +1,25 @@
+{
+  "topN": 5,
+  "exposureOptimization": {
+    "highExposure": 1000,
+    "lowVisitRate": 0.01,
+    "lowExposure": 50,
+    "potentialVisits": 3,
+    "potentialAmount": 1
+  },
+  "conversionOptimization": {
+    "minVisits": 5,
+    "weakAmount": 1,
+    "minExposure": 100
+  },
+  "newProductObservation": {
+    "lowExposure": 20,
+    "zeroVisitMaxExposure": 100
+  },
+  "lifecycleGovernance": {
+    "minCustodyDays": 30,
+    "weak30dExposure": 100,
+    "weak30dVisits": 3,
+    "weak30dAmount": 1
+  }
+}
