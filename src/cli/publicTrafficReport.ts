@@ -21,10 +21,35 @@ function yesterday(date: string): string {
   return d.toISOString().slice(0, 10);
 }
 
+function isExposureCumulativeProduct(value: unknown): value is ExposureCumulativeProduct {
+  if (!value || typeof value !== 'object') return false;
+  const row = value as Record<string, unknown>;
+  return (
+    typeof row.productName === 'string' &&
+    typeof row.platformProductId === 'string' &&
+    typeof row.exposure === 'number' &&
+    typeof row.visits === 'number' &&
+    typeof row.amount === 'number' &&
+    (typeof row.custodyDays === 'number' || row.custodyDays === null) &&
+    !!row.raw &&
+    typeof row.raw === 'object' &&
+    !Array.isArray(row.raw)
+  );
+}
+
+export function parsePreviousCumulativeSnapshot(text: string): ExposureCumulativeProduct[] {
+  const parsed: unknown = JSON.parse(text);
+  if (!Array.isArray(parsed) || !parsed.every(isExposureCumulativeProduct)) {
+    throw new Error('Invalid previous exposure snapshot: expected ExposureCumulativeProduct[]');
+  }
+
+  return parsed;
+}
+
 async function loadPreviousCumulative(outputDir: string, date: string): Promise<ExposureCumulativeProduct[]> {
   const prev = buildPublicTrafficPaths(outputDir, yesterday(date));
   try {
-    return JSON.parse(await readFile(prev.exposureCumulativeProducts, 'utf8')) as ExposureCumulativeProduct[];
+    return parsePreviousCumulativeSnapshot(await readFile(prev.exposureCumulativeProducts, 'utf8'));
   } catch (error) {
     if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
       return [];

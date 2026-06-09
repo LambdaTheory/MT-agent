@@ -7,4 +7,11 @@ describe('exposureCrawler Playwright evaluation', () => {
 
     expect(source).not.toContain("locator('table').first().evaluate(");
   });
+
+  it('scopes current table and pagination instead of using global selectors', async () => {
+    const source = await readFile(new URL('../src/crawler/exposureCrawler.ts', import.meta.url), 'utf8');
+
+    expect(source).not.toContain("document.querySelector('table')");
+    expect(source).not.toContain("page.locator('.ant-pagination-next:not(.ant-pagination-disabled)')");
+  });
 });

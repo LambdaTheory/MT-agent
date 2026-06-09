@@ -97,15 +97,51 @@ async function getCurrentTable(page: Page): Promise<{
   rows: string[][];
 }> {
   return page.evaluate(`(() => {
-    const table = document.querySelector('table');
-    if (!table) return { headers: [], rows: [] };
     const clean = (value) => String(value ?? '').replace(/\s+/g, ' ').trim();
+    const isVisible = (element) => {
+      const rect = element.getBoundingClientRect();
+      const style = window.getComputedStyle(element);
+      return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+    };
+    const table = Array.from(document.querySelectorAll('table')).find((candidate) => {
+      if (!isVisible(candidate)) return false;
+      const headers = Array.from(candidate.querySelectorAll('thead th')).map((cell) => clean(cell.textContent));
+      return headers.some((header) => header.includes('商品信息'))
+        && headers.some((header) => header.includes('曝光次数'))
+        && headers.some((header) => header.includes('商品访问次数'))
+        && headers.some((header) => header.includes('交易金额'));
+    });
+    if (!table) return { headers: [], rows: [] };
     const headers = Array.from(table.querySelectorAll('thead th')).map((cell) => clean(cell.textContent));
     const rows = Array.from(table.querySelectorAll('tbody tr')).map((row) =>
       Array.from(row.querySelectorAll('td')).map((cell) => clean(cell.textContent)),
     );
 
     return { headers, rows };
+  })()`);
+}
+
+async function clickCurrentTableNext(page: Page): Promise<boolean> {
+  return page.evaluate(`(() => {
+    const clean = (value) => String(value ?? '').replace(/\s+/g, ' ').trim();
+    const isVisible = (element) => {
+      const rect = element.getBoundingClientRect();
+      const style = window.getComputedStyle(element);
+      return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+    };
+    const table = Array.from(document.querySelectorAll('table')).find((candidate) => {
+      if (!isVisible(candidate)) return false;
+      const headers = Array.from(candidate.querySelectorAll('thead th')).map((cell) => clean(cell.textContent));
+      return headers.some((header) => header.includes('商品信息'))
+        && headers.some((header) => header.includes('曝光次数'))
+        && headers.some((header) => header.includes('商品访问次数'))
+        && headers.some((header) => header.includes('交易金额'));
+    });
+    const wrapper = table?.closest('.ant-table-wrapper');
+    const nextButton = wrapper?.querySelector('.ant-pagination-next:not(.ant-pagination-disabled)');
+    if (!(nextButton instanceof HTMLElement) || !isVisible(nextButton)) return false;
+    nextButton.click();
+    return true;
   })()`);
 }
 
@@ -150,12 +186,10 @@ async function extractProductRows(page: Page): Promise<ExposureCumulativeProduct
 
     console.log(`[曝光] 第${pageNum}页: ${rows.length}行`);
 
-    const nextButton = page.locator('.ant-pagination-next:not(.ant-pagination-disabled)').first();
-    if ((await nextButton.count()) === 0 || !(await nextButton.isVisible().catch(() => false))) {
+    if (!(await clickCurrentTableNext(page))) {
       break;
     }
 
-    await nextButton.click();
     await page.waitForTimeout(2000);
   }
 
