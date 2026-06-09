@@ -58,9 +58,27 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value));
 }
 
-function mergeSection<T extends Record<string, number>>(defaults: T, override: unknown): T {
-  if (!isObject(override)) return defaults;
-  return { ...defaults, ...Object.fromEntries(Object.entries(override).filter(([, value]) => typeof value === 'number')) } as T;
+function hasOwn(object: Record<string, unknown>, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(object, key);
+}
+
+function mergeSection<T extends Record<string, number>>(sectionName: string, defaults: T, override: unknown): T {
+  if (override === undefined) return defaults;
+  if (!isObject(override)) {
+    throw new Error(`Invalid public traffic rules config: ${sectionName} must be an object`);
+  }
+
+  const section = { ...defaults };
+  for (const key of Object.keys(defaults)) {
+    if (!hasOwn(override, key)) continue;
+    const value = override[key];
+    if (typeof value !== 'number') {
+      throw new Error(`Invalid public traffic rules config: ${sectionName}.${key} must be a number`);
+    }
+    section[key as keyof T] = value as T[keyof T];
+  }
+
+  return section;
 }
 
 function assertFiniteNonNegative(name: string, value: number): void {
@@ -101,12 +119,16 @@ export async function loadPublicTrafficRulesConfig(path = DEFAULT_RULES_CONFIG_P
     throw new Error('Invalid public traffic rules config: root must be an object');
   }
 
+  if (hasOwn(parsed, 'topN') && typeof parsed.topN !== 'number') {
+    throw new Error('Invalid public traffic rules config: topN must be a number');
+  }
+
   const config: PublicTrafficRulesConfig = {
     topN: typeof parsed.topN === 'number' ? parsed.topN : DEFAULT_PUBLIC_TRAFFIC_RULES_CONFIG.topN,
-    exposureOptimization: mergeSection(DEFAULT_PUBLIC_TRAFFIC_RULES_CONFIG.exposureOptimization, parsed.exposureOptimization),
-    conversionOptimization: mergeSection(DEFAULT_PUBLIC_TRAFFIC_RULES_CONFIG.conversionOptimization, parsed.conversionOptimization),
-    newProductObservation: mergeSection(DEFAULT_PUBLIC_TRAFFIC_RULES_CONFIG.newProductObservation, parsed.newProductObservation),
-    lifecycleGovernance: mergeSection(DEFAULT_PUBLIC_TRAFFIC_RULES_CONFIG.lifecycleGovernance, parsed.lifecycleGovernance),
+    exposureOptimization: mergeSection('exposureOptimization', DEFAULT_PUBLIC_TRAFFIC_RULES_CONFIG.exposureOptimization, parsed.exposureOptimization),
+    conversionOptimization: mergeSection('conversionOptimization', DEFAULT_PUBLIC_TRAFFIC_RULES_CONFIG.conversionOptimization, parsed.conversionOptimization),
+    newProductObservation: mergeSection('newProductObservation', DEFAULT_PUBLIC_TRAFFIC_RULES_CONFIG.newProductObservation, parsed.newProductObservation),
+    lifecycleGovernance: mergeSection('lifecycleGovernance', DEFAULT_PUBLIC_TRAFFIC_RULES_CONFIG.lifecycleGovernance, parsed.lifecycleGovernance),
   };
 
   validateConfig(config);

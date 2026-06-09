@@ -39,4 +39,26 @@ describe('loadPublicTrafficRulesConfig', () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  it('rejects invalid topN type', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'mt-rules-'));
+    const path = join(dir, 'rules.json');
+    try {
+      await writeFile(path, JSON.stringify({ topN: '3' }), 'utf8');
+      await expect(loadPublicTrafficRulesConfig(path)).rejects.toThrow(/Invalid public traffic rules config/);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects invalid threshold type', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'mt-rules-'));
+    const path = join(dir, 'rules.json');
+    try {
+      await writeFile(path, JSON.stringify({ exposureOptimization: { highExposure: '500' } }), 'utf8');
+      await expect(loadPublicTrafficRulesConfig(path)).rejects.toThrow(/Invalid public traffic rules config/);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });
