@@ -85,7 +85,17 @@ function lifecycleGovernance(input: AnalyzePublicTrafficInput): PublicTrafficRep
   const candidates = input.cumulativeProducts
     .filter((row) => typeof row.custodyDays === 'number' && row.custodyDays >= rules.minCustodyDays)
     .map((row) => ({ cumulative: row, summary: summaryById.get(row.platformProductId) }))
-    .filter(({ summary }) => Boolean(summary && summary.exposure <= rules.weak30dExposure && summary.visits <= rules.weak30dVisits && summary.amount <= rules.weak30dAmount))
+    .filter(({ summary }) =>
+      Boolean(
+        summary &&
+          summary.days >= 30 &&
+          !summary.flags.includes('missing') &&
+          !summary.flags.includes('counter_reset_or_data_error') &&
+          summary.exposure <= rules.weak30dExposure &&
+          summary.visits <= rules.weak30dVisits &&
+          summary.amount <= rules.weak30dAmount,
+      ),
+    )
     .sort((a, b) => (b.cumulative.custodyDays ?? 0) - (a.cumulative.custodyDays ?? 0) || (a.summary?.exposure ?? 0) - (b.summary?.exposure ?? 0));
 
   return topN(candidates, input.config.topN).map(({ cumulative, summary }) => ({

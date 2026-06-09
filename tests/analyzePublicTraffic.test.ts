@@ -121,7 +121,7 @@ describe('analyzePublicTraffic', () => {
       date: '2026-06-09',
       dailyDelta: [],
       sevenDaySummary: [],
-      thirtyDaySummary: [summary({ platformProductId: 'old-weak', productName: '老品弱表现', exposure: 20, visits: 1, amount: 0 })],
+      thirtyDaySummary: [summary({ platformProductId: 'old-weak', productName: '老品弱表现', exposure: 20, visits: 1, amount: 0, days: 30 })],
       cumulativeProducts: [cumulative({ platformProductId: 'old-weak', productName: '老品弱表现', custodyDays: 45 }), cumulative({ platformProductId: 'unknown-days', custodyDays: null })],
       config: DEFAULT_PUBLIC_TRAFFIC_RULES_CONFIG,
     });
@@ -131,5 +131,24 @@ describe('analyzePublicTraffic', () => {
       identifier: '平台商品ID old-weak',
       action: '生命周期治理',
     });
+  });
+
+  it('skips lifecycle governance when 30 day data is incomplete or flagged as reset/error', () => {
+    const result = analyzePublicTraffic({
+      date: '2026-06-09',
+      dailyDelta: [],
+      sevenDaySummary: [],
+      thirtyDaySummary: [
+        summary({ platformProductId: 'incomplete', exposure: 20, visits: 1, amount: 0, days: 3 }),
+        summary({ platformProductId: 'reset', exposure: 20, visits: 1, amount: 0, days: 30, flags: ['counter_reset_or_data_error'] }),
+      ],
+      cumulativeProducts: [
+        cumulative({ platformProductId: 'incomplete', custodyDays: 45 }),
+        cumulative({ platformProductId: 'reset', custodyDays: 45 }),
+      ],
+      config: DEFAULT_PUBLIC_TRAFFIC_RULES_CONFIG,
+    });
+
+    expect(result.lifecycleGovernance).toEqual([]);
   });
 });

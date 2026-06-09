@@ -69,6 +69,12 @@ function mergeSection<T extends Record<string, number>>(sectionName: string, def
   }
 
   const section = { ...defaults };
+  for (const key of Object.keys(override)) {
+    if (!hasOwn(defaults, key)) {
+      throw new Error(`Unknown public traffic rules config key: ${sectionName}.${key}`);
+    }
+  }
+
   for (const key of Object.keys(defaults)) {
     if (!hasOwn(override, key)) continue;
     const value = override[key];
@@ -117,6 +123,13 @@ export async function loadPublicTrafficRulesConfig(path = DEFAULT_RULES_CONFIG_P
 
   if (!isObject(parsed)) {
     throw new Error('Invalid public traffic rules config: root must be an object');
+  }
+
+  const knownTopLevelKeys = ['topN', 'exposureOptimization', 'conversionOptimization', 'newProductObservation', 'lifecycleGovernance'];
+  for (const key of Object.keys(parsed)) {
+    if (!knownTopLevelKeys.includes(key)) {
+      throw new Error(`Unknown public traffic rules config key: ${key}`);
+    }
   }
 
   if (hasOwn(parsed, 'topN') && typeof parsed.topN !== 'number') {

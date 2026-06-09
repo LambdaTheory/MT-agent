@@ -5,6 +5,7 @@ describe('publicTrafficReport rules wiring', () => {
   it('loads recent deltas, writes summaries, and fills report sections from analysis', async () => {
     const source = await readFile(new URL('../src/cli/publicTrafficReport.ts', import.meta.url), 'utf8');
     const rulesConfigIndex = source.indexOf('loadPublicTrafficRulesConfig()');
+    const mkdirIndex = source.indexOf('mkdir(paths.dir');
     const crawlIndex = source.indexOf('crawlExposurePage(config)');
     const cumulativeWriteIndex = source.indexOf('writeFile(paths.exposureCumulativeProducts');
 
@@ -12,6 +13,7 @@ describe('publicTrafficReport rules wiring', () => {
     expect(source).toContain("import { loadPublicTrafficRulesConfig } from '../publicTraffic/rulesConfig.js';");
     expect(source).toContain("import { loadRecentExposureDeltas } from '../publicTraffic/recentExposureDeltas.js';");
     expect(rulesConfigIndex).toBeGreaterThan(-1);
+    expect(mkdirIndex).toBeGreaterThan(rulesConfigIndex);
     expect(crawlIndex).toBeGreaterThan(rulesConfigIndex);
     expect(cumulativeWriteIndex).toBeGreaterThan(rulesConfigIndex);
     expect(source).toContain('aggregateExposureDeltas(sevenDayDeltas)');

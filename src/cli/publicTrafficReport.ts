@@ -76,13 +76,12 @@ export async function runPublicTrafficReportCli(): Promise<void> {
   const config = await loadConfig();
   const date = today();
   const paths = buildPublicTrafficPaths(config.outputDir, date);
+  const rulesConfig = await loadPublicTrafficRulesConfig();
   const log = createRunLog(new Date().toISOString(), config.exposureUrl ?? config.targetUrl);
 
   await mkdir(paths.dir, { recursive: true });
 
   try {
-    const rulesConfig = await loadPublicTrafficRulesConfig();
-
     log.addEvent('开始抓取曝光数据');
     const crawlResult = await crawlExposurePage(config);
 

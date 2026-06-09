@@ -61,4 +61,15 @@ describe('loadPublicTrafficRulesConfig', () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  it('rejects unknown rule keys', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'mt-rules-'));
+    const path = join(dir, 'rules.json');
+    try {
+      await writeFile(path, JSON.stringify({ exposureOptimization: { highExpsoure: 500 } }), 'utf8');
+      await expect(loadPublicTrafficRulesConfig(path)).rejects.toThrow(/Unknown public traffic rules config key/);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });
