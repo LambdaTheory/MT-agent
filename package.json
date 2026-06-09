@@ -11,6 +11,7 @@
     "sync-product-id-map": "tsx src/cli/syncProductIdMap.ts",
     "refresh-product-id-map": "tsx src/cli/refreshProductIdMap.ts",
     "rebuild-latest": "tsx src/cli/rebuildLatestReport.ts",
+    "public-traffic-report": "tsx src/cli/publicTrafficReport.ts",
     "build": "tsc -p tsconfig.json",
     "test": "vitest run"
   },
