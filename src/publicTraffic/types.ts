@@ -75,3 +75,23 @@ export interface ProductObservationOverride {
   cooldownUntil?: string | null;
   note?: string;
 }
+
+export interface PublicTrafficReportSectionItem {
+  identifier: string;
+  action: string;
+  reason: string;
+}
+
+export interface PublicTrafficReportContext {
+  date: string;
+  overview: ExposureOverviewMetric[];
+  exposureOptimization: PublicTrafficReportSectionItem[];
+  conversionOptimization: PublicTrafficReportSectionItem[];
+  newProductObservation: PublicTrafficReportSectionItem[];
+  lifecycleGovernance: PublicTrafficReportSectionItem[];
+}
+
+export interface PublicTrafficReportPaths {
+  markdownPath: string;
+  workbookPath: string;
+}

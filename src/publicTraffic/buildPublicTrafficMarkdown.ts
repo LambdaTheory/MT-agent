@@ -1,11 +1,10 @@
-type SectionItem = { identifier: string; action: string; reason: string };
-type Context = { date: string; exposureOptimization: SectionItem[]; conversionOptimization: SectionItem[]; newProductObservation: SectionItem[]; lifecycleGovernance: SectionItem[] };
+import type { PublicTrafficReportContext, PublicTrafficReportSectionItem } from './types.js';
 
-function linesFor(items: SectionItem[]): string[] {
+function linesFor(items: PublicTrafficReportSectionItem[]): string[] {
   return items.length > 0 ? items.map((item, index) => `${index + 1}. ${item.identifier}：${item.action}。原因：${item.reason}`) : ['无'];
 }
 
-export function buildPublicTrafficMarkdown(context: Context): string {
+export function buildPublicTrafficMarkdown(context: PublicTrafficReportContext): string {
   return [
     `# 公域流量日报 ${context.date}`,
     '',

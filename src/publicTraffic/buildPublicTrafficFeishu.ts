@@ -1,14 +1,12 @@
-type Overview = { period: '1d' | '7d' | '30d'; exposure: number; visits: number; conversionRate: number; amount: number };
-type SectionItem = { identifier: string; action: string; reason: string };
-type Context = { date: string; overview: Overview[]; exposureOptimization: SectionItem[]; conversionOptimization: SectionItem[]; newProductObservation: SectionItem[]; lifecycleGovernance: SectionItem[] };
-type Paths = { markdownPath: string; workbookPath: string };
+import type { ExposureOverviewMetric, PublicTrafficReportContext, PublicTrafficReportPaths, PublicTrafficReportSectionItem } from './types.js';
 
-function topLines(items: SectionItem[], limit = 5): string[] {
+function topLines(items: PublicTrafficReportSectionItem[], limit = 5): string[] {
   return items.length > 0 ? items.slice(0, limit).map((item, index) => `${index + 1}. ${item.identifier}｜${item.reason}`) : ['无'];
 }
 
-export function buildPublicTrafficFeishuText(context: Context, paths: Paths): string {
-  const one = context.overview.find((item) => item.period === '1d') ?? { exposure: 0, visits: 0, conversionRate: 0, amount: 0 };
+export function buildPublicTrafficFeishuText(context: PublicTrafficReportContext, paths: PublicTrafficReportPaths): string {
+  const fallback: Omit<ExposureOverviewMetric, 'period'> = { exposure: 0, visits: 0, conversionRate: 0, amount: 0 };
+  const one = context.overview.find((item) => item.period === '1d') ?? fallback;
   return [
     `公域流量日报 ${context.date}`,
     '',
