@@ -69,9 +69,8 @@ async function extractAllOverviews(page: Page): Promise<ExposureOverviewMetric[]
       await button.waitFor({ state: 'visible', timeout: 10000 });
       await button.click();
       await page.waitForTimeout(2000);
-    } catch {
-      console.log(`[曝光] 无法点击周期 ${label}，跳过`);
-      continue;
+    } catch (error) {
+      throw new Error(`无法点击曝光总体概况周期 ${label}: ${error instanceof Error ? error.message : String(error)}`);
     }
 
     const bodyText = normalizeText(await page.locator('body').innerText().catch(() => ''));
@@ -80,8 +79,12 @@ async function extractAllOverviews(page: Page): Promise<ExposureOverviewMetric[]
       results.push({ period, ...metrics });
       console.log(`[曝光] ${label}: 曝光=${metrics.exposure}, 访问=${metrics.visits}, 金额=${metrics.amount}`);
     } else {
-      console.log(`[曝光] ${label}: 未能提取总体概况`);
+      throw new Error(`未能提取曝光总体概况周期 ${label}`);
     }
+  }
+
+  if (results.length !== PERIOD_LABELS.length) {
+    throw new Error(`曝光总体概况抓取不完整: expected ${PERIOD_LABELS.length}, got ${results.length}`);
   }
 
   return results;
