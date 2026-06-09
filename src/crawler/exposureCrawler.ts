@@ -31,7 +31,9 @@ function findHeaderIndex(headers: string[], expected: string): number {
 }
 
 function productNameFromInfo(infoText: string, platformProductId: string): string {
-  return normalizeText(infoText.replace(platformProductId, '').replace(/[()（）ID:：]/g, ' '));
+  const escapedProductId = platformProductId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const productIdToken = new RegExp(`\\s*[（(]?\\s*(?:商品ID|平台商品ID|ID)?\\s*[:：]?\\s*${escapedProductId}\\s*[）)]?\\s*`, 'gi');
+  return normalizeText(infoText.replace(productIdToken, ' '));
 }
 
 async function ensureExposurePage(config: AgentConfig, page: Page): Promise<void> {
