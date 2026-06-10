@@ -6,6 +6,16 @@ import type {
   PublicTrafficReportSectionItem,
 } from './types.js';
 
+const emptySectionNotes = {
+  lowExposure: '暂无达到阈值的曝光不足商品。',
+  weakClick: '暂无达到阈值的高曝光低点击商品。',
+  weakConversion: '暂无达到阈值的高访问低转化商品。',
+  highPotential: '暂无达到放量阈值的高潜力商品。',
+  newProductObservation: '暂无可识别的新进入公域商品，或今日缺少上一日快照。',
+  lifecycleGovernance: '暂无达到长期弱表现阈值的托管商品。',
+  recommendedActions: '暂无需要立即处理的建议操作。',
+};
+
 function summaryFromOverview(overview: ExposureOverviewMetric[], period: ExposureOverviewMetric['period']): PublicTrafficDataSummary {
   const metric = overview.find((item) => item.period === period);
   return {
@@ -30,7 +40,7 @@ function toDataContext(context: PublicTrafficDataReportContext | PublicTrafficRe
       '7d': summaryFromOverview(context.overview, '7d'),
       '30d': summaryFromOverview(context.overview, '30d'),
     },
-    conclusions: [],
+    conclusions: [{ label: '基准', text: `暂无昨日公域数据上下文，今日仅展示基准值：曝光 ${context.overview[0]?.exposure ?? 0}。` }],
     rows: [],
     lowExposure: context.exposureOptimization,
     weakClick: [],
@@ -39,20 +49,12 @@ function toDataContext(context: PublicTrafficDataReportContext | PublicTrafficRe
     newProductObservation: context.newProductObservation,
     lifecycleGovernance: context.lifecycleGovernance,
     recommendedActions: [],
-    emptySectionNotes: {
-      lowExposure: '暂无达到阈值的曝光不足商品。',
-      weakClick: '暂无达到阈值的高曝光低点击商品。',
-      weakConversion: '暂无达到阈值的高访问低转化商品。',
-      highPotential: '暂无达到放量阈值的高潜力商品。',
-      newProductObservation: '暂无可识别的新进入公域商品，或今日缺少上一日快照。',
-      lifecycleGovernance: '暂无达到长期弱表现阈值的托管商品。',
-      recommendedActions: '暂无需要立即处理的建议操作。',
-    },
+    emptySectionNotes,
   };
 }
 
-function linesFor(items: PublicTrafficReportSectionItem[]): string[] {
-  return items.length > 0 ? items.map((item, index) => `${index + 1}. ${item.identifier}：${item.action}。原因：${item.reason}`) : ['无'];
+function linesFor(items: PublicTrafficReportSectionItem[], emptyNote: string): string[] {
+  return items.length > 0 ? items.map((item, index) => `${index + 1}. ${item.identifier}：${item.action}。原因：${item.reason}`) : [emptyNote];
 }
 
 function overviewLines(summary: PublicTrafficDataSummary): string[] {
@@ -74,6 +76,9 @@ export function buildPublicTrafficMarkdown(input: PublicTrafficDataReportContext
   return [
     `# 公域数据日报 ${context.date}`,
     '',
+    '## 经营结论',
+    ...context.conclusions.map((item) => `- ${item.label}：${item.text}`),
+    '',
     '## 1日总览',
     ...overviewLines(context.summary['1d']),
     '',
@@ -83,23 +88,26 @@ export function buildPublicTrafficMarkdown(input: PublicTrafficDataReportContext
     '## 30日总览',
     ...overviewLines(context.summary['30d']),
     '',
+    '## 建议操作',
+    ...linesFor(context.recommendedActions, context.emptySectionNotes.recommendedActions),
+    '',
     '## 曝光不足',
-    ...linesFor(context.lowExposure),
+    ...linesFor(context.lowExposure, context.emptySectionNotes.lowExposure),
     '',
     '## 曝光有但点击弱',
-    ...linesFor(context.weakClick),
+    ...linesFor(context.weakClick, context.emptySectionNotes.weakClick),
     '',
     '## 点击有但转化弱',
-    ...linesFor(context.weakConversion),
+    ...linesFor(context.weakConversion, context.emptySectionNotes.weakConversion),
     '',
     '## 高潜力商品',
-    ...linesFor(context.highPotential),
+    ...linesFor(context.highPotential, context.emptySectionNotes.highPotential),
     '',
     '## 新品观察',
-    ...linesFor(context.newProductObservation),
+    ...linesFor(context.newProductObservation, context.emptySectionNotes.newProductObservation),
     '',
     '## 生命周期治理',
-    ...linesFor(context.lifecycleGovernance),
+    ...linesFor(context.lifecycleGovernance, context.emptySectionNotes.lifecycleGovernance),
     '',
   ].join('\n');
 }
