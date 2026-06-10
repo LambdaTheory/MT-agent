@@ -237,24 +237,6 @@ export async function selectSubAccountIfNeeded(page: Page): Promise<void> {
   throw new Error(`Reached the account selection page, but could not find the 深圳市米奇租赁有限责任公司 sub-account. Visible accounts: ${visibleAccounts.join(' | ')}`);
 }
 
-function emptyStats(period: keyof typeof PERIOD_LABELS): RawTableData {
-  return {
-    period,
-    headers: [],
-    rows: [],
-    collection: {
-      period,
-      actualPageSizes: [],
-      pageCount: 0,
-      rowCount: 0,
-      dedupedRowCount: 0,
-      displayedTotalCount: null,
-      pageSizeFallback: false,
-      complete: false,
-    },
-  };
-}
-
 export async function collectDashboardPage(config: AgentConfig, page: Page): Promise<RawTableData[]> {
   await page.goto(config.targetUrl, { waitUntil: 'domcontentloaded' });
   const loginState = await waitForSettledLoginState(page, { timeoutMs: 60000, intervalMs: 1000 });
@@ -276,22 +258,17 @@ export async function collectDashboardPage(config: AgentConfig, page: Page): Pro
     throw new Error('Dashboard table did not appear within 180 seconds. Complete QR login in the opened browser window.');
   }
 
-  const rawDir = 'output/latest';
+  const rawDir = `${config.outputDir}/latest`;
   await mkdir(rawDir, { recursive: true });
 
   const results: RawTableData[] = [];
 
   for (const period of ['1d', '7d', '30d'] as const) {
-    try {
-      const table = await collectPeriodWithAdaptivePageSize(page, period, config.preferredPageSize);
-      results.push(table);
-      const path = `${rawDir}/raw-${period}.json`;
-      await writeFile(path, JSON.stringify(table, null, 2), 'utf8');
-      console.log(`[${period}] saved ${table.rows.length} rows to ${path}`);
-    } catch (error) {
-      console.error(`[${period}] collection failed: ${error instanceof Error ? error.message : String(error)}`);
-      results.push(emptyStats(period));
-    }
+    const table = await collectPeriodWithAdaptivePageSize(page, period, config.preferredPageSize);
+    results.push(table);
+    const path = `${rawDir}/raw-${period}.json`;
+    await writeFile(path, JSON.stringify(table, null, 2), 'utf8');
+    console.log(`[${period}] saved ${table.rows.length} rows to ${path}`);
   }
 
   return results;
