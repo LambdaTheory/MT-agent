@@ -54,7 +54,14 @@ export function analyzePublicTrafficData(input: PublicTrafficDataContext & { dat
   >;
 
   const lowExposure = rows
-    .filter((row) => one(row).exposure <= 50 && one(row).dashboardVisits <= 5 && one(row).shippedOrders === 0)
+    .filter(
+      (row) =>
+        one(row).hasExposureData &&
+        one(row).hasDashboardData &&
+        one(row).exposure <= 50 &&
+        one(row).dashboardVisits <= 5 &&
+        one(row).shippedOrders === 0,
+    )
     .sort((a, b) => one(a).exposure - one(b).exposure)
     .slice(0, TOP_N)
     .map((row) =>
@@ -62,19 +69,26 @@ export function analyzePublicTrafficData(input: PublicTrafficDataContext & { dat
     );
 
   const weakClick = rows
-    .filter((row) => one(row).exposure >= 1000 && one(row).exposureVisitRate < 0.01)
+    .filter((row) => one(row).hasExposureData && one(row).exposure >= 1000 && one(row).exposureVisitRate < 0.01)
     .sort((a, b) => one(a).exposureVisitRate - one(b).exposureVisitRate || one(b).exposure - one(a).exposure)
     .slice(0, TOP_N)
     .map((row) => item(row, '曝光有但点击弱', `1日曝光 ${one(row).exposure}，公域访问率 ${(one(row).exposureVisitRate * 100).toFixed(2)}%`));
 
   const weakConversion = rows
-    .filter((row) => one(row).dashboardVisits >= 50 && one(row).shippedOrders === 0)
+    .filter((row) => one(row).hasDashboardData && one(row).dashboardVisits >= 50 && one(row).shippedOrders === 0)
     .sort((a, b) => one(b).dashboardVisits - one(a).dashboardVisits)
     .slice(0, TOP_N)
     .map((row) => item(row, '点击有但转化弱', `1日后链路访问 ${one(row).dashboardVisits}，发货 ${one(row).shippedOrders}`));
 
   const highPotential = rows
-    .filter((row) => one(row).exposure >= 1000 && one(row).publicVisits >= 100 && one(row).shippedOrders > 0)
+    .filter(
+      (row) =>
+        one(row).hasExposureData &&
+        one(row).hasDashboardData &&
+        one(row).exposure >= 1000 &&
+        one(row).publicVisits >= 100 &&
+        one(row).shippedOrders > 0,
+    )
     .sort((a, b) => one(b).shippedOrders - one(a).shippedOrders || one(b).publicVisits - one(a).publicVisits)
     .slice(0, TOP_N)
     .map((row) => item(row, '高潜力商品', `1日曝光 ${one(row).exposure}，公域访问 ${one(row).publicVisits}，发货 ${one(row).shippedOrders}`));

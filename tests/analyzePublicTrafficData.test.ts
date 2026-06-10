@@ -8,6 +8,8 @@ function row(
   publicVisits: number,
   dashboardVisits: number,
   shippedOrders: number,
+  hasExposureData = true,
+  hasDashboardData = true,
 ): PublicTrafficProductDataRow {
   const period = {
     exposure,
@@ -21,8 +23,8 @@ function row(
     exposureVisitRate: exposure > 0 ? publicVisits / exposure : 0,
     visitCreatedOrderRate: dashboardVisits > 0 ? shippedOrders / dashboardVisits : 0,
     visitShipmentRate: dashboardVisits > 0 ? shippedOrders / dashboardVisits : 0,
-    hasExposureData: true,
-    hasDashboardData: true,
+    hasExposureData,
+    hasDashboardData,
   };
   return {
     productName: displayProductId,
@@ -61,5 +63,22 @@ describe('analyzePublicTrafficData', () => {
     expect(report.weakClick[0].identifier).toBe('端内ID click-weak');
     expect(report.weakConversion[0].identifier).toBe('端内ID conversion-weak');
     expect(report.highPotential[0].identifier).toBe('端内ID potential');
+  });
+
+  it('does not classify rows when required one-day source data is missing', () => {
+    const report = analyzePublicTrafficData({
+      date: '2026-06-10',
+      rows: [
+        row('端内ID missing-low', 0, 0, 0, 0, false, false),
+        row('端内ID missing-click', 2000, 5, 4, 0, false, true),
+        row('端内ID missing-conversion', 1500, 120, 100, 0, true, false),
+        row('端内ID missing-potential', 1500, 180, 160, 8, false, true),
+      ],
+    });
+
+    expect(report.lowExposure).toHaveLength(0);
+    expect(report.weakClick).toHaveLength(0);
+    expect(report.weakConversion).toHaveLength(0);
+    expect(report.highPotential).toHaveLength(0);
   });
 });
