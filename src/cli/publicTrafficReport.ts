@@ -106,11 +106,10 @@ export async function runPublicTrafficReportCli(): Promise<void> {
     }
 
     const previousProducts = await loadPreviousCumulative(config.outputDir, date);
-    const hasReliableExposureHistory = previousProducts.length > 0;
-    if (!hasReliableExposureHistory) {
-      log.addEvent('商品级曝光历史不足: 跳过商品级曝光聚合');
+    if (previousProducts.length === 0) {
+      log.addEvent('商品级曝光历史不足: 跳过商品级日差分');
     }
-    const dailyDelta = computeExposureDailyDelta(date, previousProducts, crawlResult.products);
+    const dailyDelta = previousProducts.length > 0 ? computeExposureDailyDelta(date, previousProducts, crawlResult.products) : [];
     await writeFile(paths.exposureDailyDelta, JSON.stringify(dailyDelta, null, 2), 'utf8');
     log.addEvent(`日差分: ${dailyDelta.length} 条, 新品=${dailyDelta.filter((row) => row.flags.includes('new_product')).length}`);
 
@@ -135,20 +134,18 @@ export async function runPublicTrafficReportCli(): Promise<void> {
     const merged = mergePublicTrafficData({
       dashboardRows,
       exposureByPeriod: {
-        '1d': hasReliableExposureHistory
-          ? dailyDelta.map((row) => ({
-              productName: row.productName,
-              platformProductId: row.platformProductId,
-              exposure: row.exposure,
-              visits: row.visits,
-              amount: row.amount,
-              visitRate: row.exposure > 0 ? row.visits / row.exposure : 0,
-              days: 1,
-              flags: row.flags,
-            }))
-          : [],
-        '7d': hasReliableExposureHistory ? sevenDaySummary : [],
-        '30d': hasReliableExposureHistory ? thirtyDaySummary : [],
+        '1d': dailyDelta.map((row) => ({
+          productName: row.productName,
+          platformProductId: row.platformProductId,
+          exposure: row.exposure,
+          visits: row.visits,
+          amount: row.amount,
+          visitRate: row.exposure > 0 ? row.visits / row.exposure : 0,
+          days: 1,
+          flags: row.flags,
+        })),
+        '7d': sevenDaySummary,
+        '30d': thirtyDaySummary,
       },
       cumulativeProducts: crawlResult.products,
       mapping,
