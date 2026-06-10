@@ -153,8 +153,12 @@ async function loadMappingSafely(path: string | undefined, log: ReturnType<typeo
   }
 }
 
+function resolveProductIdMappingPath(config: Awaited<ReturnType<typeof loadConfig>>): string {
+  return config.productIdMappingPath ?? 'config/product-id-map.json';
+}
+
 async function refreshProductIdMappingForReport(config: Awaited<ReturnType<typeof loadConfig>>, paths: ReturnType<typeof buildPublicTrafficPaths>, log: ReturnType<typeof createRunLog>): Promise<void> {
-  const mappingPath = config.productIdMappingPath ?? 'config/product-id-map.json';
+  const mappingPath = resolveProductIdMappingPath(config);
   log.addEvent('开始下载商品总表并刷新商品ID映射');
   const exportPath = await downloadGoodsExport(config, paths.goodsExportWorkbook);
   const mappingCount = await writeProductIdMappingFromExport(exportPath, mappingPath, paths.productIdMappingSyncLog);
@@ -208,7 +212,7 @@ export async function runPublicTrafficReportCli(): Promise<void> {
     const dashboardRows = normalizeDashboardRowsForReport(rawTables, log);
     log.addEvent(`后链路数据: ${dashboardRows.length} 条周期商品记录`);
 
-    const mapping = await loadMappingSafely(config.productIdMappingPath, log);
+    const mapping = await loadMappingSafely(resolveProductIdMappingPath(config), log);
     const merged = mergePublicTrafficData({
       dashboardRows,
       exposureByPeriod: {

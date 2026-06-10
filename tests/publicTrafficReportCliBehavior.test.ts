@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   loadConfig: vi.fn<() => Promise<AgentConfig>>(),
   downloadGoodsExport: vi.fn(),
   writeProductIdMappingFromExport: vi.fn(),
+  loadProductIdMapping: vi.fn(),
   crawlPublicTrafficSources: vi.fn(),
   normalizeRowsForPeriod: vi.fn<(table: RawTableData) => PeriodProductMetrics[]>(),
   sendFeishuCard: vi.fn(),
@@ -34,6 +35,10 @@ vi.mock('../src/crawler/goodsExportCrawler.js', () => ({
 
 vi.mock('../src/mapping/refreshProductIdMapping.js', () => ({
   writeProductIdMappingFromExport: mocks.writeProductIdMappingFromExport,
+}));
+
+vi.mock('../src/mapping/productIdMapping.js', () => ({
+  loadProductIdMapping: mocks.loadProductIdMapping,
 }));
 
 vi.mock('../src/extractor/normalizeRows.js', () => ({
@@ -86,6 +91,7 @@ describe('runPublicTrafficReportCli public traffic sequencing', () => {
     });
     mocks.downloadGoodsExport.mockResolvedValue(join(mocks.outputDir, 'goods.xlsx'));
     mocks.writeProductIdMappingFromExport.mockResolvedValue(50);
+    mocks.loadProductIdMapping.mockResolvedValue({});
     mocks.normalizeRowsForPeriod.mockReturnValue([
       {
         period: '1d',
@@ -170,6 +176,15 @@ describe('runPublicTrafficReportCli public traffic sequencing', () => {
     expect(source.indexOf('await refreshProductIdMappingForReport(config, paths, log);')).toBeLessThan(source.indexOf('const mapping = await loadMappingSafely'));
     expect(source).toContain('paths.goodsExportWorkbook');
     expect(source).toContain('paths.productIdMappingSyncLog');
+  });
+
+  it('loads the refreshed default mapping path when productIdMappingPath is not configured', async () => {
+    const { runPublicTrafficReportCli } = await import('../src/cli/publicTrafficReport.js');
+
+    await runPublicTrafficReportCli();
+
+    expect(mocks.writeProductIdMappingFromExport).toHaveBeenCalledWith(expect.any(String), 'config/product-id-map.json', expect.any(String));
+    expect(mocks.loadProductIdMapping).toHaveBeenCalledWith('config/product-id-map.json');
   });
 
   it('loads yesterday report context summary for conclusions', async () => {
