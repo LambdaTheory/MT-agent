@@ -28,6 +28,18 @@ describe('parsePreviousCumulativeSnapshot', () => {
 });
 
 describe('normalizeDashboardRowsForReport', () => {
+  const collection = (overrides: Partial<RawTableData['collection']> = {}): RawTableData['collection'] => ({
+    period: '7d',
+    actualPageSizes: [],
+    pageCount: 0,
+    rowCount: 0,
+    dedupedRowCount: 0,
+    displayedTotalCount: null,
+    pageSizeFallback: false,
+    complete: false,
+    ...overrides,
+  });
+
   it('returns valid period rows and logs failed empty period skips', () => {
     const rawTables: RawTableData[] = [
       {
@@ -98,6 +110,49 @@ describe('normalizeDashboardRowsForReport', () => {
           pageSizeFallback: false,
           complete: true,
         },
+      },
+    ];
+    const log = createRunLog('2026-06-10T12:00:00.000Z', 'https://example.test/dashboard');
+
+    expect(() => normalizeDashboardRowsForReport(rawTables, log)).toThrow(/Missing required headers/);
+  });
+
+  it('skips an empty failed table with no headers', () => {
+    const rawTables: RawTableData[] = [
+      {
+        period: '7d',
+        headers: [],
+        rows: [],
+        collection: collection({ period: '7d' }),
+      },
+    ];
+    const log = createRunLog('2026-06-10T12:00:00.000Z', 'https://example.test/dashboard');
+
+    expect(normalizeDashboardRowsForReport(rawTables, log)).toEqual([]);
+    expect(log.toText()).toContain('后链路数据跳过 7d: Missing required headers for 7d');
+  });
+
+  it('throws for an empty malformed table with headers missing required fields', () => {
+    const rawTables: RawTableData[] = [
+      {
+        period: '7d',
+        headers: ['商品名称', '商品ID'],
+        rows: [],
+        collection: collection({ period: '7d' }),
+      },
+    ];
+    const log = createRunLog('2026-06-10T12:00:00.000Z', 'https://example.test/dashboard');
+
+    expect(() => normalizeDashboardRowsForReport(rawTables, log)).toThrow(/Missing required headers/);
+  });
+
+  it('throws for empty rows with non-zero collected row counts', () => {
+    const rawTables: RawTableData[] = [
+      {
+        period: '7d',
+        headers: [],
+        rows: [],
+        collection: collection({ period: '7d', rowCount: 1, dedupedRowCount: 1 }),
       },
     ];
     const log = createRunLog('2026-06-10T12:00:00.000Z', 'https://example.test/dashboard');

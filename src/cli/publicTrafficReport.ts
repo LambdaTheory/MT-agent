@@ -82,9 +82,12 @@ export function normalizeDashboardRowsForReport(rawTables: RawTableData[], log: 
     try {
       return normalizeRowsForPeriod(table);
     } catch (error) {
-      const hasNoRows = table.rows.length === 0;
-      const hasNoCollectedRows = table.collection.rowCount === 0 && table.collection.dedupedRowCount === 0;
-      const isEmptyFailedTable = hasNoRows && (table.collection.complete === false || (table.headers.length === 0 && hasNoCollectedRows));
+      const isEmptyFailedTable =
+        table.headers.length === 0 &&
+        table.rows.length === 0 &&
+        table.collection.rowCount === 0 &&
+        table.collection.dedupedRowCount === 0 &&
+        table.collection.complete === false;
       if (!isEmptyFailedTable) {
         throw error;
       }
