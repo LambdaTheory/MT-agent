@@ -112,6 +112,24 @@ describe('analyzePublicTrafficData', () => {
     expect(report.highPotential).toHaveLength(0);
   });
 
+  it('does not classify custody rows as weak performance when exposure history is missing', () => {
+    const report = analyzePublicTrafficData({
+      date: '2026-06-10',
+      rows: [
+        row(
+          '端内ID missing-history',
+          metric(0, 0, 0, 0, false, true),
+          metric(0, 0, 0, 0, false, true),
+          metric(0, 0, 0, 0, false, true),
+          45,
+        ),
+      ],
+    });
+
+    expect(report.lowExposure).toHaveLength(0);
+    expect(report.lifecycleGovernance).toHaveLength(0);
+  });
+
   it('builds multiple conclusions compared with yesterday', () => {
     const report = analyzePublicTrafficData({
       date: '2026-06-10',
