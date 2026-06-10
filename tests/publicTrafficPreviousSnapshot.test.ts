@@ -81,4 +81,27 @@ describe('normalizeDashboardRowsForReport', () => {
     ]);
     expect(log.toText()).toContain('后链路数据跳过 7d: Missing required headers for 7d');
   });
+
+  it('throws when a non-empty period has missing required headers', () => {
+    const rawTables: RawTableData[] = [
+      {
+        period: '30d',
+        headers: ['商品名称', '商品ID'],
+        rows: [['商品A', 'p-a']],
+        collection: {
+          period: '30d',
+          actualPageSizes: [100],
+          pageCount: 1,
+          rowCount: 1,
+          dedupedRowCount: 1,
+          displayedTotalCount: 1,
+          pageSizeFallback: false,
+          complete: true,
+        },
+      },
+    ];
+    const log = createRunLog('2026-06-10T12:00:00.000Z', 'https://example.test/dashboard');
+
+    expect(() => normalizeDashboardRowsForReport(rawTables, log)).toThrow(/Missing required headers/);
+  });
 });

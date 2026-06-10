@@ -82,6 +82,13 @@ export function normalizeDashboardRowsForReport(rawTables: RawTableData[], log: 
     try {
       return normalizeRowsForPeriod(table);
     } catch (error) {
+      const hasNoRows = table.rows.length === 0;
+      const hasNoCollectedRows = table.collection.rowCount === 0 && table.collection.dedupedRowCount === 0;
+      const isEmptyFailedTable = hasNoRows && (table.collection.complete === false || (table.headers.length === 0 && hasNoCollectedRows));
+      if (!isEmptyFailedTable) {
+        throw error;
+      }
+
       log.addEvent(`后链路数据跳过 ${table.period}: ${error instanceof Error ? error.message : String(error)}`);
       return [];
     }
