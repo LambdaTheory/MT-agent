@@ -17,7 +17,7 @@ import { mergePublicTrafficData } from '../publicTraffic/mergePublicTrafficData.
 import { buildPublicTrafficPaths } from '../publicTraffic/paths.js';
 import { loadRecentExposureDeltas } from '../publicTraffic/recentExposureDeltas.js';
 import type { PeriodProductMetrics, RawTableData } from '../domain/types.js';
-import type { ExposureCumulativeProduct } from '../publicTraffic/types.js';
+import type { ExposureCumulativeProduct, PublicTrafficDataReportContext, PublicTrafficDataSummary } from '../publicTraffic/types.js';
 import { createRunLog } from '../storage/runLog.js';
 
 function today(): string {
@@ -73,6 +73,21 @@ async function loadPreviousCumulative(outputDir: string, date: string): Promise<
     }
 
     throw error;
+  }
+}
+
+async function loadPreviousReportSummary(outputDir: string, date: string, log: ReturnType<typeof createRunLog>): Promise<PublicTrafficDataSummary | undefined> {
+  const prev = buildPublicTrafficPaths(outputDir, yesterday(date));
+  try {
+    const parsed = JSON.parse(await readFile(prev.reportContext, 'utf8')) as Partial<PublicTrafficDataReportContext>;
+    return parsed.summary?.['1d'];
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
+      log.addEvent('昨日公域数据上下文缺失: 结论使用今日基准值');
+      return undefined;
+    }
+    log.addEvent(`昨日公域数据上下文读取失败: ${error instanceof Error ? error.message : String(error)}`);
+    return undefined;
   }
 }
 
@@ -179,13 +194,19 @@ export async function runPublicTrafficReportCli(): Promise<void> {
       cumulativeProducts: crawlResult.products,
       mapping,
     });
+    const previousSummary = await loadPreviousReportSummary(config.outputDir, date, log);
     const context = analyzePublicTrafficData({
       date,
       rows: merged.rows,
       overview: crawlResult.overview,
+      previousSummary,
+      dailyDelta,
+      sevenDaySummary,
+      thirtyDaySummary,
+      cumulativeProducts: crawlResult.products,
     });
     log.addEvent(
-      `规则分析: 曝光不足=${context.lowExposure.length}, 点击弱=${context.weakClick.length}, 转化弱=${context.weakConversion.length}, 高潜力=${context.highPotential.length}`,
+      `规则分析: 曝光不足=${context.lowExposure.length}, 点击弱=${context.weakClick.length}, 转化弱=${context.weakConversion.length}, 高潜力=${context.highPotential.length}, 新品观察=${context.newProductObservation.length}, 生命周期治理=${context.lifecycleGovernance.length}, 建议操作=${context.recommendedActions.length}`,
     );
 
     await writeFile(paths.reportContext, JSON.stringify(context, null, 2), 'utf8');

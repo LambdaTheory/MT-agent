@@ -131,10 +131,67 @@ describe('runPublicTrafficReportCli public traffic sequencing', () => {
 
     await expect(readFile(buildPublicTrafficPaths(mocks.outputDir, '2026-06-09').exposureCumulativeProducts, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(readFile(todayPaths.log, 'utf8')).resolves.toContain('商品级曝光历史不足');
+    await expect(readFile(todayPaths.log, 'utf8')).resolves.toContain('昨日公域数据上下文缺失: 结论使用今日基准值');
 
     await expect(readFile(todayPaths.publicVisitRaw['1d'], 'utf8')).resolves.toContain('"period": "1d"');
     await expect(readFile(todayPaths.publicVisitRaw['7d'], 'utf8')).resolves.toContain('"period": "7d"');
     await expect(readFile(todayPaths.publicVisitRaw['30d'], 'utf8')).resolves.toContain('"period": "30d"');
+  });
+
+  it('passes previous report context and exposure histories into analyzer', async () => {
+    const source = await readFile(join(process.cwd(), 'src/cli/publicTrafficReport.ts'), 'utf8');
+
+    expect(source).toContain('loadPreviousReportSummary');
+    expect(source).toContain('previousSummary');
+    expect(source).toContain('dailyDelta,');
+    expect(source).toContain('sevenDaySummary,');
+    expect(source).toContain('thirtyDaySummary,');
+    expect(source).toContain('cumulativeProducts: crawlResult.products');
+  });
+
+  it('loads yesterday report context summary for conclusions', async () => {
+    const yesterdayPaths = buildPublicTrafficPaths(mocks.outputDir, '2026-06-09');
+    await writeFile(
+      yesterdayPaths.reportContext,
+      JSON.stringify({
+        summary: {
+          '1d': {
+            exposure: 5,
+            publicVisits: 1,
+            dashboardVisits: 0,
+            createdOrders: 0,
+            shippedOrders: 0,
+            amount: 1,
+            exposureVisitRate: 0.1,
+            visitCreatedOrderRate: 0,
+            visitShipmentRate: 0,
+          },
+        },
+      }),
+      'utf8',
+    );
+    const { runPublicTrafficReportCli } = await import('../src/cli/publicTrafficReport.js');
+
+    await runPublicTrafficReportCli();
+
+    const todayPaths = buildPublicTrafficPaths(mocks.outputDir, '2026-06-10');
+    const context = JSON.parse(await readFile(todayPaths.reportContext, 'utf8')) as PublicTrafficDataReportContext;
+    expect(context.conclusions[0].label).toBe('曝光');
+    expect(context.conclusions[0].text).toContain('较昨日上升 5');
+    expect(context.conclusions[0].text).not.toContain('暂无昨日公域数据上下文');
+  });
+
+  it('continues with baseline conclusions when yesterday report context is malformed', async () => {
+    const yesterdayPaths = buildPublicTrafficPaths(mocks.outputDir, '2026-06-09');
+    await writeFile(yesterdayPaths.reportContext, '{bad json', 'utf8');
+    const { runPublicTrafficReportCli } = await import('../src/cli/publicTrafficReport.js');
+
+    await runPublicTrafficReportCli();
+
+    const todayPaths = buildPublicTrafficPaths(mocks.outputDir, '2026-06-10');
+    const context = JSON.parse(await readFile(todayPaths.reportContext, 'utf8')) as PublicTrafficDataReportContext;
+    expect(context.conclusions[0].label).toBe('基准');
+    await expect(readFile(todayPaths.log, 'utf8')).resolves.toContain('昨日公域数据上下文读取失败:');
   });
 
   it('treats an existing empty previous cumulative snapshot as history for new-product daily deltas', async () => {
