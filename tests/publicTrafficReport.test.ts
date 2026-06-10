@@ -95,6 +95,8 @@ describe('public traffic report outputs', () => {
     expect(text).toContain('端内ID 900｜检查价格/押金/库存/风控/履约链路｜访问有发货弱');
     expect(text).toContain('曝光：1000');
     expect(text).toContain('曝光不足：1个');
+    expect(text).toContain('新品观察：1个');
+    expect(text).toContain('生命周期治理：1个');
     expect(text).toContain('转化弱 Top5');
     expect(text).toContain('高潜力 Top5');
     expect(text).toContain('新品观察 Top5');
@@ -111,6 +113,8 @@ describe('public traffic report outputs', () => {
     expect(serialized).toContain('建议操作');
     expect(serialized).toContain('检查价格/押金/库存/风控/履约链路');
     expect(serialized).toContain('端内ID 558');
+    expect(serialized).toContain('新品观察：1个');
+    expect(serialized).toContain('生命周期治理：1个');
     expect(serialized).toContain('高潜力 Top5');
     expect(serialized).toContain('新品观察 Top5');
     expect(serialized).toContain('生命周期治理 Top5');

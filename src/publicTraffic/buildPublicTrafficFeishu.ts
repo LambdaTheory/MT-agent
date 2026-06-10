@@ -87,6 +87,8 @@ export function buildPublicTrafficFeishuText(input: PublicTrafficDataReportConte
     `点击弱：${context.weakClick.length}个`,
     `转化弱：${context.weakConversion.length}个`,
     `高潜力：${context.highPotential.length}个`,
+    `新品观察：${context.newProductObservation.length}个`,
+    `生命周期治理：${context.lifecycleGovernance.length}个`,
     '',
     '建议操作',
     ...topLines(context.recommendedActions, context.emptySectionNotes.recommendedActions, 8),
