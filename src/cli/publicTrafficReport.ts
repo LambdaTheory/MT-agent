@@ -2,9 +2,11 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { loadConfig } from '../config/loadConfig.js';
 import { loadEnv } from '../config/loadEnv.js';
+import { downloadGoodsExport } from '../crawler/goodsExportCrawler.js';
 import { crawlPublicTrafficSources } from '../crawler/publicTrafficCrawler.js';
 import { normalizeRowsForPeriod } from '../extractor/normalizeRows.js';
 import { loadProductIdMapping } from '../mapping/productIdMapping.js';
+import { writeProductIdMappingFromExport } from '../mapping/refreshProductIdMapping.js';
 import { sendFeishuCard } from '../notify/feishu.js';
 import { analyzePublicTrafficData } from '../publicTraffic/analyzePublicTrafficData.js';
 import { buildPublicTrafficCard } from '../publicTraffic/buildPublicTrafficCard.js';
@@ -151,6 +153,14 @@ async function loadMappingSafely(path: string | undefined, log: ReturnType<typeo
   }
 }
 
+async function refreshProductIdMappingForReport(config: Awaited<ReturnType<typeof loadConfig>>, paths: ReturnType<typeof buildPublicTrafficPaths>, log: ReturnType<typeof createRunLog>): Promise<void> {
+  const mappingPath = config.productIdMappingPath ?? 'config/product-id-map.json';
+  log.addEvent('开始下载商品总表并刷新商品ID映射');
+  const exportPath = await downloadGoodsExport(config, paths.goodsExportWorkbook);
+  const mappingCount = await writeProductIdMappingFromExport(exportPath, mappingPath, paths.productIdMappingSyncLog);
+  log.addEvent(`商品ID映射已刷新: ${mappingCount} 条, source=${exportPath}`);
+}
+
 export async function runPublicTrafficReportCli(): Promise<void> {
   await loadEnv();
   const config = await loadConfig();
@@ -161,6 +171,7 @@ export async function runPublicTrafficReportCli(): Promise<void> {
   await mkdir(paths.dir, { recursive: true });
 
   try {
+    await refreshProductIdMappingForReport(config, paths, log);
     log.addEvent('开始抓取曝光与后链路数据');
     const { exposure: crawlResult, dashboard: rawTables } = await crawlPublicTrafficSources(config);
 

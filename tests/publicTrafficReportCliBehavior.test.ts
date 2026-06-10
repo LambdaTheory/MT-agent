@@ -9,6 +9,8 @@ import type { ExposureDailyDelta, PublicTrafficDataReportContext } from '../src/
 const mocks = vi.hoisted(() => ({
   outputDir: '',
   loadConfig: vi.fn<() => Promise<AgentConfig>>(),
+  downloadGoodsExport: vi.fn(),
+  writeProductIdMappingFromExport: vi.fn(),
   crawlPublicTrafficSources: vi.fn(),
   normalizeRowsForPeriod: vi.fn<(table: RawTableData) => PeriodProductMetrics[]>(),
   sendFeishuCard: vi.fn(),
@@ -24,6 +26,14 @@ vi.mock('../src/config/loadConfig.js', () => ({
 
 vi.mock('../src/crawler/publicTrafficCrawler.js', () => ({
   crawlPublicTrafficSources: mocks.crawlPublicTrafficSources,
+}));
+
+vi.mock('../src/crawler/goodsExportCrawler.js', () => ({
+  downloadGoodsExport: mocks.downloadGoodsExport,
+}));
+
+vi.mock('../src/mapping/refreshProductIdMapping.js', () => ({
+  writeProductIdMappingFromExport: mocks.writeProductIdMappingFromExport,
 }));
 
 vi.mock('../src/extractor/normalizeRows.js', () => ({
@@ -74,6 +84,8 @@ describe('runPublicTrafficReportCli public traffic sequencing', () => {
         },
       })) satisfies RawTableData[],
     });
+    mocks.downloadGoodsExport.mockResolvedValue(join(mocks.outputDir, 'goods.xlsx'));
+    mocks.writeProductIdMappingFromExport.mockResolvedValue(50);
     mocks.normalizeRowsForPeriod.mockReturnValue([
       {
         period: '1d',
@@ -147,6 +159,17 @@ describe('runPublicTrafficReportCli public traffic sequencing', () => {
     expect(source).toContain('sevenDaySummary,');
     expect(source).toContain('thirtyDaySummary,');
     expect(source).toContain('cumulativeProducts: crawlResult.products');
+  });
+
+  it('refreshes product id mapping from goods export before loading mapping', async () => {
+    const source = await readFile(join(process.cwd(), 'src/cli/publicTrafficReport.ts'), 'utf8');
+
+    expect(source).toContain("import { downloadGoodsExport } from '../crawler/goodsExportCrawler.js';");
+    expect(source).toContain("import { writeProductIdMappingFromExport } from '../mapping/refreshProductIdMapping.js';");
+    expect(source).toContain('await refreshProductIdMappingForReport(config, paths, log);');
+    expect(source.indexOf('await refreshProductIdMappingForReport(config, paths, log);')).toBeLessThan(source.indexOf('const mapping = await loadMappingSafely'));
+    expect(source).toContain('paths.goodsExportWorkbook');
+    expect(source).toContain('paths.productIdMappingSyncLog');
   });
 
   it('loads yesterday report context summary for conclusions', async () => {
