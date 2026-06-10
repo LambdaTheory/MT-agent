@@ -9,6 +9,8 @@ export interface PublicTrafficPaths {
   exposure30dSummary: string;
   publicVisitRaw: Record<PeriodKey, string>;
   goodsListSnapshot: string;
+  goodsExportWorkbook: string;
+  productIdMappingSyncLog: string;
   newProductObservation: string;
   observationState: string;
   markdown: string;
@@ -32,6 +34,8 @@ export function buildPublicTrafficPaths(outputDir: string, date: string): Public
       '30d': `${dir}/公域访问数据_30日.json`,
     },
     goodsListSnapshot: `${dir}/goods-list-snapshot.json`,
+    goodsExportWorkbook: `${dir}/商品总表_${date}.xlsx`,
+    productIdMappingSyncLog: `${dir}/商品ID映射同步日志_${date}.log`,
     newProductObservation: `${dir}/new-product-observation.json`,
     observationState: `${dir}/observation-state.json`,
     markdown: `${dir}/公域数据日报_${date}.md`,
