@@ -77,6 +77,9 @@ export function buildPublicTrafficFeishuText(input: PublicTrafficDataReportConte
     '点击弱 Top5',
     ...topLines(context.weakClick),
     '',
+    '转化弱 Top5',
+    ...topLines(context.weakConversion),
+    '',
     `Markdown：${paths.markdownPath}`,
     `XLSX：${paths.workbookPath}`,
   ].join('\n');
