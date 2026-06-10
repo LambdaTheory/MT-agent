@@ -79,8 +79,11 @@ async function loadPreviousCumulative(outputDir: string, date: string): Promise<
 async function loadPreviousReportSummary(outputDir: string, date: string, log: ReturnType<typeof createRunLog>): Promise<PublicTrafficDataSummary | undefined> {
   const prev = buildPublicTrafficPaths(outputDir, yesterday(date));
   try {
-    const parsed = JSON.parse(await readFile(prev.reportContext, 'utf8')) as Partial<PublicTrafficDataReportContext>;
-    const summary = parsed.summary?.['1d'];
+    const parsed = JSON.parse(await readFile(prev.reportContext, 'utf8')) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('Invalid previous public traffic summary');
+    }
+    const summary = (parsed as Partial<PublicTrafficDataReportContext>).summary?.['1d'];
     if (!isPublicTrafficDataSummary(summary)) {
       throw new Error('Invalid previous public traffic summary');
     }
