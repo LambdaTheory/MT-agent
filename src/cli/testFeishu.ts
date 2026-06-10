@@ -1,7 +1,9 @@
 import { pathToFileURL } from 'node:url';
+import { loadEnv } from '../config/loadEnv.js';
 import { maybeSendFeishuTestMessage } from '../notify/feishu.js';
 
 export async function runTestFeishuCli(): Promise<void> {
+  await loadEnv();
   const result = await maybeSendFeishuTestMessage();
   if (!result.sent) {
     throw new Error(`Feishu test message was not sent: ${result.reason}`);

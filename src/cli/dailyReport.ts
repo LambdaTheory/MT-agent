@@ -2,6 +2,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { analyzeProducts } from '../analyzer/analyzeProducts.js';
 import { loadConfig } from '../config/loadConfig.js';
+import { loadEnv } from '../config/loadEnv.js';
 import { crawlDashboard } from '../crawler/dashboardCrawler.js';
 import { normalizeRowsForPeriod } from '../extractor/normalizeRows.js';
 import { enrichAnalysisRowsWithMapping } from '../mapping/enrichAnalysisRows.js';
@@ -16,6 +17,7 @@ function today(): string {
 }
 
 export async function runDailyReportCli(): Promise<void> {
+  await loadEnv();
   const config = await loadConfig();
   const date = today();
   const paths = buildOutputPaths(config.outputDir, date);

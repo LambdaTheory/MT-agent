@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { loadConfig } from '../config/loadConfig.js';
+import { loadEnv } from '../config/loadEnv.js';
 import { crawlExposurePage } from '../crawler/exposureCrawler.js';
 import { sendFeishuText } from '../notify/feishu.js';
 import { analyzePublicTraffic } from '../publicTraffic/analyzePublicTraffic.js';
@@ -63,16 +64,8 @@ async function loadPreviousCumulative(outputDir: string, date: string): Promise<
   }
 }
 
-async function sendFeishuTextSafely(text: string, log: ReturnType<typeof createRunLog>): Promise<void> {
-  try {
-    const feishuResult = await sendFeishuText(process.env, text);
-    log.addEvent(feishuResult.sent ? '飞书通知已发送' : `飞书通知跳过: ${feishuResult.reason}`);
-  } catch (error) {
-    log.addEvent(`飞书通知失败: ${error instanceof Error ? error.message : String(error)}`);
-  }
-}
-
 export async function runPublicTrafficReportCli(): Promise<void> {
+  await loadEnv();
   const config = await loadConfig();
   const date = today();
   const paths = buildPublicTrafficPaths(config.outputDir, date);
@@ -148,6 +141,15 @@ export async function runPublicTrafficReportCli(): Promise<void> {
     throw error;
   } finally {
     await writeFile(paths.log, log.toText(), 'utf8');
+  }
+}
+
+async function sendFeishuTextSafely(text: string, log: ReturnType<typeof createRunLog>): Promise<void> {
+  try {
+    const feishuResult = await sendFeishuText(process.env, text);
+    log.addEvent(feishuResult.sent ? '飞书通知已发送' : `飞书通知跳过: ${feishuResult.reason}`);
+  } catch (error) {
+    log.addEvent(`飞书通知失败: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
