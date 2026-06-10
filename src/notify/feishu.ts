@@ -1,5 +1,5 @@
 import type { DailyReportData } from '../domain/types.js';
-import { sendFeishuAppText, type FeishuAppConfig } from './feishuApp.js';
+import { sendFeishuAppCard, sendFeishuAppText, type FeishuAppConfig, type FeishuCardPayload } from './feishuApp.js';
 import { buildFeishuReportText, buildFeishuTestText, sendFeishuWebhookText, type FeishuReportPaths } from './feishuWebhook.js';
 
 export type FeishuDeliveryResult =
@@ -35,6 +35,25 @@ export async function sendFeishuText(env: FeishuEnv, text: string, fetchImpl: ty
 
   if (env.FEISHU_WEBHOOK_URL) {
     const result = await sendFeishuWebhookText(env.FEISHU_WEBHOOK_URL, text, fetchImpl);
+    return result.sent ? { sent: true, channel: 'webhook' } : { sent: false, channel: 'webhook', reason: result.reason };
+  }
+
+  return { sent: false, channel: 'none', reason: 'missing Feishu app config and webhook url' };
+}
+
+export async function sendFeishuCard(
+  env: FeishuEnv,
+  card: FeishuCardPayload,
+  fallbackText: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<FeishuDeliveryResult> {
+  const appConfig = appConfigFromEnv(env);
+  if (appConfig) {
+    return sendFeishuAppCard(appConfig, card, fetchImpl);
+  }
+
+  if (env.FEISHU_WEBHOOK_URL) {
+    const result = await sendFeishuWebhookText(env.FEISHU_WEBHOOK_URL, fallbackText, fetchImpl);
     return result.sent ? { sent: true, channel: 'webhook' } : { sent: false, channel: 'webhook', reason: result.reason };
   }
 

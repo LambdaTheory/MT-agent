@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { sendFeishuAppText } from '../src/notify/feishuApp.js';
+import { sendFeishuAppCard, sendFeishuAppText } from '../src/notify/feishuApp.js';
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -62,5 +62,30 @@ describe('sendFeishuAppText', () => {
     }
 
     expect(result.reason).toContain('token request failed');
+  });
+});
+
+it('sends interactive card message to open_id', async () => {
+  const calls: Array<{ url: string; init: RequestInit }> = [];
+  const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
+    calls.push({ url: String(url), init: init ?? {} });
+    if (String(url).includes('/auth/v3/tenant_access_token/internal')) {
+      return jsonResponse({ code: 0, tenant_access_token: 'token-1' });
+    }
+    return jsonResponse({ code: 0, data: { message_id: 'msg-1' } });
+  };
+
+  const card = { schema: '2.0', header: { title: { tag: 'plain_text', content: '标题' } }, body: { elements: [] } };
+  const result = await sendFeishuAppCard(
+    { appId: 'cli_test', appSecret: 'secret', receiveIdType: 'open_id', receiveId: 'ou_test' },
+    card,
+    fetchImpl as typeof fetch,
+  );
+
+  expect(result).toEqual({ sent: true, channel: 'app' });
+  expect(JSON.parse(String(calls[1].init.body))).toEqual({
+    receive_id: 'ou_test',
+    msg_type: 'interactive',
+    content: JSON.stringify(card),
   });
 });
