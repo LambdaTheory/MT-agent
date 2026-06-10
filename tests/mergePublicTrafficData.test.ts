@@ -1,0 +1,77 @@
+import { describe, expect, it } from 'vitest';
+import type { PeriodProductMetrics } from '../src/domain/types.js';
+import { mergePublicTrafficData } from '../src/publicTraffic/mergePublicTrafficData.js';
+import type { ExposureCumulativeProduct, ExposureProductSummary } from '../src/publicTraffic/types.js';
+
+function dashboard(period: '1d' | '7d' | '30d', platformProductId: string, visits: number, shippedOrders: number): PeriodProductMetrics {
+  return {
+    period,
+    productName: `商品${platformProductId}`,
+    platformProductId,
+    visits,
+    createdOrders: Math.floor(visits / 10),
+    signedOrders: Math.floor(visits / 20),
+    reviewedOrders: Math.floor(visits / 30),
+    shippedOrders,
+  };
+}
+
+function exposure(platformProductId: string, exposureValue: number, visits: number, amount = 0): ExposureProductSummary {
+  return {
+    productName: `商品${platformProductId}`,
+    platformProductId,
+    exposure: exposureValue,
+    visits,
+    amount,
+    visitRate: exposureValue > 0 ? visits / exposureValue : 0,
+    days: 1,
+    flags: [],
+  };
+}
+
+const cumulative: ExposureCumulativeProduct[] = [
+  { productName: '商品p1', platformProductId: 'p1', exposure: 100, visits: 10, amount: 20, custodyDays: 3, raw: {} },
+];
+
+describe('mergePublicTrafficData', () => {
+  it('joins dashboard and exposure rows by platform product id', () => {
+    const result = mergePublicTrafficData({
+      dashboardRows: [dashboard('1d', 'p1', 8, 2)],
+      exposureByPeriod: { '1d': [exposure('p1', 100, 10, 50)], '7d': [], '30d': [] },
+      cumulativeProducts: cumulative,
+      mapping: { p1: '558' },
+    });
+
+    expect(result.rows).toHaveLength(1);
+    expect(result.rows[0]).toMatchObject({
+      platformProductId: 'p1',
+      displayProductId: '端内ID 558',
+      custodyDays: 3,
+    });
+    expect(result.rows[0].periods['1d']).toMatchObject({ exposure: 100, publicVisits: 10, dashboardVisits: 8, shippedOrders: 2, amount: 50 });
+  });
+
+  it('keeps rows that exist only in exposure data', () => {
+    const result = mergePublicTrafficData({
+      dashboardRows: [],
+      exposureByPeriod: { '1d': [exposure('p2', 40, 0)], '7d': [], '30d': [] },
+      cumulativeProducts: [],
+      mapping: {},
+    });
+
+    expect(result.rows[0].displayProductId).toBe('平台商品ID p2');
+    expect(result.rows[0].periods['1d']).toMatchObject({ exposure: 40, publicVisits: 0, dashboardVisits: 0 });
+  });
+
+  it('keeps rows that exist only in dashboard data', () => {
+    const result = mergePublicTrafficData({
+      dashboardRows: [dashboard('7d', 'p3', 70, 4)],
+      exposureByPeriod: { '1d': [], '7d': [], '30d': [] },
+      cumulativeProducts: [],
+      mapping: { p3: '900' },
+    });
+
+    expect(result.rows[0].displayProductId).toBe('端内ID 900');
+    expect(result.rows[0].periods['7d']).toMatchObject({ exposure: 0, publicVisits: 0, dashboardVisits: 70, shippedOrders: 4 });
+  });
+});

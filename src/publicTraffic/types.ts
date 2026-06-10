@@ -1,3 +1,5 @@
+import type { PeriodKey } from '../domain/types.js';
+
 export interface ExposureOverviewMetric {
   period: '1d' | '7d' | '30d';
   exposure: number;
@@ -94,4 +96,32 @@ export interface PublicTrafficReportContext {
 export interface PublicTrafficReportPaths {
   markdownPath: string;
   workbookPath: string;
+}
+
+export interface PublicTrafficPeriodMetrics {
+  exposure: number;
+  publicVisits: number;
+  dashboardVisits: number;
+  createdOrders: number;
+  signedOrders: number;
+  reviewedOrders: number;
+  shippedOrders: number;
+  amount: number;
+  exposureVisitRate: number;
+  visitCreatedOrderRate: number;
+  visitShipmentRate: number;
+  hasExposureData: boolean;
+  hasDashboardData: boolean;
+}
+
+export interface PublicTrafficProductDataRow {
+  productName: string;
+  platformProductId: string;
+  displayProductId: string;
+  custodyDays: number | null;
+  periods: Record<PeriodKey, PublicTrafficPeriodMetrics>;
+}
+
+export interface PublicTrafficDataContext {
+  rows: PublicTrafficProductDataRow[];
 }
