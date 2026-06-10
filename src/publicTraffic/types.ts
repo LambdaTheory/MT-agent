@@ -125,3 +125,27 @@ export interface PublicTrafficProductDataRow {
 export interface PublicTrafficDataContext {
   rows: PublicTrafficProductDataRow[];
 }
+
+export interface PublicTrafficDataSummary {
+  exposure: number;
+  publicVisits: number;
+  dashboardVisits: number;
+  createdOrders: number;
+  shippedOrders: number;
+  amount: number;
+  exposureVisitRate: number;
+  visitCreatedOrderRate: number;
+  visitShipmentRate: number;
+}
+
+export interface PublicTrafficDataReportContext {
+  date: string;
+  summary: Record<PeriodKey, PublicTrafficDataSummary>;
+  rows: PublicTrafficProductDataRow[];
+  lowExposure: PublicTrafficReportSectionItem[];
+  weakClick: PublicTrafficReportSectionItem[];
+  weakConversion: PublicTrafficReportSectionItem[];
+  highPotential: PublicTrafficReportSectionItem[];
+  newProductObservation: PublicTrafficReportSectionItem[];
+  lifecycleGovernance: PublicTrafficReportSectionItem[];
+}
