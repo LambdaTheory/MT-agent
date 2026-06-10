@@ -8,9 +8,15 @@ async function source(path: string): Promise<string> {
 describe('public traffic CLI wiring', () => {
   it('crawls both exposure page and dashboard page before report generation', async () => {
     const text = await source('../src/cli/publicTrafficReport.ts');
-    expect(text).toContain("import { crawlDashboard } from '../crawler/dashboardCrawler.js';");
-    expect(text).toContain('const rawTables = await crawlDashboard(config);');
-    expect(text.indexOf('const rawTables = await crawlDashboard(config);')).toBeLessThan(text.indexOf('mergePublicTrafficData({'));
+    expect(text).toContain("import { crawlPublicTrafficSources } from '../crawler/publicTrafficCrawler.js';");
+    expect(text).not.toContain("import { crawlDashboard } from '../crawler/dashboardCrawler.js';");
+    expect(text).not.toContain("import { crawlExposurePage } from '../crawler/exposureCrawler.js';");
+    expect(text).toContain('const { exposure: crawlResult, dashboard: rawTables } = await crawlPublicTrafficSources(config);');
+    expect(text).not.toContain('await crawlExposurePage(config)');
+    expect(text).not.toContain('await crawlDashboard(config)');
+    expect(text.indexOf('const { exposure: crawlResult, dashboard: rawTables } = await crawlPublicTrafficSources(config);')).toBeLessThan(
+      text.indexOf('mergePublicTrafficData({'),
+    );
   });
 
   it('loads product mapping and sends a Feishu card', async () => {

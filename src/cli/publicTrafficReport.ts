@@ -2,8 +2,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { loadConfig } from '../config/loadConfig.js';
 import { loadEnv } from '../config/loadEnv.js';
-import { crawlDashboard } from '../crawler/dashboardCrawler.js';
-import { crawlExposurePage } from '../crawler/exposureCrawler.js';
+import { crawlPublicTrafficSources } from '../crawler/publicTrafficCrawler.js';
 import { normalizeRowsForPeriod } from '../extractor/normalizeRows.js';
 import { loadProductIdMapping } from '../mapping/productIdMapping.js';
 import { sendFeishuCard } from '../notify/feishu.js';
@@ -124,8 +123,8 @@ export async function runPublicTrafficReportCli(): Promise<void> {
   await mkdir(paths.dir, { recursive: true });
 
   try {
-    log.addEvent('开始抓取曝光数据');
-    const crawlResult = await crawlExposurePage(config);
+    log.addEvent('开始抓取曝光与后链路数据');
+    const { exposure: crawlResult, dashboard: rawTables } = await crawlPublicTrafficSources(config);
 
     await writeFile(paths.exposureCumulativeProducts, JSON.stringify(crawlResult.products, null, 2), 'utf8');
     log.addEvent(`保存累计快照: ${crawlResult.products.length} 条商品`);
@@ -152,8 +151,7 @@ export async function runPublicTrafficReportCli(): Promise<void> {
     log.addEvent(`7日汇总: ${sevenDaySummary.length} 条商品`);
     log.addEvent(`30日汇总: ${thirtyDaySummary.length} 条商品`);
 
-    log.addEvent('开始抓取后链路数据');
-    const rawTables = await crawlDashboard(config);
+    log.addEvent('开始处理后链路数据');
     for (const table of rawTables) {
       await writeFile(paths.publicVisitRaw[table.period], JSON.stringify(table, null, 2), 'utf8');
       log.addPeriodStats(table.collection);

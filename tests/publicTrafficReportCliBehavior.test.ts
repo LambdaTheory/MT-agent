@@ -9,8 +9,7 @@ import type { ExposureDailyDelta, PublicTrafficDataReportContext } from '../src/
 const mocks = vi.hoisted(() => ({
   outputDir: '',
   loadConfig: vi.fn<() => Promise<AgentConfig>>(),
-  crawlExposurePage: vi.fn(),
-  crawlDashboard: vi.fn(),
+  crawlPublicTrafficSources: vi.fn(),
   normalizeRowsForPeriod: vi.fn<(table: RawTableData) => PeriodProductMetrics[]>(),
   sendFeishuCard: vi.fn(),
 }));
@@ -23,12 +22,8 @@ vi.mock('../src/config/loadConfig.js', () => ({
   loadConfig: mocks.loadConfig,
 }));
 
-vi.mock('../src/crawler/exposureCrawler.js', () => ({
-  crawlExposurePage: mocks.crawlExposurePage,
-}));
-
-vi.mock('../src/crawler/dashboardCrawler.js', () => ({
-  crawlDashboard: mocks.crawlDashboard,
+vi.mock('../src/crawler/publicTrafficCrawler.js', () => ({
+  crawlPublicTrafficSources: mocks.crawlPublicTrafficSources,
 }));
 
 vi.mock('../src/extractor/normalizeRows.js', () => ({
@@ -54,16 +49,16 @@ describe('runPublicTrafficReportCli public traffic sequencing', () => {
       outputDir: mocks.outputDir,
       browserProfileDir: join(mocks.outputDir, 'profile'),
     });
-    mocks.crawlExposurePage.mockResolvedValue({
-      overview: [
-        { period: '1d', exposure: 10, visits: 2, amount: 3, conversionRate: 20 },
-        { period: '7d', exposure: 70, visits: 14, amount: 21, conversionRate: 20 },
-        { period: '30d', exposure: 300, visits: 60, amount: 90, conversionRate: 20 },
-      ],
-      products: [{ productName: '当前商品', platformProductId: 'p-current', exposure: 1000, visits: 100, amount: 200, custodyDays: null, raw: {} }],
-    });
-    mocks.crawlDashboard.mockResolvedValue(
-      (['1d', '7d', '30d'] as const).map((period) => ({
+    mocks.crawlPublicTrafficSources.mockResolvedValue({
+      exposure: {
+        overview: [
+          { period: '1d', exposure: 10, visits: 2, amount: 3, conversionRate: 20 },
+          { period: '7d', exposure: 70, visits: 14, amount: 21, conversionRate: 20 },
+          { period: '30d', exposure: 300, visits: 60, amount: 90, conversionRate: 20 },
+        ],
+        products: [{ productName: '当前商品', platformProductId: 'p-current', exposure: 1000, visits: 100, amount: 200, custodyDays: null, raw: {} }],
+      },
+      dashboard: (['1d', '7d', '30d'] as const).map((period) => ({
         period,
         headers: [],
         rows: [],
@@ -78,7 +73,7 @@ describe('runPublicTrafficReportCli public traffic sequencing', () => {
           complete: true,
         },
       })) satisfies RawTableData[],
-    );
+    });
     mocks.normalizeRowsForPeriod.mockReturnValue([
       {
         period: '1d',

@@ -196,6 +196,18 @@ async function extractProductRows(page: Page): Promise<ExposureCumulativeProduct
   return products;
 }
 
+export async function collectExposurePage(config: AgentConfig, page: Page): Promise<ExposureCrawlResult> {
+  await ensureExposurePage(config, page);
+  const overview = await extractAllOverviews(page);
+  await page.waitForSelector('.ant-table-tbody tr', { timeout: 30000 }).catch(() => undefined);
+  const products = await extractProductRows(page);
+
+  console.log(`[曝光] 总体概况: ${overview.length}个周期`);
+  console.log(`[曝光] 当前托管商品: ${products.length} 条`);
+
+  return { overview, products, url: page.url() };
+}
+
 export async function crawlExposurePage(config: AgentConfig): Promise<ExposureCrawlResult> {
   await clearBrowserProfileLocks(config.browserProfileDir);
   const browser = await chromium.launchPersistentContext(config.browserProfileDir, { headless: false });
@@ -203,16 +215,9 @@ export async function crawlExposurePage(config: AgentConfig): Promise<ExposureCr
   let completed = false;
 
   try {
-    await ensureExposurePage(config, page);
-    const overview = await extractAllOverviews(page);
-    await page.waitForSelector('.ant-table-tbody tr', { timeout: 30000 }).catch(() => undefined);
-    const products = await extractProductRows(page);
-
-    console.log(`[曝光] 总体概况: ${overview.length}个周期`);
-    console.log(`[曝光] 当前托管商品: ${products.length} 条`);
-
+    const result = await collectExposurePage(config, page);
     completed = true;
-    return { overview, products, url: page.url() };
+    return result;
   } finally {
     if (completed || !shouldKeepBrowserOpenOnFailure(process.env.MT_AGENT_KEEP_BROWSER_ON_FAILURE)) {
       await browser.close();

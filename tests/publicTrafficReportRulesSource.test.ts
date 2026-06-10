@@ -20,7 +20,9 @@ describe('publicTrafficReport rules wiring', () => {
     expect(source).toContain('aggregateExposureDeltas(thirtyDayDeltas)');
     expect(source).toContain('paths.exposure7dSummary');
     expect(source).toContain('paths.exposure30dSummary');
-    expect(source.indexOf('const rawTables = await crawlDashboard(config);')).toBeLessThan(source.indexOf('mergePublicTrafficData({'));
+    expect(source.indexOf('const { exposure: crawlResult, dashboard: rawTables } = await crawlPublicTrafficSources(config);')).toBeLessThan(
+      source.indexOf('mergePublicTrafficData({'),
+    );
     expect(source.indexOf('mergePublicTrafficData({')).toBeLessThan(source.indexOf('analyzePublicTrafficData({'));
     expect(source).toContain('await writeFile(paths.reportContext, JSON.stringify(context, null, 2),');
     expect(source).toContain('await writeFile(paths.markdown, buildPublicTrafficMarkdown(context),');
