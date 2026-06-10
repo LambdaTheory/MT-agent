@@ -115,6 +115,12 @@ function byPlatformId(rows: PublicTrafficProductDataRow[]): Map<string, PublicTr
   return new Map(rows.map((row) => [row.platformProductId, row]));
 }
 
+function hasReliableThirtyDaySummary(summary: PublicTrafficDataAnalysisInput['thirtyDaySummary'], platformProductId: string): boolean {
+  if (!summary) return true;
+  const item = summary.find((entry) => entry.platformProductId === platformProductId);
+  return Boolean(item && item.days >= 30 && !item.flags.includes('missing') && !item.flags.includes('counter_reset_or_data_error'));
+}
+
 function buildRecommendedActions(sections: {
   weakConversion: PublicTrafficReportSectionItem[];
   weakClick: PublicTrafficReportSectionItem[];
@@ -146,7 +152,7 @@ export function analyzePublicTrafficData(input: PublicTrafficDataAnalysisInput):
   const dailyDelta = input.dailyDelta ?? [];
 
   const lowExposure = rows
-    .filter((row) => one(row).hasExposureData || seven(row).hasExposureData)
+    .filter((row) => seven(row).hasExposureData)
     .filter((row) => (one(row).exposure <= 50 && seven(row).exposure <= 300) || (seven(row).publicVisits <= 3 && thirty(row).publicVisits <= 10))
     .filter((row) => one(row).shippedOrders === 0 && seven(row).shippedOrders === 0)
     .sort((a, b) => seven(a).exposure - seven(b).exposure || one(a).exposure - one(b).exposure)
@@ -205,6 +211,7 @@ export function analyzePublicTrafficData(input: PublicTrafficDataAnalysisInput):
   const lifecycleGovernance = rows
     .filter((row) => typeof row.custodyDays === 'number' && row.custodyDays >= 30)
     .filter((row) => thirty(row).hasExposureData)
+    .filter((row) => hasReliableThirtyDaySummary(input.thirtyDaySummary, row.platformProductId))
     .filter((row) => thirty(row).exposure <= 100 && thirty(row).publicVisits <= 3 && thirty(row).amount <= 1)
     .sort((a, b) => (b.custodyDays ?? 0) - (a.custodyDays ?? 0) || thirty(a).exposure - thirty(b).exposure)
     .slice(0, TOP_N)

@@ -130,6 +130,33 @@ describe('analyzePublicTrafficData', () => {
     expect(report.lifecycleGovernance).toHaveLength(0);
   });
 
+  it('does not classify low exposure when seven-day exposure history is missing', () => {
+    const report = analyzePublicTrafficData({
+      date: '2026-06-10',
+      rows: [row('端内ID partial-history', metric(20, 0, 0, 0, true, true), metric(0, 0, 0, 0, false, true))],
+    });
+
+    expect(report.lowExposure).toHaveLength(0);
+  });
+
+  it('skips lifecycle governance when thirty-day summary history is unreliable', () => {
+    const report = analyzePublicTrafficData({
+      date: '2026-06-10',
+      rows: [
+        row('端内ID short-history', metric(0, 0, 0, 0), metric(0, 0, 0, 0), metric(60, 1, 1, 0, true, true), 45),
+        row('端内ID missing-history', metric(0, 0, 0, 0), metric(0, 0, 0, 0), metric(60, 1, 1, 0, true, true), 45),
+        row('端内ID reset-history', metric(0, 0, 0, 0), metric(0, 0, 0, 0), metric(60, 1, 1, 0, true, true), 45),
+      ],
+      thirtyDaySummary: [
+        { productName: '短历史', platformProductId: '端内ID short-history', exposure: 60, visits: 1, amount: 0, visitRate: 1 / 60, days: 29, flags: [] },
+        { productName: '缺失历史', platformProductId: '端内ID missing-history', exposure: 60, visits: 1, amount: 0, visitRate: 1 / 60, days: 30, flags: ['missing'] },
+        { productName: '重置历史', platformProductId: '端内ID reset-history', exposure: 60, visits: 1, amount: 0, visitRate: 1 / 60, days: 30, flags: ['counter_reset_or_data_error'] },
+      ],
+    });
+
+    expect(report.lifecycleGovernance).toHaveLength(0);
+  });
+
   it('builds multiple conclusions compared with yesterday', () => {
     const report = analyzePublicTrafficData({
       date: '2026-06-10',
