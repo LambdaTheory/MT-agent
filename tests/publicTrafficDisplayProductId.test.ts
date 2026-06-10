@@ -13,4 +13,8 @@ describe('buildDisplayProductId', () => {
   it('falls back when mapped value is empty', () => {
     expect(buildDisplayProductId('platform-3', { 'platform-3': '' })).toBe('平台商品ID platform-3');
   });
+
+  it('falls back when only inherited object key exists', () => {
+    expect(buildDisplayProductId('toString', {})).toBe('平台商品ID toString');
+  });
 });
