@@ -4,7 +4,7 @@
 
 **Goal:** 聚合支付宝旧 dashboard 页面和公域曝光页面，生成完整公域数据日报，并通过飞书卡片发送。
 
-**Architecture:** 保留现有两个 crawler。新增聚合层以 `平台商品ID` 合并 dashboard 后链路数据和 exposure 公域入口数据，新增展示 ID 映射工具优先输出端内 ID。飞书 App API 增加 interactive card 发送能力，public traffic CLI 改为生成公域数据上下文并发送卡片，webhook 继续纯文本 fallback。
+**Architecture:** 新增聚合层以 `平台商品ID` 合并公域访问数据页面和公域曝光页面数据，新增展示 ID 映射工具优先输出端内 ID。飞书 App API 增加 interactive card 发送能力，public traffic CLI 在单一浏览器登录工作流中抓取两个页面，生成公域数据上下文并发送卡片，webhook 继续纯文本 fallback。输出统一写入 `output/YYYY-MM-DD/`，使用中文业务文件名。
 
 **Tech Stack:** Node.js, TypeScript, Playwright, Vitest, xlsx-js-style, Feishu IM App API.
 
@@ -29,6 +29,16 @@
 - Modify `src/publicTraffic/buildPublicTrafficWorkbook.ts`: 支持新上下文 workbook。
 - Modify `src/cli/publicTrafficReport.ts`: 同时抓取 dashboard 和 exposure，加载映射，聚合分析，发送卡片。
 - Create `tests/publicTrafficCliSource.test.ts`: 源码级确认 CLI 串联 dashboard crawl 和 card send。
+- Modify `src/publicTraffic/paths.ts`: 公域日报路径改为 `output/YYYY-MM-DD/` 和中文文件名。
+- Modify crawler orchestration: 公域日报运行时只打开一次浏览器上下文，并在同一登录态抓取曝光页和公域访问数据页。
+
+## Additional Confirmed Requirements
+
+- 公域数据日报结构保持新结构，不回退到旧 `MT每日运营日报` 章节。
+- 旧 dashboard 页面在输出命名中称为“公域访问数据”。
+- 当日产物集中在 `output/YYYY-MM-DD/`。
+- 中文文件名如下：`公域数据日报_YYYY-MM-DD.md`、`公域数据日报_YYYY-MM-DD.xlsx`、`公域数据上下文_YYYY-MM-DD.json`、`公域数据运行日志_YYYY-MM-DD.log`、`公域访问数据_1日.json`、`公域访问数据_7日.json`、`公域访问数据_30日.json`、`公域曝光总览_YYYY-MM-DD.json`、`公域曝光商品快照_YYYY-MM-DD.json`、`公域曝光日差分_YYYY-MM-DD.json`、`公域曝光7日汇总_YYYY-MM-DD.json`、`公域曝光30日汇总_YYYY-MM-DD.json`。
+- JSON 是中间数据和排障证据；最终人读输出仍是 Markdown、XLSX、飞书卡片。
 
 ## Task 1: Display Product ID Mapping
 
