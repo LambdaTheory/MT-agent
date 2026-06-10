@@ -197,7 +197,11 @@ describe('public traffic report outputs', () => {
   it('renders legacy Markdown and Feishu text with neutral insight defaults', () => {
     const legacy: PublicTrafficReportContext = {
       date: '2026-06-10',
-      overview: [{ period: '1d', exposure: 48103, visits: 1591, conversionRate: 3.31, amount: 3018.8 }],
+      overview: [
+        { period: '7d', exposure: 70000, visits: 700, conversionRate: 1, amount: 7000 },
+        { period: '1d', exposure: 48103, visits: 1591, conversionRate: 3.31, amount: 3018.8 },
+        { period: '30d', exposure: 300000, visits: 3000, conversionRate: 1, amount: 30000 },
+      ],
       exposureOptimization: [],
       conversionOptimization: [],
       newProductObservation: [],
@@ -207,11 +211,15 @@ describe('public traffic report outputs', () => {
     const markdown = buildPublicTrafficMarkdown(legacy);
     expect(markdown).toContain('## 经营结论');
     expect(markdown).toContain('暂无昨日公域数据上下文');
+    expect(markdown).toContain('今日仅展示基准值：曝光 48103。');
+    expect(markdown).not.toContain('今日仅展示基准值：曝光 70000。');
     expect(markdown).toContain('## 建议操作\n暂无需要立即处理的建议操作。');
 
     const text = buildPublicTrafficFeishuText(legacy, { markdownPath: 'report.md', workbookPath: 'report.xlsx' });
     expect(text).toContain('经营结论');
     expect(text).toContain('暂无昨日公域数据上下文');
+    expect(text).toContain('今日仅展示基准值：曝光 48103。');
+    expect(text).not.toContain('今日仅展示基准值：曝光 70000。');
     expect(text).toContain('建议操作\n暂无需要立即处理的建议操作。');
   });
 });

@@ -34,14 +34,15 @@ function summaryFromOverview(overview: ExposureOverviewMetric[], period: Exposur
 
 function toDataContext(context: PublicTrafficDataReportContext | PublicTrafficReportContext): PublicTrafficDataReportContext {
   if ('summary' in context) return context;
+  const summary = {
+    '1d': summaryFromOverview(context.overview, '1d'),
+    '7d': summaryFromOverview(context.overview, '7d'),
+    '30d': summaryFromOverview(context.overview, '30d'),
+  };
   return {
     date: context.date,
-    summary: {
-      '1d': summaryFromOverview(context.overview, '1d'),
-      '7d': summaryFromOverview(context.overview, '7d'),
-      '30d': summaryFromOverview(context.overview, '30d'),
-    },
-    conclusions: [{ label: '基准', text: `暂无昨日公域数据上下文，今日仅展示基准值：曝光 ${context.overview[0]?.exposure ?? 0}。` }],
+    summary,
+    conclusions: [{ label: '基准', text: `暂无昨日公域数据上下文，今日仅展示基准值：曝光 ${summary['1d'].exposure}。` }],
     rows: [],
     lowExposure: context.exposureOptimization,
     weakClick: [],
