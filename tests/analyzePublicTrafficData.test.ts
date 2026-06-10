@@ -1,17 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { analyzePublicTrafficData } from '../src/publicTraffic/analyzePublicTrafficData.js';
-import type { ExposureOverviewMetric, PublicTrafficProductDataRow } from '../src/publicTraffic/types.js';
+import type { ExposureOverviewMetric, PublicTrafficPeriodMetrics, PublicTrafficProductDataRow } from '../src/publicTraffic/types.js';
 
-function row(
-  displayProductId: string,
+function metric(
   exposure: number,
   publicVisits: number,
   dashboardVisits: number,
   shippedOrders: number,
   hasExposureData = true,
   hasDashboardData = true,
-): PublicTrafficProductDataRow {
-  const period = {
+): PublicTrafficPeriodMetrics {
+  return {
     exposure,
     publicVisits,
     dashboardVisits,
@@ -26,18 +25,27 @@ function row(
     hasExposureData,
     hasDashboardData,
   };
+}
+
+function row(
+  displayProductId: string,
+  oneDay = metric(0, 0, 0, 0),
+  sevenDay = oneDay,
+  thirtyDay = sevenDay,
+  custodyDays: number | null = null,
+): PublicTrafficProductDataRow {
   return {
     productName: displayProductId,
     platformProductId: displayProductId,
     displayProductId,
-    custodyDays: null,
-    periods: { '1d': period, '7d': period, '30d': period },
+    custodyDays,
+    periods: { '1d': oneDay, '7d': sevenDay, '30d': thirtyDay },
   };
 }
 
 describe('analyzePublicTrafficData', () => {
   it('builds one-day funnel summary', () => {
-    const report = analyzePublicTrafficData({ date: '2026-06-10', rows: [row('端内ID 1', 1000, 50, 40, 4)] });
+    const report = analyzePublicTrafficData({ date: '2026-06-10', rows: [row('端内ID 1', metric(1000, 50, 40, 4))] });
     expect(report.summary['1d']).toMatchObject({
       exposure: 1000,
       publicVisits: 50,
@@ -55,7 +63,7 @@ describe('analyzePublicTrafficData', () => {
 
     const report = analyzePublicTrafficData({
       date: '2026-06-10',
-      rows: [row('端内ID 1', 2959313, 117792, 40, 4)],
+      rows: [row('端内ID 1', metric(2959313, 117792, 40, 4))],
       overview,
     });
 
@@ -74,10 +82,10 @@ describe('analyzePublicTrafficData', () => {
     const report = analyzePublicTrafficData({
       date: '2026-06-10',
       rows: [
-        row('端内ID low', 10, 0, 0, 0),
-        row('端内ID click-weak', 2000, 5, 4, 0),
-        row('端内ID conversion-weak', 1500, 120, 100, 0),
-        row('端内ID potential', 1500, 180, 160, 8),
+        row('端内ID low', metric(10, 0, 0, 0)),
+        row('端内ID click-weak', metric(2000, 5, 4, 0)),
+        row('端内ID conversion-weak', metric(1500, 120, 100, 0)),
+        row('端内ID potential', metric(1500, 180, 160, 8)),
       ],
     });
 
@@ -91,10 +99,10 @@ describe('analyzePublicTrafficData', () => {
     const report = analyzePublicTrafficData({
       date: '2026-06-10',
       rows: [
-        row('端内ID missing-low', 0, 0, 0, 0, false, false),
-        row('端内ID missing-click', 2000, 5, 4, 0, false, true),
-        row('端内ID missing-conversion', 1500, 120, 100, 0, true, false),
-        row('端内ID missing-potential', 1500, 180, 160, 8, false, true),
+        row('端内ID missing-low', metric(0, 0, 0, 0, false, false)),
+        row('端内ID missing-click', metric(2000, 5, 4, 0, false, true)),
+        row('端内ID missing-conversion', metric(1500, 120, 100, 0, true, false)),
+        row('端内ID missing-potential', metric(1500, 180, 160, 8, false, true)),
       ],
     });
 
@@ -102,5 +110,102 @@ describe('analyzePublicTrafficData', () => {
     expect(report.weakClick).toHaveLength(0);
     expect(report.weakConversion).toHaveLength(0);
     expect(report.highPotential).toHaveLength(0);
+  });
+
+  it('builds multiple conclusions compared with yesterday', () => {
+    const report = analyzePublicTrafficData({
+      date: '2026-06-10',
+      rows: [row('端内ID 1', metric(1200, 80, 60, 6))],
+      previousSummary: {
+        exposure: 1000,
+        publicVisits: 50,
+        dashboardVisits: 45,
+        createdOrders: 4,
+        shippedOrders: 3,
+        amount: 300,
+        exposureVisitRate: 0.05,
+        visitCreatedOrderRate: 0.0889,
+        visitShipmentRate: 0.0667,
+      },
+    });
+
+    expect(report.conclusions.map((item) => item.label)).toEqual(['曝光', '公域访问', '金额', '发货', '曝光到访问率', '访问到发货率']);
+    expect(report.conclusions[0].text).toContain('较昨日上升 200');
+    expect(report.conclusions[1].text).toContain('较昨日上升 30');
+    expect(report.conclusions[3].text).toContain('较昨日上升 3');
+    expect(report.conclusions[4].text).toContain('百分点');
+  });
+
+  it('builds baseline conclusions when yesterday summary is missing', () => {
+    const report = analyzePublicTrafficData({ date: '2026-06-10', rows: [row('端内ID 1', metric(1000, 50, 40, 4))] });
+
+    expect(report.conclusions.length).toBeGreaterThan(0);
+    expect(report.conclusions[0].text).toContain('暂无昨日公域数据上下文');
+  });
+
+  it('builds new product observation from daily new_product deltas', () => {
+    const report = analyzePublicTrafficData({
+      date: '2026-06-10',
+      rows: [row('端内ID 888', metric(12, 0, 0, 0))],
+      dailyDelta: [
+        {
+          date: '2026-06-10',
+          productName: '新品',
+          platformProductId: '端内ID 888',
+          exposure: 12,
+          visits: 0,
+          amount: 0,
+          custodyDays: 1,
+          flags: ['new_product'],
+        },
+      ],
+    });
+
+    expect(report.newProductObservation[0]).toMatchObject({
+      identifier: '端内ID 888',
+      action: '观察 3-7 天，重点看曝光、访问和首单/发货',
+    });
+  });
+
+  it('builds lifecycle governance from weak thirty-day performance', () => {
+    const report = analyzePublicTrafficData({
+      date: '2026-06-10',
+      rows: [row('端内ID old', metric(0, 0, 0, 0), metric(5, 0, 0, 0), metric(60, 1, 1, 0), 45)],
+    });
+
+    expect(report.lifecycleGovernance[0]).toMatchObject({
+      identifier: '端内ID old',
+      action: '下架、替换或重做素材',
+    });
+  });
+
+  it('builds prioritized recommended actions with executable action text', () => {
+    const report = analyzePublicTrafficData({
+      date: '2026-06-10',
+      rows: [
+        row('端内ID conversion', metric(1000, 120, 100, 0)),
+        row('端内ID click', metric(2000, 5, 5, 0), metric(5000, 20, 20, 0)),
+        row('端内ID potential', metric(1500, 160, 120, 8)),
+      ],
+    });
+
+    expect(report.recommendedActions[0]).toMatchObject({
+      identifier: '端内ID conversion',
+      action: '检查价格/押金/库存/风控/履约链路',
+    });
+    expect(report.recommendedActions.map((item) => item.action).join('\n')).toContain('优化主图、标题、价格露出和首屏卖点');
+    expect(report.recommendedActions.map((item) => item.action).join('\n')).toContain('继续放量');
+  });
+
+  it('provides explanatory notes for empty sections', () => {
+    const report = analyzePublicTrafficData({ date: '2026-06-10', rows: [] });
+
+    expect(report.emptySectionNotes.lowExposure).toBe('暂无达到阈值的曝光不足商品。');
+    expect(report.emptySectionNotes.weakClick).toBe('暂无达到阈值的高曝光低点击商品。');
+    expect(report.emptySectionNotes.weakConversion).toBe('暂无达到阈值的高访问低转化商品。');
+    expect(report.emptySectionNotes.highPotential).toBe('暂无达到放量阈值的高潜力商品。');
+    expect(report.emptySectionNotes.newProductObservation).toBe('暂无可识别的新进入公域商品，或今日缺少上一日快照。');
+    expect(report.emptySectionNotes.lifecycleGovernance).toBe('暂无达到长期弱表现阈值的托管商品。');
+    expect(report.emptySectionNotes.recommendedActions).toBe('暂无需要立即处理的建议操作。');
   });
 });

@@ -138,9 +138,25 @@ export interface PublicTrafficDataSummary {
   visitShipmentRate: number;
 }
 
+export interface PublicTrafficConclusion {
+  label: string;
+  text: string;
+}
+
+export interface PublicTrafficEmptySectionNotes {
+  lowExposure: string;
+  weakClick: string;
+  weakConversion: string;
+  highPotential: string;
+  newProductObservation: string;
+  lifecycleGovernance: string;
+  recommendedActions: string;
+}
+
 export interface PublicTrafficDataReportContext {
   date: string;
   summary: Record<PeriodKey, PublicTrafficDataSummary>;
+  conclusions: PublicTrafficConclusion[];
   rows: PublicTrafficProductDataRow[];
   lowExposure: PublicTrafficReportSectionItem[];
   weakClick: PublicTrafficReportSectionItem[];
@@ -148,4 +164,16 @@ export interface PublicTrafficDataReportContext {
   highPotential: PublicTrafficReportSectionItem[];
   newProductObservation: PublicTrafficReportSectionItem[];
   lifecycleGovernance: PublicTrafficReportSectionItem[];
+  recommendedActions: PublicTrafficReportSectionItem[];
+  emptySectionNotes: PublicTrafficEmptySectionNotes;
+}
+
+export interface PublicTrafficDataAnalysisInput extends PublicTrafficDataContext {
+  date: string;
+  overview?: ExposureOverviewMetric[];
+  previousSummary?: PublicTrafficDataSummary;
+  dailyDelta?: ExposureDailyDelta[];
+  sevenDaySummary?: ExposureProductSummary[];
+  thirtyDaySummary?: ExposureProductSummary[];
+  cumulativeProducts?: ExposureCumulativeProduct[];
 }

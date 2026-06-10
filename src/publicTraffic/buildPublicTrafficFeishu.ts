@@ -31,6 +31,7 @@ function toDataContext(context: PublicTrafficDataReportContext | PublicTrafficRe
       '7d': summaryFromOverview(context.overview, '7d'),
       '30d': summaryFromOverview(context.overview, '30d'),
     },
+    conclusions: [],
     rows: [],
     lowExposure: context.exposureOptimization,
     weakClick: [],
@@ -38,6 +39,16 @@ function toDataContext(context: PublicTrafficDataReportContext | PublicTrafficRe
     highPotential: [],
     newProductObservation: context.newProductObservation,
     lifecycleGovernance: context.lifecycleGovernance,
+    recommendedActions: [],
+    emptySectionNotes: {
+      lowExposure: '暂无达到阈值的曝光不足商品。',
+      weakClick: '暂无达到阈值的高曝光低点击商品。',
+      weakConversion: '暂无达到阈值的高访问低转化商品。',
+      highPotential: '暂无达到放量阈值的高潜力商品。',
+      newProductObservation: '暂无可识别的新进入公域商品，或今日缺少上一日快照。',
+      lifecycleGovernance: '暂无达到长期弱表现阈值的托管商品。',
+      recommendedActions: '暂无需要立即处理的建议操作。',
+    },
   };
 }
 

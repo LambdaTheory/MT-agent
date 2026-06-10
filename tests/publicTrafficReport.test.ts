@@ -32,6 +32,7 @@ const context: PublicTrafficDataReportContext = {
     '7d': { exposure: 7000, publicVisits: 350, dashboardVisits: 280, createdOrders: 20, shippedOrders: 10, amount: 1500, exposureVisitRate: 0.05, visitCreatedOrderRate: 0.0714, visitShipmentRate: 0.0357 },
     '30d': { exposure: 30000, publicVisits: 1500, dashboardVisits: 1200, createdOrders: 80, shippedOrders: 40, amount: 6000, exposureVisitRate: 0.05, visitCreatedOrderRate: 0.0667, visitShipmentRate: 0.0333 },
   },
+  conclusions: [],
   rows: [
     {
       platformProductId: 'P-1001',
@@ -51,6 +52,16 @@ const context: PublicTrafficDataReportContext = {
   highPotential: [{ identifier: '端内ID 333', action: '高潜力商品', reason: '可继续放量' }],
   newProductObservation: [],
   lifecycleGovernance: [],
+  recommendedActions: [],
+  emptySectionNotes: {
+    lowExposure: '暂无达到阈值的曝光不足商品。',
+    weakClick: '暂无达到阈值的高曝光低点击商品。',
+    weakConversion: '暂无达到阈值的高访问低转化商品。',
+    highPotential: '暂无达到放量阈值的高潜力商品。',
+    newProductObservation: '暂无可识别的新进入公域商品，或今日缺少上一日快照。',
+    lifecycleGovernance: '暂无达到长期弱表现阈值的托管商品。',
+    recommendedActions: '暂无需要立即处理的建议操作。',
+  },
 };
 
 describe('public traffic report outputs', () => {
