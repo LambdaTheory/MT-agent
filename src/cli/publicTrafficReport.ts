@@ -155,6 +155,7 @@ export async function runPublicTrafficReportCli(): Promise<void> {
     log.addEvent('开始抓取后链路数据');
     const rawTables = await crawlDashboard(config);
     for (const table of rawTables) {
+      await writeFile(paths.publicVisitRaw[table.period], JSON.stringify(table, null, 2), 'utf8');
       log.addPeriodStats(table.collection);
     }
     const dashboardRows = normalizeDashboardRowsForReport(rawTables, log);

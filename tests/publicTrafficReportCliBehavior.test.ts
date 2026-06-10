@@ -62,13 +62,13 @@ describe('runPublicTrafficReportCli public traffic sequencing', () => {
       ],
       products: [{ productName: '当前商品', platformProductId: 'p-current', exposure: 1000, visits: 100, amount: 200, custodyDays: null, raw: {} }],
     });
-    mocks.crawlDashboard.mockResolvedValue([
-      {
-        period: '1d',
+    mocks.crawlDashboard.mockResolvedValue(
+      (['1d', '7d', '30d'] as const).map((period) => ({
+        period,
         headers: [],
         rows: [],
         collection: {
-          period: '1d',
+          period,
           actualPageSizes: [1],
           pageCount: 1,
           rowCount: 1,
@@ -77,8 +77,8 @@ describe('runPublicTrafficReportCli public traffic sequencing', () => {
           pageSizeFallback: false,
           complete: true,
         },
-      },
-    ] satisfies RawTableData[]);
+      })) satisfies RawTableData[],
+    );
     mocks.normalizeRowsForPeriod.mockReturnValue([
       {
         period: '1d',
@@ -136,6 +136,10 @@ describe('runPublicTrafficReportCli public traffic sequencing', () => {
 
     await expect(readFile(buildPublicTrafficPaths(mocks.outputDir, '2026-06-09').exposureCumulativeProducts, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(readFile(todayPaths.log, 'utf8')).resolves.toContain('商品级曝光历史不足');
+
+    await expect(readFile(todayPaths.publicVisitRaw['1d'], 'utf8')).resolves.toContain('"period": "1d"');
+    await expect(readFile(todayPaths.publicVisitRaw['7d'], 'utf8')).resolves.toContain('"period": "7d"');
+    await expect(readFile(todayPaths.publicVisitRaw['30d'], 'utf8')).resolves.toContain('"period": "30d"');
   });
 
   it('treats an existing empty previous cumulative snapshot as history for new-product daily deltas', async () => {
