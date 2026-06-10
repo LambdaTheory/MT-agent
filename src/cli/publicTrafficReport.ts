@@ -80,7 +80,11 @@ async function loadPreviousReportSummary(outputDir: string, date: string, log: R
   const prev = buildPublicTrafficPaths(outputDir, yesterday(date));
   try {
     const parsed = JSON.parse(await readFile(prev.reportContext, 'utf8')) as Partial<PublicTrafficDataReportContext>;
-    return parsed.summary?.['1d'];
+    const summary = parsed.summary?.['1d'];
+    if (!isPublicTrafficDataSummary(summary)) {
+      throw new Error('Invalid previous public traffic summary');
+    }
+    return summary;
   } catch (error) {
     if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
       log.addEvent('昨日公域数据上下文缺失: 结论使用今日基准值');
@@ -89,6 +93,22 @@ async function loadPreviousReportSummary(outputDir: string, date: string, log: R
     log.addEvent(`昨日公域数据上下文读取失败: ${error instanceof Error ? error.message : String(error)}`);
     return undefined;
   }
+}
+
+function isPublicTrafficDataSummary(value: unknown): value is PublicTrafficDataSummary {
+  if (!value || typeof value !== 'object') return false;
+  const summary = value as Record<keyof PublicTrafficDataSummary, unknown>;
+  return (
+    Number.isFinite(summary.exposure) &&
+    Number.isFinite(summary.publicVisits) &&
+    Number.isFinite(summary.dashboardVisits) &&
+    Number.isFinite(summary.createdOrders) &&
+    Number.isFinite(summary.shippedOrders) &&
+    Number.isFinite(summary.amount) &&
+    Number.isFinite(summary.exposureVisitRate) &&
+    Number.isFinite(summary.visitCreatedOrderRate) &&
+    Number.isFinite(summary.visitShipmentRate)
+  );
 }
 
 export function normalizeDashboardRowsForReport(rawTables: RawTableData[], log: ReturnType<typeof createRunLog>): PeriodProductMetrics[] {

@@ -194,6 +194,20 @@ describe('runPublicTrafficReportCli public traffic sequencing', () => {
     await expect(readFile(todayPaths.log, 'utf8')).resolves.toContain('昨日公域数据上下文读取失败:');
   });
 
+  it('does not use yesterday report context with malformed summary fields', async () => {
+    const yesterdayPaths = buildPublicTrafficPaths(mocks.outputDir, '2026-06-09');
+    await writeFile(yesterdayPaths.reportContext, JSON.stringify({ summary: { '1d': {} } }), 'utf8');
+    const { runPublicTrafficReportCli } = await import('../src/cli/publicTrafficReport.js');
+
+    await runPublicTrafficReportCli();
+
+    const todayPaths = buildPublicTrafficPaths(mocks.outputDir, '2026-06-10');
+    const context = JSON.parse(await readFile(todayPaths.reportContext, 'utf8')) as PublicTrafficDataReportContext;
+    expect(context.conclusions[0].label).toBe('基准');
+    expect(context.conclusions[0].text).toContain('暂无昨日公域数据上下文');
+    await expect(readFile(todayPaths.log, 'utf8')).resolves.toContain('昨日公域数据上下文读取失败: Invalid previous public traffic summary');
+  });
+
   it('treats an existing empty previous cumulative snapshot as history for new-product daily deltas', async () => {
     const yesterdayPaths = buildPublicTrafficPaths(mocks.outputDir, '2026-06-09');
     await writeFile(yesterdayPaths.exposureCumulativeProducts, '[]', 'utf8');
