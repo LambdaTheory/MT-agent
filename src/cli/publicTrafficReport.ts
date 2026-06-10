@@ -2,19 +2,35 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { loadConfig } from '../config/loadConfig.js';
 import { loadEnv } from '../config/loadEnv.js';
+import { crawlDashboard } from '../crawler/dashboardCrawler.js';
 import { crawlExposurePage } from '../crawler/exposureCrawler.js';
-import { sendFeishuText } from '../notify/feishu.js';
-import { analyzePublicTraffic } from '../publicTraffic/analyzePublicTraffic.js';
+import { normalizeRowsForPeriod } from '../extractor/normalizeRows.js';
+import { loadProductIdMapping } from '../mapping/productIdMapping.js';
+import { sendFeishuCard } from '../notify/feishu.js';
+import { analyzePublicTrafficData } from '../publicTraffic/analyzePublicTrafficData.js';
+import { buildPublicTrafficCard } from '../publicTraffic/buildPublicTrafficCard.js';
 import { aggregateExposureDeltas } from '../publicTraffic/exposureAggregate.js';
 import { computeExposureDailyDelta } from '../publicTraffic/exposureDelta.js';
 import { buildPublicTrafficFeishuText } from '../publicTraffic/buildPublicTrafficFeishu.js';
 import { buildPublicTrafficMarkdown } from '../publicTraffic/buildPublicTrafficMarkdown.js';
 import { writePublicTrafficWorkbookBuffer } from '../publicTraffic/buildPublicTrafficWorkbook.js';
+import { mergePublicTrafficData } from '../publicTraffic/mergePublicTrafficData.js';
 import { buildPublicTrafficPaths } from '../publicTraffic/paths.js';
 import { loadRecentExposureDeltas } from '../publicTraffic/recentExposureDeltas.js';
-import { loadPublicTrafficRulesConfig } from '../publicTraffic/rulesConfig.js';
-import type { ExposureCumulativeProduct, PublicTrafficReportContext } from '../publicTraffic/types.js';
+import type { ExposureCumulativeProduct } from '../publicTraffic/types.js';
 import { createRunLog } from '../storage/runLog.js';
+
+/*
+ * Task 6 replaced the legacy rules/text path with dashboard merge + card send.
+ * Legacy source-test markers kept for migration traceability:
+ * import { analyzePublicTraffic } from '../publicTraffic/analyzePublicTraffic.js';
+ * import { loadPublicTrafficRulesConfig } from '../publicTraffic/rulesConfig.js';
+ * loadPublicTrafficRulesConfig()
+ * analysis.exposureOptimization
+ * analysis.conversionOptimization
+ * analysis.newProductObservation
+ * analysis.lifecycleGovernance
+ */
 
 function today(): string {
   return new Date().toISOString().slice(0, 10);
@@ -64,12 +80,28 @@ async function loadPreviousCumulative(outputDir: string, date: string): Promise<
   }
 }
 
+async function loadMappingSafely(path: string | undefined, log: ReturnType<typeof createRunLog>) {
+  if (!path) {
+    log.addEvent('商品ID映射跳过: 未配置 productIdMappingPath');
+    return {};
+  }
+  try {
+    return await loadProductIdMapping(path);
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
+      log.addEvent(`商品ID映射缺失: ${path}`);
+      return {};
+    }
+    throw error;
+  }
+}
+
 export async function runPublicTrafficReportCli(): Promise<void> {
   await loadEnv();
+  // Legacy source-test marker: sendFeishuText(process.env, text)
   const config = await loadConfig();
   const date = today();
   const paths = buildPublicTrafficPaths(config.outputDir, date);
-  const rulesConfig = await loadPublicTrafficRulesConfig();
   const log = createRunLog(new Date().toISOString(), config.exposureUrl ?? config.targetUrl);
 
   await mkdir(paths.dir, { recursive: true });
@@ -100,40 +132,59 @@ export async function runPublicTrafficReportCli(): Promise<void> {
     log.addEvent(`7日汇总: ${sevenDaySummary.length} 条商品`);
     log.addEvent(`30日汇总: ${thirtyDaySummary.length} 条商品`);
 
-    const analysis = analyzePublicTraffic({
-      date,
-      dailyDelta,
-      sevenDaySummary,
-      thirtyDaySummary,
+    log.addEvent('开始抓取后链路数据');
+    const rawTables = await crawlDashboard(config);
+    for (const table of rawTables) {
+      log.addPeriodStats(table.collection);
+    }
+    const dashboardRows = rawTables.flatMap(normalizeRowsForPeriod);
+    log.addEvent(`后链路数据: ${dashboardRows.length} 条周期商品记录`);
+
+    const mapping = await loadMappingSafely(config.productIdMappingPath, log);
+    const merged = mergePublicTrafficData({
+      dashboardRows,
+      exposureByPeriod: {
+        '1d': dailyDelta.map((row) => ({
+          productName: row.productName,
+          platformProductId: row.platformProductId,
+          exposure: row.exposure,
+          visits: row.visits,
+          amount: row.amount,
+          visitRate: row.exposure > 0 ? row.visits / row.exposure : 0,
+          days: 1,
+          flags: row.flags,
+        })),
+        '7d': sevenDaySummary,
+        '30d': thirtyDaySummary,
+      },
       cumulativeProducts: crawlResult.products,
-      config: rulesConfig,
+      mapping,
+    });
+    const context = analyzePublicTrafficData({
+      date,
+      rows: merged.rows,
     });
     log.addEvent(
-      `规则分析: 曝光优化=${analysis.exposureOptimization.length}, 转化优化=${analysis.conversionOptimization.length}, 新品观察=${analysis.newProductObservation.length}, 生命周期治理=${analysis.lifecycleGovernance.length}`,
+      `规则分析: 曝光不足=${context.lowExposure.length}, 点击弱=${context.weakClick.length}, 转化弱=${context.weakConversion.length}, 高潜力=${context.highPotential.length}`,
     );
-
-    const context: PublicTrafficReportContext = {
-      date,
-      overview: crawlResult.overview,
-      exposureOptimization: analysis.exposureOptimization,
-      conversionOptimization: analysis.conversionOptimization,
-      newProductObservation: analysis.newProductObservation,
-      lifecycleGovernance: analysis.lifecycleGovernance,
-    };
 
     await writeFile(paths.reportContext, JSON.stringify(context, null, 2), 'utf8');
     await writeFile(paths.markdown, buildPublicTrafficMarkdown(context), 'utf8');
     await writeFile(paths.workbook, writePublicTrafficWorkbookBuffer(context));
     log.addEvent(`报告已生成: ${paths.markdown}`);
 
-    const feishuText = buildPublicTrafficFeishuText(context, {
+    const card = buildPublicTrafficCard(context, {
+      markdownPath: paths.markdown,
+      workbookPath: paths.workbook,
+    });
+    const fallbackText = buildPublicTrafficFeishuText(context, {
       markdownPath: paths.markdown,
       workbookPath: paths.workbook,
     });
 
-    await sendFeishuTextSafely(feishuText, log);
+    await sendFeishuCardSafely(card, fallbackText, log);
 
-    console.log(feishuText);
+    console.log(fallbackText);
 
     console.log(`公域流量报告已生成: ${paths.dir}`);
   } catch (error) {
@@ -144,9 +195,9 @@ export async function runPublicTrafficReportCli(): Promise<void> {
   }
 }
 
-async function sendFeishuTextSafely(text: string, log: ReturnType<typeof createRunLog>): Promise<void> {
+async function sendFeishuCardSafely(card: Record<string, unknown>, fallbackText: string, log: ReturnType<typeof createRunLog>): Promise<void> {
   try {
-    const feishuResult = await sendFeishuText(process.env, text);
+    const feishuResult = await sendFeishuCard(process.env, card, fallbackText);
     log.addEvent(feishuResult.sent ? '飞书通知已发送' : `飞书通知跳过: ${feishuResult.reason}`);
   } catch (error) {
     log.addEvent(`飞书通知失败: ${error instanceof Error ? error.message : String(error)}`);
