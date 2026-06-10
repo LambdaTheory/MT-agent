@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { parsePreviousCumulativeSnapshot } from '../src/cli/publicTrafficReport.js';
+import { normalizeDashboardRowsForReport, parsePreviousCumulativeSnapshot } from '../src/cli/publicTrafficReport.js';
+import type { RawTableData } from '../src/domain/types.js';
+import { createRunLog } from '../src/storage/runLog.js';
 
 describe('parsePreviousCumulativeSnapshot', () => {
   it('rejects valid JSON that is not an exposure cumulative product array', () => {
@@ -22,5 +24,61 @@ describe('parsePreviousCumulativeSnapshot', () => {
         ]),
       ),
     ).toHaveLength(1);
+  });
+});
+
+describe('normalizeDashboardRowsForReport', () => {
+  it('returns valid period rows and logs failed empty period skips', () => {
+    const rawTables: RawTableData[] = [
+      {
+        period: '1d',
+        headers: ['商品名称', '商品ID', '频道访问次数', '创建订单数', '签约订单数', '审出订单数', '发货订单数'],
+        rows: [['商品A', 'p-a', '3', '2', '1', '1', '1']],
+        collection: {
+          period: '1d',
+          actualPageSizes: [100],
+          pageCount: 1,
+          rowCount: 1,
+          dedupedRowCount: 1,
+          displayedTotalCount: 1,
+          pageSizeFallback: false,
+          complete: true,
+        },
+      },
+      {
+        period: '7d',
+        headers: [],
+        rows: [],
+        collection: {
+          period: '7d',
+          actualPageSizes: [],
+          pageCount: 0,
+          rowCount: 0,
+          dedupedRowCount: 0,
+          displayedTotalCount: null,
+          pageSizeFallback: false,
+          complete: false,
+        },
+      },
+    ];
+    const log = createRunLog('2026-06-10T12:00:00.000Z', 'https://example.test/dashboard');
+
+    const rows = normalizeDashboardRowsForReport(rawTables, log);
+
+    expect(rows).toEqual([
+      {
+        period: '1d',
+        productName: '商品A',
+        platformProductId: 'p-a',
+        spuName: undefined,
+        spuId: undefined,
+        visits: 3,
+        createdOrders: 2,
+        signedOrders: 1,
+        reviewedOrders: 1,
+        shippedOrders: 1,
+      },
+    ]);
+    expect(log.toText()).toContain('后链路数据跳过 7d: Missing required headers for 7d');
   });
 });

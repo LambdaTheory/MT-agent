@@ -17,6 +17,7 @@ import { writePublicTrafficWorkbookBuffer } from '../publicTraffic/buildPublicTr
 import { mergePublicTrafficData } from '../publicTraffic/mergePublicTrafficData.js';
 import { buildPublicTrafficPaths } from '../publicTraffic/paths.js';
 import { loadRecentExposureDeltas } from '../publicTraffic/recentExposureDeltas.js';
+import type { PeriodProductMetrics, RawTableData } from '../domain/types.js';
 import type { ExposureCumulativeProduct } from '../publicTraffic/types.js';
 import { createRunLog } from '../storage/runLog.js';
 
@@ -46,6 +47,11 @@ function isExposureCumulativeProduct(value: unknown): value is ExposureCumulativ
   );
 }
 
+interface PreviousCumulativeSnapshot {
+  products: ExposureCumulativeProduct[];
+  found: boolean;
+}
+
 export function parsePreviousCumulativeSnapshot(text: string): ExposureCumulativeProduct[] {
   const parsed: unknown = JSON.parse(text);
   if (!Array.isArray(parsed) || !parsed.every(isExposureCumulativeProduct)) {
@@ -55,17 +61,31 @@ export function parsePreviousCumulativeSnapshot(text: string): ExposureCumulativ
   return parsed;
 }
 
-async function loadPreviousCumulative(outputDir: string, date: string): Promise<ExposureCumulativeProduct[]> {
+async function loadPreviousCumulative(outputDir: string, date: string): Promise<PreviousCumulativeSnapshot> {
   const prev = buildPublicTrafficPaths(outputDir, yesterday(date));
   try {
-    return parsePreviousCumulativeSnapshot(await readFile(prev.exposureCumulativeProducts, 'utf8'));
+    return {
+      products: parsePreviousCumulativeSnapshot(await readFile(prev.exposureCumulativeProducts, 'utf8')),
+      found: true,
+    };
   } catch (error) {
     if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
-      return [];
+      return { products: [], found: false };
     }
 
     throw error;
   }
+}
+
+export function normalizeDashboardRowsForReport(rawTables: RawTableData[], log: ReturnType<typeof createRunLog>): PeriodProductMetrics[] {
+  return rawTables.flatMap((table) => {
+    try {
+      return normalizeRowsForPeriod(table);
+    } catch (error) {
+      log.addEvent(`后链路数据跳过 ${table.period}: ${error instanceof Error ? error.message : String(error)}`);
+      return [];
+    }
+  });
 }
 
 async function loadMappingSafely(path: string | undefined, log: ReturnType<typeof createRunLog>) {
@@ -105,11 +125,11 @@ export async function runPublicTrafficReportCli(): Promise<void> {
       log.addEvent(`保存总体概况: ${crawlResult.overview.length} 个周期`);
     }
 
-    const previousProducts = await loadPreviousCumulative(config.outputDir, date);
-    if (previousProducts.length === 0) {
+    const previous = await loadPreviousCumulative(config.outputDir, date);
+    if (!previous.found) {
       log.addEvent('商品级曝光历史不足: 跳过商品级日差分');
     }
-    const dailyDelta = previousProducts.length > 0 ? computeExposureDailyDelta(date, previousProducts, crawlResult.products) : [];
+    const dailyDelta = previous.found ? computeExposureDailyDelta(date, previous.products, crawlResult.products) : [];
     await writeFile(paths.exposureDailyDelta, JSON.stringify(dailyDelta, null, 2), 'utf8');
     log.addEvent(`日差分: ${dailyDelta.length} 条, 新品=${dailyDelta.filter((row) => row.flags.includes('new_product')).length}`);
 
@@ -127,7 +147,7 @@ export async function runPublicTrafficReportCli(): Promise<void> {
     for (const table of rawTables) {
       log.addPeriodStats(table.collection);
     }
-    const dashboardRows = rawTables.flatMap(normalizeRowsForPeriod);
+    const dashboardRows = normalizeDashboardRowsForReport(rawTables, log);
     log.addEvent(`后链路数据: ${dashboardRows.length} 条周期商品记录`);
 
     const mapping = await loadMappingSafely(config.productIdMappingPath, log);

@@ -137,4 +137,26 @@ describe('runPublicTrafficReportCli public traffic sequencing', () => {
     await expect(readFile(buildPublicTrafficPaths(mocks.outputDir, '2026-06-09').exposureCumulativeProducts, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(readFile(todayPaths.log, 'utf8')).resolves.toContain('商品级曝光历史不足');
   });
+
+  it('treats an existing empty previous cumulative snapshot as history for new-product daily deltas', async () => {
+    const yesterdayPaths = buildPublicTrafficPaths(mocks.outputDir, '2026-06-09');
+    await writeFile(yesterdayPaths.exposureCumulativeProducts, '[]', 'utf8');
+    const { runPublicTrafficReportCli } = await import('../src/cli/publicTrafficReport.js');
+
+    await runPublicTrafficReportCli();
+
+    const todayPaths = buildPublicTrafficPaths(mocks.outputDir, '2026-06-10');
+    const dailyDelta = JSON.parse(await readFile(todayPaths.exposureDailyDelta, 'utf8')) as ExposureDailyDelta[];
+    expect(dailyDelta).toHaveLength(1);
+    expect(dailyDelta[0]).toMatchObject({
+      date: '2026-06-10',
+      productName: '当前商品',
+      platformProductId: 'p-current',
+      exposure: 1000,
+      visits: 100,
+      amount: 200,
+      flags: ['new_product'],
+    });
+    await expect(readFile(todayPaths.log, 'utf8')).resolves.not.toContain('商品级曝光历史不足');
+  });
 });
