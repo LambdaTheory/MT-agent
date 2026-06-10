@@ -60,4 +60,13 @@ describe('loadEnv', () => {
       expect(env).toEqual({});
     });
   });
+
+  it('throws non-missing-file read errors', async () => {
+    await withTempDir(async (dir) => {
+      const env: Record<string, string | undefined> = {};
+
+      await expect(loadEnv(dir, env)).rejects.toThrow();
+      expect(env).toEqual({});
+    });
+  });
 });
