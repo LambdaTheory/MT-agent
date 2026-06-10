@@ -15,7 +15,9 @@ describe('CLI loadEnv wiring', () => {
   it('loads .env before public traffic Feishu send', async () => {
     const text = await source('../src/cli/publicTrafficReport.ts');
     expect(text).toContain("import { loadEnv } from '../config/loadEnv.js';");
-    expect(text.indexOf('await loadEnv();')).toBeLessThan(text.indexOf('sendFeishuText(process.env, text)'));
+    expect(text.indexOf('await loadEnv();')).toBeLessThan(text.indexOf('const config = await loadConfig();'));
+    expect(text.indexOf('await loadEnv();')).toBeLessThan(text.indexOf('sendFeishuCard(process.env, card, fallbackText)'));
+    expect(text).not.toContain('sendFeishuText(process.env, text)');
   });
 
   it('loads .env before daily report Feishu send', async () => {

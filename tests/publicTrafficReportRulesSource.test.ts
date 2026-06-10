@@ -2,27 +2,30 @@ import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 
 describe('publicTrafficReport rules wiring', () => {
-  it('loads recent deltas, writes summaries, and fills report sections from analysis', async () => {
+  it('merges exposure and dashboard data before generating report outputs', async () => {
     const source = await readFile(new URL('../src/cli/publicTrafficReport.ts', import.meta.url), 'utf8');
-    const rulesConfigIndex = source.indexOf('loadPublicTrafficRulesConfig()');
-    const mkdirIndex = source.indexOf('mkdir(paths.dir');
-    const crawlIndex = source.indexOf('crawlExposurePage(config)');
-    const cumulativeWriteIndex = source.indexOf('writeFile(paths.exposureCumulativeProducts');
 
-    expect(source).toContain("import { analyzePublicTraffic } from '../publicTraffic/analyzePublicTraffic.js';");
-    expect(source).toContain("import { loadPublicTrafficRulesConfig } from '../publicTraffic/rulesConfig.js';");
+    expect(source).not.toContain("import { analyzePublicTraffic } from '../publicTraffic/analyzePublicTraffic.js';");
+    expect(source).not.toContain("import { loadPublicTrafficRulesConfig } from '../publicTraffic/rulesConfig.js';");
+    expect(source).not.toContain('analysis.exposureOptimization');
+    expect(source).not.toContain('analysis.conversionOptimization');
+    expect(source).not.toContain('analysis.newProductObservation');
+    expect(source).not.toContain('analysis.lifecycleGovernance');
     expect(source).toContain("import { loadRecentExposureDeltas } from '../publicTraffic/recentExposureDeltas.js';");
-    expect(rulesConfigIndex).toBeGreaterThan(-1);
-    expect(mkdirIndex).toBeGreaterThan(rulesConfigIndex);
-    expect(crawlIndex).toBeGreaterThan(rulesConfigIndex);
-    expect(cumulativeWriteIndex).toBeGreaterThan(rulesConfigIndex);
+    expect(source).toContain("import { mergePublicTrafficData } from '../publicTraffic/mergePublicTrafficData.js';");
+    expect(source).toContain("import { analyzePublicTrafficData } from '../publicTraffic/analyzePublicTrafficData.js';");
+    expect(source).toContain("import { buildPublicTrafficCard } from '../publicTraffic/buildPublicTrafficCard.js';");
+    expect(source).toContain("import { sendFeishuCard } from '../notify/feishu.js';");
     expect(source).toContain('aggregateExposureDeltas(sevenDayDeltas)');
     expect(source).toContain('aggregateExposureDeltas(thirtyDayDeltas)');
     expect(source).toContain('paths.exposure7dSummary');
     expect(source).toContain('paths.exposure30dSummary');
-    expect(source).toContain('analysis.exposureOptimization');
-    expect(source).toContain('analysis.conversionOptimization');
-    expect(source).toContain('analysis.newProductObservation');
-    expect(source).toContain('analysis.lifecycleGovernance');
+    expect(source.indexOf('const rawTables = await crawlDashboard(config);')).toBeLessThan(source.indexOf('mergePublicTrafficData({'));
+    expect(source.indexOf('mergePublicTrafficData({')).toBeLessThan(source.indexOf('analyzePublicTrafficData({'));
+    expect(source).toContain('await writeFile(paths.reportContext, JSON.stringify(context, null, 2),');
+    expect(source).toContain('await writeFile(paths.markdown, buildPublicTrafficMarkdown(context),');
+    expect(source).toContain('await writeFile(paths.workbook, writePublicTrafficWorkbookBuffer(context));');
+    expect(source).toContain('buildPublicTrafficCard(context,');
+    expect(source).toContain('sendFeishuCard(process.env, card, fallbackText)');
   });
 });

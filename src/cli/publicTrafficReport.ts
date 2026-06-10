@@ -20,18 +20,6 @@ import { loadRecentExposureDeltas } from '../publicTraffic/recentExposureDeltas.
 import type { ExposureCumulativeProduct } from '../publicTraffic/types.js';
 import { createRunLog } from '../storage/runLog.js';
 
-/*
- * Task 6 replaced the legacy rules/text path with dashboard merge + card send.
- * Legacy source-test markers kept for migration traceability:
- * import { analyzePublicTraffic } from '../publicTraffic/analyzePublicTraffic.js';
- * import { loadPublicTrafficRulesConfig } from '../publicTraffic/rulesConfig.js';
- * loadPublicTrafficRulesConfig()
- * analysis.exposureOptimization
- * analysis.conversionOptimization
- * analysis.newProductObservation
- * analysis.lifecycleGovernance
- */
-
 function today(): string {
   return new Date().toISOString().slice(0, 10);
 }
@@ -98,7 +86,6 @@ async function loadMappingSafely(path: string | undefined, log: ReturnType<typeo
 
 export async function runPublicTrafficReportCli(): Promise<void> {
   await loadEnv();
-  // Legacy source-test marker: sendFeishuText(process.env, text)
   const config = await loadConfig();
   const date = today();
   const paths = buildPublicTrafficPaths(config.outputDir, date);
