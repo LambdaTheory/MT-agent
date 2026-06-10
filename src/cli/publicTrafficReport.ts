@@ -106,6 +106,10 @@ export async function runPublicTrafficReportCli(): Promise<void> {
     }
 
     const previousProducts = await loadPreviousCumulative(config.outputDir, date);
+    const hasReliableExposureHistory = previousProducts.length > 0;
+    if (!hasReliableExposureHistory) {
+      log.addEvent('商品级曝光历史不足: 跳过商品级曝光聚合');
+    }
     const dailyDelta = computeExposureDailyDelta(date, previousProducts, crawlResult.products);
     await writeFile(paths.exposureDailyDelta, JSON.stringify(dailyDelta, null, 2), 'utf8');
     log.addEvent(`日差分: ${dailyDelta.length} 条, 新品=${dailyDelta.filter((row) => row.flags.includes('new_product')).length}`);
@@ -131,18 +135,20 @@ export async function runPublicTrafficReportCli(): Promise<void> {
     const merged = mergePublicTrafficData({
       dashboardRows,
       exposureByPeriod: {
-        '1d': dailyDelta.map((row) => ({
-          productName: row.productName,
-          platformProductId: row.platformProductId,
-          exposure: row.exposure,
-          visits: row.visits,
-          amount: row.amount,
-          visitRate: row.exposure > 0 ? row.visits / row.exposure : 0,
-          days: 1,
-          flags: row.flags,
-        })),
-        '7d': sevenDaySummary,
-        '30d': thirtyDaySummary,
+        '1d': hasReliableExposureHistory
+          ? dailyDelta.map((row) => ({
+              productName: row.productName,
+              platformProductId: row.platformProductId,
+              exposure: row.exposure,
+              visits: row.visits,
+              amount: row.amount,
+              visitRate: row.exposure > 0 ? row.visits / row.exposure : 0,
+              days: 1,
+              flags: row.flags,
+            }))
+          : [],
+        '7d': hasReliableExposureHistory ? sevenDaySummary : [],
+        '30d': hasReliableExposureHistory ? thirtyDaySummary : [],
       },
       cumulativeProducts: crawlResult.products,
       mapping,
@@ -150,6 +156,7 @@ export async function runPublicTrafficReportCli(): Promise<void> {
     const context = analyzePublicTrafficData({
       date,
       rows: merged.rows,
+      overview: crawlResult.overview,
     });
     log.addEvent(
       `规则分析: 曝光不足=${context.lowExposure.length}, 点击弱=${context.weakClick.length}, 转化弱=${context.weakConversion.length}, 高潜力=${context.highPotential.length}`,

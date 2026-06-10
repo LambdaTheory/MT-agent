@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { analyzePublicTrafficData } from '../src/publicTraffic/analyzePublicTrafficData.js';
-import type { PublicTrafficProductDataRow } from '../src/publicTraffic/types.js';
+import type { ExposureOverviewMetric, PublicTrafficProductDataRow } from '../src/publicTraffic/types.js';
 
 function row(
   displayProductId: string,
@@ -46,6 +46,28 @@ describe('analyzePublicTrafficData', () => {
       amount: 400,
     });
     expect(report.summary['1d'].exposureVisitRate).toBeCloseTo(0.05);
+  });
+
+  it('uses exposure page overview for public summary metrics while preserving dashboard metrics', () => {
+    const overview: ExposureOverviewMetric[] = [
+      { period: '1d', exposure: 30500, visits: 1043, amount: 2673, conversionRate: 3.42 },
+    ];
+
+    const report = analyzePublicTrafficData({
+      date: '2026-06-10',
+      rows: [row('端内ID 1', 2959313, 117792, 40, 4)],
+      overview,
+    });
+
+    expect(report.summary['1d']).toMatchObject({
+      exposure: 30500,
+      publicVisits: 1043,
+      dashboardVisits: 40,
+      shippedOrders: 4,
+      amount: 2673,
+    });
+    expect(report.summary['1d'].exposureVisitRate).toBeCloseTo(0.0342);
+    expect(report.summary['1d'].visitShipmentRate).toBeCloseTo(0.1);
   });
 
   it('classifies problem and opportunity groups', () => {

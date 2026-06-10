@@ -1,5 +1,6 @@
 import type { PeriodKey } from '../domain/types.js';
 import type {
+  ExposureOverviewMetric,
   PublicTrafficDataContext,
   PublicTrafficDataReportContext,
   PublicTrafficDataSummary,
@@ -41,14 +42,25 @@ function summarize(rows: PublicTrafficProductDataRow[], period: PeriodKey): Publ
   return summary;
 }
 
+function applyOverview(summary: PublicTrafficDataSummary, overview: ExposureOverviewMetric | undefined): PublicTrafficDataSummary {
+  if (!overview) return summary;
+  return {
+    ...summary,
+    exposure: overview.exposure,
+    publicVisits: overview.visits,
+    amount: overview.amount,
+    exposureVisitRate: overview.conversionRate / 100,
+  };
+}
+
 function item(row: PublicTrafficProductDataRow, action: string, reason: string): PublicTrafficReportSectionItem {
   return { identifier: row.displayProductId, action, reason };
 }
 
-export function analyzePublicTrafficData(input: PublicTrafficDataContext & { date: string }): PublicTrafficDataReportContext {
+export function analyzePublicTrafficData(input: PublicTrafficDataContext & { date: string; overview?: ExposureOverviewMetric[] }): PublicTrafficDataReportContext {
   const rows = input.rows;
   const one = (row: PublicTrafficProductDataRow) => row.periods['1d'];
-  const summary = Object.fromEntries(PERIODS.map((period) => [period, summarize(rows, period)])) as Record<
+  const summary = Object.fromEntries(PERIODS.map((period) => [period, applyOverview(summarize(rows, period), input.overview?.find((item) => item.period === period))])) as Record<
     PeriodKey,
     PublicTrafficDataSummary
   >;
