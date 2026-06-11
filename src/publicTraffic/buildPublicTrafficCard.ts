@@ -50,23 +50,35 @@ function columnSet(columns: string[], elementId?: string): Record<string, unknow
   return { tag: 'column_set', ...(elementId ? { element_id: elementId } : {}), flex_mode: 'bisect', horizontal_spacing: '8px', columns: columns.map(markdownColumn) };
 }
 
-function nestedMetricColumn(title: string, metrics: Array<[string, string]>): Record<string, unknown> {
-  const metricColumns = metrics.map(([label, value]) => ({
-    tag: 'column',
-    width: 'weighted',
-    weight: 1,
-    vertical_align: 'top',
-    elements: [{ tag: 'markdown', content: `${label}\n**${value}**` }],
-  }));
+function metricCard(label: string, value: string): Record<string, unknown> {
   return {
     tag: 'column',
     width: 'weighted',
     weight: 1,
     vertical_align: 'top',
-    elements: [
-      { tag: 'markdown', content: `**${title}**` },
-      { tag: 'column_set', flex_mode: 'flow', horizontal_spacing: '8px', columns: metricColumns },
-    ],
+    background_style: 'grey',
+    padding: '8px',
+    elements: [{ tag: 'markdown', content: `${label}\n**${value}**`, text_align: 'center' }],
+  };
+}
+
+function metricCardRow(metrics: Array<[string, string]>): Record<string, unknown> {
+  return { tag: 'column_set', flex_mode: 'bisect', horizontal_spacing: '8px', columns: metrics.map(([label, value]) => metricCard(label, value)) };
+}
+
+function chunkMetrics(metrics: Array<[string, string]>, size = 3): Array<Array<[string, string]>> {
+  const chunks: Array<Array<[string, string]>> = [];
+  for (let index = 0; index < metrics.length; index += size) chunks.push(metrics.slice(index, index + size));
+  return chunks;
+}
+
+function nestedMetricColumn(title: string, metrics: Array<[string, string]>): Record<string, unknown> {
+  return {
+    tag: 'column',
+    width: 'weighted',
+    weight: 1,
+    vertical_align: 'top',
+    elements: [{ tag: 'markdown', content: `**${title}**` }, ...chunkMetrics(metrics).map((chunk) => metricCardRow(chunk))],
   };
 }
 
