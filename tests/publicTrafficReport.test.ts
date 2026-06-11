@@ -240,7 +240,9 @@ describe('public traffic report outputs', () => {
     const card = buildPublicTrafficCard(context, { markdownPath: 'report.md', workbookPath: 'report.xlsx' });
     expect(card.header).toMatchObject({ title: { tag: 'plain_text', content: '公域数据日报 2026-06-10' } });
     const serialized = JSON.stringify(card);
-    expect(serialized).toContain('经营结论');
+    expect(serialized).not.toContain('经营结论');
+    expect(serialized).not.toContain('今日漏斗');
+    expect(serialized).not.toContain('**公域**');
     expect(serialized).toContain('曝光 Top10');
     expect(serialized).not.toContain('预警商品（托管>5天 且 曝光<100）');
     expect(serialized).toContain('分析与建议');
@@ -338,10 +340,11 @@ describe('public traffic report outputs', () => {
     const contents = (columnSet: Record<string, unknown>) =>
       (columnSet.columns as Array<{ elements: Array<{ content: string }> }>).flatMap((column) => column.elements.map((element) => element.content));
 
-    expect(markdowns[0].content).toContain('**经营结论**');
-    expect(markdowns[0].content).toContain('曝光 1000，较昨日上升 100');
+    expect(JSON.stringify(card)).not.toContain('经营结论');
+    expect(JSON.stringify(card)).not.toContain('今日漏斗');
+    expect(JSON.stringify(card)).not.toContain('**公域**');
+    expect(markdowns[0].content).toContain('**转化率**');
     expect(columnSets.length).toBeGreaterThanOrEqual(2);
-    expect(contents(columnSets[0]).join('\n')).toContain('公域');
     expect(JSON.stringify(columnSets[0])).toContain('曝光\\n**1000**');
     expect(contents(columnSets[0]).join('\n')).toContain('订单');
     expect(JSON.stringify(columnSets[0])).toContain('发货\\n**2**');
@@ -569,10 +572,11 @@ describe('public traffic report outputs', () => {
     expect(workbook.SheetNames).not.toContain('订单分析');
   });
 
-  it('卡片今日漏斗输出三行并标注数据日期', () => {
+  it('卡片漏斗输出三行并省略冗余公域标题', () => {
     const card = buildPublicTrafficCard(contextWithOrderAnalysis, { markdownPath: 'report.md', workbookPath: 'report.xlsx' });
     const json = JSON.stringify(card);
-    expect(json).toContain('公域（');
+    expect(json).not.toContain('今日漏斗');
+    expect(json).not.toContain('公域（');
     expect(json).toContain('订单（06-10）');
     expect(json).toContain('履约（发货06-10｜归还未知｜关单06-10）');
     expect(json).toContain('创建订单');
@@ -585,7 +589,8 @@ describe('public traffic report outputs', () => {
     const card = buildPublicTrafficCard(context, { markdownPath: 'report.md', workbookPath: 'report.xlsx' });
     const json = JSON.stringify(card);
     expect(json).not.toContain('履约（');
-    expect(json).toContain('今日漏斗');
+    expect(json).not.toContain('今日漏斗');
+    expect(json).not.toContain('**公域**');
   });
 
   it('Markdown 1日总览输出三行', () => {

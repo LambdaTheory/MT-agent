@@ -84,13 +84,13 @@ function chunkMetrics(metrics: FunnelMetric[], size = 3): FunnelMetric[][] {
   return chunks;
 }
 
-function nestedMetricColumn(title: string, metrics: FunnelMetric[]): Record<string, unknown> {
+function nestedMetricColumn(title: string | null, metrics: FunnelMetric[]): Record<string, unknown> {
   return {
     tag: 'column',
     width: 'weighted',
     weight: 1,
     vertical_align: 'top',
-    elements: [{ tag: 'markdown', content: `**${title}**` }, ...chunkMetrics(metrics).map((chunk) => metricCardRow(chunk))],
+    elements: [...(title ? [{ tag: 'markdown', content: `**${title}**` }] : []), ...chunkMetrics(metrics).map((chunk) => metricCardRow(chunk))],
   };
 }
 
@@ -101,7 +101,7 @@ function orderMetric(page: Parameters<typeof findOrderAnalysisIndicator>[0], lab
   return [label, value, delta];
 }
 
-function nestedFunnelColumnSet(groups: Array<{ title: string; metrics: FunnelMetric[] }>, elementId = 'funnel_summary'): Record<string, unknown> {
+function nestedFunnelColumnSet(groups: Array<{ title: string | null; metrics: FunnelMetric[] }>, elementId = 'funnel_summary'): Record<string, unknown> {
   return {
     tag: 'column_set',
     element_id: elementId,
@@ -115,14 +115,9 @@ function optionalElement(element: Record<string, unknown> | null): Record<string
   return element ? [element] : [];
 }
 
-function conclusionMarkdown(context: PublicTrafficDataReportContext): Record<string, unknown> {
-  const lines = context.conclusions.map((item) => `**${item.label}**\n${item.text}`);
-  return { tag: 'markdown', content: ['**经营结论**', ...lines].join('\n') };
-}
-
 function funnelColumnSet(one: PublicTrafficDataReportContext['summary']['1d']): Record<string, unknown> {
   return { tag: 'column_set', element_id: 'funnel_summary', flex_mode: 'stretch', horizontal_spacing: '8px', columns: [
-    nestedMetricColumn('公域', [['曝光', String(one.exposure)], ['访问', String(one.publicVisits)], ['金额', `¥${one.amount.toFixed(2)}`]]),
+    nestedMetricColumn(null, [['曝光', String(one.exposure)], ['访问', String(one.publicVisits)], ['金额', `¥${one.amount.toFixed(2)}`]]),
     nestedMetricColumn('订单', [['创建', String(one.createdOrders)], ['发货', String(one.shippedOrders)]]),
   ] };
 }
@@ -139,7 +134,7 @@ function funnelElements(context: PublicTrafficDataReportContext): Record<string,
   const customs = oa.pages.customs;
   return [
     nestedFunnelColumnSet([
-      { title: `公域（${context.date}）`, metrics: [['曝光', String(one.exposure)], ['公域访问', String(one.publicVisits)], ['商品页访问', String(one.dashboardVisits)]] },
+      { title: null, metrics: [['曝光', String(one.exposure)], ['公域访问', String(one.publicVisits)], ['商品页访问', String(one.dashboardVisits)]] },
     ], 'funnel_public'),
     nestedFunnelColumnSet([
       { title: `订单（${shortDataDate(overview?.dataDate)}）`, metrics: [orderMetric(overview, '创建订单', ['创建订单数']), orderMetric(overview, '签约订单', ['签约订单数']), orderMetric(overview, '审出订单', ['审出订单数'])] },
@@ -308,9 +303,6 @@ export function buildPublicTrafficCard(context: PublicTrafficDataReportContext, 
     },
     body: {
       elements: [
-        conclusionMarkdown(context),
-        { tag: 'hr' },
-        { tag: 'markdown', content: '**今日漏斗**' },
         ...funnelElements(context),
         { tag: 'markdown', content: rateText(one) },
         ...markdownElement(fulfillmentRateText(context)),
