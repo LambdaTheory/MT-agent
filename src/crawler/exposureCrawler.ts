@@ -8,7 +8,7 @@ import { clearBrowserProfileLocks, prepareDashboardPage } from './browserProfile
 import { selectSubAccountIfNeeded } from './dashboardCrawler.js';
 import { shouldKeepBrowserOpenOnFailure } from './failureHandling.js';
 import { waitForSettledLoginState } from './loginState.js';
-import { setDashboardPageSize } from './pageSizeProbe.js';
+import { readCurrentPageSize, setDashboardPageSize } from './pageSizeProbe.js';
 
 export interface ExposureCrawlResult {
   overview: ExposureOverviewMetric[];
@@ -182,6 +182,18 @@ async function tryEnlargePageSize(page: Page, preferredPageSize: number): Promis
   const size = Math.min(preferredPageSize, EXPOSURE_MAX_PAGE_SIZE);
   try {
     await setDashboardPageSize(page, size);
+    const actual = await readCurrentPageSize(page);
+    if (actual !== size) {
+      console.log(`[曝光] 每页条数调整失败，保持默认: 实际值 ${actual ?? '未知'}`);
+      return;
+    }
+
+    try {
+      await page.waitForFunction("document.querySelectorAll('.ant-table-tbody tr').length > 10", undefined, { timeout: 10000 });
+    } catch {
+      console.log('[曝光] 每页条数调整后行数未确认，继续');
+    }
+
     console.log(`[曝光] 每页条数已调整为 ${size}`);
   } catch (error) {
     console.log(`[曝光] 每页条数调整失败，保持默认: ${error instanceof Error ? error.message : String(error)}`);

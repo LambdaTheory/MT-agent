@@ -33,6 +33,7 @@ describe('exposureCrawler Playwright evaluation', () => {
     const source = await readFile(new URL('../src/crawler/exposureCrawler.ts', import.meta.url), 'utf8');
 
     expect(source).toContain('setDashboardPageSize');
+    expect(source).toContain('readCurrentPageSize');
     expect(source).toContain('EXPOSURE_MAX_PAGE_SIZE = 50');
     expect(source).toContain('Math.min(');
     expect(source).toContain('每页条数调整失败');
