@@ -1052,17 +1052,18 @@ git commit -m "验证：订单分析采集实跑通过"
 - Modify: `src/crawler/exposureCrawler.ts`
 - Test: `tests/exposureCrawlerSource.test.ts`（追加断言）
 
-曝光页商品表目前按默认每页条数逐页点「下一页」（258 商品约 26 页、每页等 2 秒）。复用 `pageSizeProbe.ts` 的 `setDashboardPageSize`（通用 antd size-changer 操作，`.ant-pagination-options-size-changer` 取 `.last()`），在分页循环前尽量调大每页条数。曝光页若无 size-changer 控件则保持默认，不影响正确性——必须 best-effort，失败不抛错。
+曝光页商品表目前按默认每页条数逐页点「下一页」（258 商品约 26 页、每页等 2 秒）。复用 `pageSizeProbe.ts` 的 `setDashboardPageSize`（通用 antd size-changer 操作，`.ant-pagination-options-size-changer` 取 `.last()`），在分页循环前尽量调大每页条数。**用户实测：曝光页最多开到 50 条/页**，因此取 `min(preferredPageSize, 50)`。曝光页若无 size-changer 控件则保持默认，不影响正确性——必须 best-effort，失败不抛错。
 
 - [ ] **Step 1: 写失败的源码断言测试**
 
 `tests/exposureCrawlerSource.test.ts` 追加一个 it：
 
 ```ts
-it('曝光页分页前尝试调大每页条数（best-effort）', async () => {
+it('曝光页分页前尝试调大每页条数（best-effort，上限50）', async () => {
   const source = await readFile('src/crawler/exposureCrawler.ts', 'utf8');
   expect(source).toContain('setDashboardPageSize');
-  expect(source).toContain('preferredPageSize');
+  expect(source).toContain('EXPOSURE_MAX_PAGE_SIZE = 50');
+  expect(source).toContain('Math.min(');
   expect(source).toContain('每页条数调整失败');
 });
 ```
@@ -1078,11 +1079,15 @@ Expected: 新增用例 FAIL
 // 顶部 import 追加：
 import { setDashboardPageSize } from './pageSizeProbe.js';
 
+// 模块级常量（用户实测曝光页 size-changer 最大选项为 50 条/页）：
+const EXPOSURE_MAX_PAGE_SIZE = 50;
+
 // 新增函数（放在 extractProductRows 之前）：
 async function tryEnlargePageSize(page: Page, preferredPageSize: number): Promise<void> {
+  const size = Math.min(preferredPageSize, EXPOSURE_MAX_PAGE_SIZE);
   try {
-    await setDashboardPageSize(page, preferredPageSize);
-    console.log(`[曝光] 每页条数已调整为 ${preferredPageSize}`);
+    await setDashboardPageSize(page, size);
+    console.log(`[曝光] 每页条数已调整为 ${size}`);
   } catch (error) {
     console.log(`[曝光] 每页条数调整失败，保持默认: ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -1106,7 +1111,7 @@ git add src/crawler/exposureCrawler.ts tests/exposureCrawlerSource.test.ts
 git commit -m "优化：曝光页调大每页条数提速"
 ```
 
-Task 10 实跑时验证：运行日志中 `[曝光] 每页条数已调整为 100`（或调整失败提示），且 `[曝光] 第N页` 总页数明显减少、商品总数不变（≈258）。
+Task 10 实跑时验证：运行日志中 `[曝光] 每页条数已调整为 50`（或调整失败提示），且 `[曝光] 第N页` 总页数明显减少（≈6 页）、商品总数不变（≈258）。
 
 ---
 
