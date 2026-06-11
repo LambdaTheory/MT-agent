@@ -15,6 +15,7 @@ describe('orderAnalysisCrawler wiring', () => {
     expect(source).toContain('请选择日期');
     expect(source).toContain('selectSubAccountIfNeeded');
     expect(source).toContain('指标为空');
+    expect(source).toContain('展开后指标数未增加');
     expect(source).toContain('cleanOrderAnalysisIndicator');
     expect(source).toContain('resolveOrderAnalysisDataDate');
   });

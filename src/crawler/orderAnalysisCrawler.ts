@@ -30,11 +30,16 @@ async function selectOneDayPeriod(page: Page, key: OrderAnalysisPageKey): Promis
   await page.waitForTimeout(3000);
 }
 
-async function expandIndicators(page: Page): Promise<void> {
+async function expandIndicators(page: Page, key: OrderAnalysisPageKey): Promise<void> {
   const expand = page.getByText('展开', { exact: true }).first();
   if ((await expand.count()) === 0) return;
-  await expand.click().catch(() => undefined);
+  const before = await page.locator('.merchant-ui-data-indicator').count();
+  await expand.click();
   await page.waitForTimeout(3000);
+  const after = await page.locator('.merchant-ui-data-indicator').count();
+  if (after <= before) {
+    throw new Error(`订单分析页 ${key} 展开后指标数未增加（前 ${before} 后 ${after}），展开可能未生效`);
+  }
 }
 
 async function extractIndicators(page: Page): Promise<OrderAnalysisIndicator[]> {
@@ -65,7 +70,7 @@ async function collectOrderAnalysisPage(page: Page, key: OrderAnalysisPageKey): 
   }
   await page.waitForSelector('.merchant-ui-data-indicator', { timeout: 60000 });
   await selectOneDayPeriod(page, key);
-  await expandIndicators(page);
+  await expandIndicators(page, key);
 
   const indicators = await extractIndicators(page);
   if (indicators.length === 0) {
