@@ -55,6 +55,12 @@ describe('public traffic CLI wiring', () => {
     expect(text).toContain('orderAnalysis,');
   });
 
+  it('CLI 在映射刷新后为商品总表注端内ID列', async () => {
+    const text = await source('../src/cli/publicTrafficReport.ts');
+    expect(text).toContain('annotateGoodsExportWorkbookWithInternalId');
+    expect(text).toContain('商品总表端内ID列注入失败');
+  });
+
   it('paths 定义订单分析中文路径', async () => {
     const text = await source('../src/publicTraffic/paths.ts');
     expect(text).toContain('订单分析_');

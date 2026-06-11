@@ -4,6 +4,7 @@ import { loadConfig } from '../config/loadConfig.js';
 import { loadEnv } from '../config/loadEnv.js';
 import { crawlPublicTrafficSources } from '../crawler/publicTrafficCrawler.js';
 import { normalizeRowsForPeriod } from '../extractor/normalizeRows.js';
+import { annotateGoodsExportWorkbookWithInternalId } from '../mapping/annotateGoodsExportWorkbook.js';
 import { loadProductIdMapping } from '../mapping/productIdMapping.js';
 import { writeProductIdMappingFromExport } from '../mapping/refreshProductIdMapping.js';
 import { sendFeishuCard } from '../notify/feishu.js';
@@ -196,6 +197,13 @@ export async function runPublicTrafficReportCli(): Promise<void> {
     log.addEvent('开始下载商品总表、抓取曝光与后链路数据');
     const { goodsExportPath, exposure: crawlResult, dashboard: rawTables, orderAnalysis: orderAnalysisCapture } = await crawlPublicTrafficSources(config, paths.goodsExportWorkbook);
     await refreshProductIdMappingForReport(goodsExportPath, mappingPath, paths.productIdMappingSyncLog, log);
+
+    try {
+      const annotatedCount = annotateGoodsExportWorkbookWithInternalId(paths.goodsExportWorkbook);
+      log.addEvent(`商品总表端内ID列已注入: ${annotatedCount} 行`);
+    } catch (error) {
+      log.addEvent(`商品总表端内ID列注入失败: ${error instanceof Error ? error.message : String(error)}`);
+    }
 
     await writeFile(paths.exposureCumulativeProducts, JSON.stringify(crawlResult.products, null, 2), 'utf8');
     log.addEvent(`保存累计快照: ${crawlResult.products.length} 条商品`);

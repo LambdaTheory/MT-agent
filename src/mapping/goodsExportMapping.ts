@@ -17,7 +17,7 @@ function normalize(value: unknown): string {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
 }
 
-function internalIdFromMerchantCode(code: string): string | null {
+export function internalIdFromMerchantCode(code: string): string | null {
   const parts = code.split('-').map((part) => part.trim()).filter(Boolean);
   if (parts.length >= 3 && /^\d+$/.test(parts[1] ?? '')) return parts[1] ?? null;
   if (parts.length > 0 && /^\d+$/.test(parts[0] ?? '')) return parts[0] ?? null;
