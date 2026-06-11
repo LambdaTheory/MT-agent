@@ -107,6 +107,10 @@ export interface PublicTrafficPeriodMetrics {
   signedOrders: number;
   reviewedOrders: number;
   shippedOrders: number;
+  createdOrderAmount?: number;
+  signedOrderAmount?: number;
+  reviewedOrderAmount?: number;
+  shippedOrderAmount?: number;
   amount: number;
   exposureVisitRate: number;
   visitCreatedOrderRate: number;

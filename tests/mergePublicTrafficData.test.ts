@@ -74,4 +74,22 @@ describe('mergePublicTrafficData', () => {
     expect(result.rows[0].displayProductId).toBe('端内ID 900');
     expect(result.rows[0].periods['7d']).toMatchObject({ exposure: 0, publicVisits: 0, dashboardVisits: 70, shippedOrders: 4 });
   });
+
+  it('透传访问页金额字段', () => {
+    const merged = mergePublicTrafficData({
+      dashboardRows: [{
+        period: '1d', productName: '测试', platformProductId: 'P1',
+        visits: 10, createdOrders: 5, signedOrders: 4, reviewedOrders: 3, shippedOrders: 2,
+        createdOrderAmount: 500, signedOrderAmount: 400, reviewedOrderAmount: 300, shippedOrderAmount: 200,
+      }],
+      exposureByPeriod: { '1d': [], '7d': [], '30d': [] },
+      cumulativeProducts: [],
+      mapping: {},
+    });
+    const metrics = merged.rows[0].periods['1d'];
+    expect(metrics.createdOrderAmount).toBe(500);
+    expect(metrics.signedOrderAmount).toBe(400);
+    expect(metrics.reviewedOrderAmount).toBe(300);
+    expect(metrics.shippedOrderAmount).toBe(200);
+  });
 });

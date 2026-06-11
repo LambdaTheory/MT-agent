@@ -26,6 +26,10 @@ function emptyPeriod(): PublicTrafficPeriodMetrics {
     signedOrders: 0,
     reviewedOrders: 0,
     shippedOrders: 0,
+    createdOrderAmount: 0,
+    signedOrderAmount: 0,
+    reviewedOrderAmount: 0,
+    shippedOrderAmount: 0,
     amount: 0,
     exposureVisitRate: 0,
     visitCreatedOrderRate: 0,
@@ -87,6 +91,10 @@ export function mergePublicTrafficData(input: MergePublicTrafficDataInput): Publ
     metrics.signedOrders = row.signedOrders;
     metrics.reviewedOrders = row.reviewedOrders;
     metrics.shippedOrders = row.shippedOrders;
+    metrics.createdOrderAmount = row.createdOrderAmount ?? 0;
+    metrics.signedOrderAmount = row.signedOrderAmount ?? 0;
+    metrics.reviewedOrderAmount = row.reviewedOrderAmount ?? 0;
+    metrics.shippedOrderAmount = row.shippedOrderAmount ?? 0;
     metrics.visitCreatedOrderRate = row.visits > 0 ? row.createdOrders / row.visits : 0;
     metrics.visitShipmentRate = row.visits > 0 ? row.shippedOrders / row.visits : 0;
     metrics.hasDashboardData = true;
