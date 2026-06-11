@@ -57,10 +57,6 @@ function toDataContext(context: PublicTrafficDataReportContext | PublicTrafficRe
   };
 }
 
-function linesFor(items: PublicTrafficReportSectionItem[]): string[] {
-  return items.map((item, index) => `${index + 1}. ${item.identifier}：${item.action}。原因：${item.reason}`);
-}
-
 function overviewLines(summary: PublicTrafficDataSummary): string[] {
   return [
     `曝光 ${summary.exposure}｜公域访问 ${summary.publicVisits}｜后链路访问 ${summary.dashboardVisits}｜订单 ${summary.createdOrders}｜发货 ${summary.shippedOrders}｜金额 ¥${summary.amount.toFixed(2)}`,
@@ -96,16 +92,33 @@ function topExposureLines(rows: PublicTrafficProductDataRow[]): string[] {
   return items.map(productLine);
 }
 
-function warningProductLines(rows: PublicTrafficProductDataRow[]): string[] {
-  const items = rows
-    .filter((row) => typeof row.custodyDays === 'number' && row.custodyDays > 5 && row.periods['1d'].exposure < 100)
-    .sort((a, b) => a.periods['1d'].exposure - b.periods['1d'].exposure || (b.custodyDays ?? 0) - (a.custodyDays ?? 0));
-  return items.slice(0, 15).map((row, index) => `${productLine(row, index)}｜托管 ${row.custodyDays}天`);
-}
-
 function appendMarkdownSection(lines: string[], title: string, items: string[]): void {
   if (items.length === 0) return;
   lines.push('', `## ${title}`, ...items);
+}
+
+function tableCell(value: string): string {
+  return value.replace(/\|/g, '｜').replace(/[\r\n]+/g, ' ');
+}
+
+function appendMarkdownTable(lines: string[], title: string, headers: string[], rows: string[][]): void {
+  if (rows.length === 0) return;
+  lines.push('', `## ${title}`, `| ${headers.join(' | ')} |`, `| ${headers.map(() => '---').join(' | ')} |`);
+  lines.push(...rows.map((row) => `| ${row.map(tableCell).join(' | ')} |`));
+}
+
+function diagnosticRows(context: PublicTrafficDataReportContext): string[][] {
+  return [
+    ...context.lowExposure.map((item) => ['曝光不足', item.identifier, item.action, item.reason]),
+    ...context.weakClick.map((item) => ['点击弱', item.identifier, item.action, item.reason]),
+    ...context.weakConversion.map((item) => ['转化弱', item.identifier, item.action, item.reason]),
+    ...context.highPotential.map((item) => ['高潜力', item.identifier, item.action, item.reason]),
+    ...context.lifecycleGovernance.map((item) => ['生命周期治理', item.identifier, item.action, item.reason]),
+  ];
+}
+
+function sortedActions(items: PublicTrafficReportSectionItem[]): PublicTrafficReportSectionItem[] {
+  return [...items].sort((a, b) => a.action.localeCompare(b.action, 'zh-CN') || a.identifier.localeCompare(b.identifier, 'zh-CN'));
 }
 
 export function buildPublicTrafficMarkdown(input: PublicTrafficDataReportContext | PublicTrafficReportContext): string {
@@ -133,13 +146,8 @@ export function buildPublicTrafficMarkdown(input: PublicTrafficDataReportContext
     '',
   );
   appendMarkdownSection(lines, '今日曝光 Top10', topExposureLines(context.rows));
-  appendMarkdownSection(lines, '预警商品（托管>5天 且 曝光<100）', warningProductLines(context.rows));
-  appendMarkdownSection(lines, '建议操作', linesFor(context.recommendedActions));
-  appendMarkdownSection(lines, '曝光不足', linesFor(context.lowExposure));
-  appendMarkdownSection(lines, '曝光有但点击弱', linesFor(context.weakClick));
-  appendMarkdownSection(lines, '点击有但转化弱', linesFor(context.weakConversion));
-  appendMarkdownSection(lines, '高潜力商品', linesFor(context.highPotential));
-  appendMarkdownSection(lines, '新品观察', linesFor(context.newProductObservation));
-  appendMarkdownSection(lines, '生命周期治理', linesFor(context.lifecycleGovernance));
+  appendMarkdownTable(lines, '诊断问题', ['类型', '商品', '操作', '原因'], diagnosticRows(context));
+  appendMarkdownTable(lines, '建议操作', ['操作', '商品', '原因'], sortedActions(context.recommendedActions).map((item) => [item.action, item.identifier, item.reason]));
+  appendMarkdownTable(lines, '新品观察', ['商品', '操作', '原因'], context.newProductObservation.map((item) => [item.identifier, item.action, item.reason]));
   return lines.join('\n');
 }

@@ -164,17 +164,37 @@ describe('public traffic report outputs', () => {
     expect(markdown).toContain('## 今日曝光 Top10');
     expect(markdown).toContain('端内ID 1001｜公域商品A｜曝光 100｜访问 10｜金额 ¥88.50');
     expect(markdown).not.toContain('## 预警商品（托管>5天 且 曝光<100）');
+    expect(markdown).toContain('## 诊断问题');
+    expect(markdown).toContain('| 类型 | 商品 | 操作 | 原因 |');
+    expect(markdown).toContain('| 曝光不足 | 端内ID 558 | 曝光不足 | 1日曝光 10 |');
+    expect(markdown).toContain('| 转化弱 | 端内ID 900 | 点击有但转化弱 | 访问有发货弱 |');
     expect(markdown).toContain('## 建议操作');
-    expect(markdown).toContain('端内ID 900：检查价格/押金/库存/风控/履约链路。原因：访问有发货弱');
-    expect(markdown).toContain('## 曝光不足');
-    expect(markdown).toContain('端内ID 558');
-    expect(markdown).toContain('## 曝光有但点击弱');
-    expect(markdown).toContain('## 点击有但转化弱');
-    expect(markdown).toContain('## 高潜力商品');
+    expect(markdown).toContain('| 操作 | 商品 | 原因 |');
+    expect(markdown).toContain('| 检查价格/押金/库存/风控/履约链路 | 端内ID 900 | 访问有发货弱 |');
     expect(markdown).toContain('## 新品观察');
-    expect(markdown).toContain('端内ID 777');
-    expect(markdown).toContain('## 生命周期治理');
-    expect(markdown).toContain('端内ID 222');
+    expect(markdown).toContain('| 端内ID 777 | 观察 3-7 天，重点看曝光、访问和首单/发货 | 今日新进入公域 |');
+    expect(markdown).not.toContain('## 曝光不足');
+    expect(markdown).not.toContain('## 曝光有但点击弱');
+    expect(markdown).not.toContain('## 点击有但转化弱');
+    expect(markdown).not.toContain('## 高潜力商品');
+    expect(markdown).not.toContain('## 生命周期治理');
+  });
+
+  it('keeps only exposure Top10 wording and places new products last in Markdown', () => {
+    const markdown = buildPublicTrafficMarkdown(makeDataReportContext({
+      lowExposure: [{ identifier: 'A', action: '补曝光', reason: '曝光低' }],
+      weakClick: [],
+      weakConversion: [{ identifier: 'B', action: '提转化', reason: '转化弱' }],
+      highPotential: [],
+      lifecycleGovernance: [],
+      recommendedActions: [{ identifier: 'B', action: '提转化', reason: '转化弱' }],
+      newProductObservation: [{ identifier: 'C', action: '新品数据监控', reason: '新品' }],
+    }));
+
+    expect(markdown).toContain('## 今日曝光 Top10');
+    expect(markdown).not.toContain('Top5');
+    expect(markdown.indexOf('## 建议操作')).toBeLessThan(markdown.indexOf('## 新品观察'));
+    expect(markdown.trim().endsWith('| C | 新品数据监控 | 新品 |')).toBe(true);
   });
 
   it('builds medium-density Feishu text', () => {
@@ -185,14 +205,16 @@ describe('public traffic report outputs', () => {
     expect(text).toContain('今日曝光 Top10');
     expect(text).toContain('端内ID 1001｜公域商品A｜曝光 100｜访问 10｜金额 ¥88.50');
     expect(text).not.toContain('预警商品（托管>5天 且 曝光<100）');
-    expect(text).toContain('端内ID 900｜检查价格/押金/库存/风控/履约链路｜访问有发货弱');
+    expect(text).toContain('诊断问题');
+    expect(text).toContain('3. 转化弱｜端内ID 900｜点击有但转化弱｜访问有发货弱');
+    expect(text).toContain('1. 检查价格/押金/库存/风控/履约链路｜端内ID 900｜访问有发货弱');
     expect(text).toContain('曝光 1000｜公域访问 50｜后链路访问 40｜订单 4｜发货 2｜金额 ¥300.00');
     expect(text).toContain('曝光到访问率 5.00%｜访问到发货率 5.00%');
     expect(text).toContain('曝光不足 1｜点击弱 1｜转化弱 1｜高潜力 1｜新品观察 1｜生命周期治理 1｜建议操作 1');
-    expect(text).toContain('转化弱 Top5');
-    expect(text).toContain('高潜力 Top5');
-    expect(text).toContain('新品观察 Top5');
-    expect(text).toContain('生命周期治理 Top5');
+    expect(text).not.toContain('转化弱 Top5');
+    expect(text).not.toContain('高潜力 Top5');
+    expect(text).not.toContain('新品观察 Top5');
+    expect(text).not.toContain('生命周期治理 Top5');
     expect(text).toContain('端内ID 900');
     expect(text).not.toContain('Markdown：report.md');
     expect(text).not.toContain('XLSX：report.xlsx');
@@ -358,7 +380,7 @@ describe('public traffic report outputs', () => {
     expect(buildPublicTrafficFeishuText(fallback, { markdownPath: 'report.md', workbookPath: 'report.xlsx' })).toContain('端内ID 888｜访问兜底商品｜曝光 0｜访问 66｜金额 ¥0.00');
   });
 
-  it('renders warning products with internal id first', () => {
+  it('renders top exposure products with internal id first', () => {
     const warning: PublicTrafficDataReportContext = {
       ...context,
       rows: [
@@ -377,8 +399,8 @@ describe('public traffic report outputs', () => {
     };
 
     const text = buildPublicTrafficFeishuText(warning, { markdownPath: 'report.md', workbookPath: 'report.xlsx' });
-    expect(text).toContain('预警商品（托管>5天 且 曝光<100）');
-    expect(text).toContain('端内ID 284｜预警商品A｜曝光 9｜访问 1｜金额 ¥0.00｜托管 12天');
+    expect(text).not.toContain('预警商品（托管>5天 且 曝光<100）');
+    expect(text).toContain('端内ID 284｜预警商品A｜曝光 9｜访问 1｜金额 ¥0.00');
     expect(text).not.toContain('预警商品A (端内ID 284)');
   });
 
@@ -393,7 +415,7 @@ describe('public traffic report outputs', () => {
     expect(JSON.stringify(buildPublicTrafficCard(stale, { markdownPath: 'report.md', workbookPath: 'report.xlsx' }))).toContain('今日访问数据支付宝暂未更新，本期访问量板块指标缺失。');
   });
 
-  it('truncates Feishu top5 to five items', () => {
+  it('does not truncate Feishu diagnostic items', () => {
     const many: PublicTrafficDataReportContext = {
       ...context,
       lowExposure: Array.from({ length: 8 }, (_, i) => ({
@@ -403,8 +425,9 @@ describe('public traffic report outputs', () => {
       })),
     };
     const text = buildPublicTrafficFeishuText(many, { markdownPath: 'report.md', workbookPath: 'report.xlsx' });
-    expect(text).toContain('5. 端内ID 5｜曝光不足｜原因5');
-    expect(text).not.toContain('6. 端内ID 6');
+    expect(text).toContain('5. 曝光不足｜端内ID 5｜曝光不足｜原因5');
+    expect(text).toContain('6. 曝光不足｜端内ID 6｜曝光不足｜原因6');
+    expect(text).not.toContain('曝光不足 Top5');
   });
 
   it('writes a workbook buffer with expected sheet names and recommended actions', () => {

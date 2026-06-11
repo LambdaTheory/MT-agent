@@ -61,8 +61,8 @@ function percent(value: number): string {
   return `${(value * 100).toFixed(2)}%`;
 }
 
-function topLines(items: PublicTrafficReportSectionItem[], limit = 5): string[] {
-  return items.slice(0, limit).map((item, index) => `${index + 1}. ${item.identifier}｜${item.action}｜${item.reason}`);
+function itemLines<T extends PublicTrafficReportSectionItem>(items: T[], formatter: (item: T) => string): string[] {
+  return items.map((item, index) => `${index + 1}. ${formatter(item)}`);
 }
 
 function productLine(row: PublicTrafficProductDataRow, index: number): string {
@@ -75,14 +75,6 @@ function topExposureLines(rows: PublicTrafficProductDataRow[]): string[] {
   const score = (row: PublicTrafficProductDataRow) => row.periods['1d'].exposure || row.periods['1d'].publicVisits || row.periods['1d'].dashboardVisits;
   const items = [...rows].sort((a, b) => score(b) - score(a)).slice(0, 10);
   return items.map(productLine);
-}
-
-function warningProductLines(rows: PublicTrafficProductDataRow[]): string[] {
-  const items = rows
-    .filter((row) => typeof row.custodyDays === 'number' && row.custodyDays > 5 && row.periods['1d'].exposure < 100)
-    .sort((a, b) => a.periods['1d'].exposure - b.periods['1d'].exposure || (b.custodyDays ?? 0) - (a.custodyDays ?? 0))
-    .slice(0, 15);
-  return items.map((row, index) => `${productLine(row, index)}｜托管 ${row.custodyDays}天`);
 }
 
 function funnelLines(summary: PublicTrafficDataSummary): string[] {
@@ -110,6 +102,20 @@ function appendSection(lines: string[], title: string, items: string[]): void {
   lines.push('', title, ...items);
 }
 
+function diagnosticItems(context: PublicTrafficDataReportContext): Array<PublicTrafficReportSectionItem & { type: string }> {
+  return [
+    ...context.lowExposure.map((item) => ({ ...item, type: '曝光不足' })),
+    ...context.weakClick.map((item) => ({ ...item, type: '点击弱' })),
+    ...context.weakConversion.map((item) => ({ ...item, type: '转化弱' })),
+    ...context.highPotential.map((item) => ({ ...item, type: '高潜力' })),
+    ...context.lifecycleGovernance.map((item) => ({ ...item, type: '生命周期治理' })),
+  ];
+}
+
+function sortedActions(items: PublicTrafficReportSectionItem[]): PublicTrafficReportSectionItem[] {
+  return [...items].sort((a, b) => a.action.localeCompare(b.action, 'zh-CN') || a.identifier.localeCompare(b.identifier, 'zh-CN'));
+}
+
 export function buildPublicTrafficFeishuText(input: PublicTrafficDataReportContext | PublicTrafficReportContext, _paths: PublicTrafficReportPaths): string {
   const context = toDataContext(input);
   const one = context.summary['1d'];
@@ -126,13 +132,8 @@ export function buildPublicTrafficFeishuText(input: PublicTrafficDataReportConte
   if (context.dataQualityNotes?.length) lines.push('', '数据提示', ...context.dataQualityNotes);
   if (moduleLine) lines.push('', '模块数量', moduleLine);
   appendSection(lines, '今日曝光 Top10', topExposureLines(context.rows));
-  appendSection(lines, '预警商品（托管>5天 且 曝光<100）', warningProductLines(context.rows));
-  appendSection(lines, '建议操作', topLines(context.recommendedActions, 8));
-  appendSection(lines, '曝光不足 Top5', topLines(context.lowExposure));
-  appendSection(lines, '点击弱 Top5', topLines(context.weakClick));
-  appendSection(lines, '转化弱 Top5', topLines(context.weakConversion));
-  appendSection(lines, '高潜力 Top5', topLines(context.highPotential));
-  appendSection(lines, '新品观察 Top5', topLines(context.newProductObservation));
-  appendSection(lines, '生命周期治理 Top5', topLines(context.lifecycleGovernance));
+  appendSection(lines, '诊断问题', itemLines(diagnosticItems(context), (item) => `${item.type}｜${item.identifier}｜${item.action}｜${item.reason}`));
+  appendSection(lines, '建议操作', itemLines(sortedActions(context.recommendedActions), (item) => `${item.action}｜${item.identifier}｜${item.reason}`));
+  appendSection(lines, '新品观察', itemLines(context.newProductObservation, (item) => `${item.identifier}｜${item.action}｜${item.reason}`));
   return lines.join('\n');
 }
