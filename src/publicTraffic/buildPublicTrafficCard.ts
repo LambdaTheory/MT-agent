@@ -50,7 +50,19 @@ function columnSet(columns: string[], elementId?: string): Record<string, unknow
   return { tag: 'column_set', ...(elementId ? { element_id: elementId } : {}), flex_mode: 'bisect', horizontal_spacing: '8px', columns: columns.map(markdownColumn) };
 }
 
-function metricCard(label: string, value: string): Record<string, unknown> {
+type FunnelMetric = [string, string, string?];
+
+function deltaColor(delta: string): string {
+  if (delta.includes('+')) return 'red';
+  if (delta.includes('-')) return 'green';
+  return 'grey';
+}
+
+function metricCard(label: string, value: string, delta?: string): Record<string, unknown> {
+  const elements: Record<string, unknown>[] = [{ tag: 'markdown', content: `${label}\n**${value}**`, text_align: 'center' }];
+  if (delta) {
+    elements.push({ tag: 'markdown', content: `<text_tag color='${deltaColor(delta)}'>${delta}</text_tag>`, text_align: 'center', text_size: 'notation' });
+  }
   return {
     tag: 'column',
     width: 'weighted',
@@ -58,21 +70,21 @@ function metricCard(label: string, value: string): Record<string, unknown> {
     vertical_align: 'top',
     background_style: 'grey',
     padding: '8px',
-    elements: [{ tag: 'markdown', content: `${label}\n**${value}**`, text_align: 'center' }],
+    elements,
   };
 }
 
-function metricCardRow(metrics: Array<[string, string]>): Record<string, unknown> {
-  return { tag: 'column_set', flex_mode: 'bisect', horizontal_spacing: '8px', columns: metrics.map(([label, value]) => metricCard(label, value)) };
+function metricCardRow(metrics: FunnelMetric[]): Record<string, unknown> {
+  return { tag: 'column_set', flex_mode: 'bisect', horizontal_spacing: '8px', columns: metrics.map(([label, value, delta]) => metricCard(label, value, delta)) };
 }
 
-function chunkMetrics(metrics: Array<[string, string]>, size = 3): Array<Array<[string, string]>> {
-  const chunks: Array<Array<[string, string]>> = [];
+function chunkMetrics(metrics: FunnelMetric[], size = 3): FunnelMetric[][] {
+  const chunks: FunnelMetric[][] = [];
   for (let index = 0; index < metrics.length; index += size) chunks.push(metrics.slice(index, index + size));
   return chunks;
 }
 
-function nestedMetricColumn(title: string, metrics: Array<[string, string]>): Record<string, unknown> {
+function nestedMetricColumn(title: string, metrics: FunnelMetric[]): Record<string, unknown> {
   return {
     tag: 'column',
     width: 'weighted',
@@ -82,14 +94,14 @@ function nestedMetricColumn(title: string, metrics: Array<[string, string]>): Re
   };
 }
 
-function orderMetric(page: Parameters<typeof findOrderAnalysisIndicator>[0], label: string, names: string[]): [string, string] {
+function orderMetric(page: Parameters<typeof findOrderAnalysisIndicator>[0], label: string, names: string[]): FunnelMetric {
   const value = findOrderAnalysisIndicator(page, names);
   const indicator = page?.indicators.find((item) => names.includes(item.label));
-  const delta = indicator?.delta && indicator.delta !== '较前日-' ? `\n${indicator.delta}` : '';
-  return [label, `${value}${delta}`];
+  const delta = indicator?.delta && indicator.delta !== '较前日-' ? indicator.delta : undefined;
+  return [label, value, delta];
 }
 
-function nestedFunnelColumnSet(groups: Array<{ title: string; metrics: Array<[string, string]> }>, elementId = 'funnel_summary'): Record<string, unknown> {
+function nestedFunnelColumnSet(groups: Array<{ title: string; metrics: FunnelMetric[] }>, elementId = 'funnel_summary'): Record<string, unknown> {
   return {
     tag: 'column_set',
     element_id: elementId,
@@ -127,7 +139,7 @@ function funnelElements(context: PublicTrafficDataReportContext): Record<string,
   const customs = oa.pages.customs;
   return [
     nestedFunnelColumnSet([
-      { title: `公域（${context.date}）`, metrics: [['曝光', String(one.exposure)], ['公域访问', String(one.publicVisits)], ['后链路访问', String(one.dashboardVisits)]] },
+      { title: `公域（${context.date}）`, metrics: [['曝光', String(one.exposure)], ['公域访问', String(one.publicVisits)], ['商品页访问', String(one.dashboardVisits)]] },
     ], 'funnel_public'),
     nestedFunnelColumnSet([
       { title: `订单（${shortDataDate(overview?.dataDate)}）`, metrics: [orderMetric(overview, '创建订单', ['创建订单数']), orderMetric(overview, '签约订单', ['签约订单数']), orderMetric(overview, '审出订单', ['审出订单数'])] },
