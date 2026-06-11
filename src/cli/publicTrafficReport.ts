@@ -202,7 +202,9 @@ export async function runPublicTrafficReportCli(): Promise<void> {
 
     const orderAnalysis = { ...orderAnalysisCapture, runDate };
     await writeFile(paths.orderAnalysis, JSON.stringify(orderAnalysis, null, 2), 'utf8');
-    await writeFile('output/latest/order-analysis.json', JSON.stringify(orderAnalysis, null, 2), 'utf8');
+    const latestDir = `${config.outputDir}/latest`;
+    await mkdir(latestDir, { recursive: true });
+    await writeFile(`${latestDir}/order-analysis.json`, JSON.stringify(orderAnalysis, null, 2), 'utf8');
     log.addEvent(`订单分析: ${Object.values(orderAnalysis.pages).map((page) => `${page.label}=${page.indicators.length}条(${page.dataDate ?? '未知'})`).join(', ')}`);
 
     if (crawlResult.overview.length > 0) {

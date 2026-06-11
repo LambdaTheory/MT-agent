@@ -164,6 +164,12 @@ describe('runPublicTrafficReportCli public traffic sequencing', () => {
     await expect(readFile(todayPaths.publicVisitRaw['1d'], 'utf8')).resolves.toContain('"period": "1d"');
     await expect(readFile(todayPaths.publicVisitRaw['7d'], 'utf8')).resolves.toContain('"period": "7d"');
     await expect(readFile(todayPaths.publicVisitRaw['30d'], 'utf8')).resolves.toContain('"period": "30d"');
+
+    const orderAnalysisJson = JSON.parse(await readFile(todayPaths.orderAnalysis, 'utf8')) as { runDate: string };
+    expect(orderAnalysisJson.runDate).toBe('2026-06-10');
+    const latestOrderAnalysis = JSON.parse(await readFile(join(mocks.outputDir, 'latest', 'order-analysis.json'), 'utf8')) as { runDate: string };
+    expect(latestOrderAnalysis.runDate).toBe('2026-06-10');
+    expect(context.orderAnalysis?.pages?.overview?.label).toBe('标准订单分析');
   });
 
   it('uses the source data date in the report title while keeping output paths on the run date', async () => {

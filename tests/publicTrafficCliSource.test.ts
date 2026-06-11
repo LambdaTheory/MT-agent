@@ -51,7 +51,7 @@ describe('public traffic CLI wiring', () => {
   it('CLI 落盘订单分析 JSON 并传入分析上下文', async () => {
     const text = await source('../src/cli/publicTrafficReport.ts');
     expect(text).toContain('paths.orderAnalysis');
-    expect(text).toContain('output/latest/order-analysis.json');
+    expect(text).toContain('${latestDir}/order-analysis.json');
     expect(text).toContain('orderAnalysis,');
   });
 
