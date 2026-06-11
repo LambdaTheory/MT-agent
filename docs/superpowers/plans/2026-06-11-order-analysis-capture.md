@@ -1115,6 +1115,166 @@ Task 10 实跑时验证：运行日志中 `[曝光] 每页条数已调整为 50`
 
 ---
 
+### Task 12: 商品总表追加端内ID列
+
+**Files:**
+- Modify: `src/mapping/goodsExportMapping.ts`（导出 `internalIdFromMerchantCode`）
+- Create: `src/mapping/annotateGoodsExportWorkbook.ts`
+- Modify: `src/cli/publicTrafficReport.ts`（映射刷新后调用）
+- Test: `tests/annotateGoodsExportWorkbook.test.ts`（新建）、`tests/publicTrafficCliSource.test.ts`（追加断言）
+
+用户需求：下载的 `商品总表_YYYY-MM-DD.xlsx` 中，把映射解析出的端内ID单独加一列，方便人工核对。列插在 `商家侧编码` 右侧，表头 `端内ID`，解析失败的行留空。
+
+失败策略：注列是辅助展示，映射本身已成功；注列失败（如文件被 Excel 锁住 EBUSY）记录日志并继续，不让整个日报失败。
+
+- [ ] **Step 1: 写失败测试**
+
+```ts
+// tests/annotateGoodsExportWorkbook.test.ts
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import XLSX from 'xlsx-js-style';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { annotateGoodsExportWorkbookWithInternalId } from '../src/mapping/annotateGoodsExportWorkbook.js';
+
+describe('annotateGoodsExportWorkbookWithInternalId', () => {
+  let dir: string;
+  let filePath: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'goods-export-'));
+    filePath = join(dir, 'goods.xlsx');
+    const aoa = [
+      ['商品名称', '商家侧编码', '平台侧编码', '价格'],
+      ['商品A', '81665859-762-06081446', 'P1', '10'],
+      ['商品B', '284', 'P2', '20'],
+      ['商品C', '333-1', 'P3', '30'],
+      ['商品D', 'ABC', 'P4', '40'],
+    ];
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(aoa), 'Sheet1');
+    XLSX.writeFile(workbook, filePath);
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('在商家侧编码右侧插入端内ID列', () => {
+    const annotated = annotateGoodsExportWorkbookWithInternalId(filePath);
+    expect(annotated).toBe(3);
+    const workbook = XLSX.readFile(filePath);
+    const rows = XLSX.utils.sheet_to_json<string[]>(workbook.Sheets[workbook.SheetNames[0]], { header: 1, defval: '' });
+    expect(rows[0]).toEqual(['商品名称', '商家侧编码', '端内ID', '平台侧编码', '价格']);
+    expect(rows[1][2]).toBe('762');
+    expect(rows[2][2]).toBe('284');
+    expect(rows[3][2]).toBe('333');
+    expect(rows[4][2]).toBe('');
+  });
+
+  it('缺少商家侧编码列时抛错', () => {
+    const aoa = [['商品名称'], ['商品A']];
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(aoa), 'Sheet1');
+    XLSX.writeFile(workbook, filePath);
+    expect(() => annotateGoodsExportWorkbookWithInternalId(filePath)).toThrow('商家侧编码');
+  });
+});
+```
+
+`tests/publicTrafficCliSource.test.ts` 追加：
+
+```ts
+it('CLI 在映射刷新后为商品总表注端内ID列', async () => {
+  const source = await readFile('src/cli/publicTrafficReport.ts', 'utf8');
+  expect(source).toContain('annotateGoodsExportWorkbookWithInternalId');
+  expect(source).toContain('商品总表端内ID列注入失败');
+});
+```
+
+- [ ] **Step 2: 运行确认失败**
+
+Run: `npx vitest run tests/annotateGoodsExportWorkbook.test.ts tests/publicTrafficCliSource.test.ts`
+Expected: 新增用例 FAIL
+
+- [ ] **Step 3: 实现**
+
+`src/mapping/goodsExportMapping.ts`：把 `internalIdFromMerchantCode` 加 `export`（逻辑不变）。
+
+```ts
+// src/mapping/annotateGoodsExportWorkbook.ts
+import XLSX from 'xlsx-js-style';
+import { internalIdFromMerchantCode } from './goodsExportMapping.js';
+
+function normalize(value: unknown): string {
+  return String(value ?? '').replace(/\s+/g, ' ').trim();
+}
+
+export function annotateGoodsExportWorkbookWithInternalId(path: string): number {
+  const workbook = XLSX.readFile(path);
+  const sheetName = workbook.SheetNames[0];
+  if (!sheetName) {
+    throw new Error('Goods export workbook has no sheets');
+  }
+
+  const rows = XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets[sheetName], { header: 1, defval: '' });
+  const headers = (rows[0] ?? []).map(normalize);
+  if (headers.includes('端内ID')) {
+    return 0;
+  }
+  const merchantCodeIndex = headers.findIndex((header) => header === '商家侧编码');
+  if (merchantCodeIndex < 0) {
+    throw new Error('Goods export is missing required column: 商家侧编码');
+  }
+
+  const insertAt = merchantCodeIndex + 1;
+  let annotated = 0;
+  const nextRows = rows.map((row, rowIndex) => {
+    const cells = [...row];
+    if (rowIndex === 0) {
+      cells.splice(insertAt, 0, '端内ID');
+      return cells;
+    }
+    const internalId = internalIdFromMerchantCode(normalize(row[merchantCodeIndex])) ?? '';
+    if (internalId) annotated += 1;
+    cells.splice(insertAt, 0, internalId);
+    return cells;
+  });
+
+  workbook.Sheets[sheetName] = XLSX.utils.aoa_to_sheet(nextRows);
+  XLSX.writeFile(workbook, path);
+  return annotated;
+}
+```
+
+`src/cli/publicTrafficReport.ts`：在 `refreshProductIdMappingForReport(...)` 调用之后追加（best-effort）：
+
+```ts
+    try {
+      const annotatedCount = annotateGoodsExportWorkbookWithInternalId(paths.goodsExportWorkbook);
+      log.addEvent(`商品总表端内ID列已注入: ${annotatedCount} 行`);
+    } catch (error) {
+      log.addEvent(`商品总表端内ID列注入失败: ${error instanceof Error ? error.message : String(error)}`);
+    }
+```
+
+并加 import。
+
+- [ ] **Step 4: 运行确认通过**
+
+Run: `npx vitest run tests/annotateGoodsExportWorkbook.test.ts tests/publicTrafficCliSource.test.ts`，再 `npm test`、`npm run build`
+Expected: 全部 PASS
+
+- [ ] **Step 5: 提交**
+
+```bash
+git add src/mapping/goodsExportMapping.ts src/mapping/annotateGoodsExportWorkbook.ts src/cli/publicTrafficReport.ts tests/annotateGoodsExportWorkbook.test.ts tests/publicTrafficCliSource.test.ts
+git commit -m "功能：商品总表追加端内ID列"
+```
+
+---
+
 ## Self-Review 记录
 
 - Spec 覆盖：四页抓取（Task 3）、1日切换（Task 1/3）、失败即整体失败（Task 3 抛错 + Task 4 主流程不捕获）、JSON 落盘（Task 5）、订单分析 sheet（Task 8）、漏斗三行（Task 9）、商品明细汉化（Task 8）、金额列（Task 6/7/8）、测试与回归（各任务 + Task 10）。
