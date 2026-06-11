@@ -1,6 +1,5 @@
 import type { FeishuCardPayload } from '../notify/feishuApp.js';
-import { findOrderAnalysisIndicator, shortDataDate } from './orderAnalysis.js';
-import type { OrderAnalysisPageData } from './orderAnalysis.js';
+import { findOrderAnalysisIndicator, fulfillmentRateLines, shortDataDate } from './orderAnalysis.js';
 import type { PublicTrafficDataReportContext, PublicTrafficProductDataRow, PublicTrafficReportPaths, PublicTrafficReportSectionItem } from './types.js';
 
 function percent(value: number): string {
@@ -38,33 +37,9 @@ function rateText(one: PublicTrafficDataReportContext['summary']['1d']): string 
   return `**转化率**\n曝光到访问率 ${percent(one.exposureVisitRate)}｜访问到发货率 ${percent(one.visitShipmentRate)}`;
 }
 
-function parseOrderAnalysisNumber(value: string): number | null {
-  const normalized = value.replace(/,/g, '').trim();
-  if (!/^-?\d+(\.\d+)?$/.test(normalized)) return null;
-  const parsed = Number(normalized);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function orderAnalysisNumber(page: OrderAnalysisPageData | undefined, labels: string[]): number | null {
-  return parseOrderAnalysisNumber(findOrderAnalysisIndicator(page, labels));
-}
-
-function fulfillmentRate(numerator: number | null, denominator: number | null): string {
-  if (numerator === null || denominator === null || denominator === 0) return '-';
-  return percent(numerator / denominator);
-}
-
-function fulfillmentRateText(overview: OrderAnalysisPageData | undefined): string | null {
-  if (!overview) return null;
-  const created = orderAnalysisNumber(overview, ['创建订单数']);
-  const signed = orderAnalysisNumber(overview, ['签约订单数']);
-  const reviewed = orderAnalysisNumber(overview, ['审出订单数']);
-  const shipped = orderAnalysisNumber(overview, ['发货订单数']);
-  return [
-    `**履约比率**`,
-    `签约/创建 ${fulfillmentRate(signed, created)}｜审出/签约 ${fulfillmentRate(reviewed, signed)}｜发货/审出 ${fulfillmentRate(shipped, reviewed)}`,
-    '暂无昨日履约率对比',
-  ].join('\n');
+function fulfillmentRateText(context: PublicTrafficDataReportContext): string | null {
+  const lines = fulfillmentRateLines(context.orderAnalysis?.pages.overview);
+  return lines.length > 0 ? ['**履约比率**', ...lines].join('\n') : null;
 }
 
 function moduleCounts(context: PublicTrafficDataReportContext): Array<[string, number]> {
@@ -276,7 +251,7 @@ export function buildPublicTrafficCard(context: PublicTrafficDataReportContext, 
         { tag: 'markdown', content: '**今日漏斗**' },
         ...funnelElements(context),
         { tag: 'markdown', content: rateText(one) },
-        ...markdownElement(fulfillmentRateText(context.orderAnalysis?.pages.overview)),
+        ...markdownElement(fulfillmentRateText(context)),
         ...markdownElement(dataQualityText(context)),
         ...optionalElement(moduleColumnSet(context)),
         { tag: 'hr' },

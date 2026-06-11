@@ -1,5 +1,4 @@
-import { findOrderAnalysisIndicator, shortDataDate } from './orderAnalysis.js';
-import type { OrderAnalysisPageData } from './orderAnalysis.js';
+import { findOrderAnalysisIndicator, fulfillmentRateLines, shortDataDate } from './orderAnalysis.js';
 import type {
   ExposureOverviewMetric,
   PublicTrafficDataReportContext,
@@ -66,34 +65,6 @@ function overviewLines(summary: PublicTrafficDataSummary): string[] {
   return [
     `曝光 ${summary.exposure}｜公域访问 ${summary.publicVisits}｜后链路访问 ${summary.dashboardVisits}｜订单 ${summary.createdOrders}｜发货 ${summary.shippedOrders}｜金额 ¥${summary.amount.toFixed(2)}`,
     `曝光到访问率 ${(summary.exposureVisitRate * 100).toFixed(2)}%｜访问到下单率 ${(summary.visitCreatedOrderRate * 100).toFixed(2)}%｜访问到发货率 ${(summary.visitShipmentRate * 100).toFixed(2)}%`,
-  ];
-}
-
-function parseOrderAnalysisNumber(value: string): number | null {
-  const normalized = value.replace(/,/g, '').trim();
-  if (!/^-?\d+(\.\d+)?$/.test(normalized)) return null;
-  const parsed = Number(normalized);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function orderAnalysisNumber(page: OrderAnalysisPageData | undefined, labels: string[]): number | null {
-  return parseOrderAnalysisNumber(findOrderAnalysisIndicator(page, labels));
-}
-
-function fulfillmentRate(numerator: number | null, denominator: number | null): string {
-  if (numerator === null || denominator === null || denominator === 0) return '-';
-  return `${((numerator / denominator) * 100).toFixed(2)}%`;
-}
-
-function fulfillmentRateLines(overview: OrderAnalysisPageData | undefined): string[] {
-  if (!overview) return [];
-  const created = orderAnalysisNumber(overview, ['创建订单数']);
-  const signed = orderAnalysisNumber(overview, ['签约订单数']);
-  const reviewed = orderAnalysisNumber(overview, ['审出订单数']);
-  const shipped = orderAnalysisNumber(overview, ['发货订单数']);
-  return [
-    `签约/创建 ${fulfillmentRate(signed, created)}｜审出/签约 ${fulfillmentRate(reviewed, signed)}｜发货/审出 ${fulfillmentRate(shipped, reviewed)}`,
-    '暂无昨日履约率对比',
   ];
 }
 

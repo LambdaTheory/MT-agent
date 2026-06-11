@@ -568,6 +568,50 @@ describe('public traffic report outputs', () => {
     expect(markdown).toContain('暂无昨日履约率对比');
   });
 
+  it('renders fulfillment rates from comma and unit indicator values', () => {
+    const orderAnalysis = makeOrderAnalysisResult([
+      { label: '创建订单数', value: '1,000 单', delta: '' },
+      { label: '签约订单数', value: '500单', delta: '' },
+      { label: '审出订单数', value: '250', delta: '' },
+      { label: '发货订单数', value: '0', delta: '' },
+    ]);
+    const reportContext = makeDataReportContext({ orderAnalysis });
+    const cardJson = JSON.stringify(buildPublicTrafficCard(reportContext, { markdownPath: 'report.md', workbookPath: 'report.xlsx' }));
+    const markdown = buildPublicTrafficMarkdown(reportContext);
+
+    expect(cardJson).toContain('签约/创建 50.00%');
+    expect(cardJson).toContain('发货/审出 0.00%');
+    expect(markdown).toContain('签约/创建 50.00%');
+    expect(markdown).toContain('发货/审出 0.00%');
+  });
+
+  it('renders missing fulfillment rates for zero and negative denominators', () => {
+    const orderAnalysis = makeOrderAnalysisResult([
+      { label: '创建订单数', value: '0', delta: '' },
+      { label: '签约订单数', value: '-1', delta: '' },
+      { label: '审出订单数', value: '10', delta: '' },
+      { label: '发货订单数', value: '0', delta: '' },
+    ]);
+    const reportContext = makeDataReportContext({ orderAnalysis });
+    const cardJson = JSON.stringify(buildPublicTrafficCard(reportContext, { markdownPath: 'report.md', workbookPath: 'report.xlsx' }));
+    const markdown = buildPublicTrafficMarkdown(reportContext);
+
+    expect(cardJson).toContain('签约/创建 -');
+    expect(cardJson).toContain('审出/签约 -');
+    expect(cardJson).toContain('发货/审出 0.00%');
+    expect(markdown).toContain('签约/创建 -');
+    expect(markdown).toContain('审出/签约 -');
+    expect(markdown).toContain('发货/审出 0.00%');
+  });
+
+  it('omits fulfillment rate section without order analysis', () => {
+    const cardJson = JSON.stringify(buildPublicTrafficCard(context, { markdownPath: 'report.md', workbookPath: 'report.xlsx' }));
+    const markdown = buildPublicTrafficMarkdown(context);
+
+    expect(cardJson).not.toContain('履约比率');
+    expect(markdown).not.toContain('## 履约比率');
+  });
+
   it('renders legacy Markdown and Feishu text with neutral insight defaults', () => {
     const legacy: PublicTrafficReportContext = {
       date: '2026-06-10',

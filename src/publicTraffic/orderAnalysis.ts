@@ -59,6 +59,36 @@ export function findOrderAnalysisIndicator(page: OrderAnalysisPageData | undefin
   return '-';
 }
 
+export function parseOrderAnalysisNumber(value: string): number | null {
+  const normalized = value.replace(/,/g, '').trim();
+  if (normalized.startsWith('-')) return null;
+  const matched = normalized.match(/^\d+(?:\.\d+)?/);
+  if (!matched) return null;
+  const parsed = Number(matched[0]);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+export function findOrderAnalysisNumber(page: OrderAnalysisPageData | undefined, labels: string[]): number | null {
+  return parseOrderAnalysisNumber(findOrderAnalysisIndicator(page, labels));
+}
+
+function formatFulfillmentRate(numerator: number | null, denominator: number | null): string {
+  if (numerator === null || denominator === null || denominator <= 0) return '-';
+  return `${((numerator / denominator) * 100).toFixed(2)}%`;
+}
+
+export function fulfillmentRateLines(overview: OrderAnalysisPageData | undefined): string[] {
+  if (!overview) return [];
+  const created = findOrderAnalysisNumber(overview, ['创建订单数']);
+  const signed = findOrderAnalysisNumber(overview, ['签约订单数']);
+  const reviewed = findOrderAnalysisNumber(overview, ['审出订单数']);
+  const shipped = findOrderAnalysisNumber(overview, ['发货订单数']);
+  return [
+    `签约/创建 ${formatFulfillmentRate(signed, created)}｜审出/签约 ${formatFulfillmentRate(reviewed, signed)}｜发货/审出 ${formatFulfillmentRate(shipped, reviewed)}`,
+    '暂无昨日履约率对比',
+  ];
+}
+
 export function shortDataDate(date: string | null | undefined): string {
   return date ? date.slice(5) : '未知';
 }
