@@ -8,6 +8,7 @@ import { clearBrowserProfileLocks, prepareDashboardPage } from './browserProfile
 import { selectSubAccountIfNeeded } from './dashboardCrawler.js';
 import { shouldKeepBrowserOpenOnFailure } from './failureHandling.js';
 import { waitForSettledLoginState } from './loginState.js';
+import { setDashboardPageSize } from './pageSizeProbe.js';
 
 export interface ExposureCrawlResult {
   overview: ExposureOverviewMetric[];
@@ -16,6 +17,7 @@ export interface ExposureCrawlResult {
 }
 
 const EXPOSURE_URL = 'https://b.alipay.com/page/self-operation-center/custody?custodyChannel=public';
+const EXPOSURE_MAX_PAGE_SIZE = 50;
 const PERIOD_LABELS: Array<{ label: string; period: ExposureOverviewMetric['period'] }> = [
   { label: '1日', period: '1d' },
   { label: '7日', period: '7d' },
@@ -176,6 +178,16 @@ async function clickCurrentTableNext(page: Page): Promise<boolean> {
   })()`);
 }
 
+async function tryEnlargePageSize(page: Page, preferredPageSize: number): Promise<void> {
+  const size = Math.min(preferredPageSize, EXPOSURE_MAX_PAGE_SIZE);
+  try {
+    await setDashboardPageSize(page, size);
+    console.log(`[曝光] 每页条数已调整为 ${size}`);
+  } catch (error) {
+    console.log(`[曝光] 每页条数调整失败，保持默认: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 async function extractProductRows(page: Page): Promise<ExposureCumulativeProduct[]> {
   const products: ExposureCumulativeProduct[] = [];
   let pageNum = 0;
@@ -232,6 +244,7 @@ export async function collectExposurePage(config: AgentConfig, page: Page): Prom
   await ensureExposurePage(config, page);
   const overview = await extractAllOverviews(page);
   await page.waitForSelector('.ant-table-tbody tr', { timeout: 30000 }).catch(() => undefined);
+  await tryEnlargePageSize(page, config.preferredPageSize);
   const products = await extractProductRows(page);
 
   console.log(`[曝光] 总体概况: ${overview.length}个周期`);

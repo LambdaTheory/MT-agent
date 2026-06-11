@@ -28,6 +28,15 @@ describe('exposureCrawler Playwright evaluation', () => {
     expect(source).not.toContain('元\\/日|出售中|已下架');
     expect(source).toContain("text.includes('元/日')");
   });
+
+  it('曝光页分页前尝试调大每页条数（best-effort，上限50）', async () => {
+    const source = await readFile(new URL('../src/crawler/exposureCrawler.ts', import.meta.url), 'utf8');
+
+    expect(source).toContain('setDashboardPageSize');
+    expect(source).toContain('EXPOSURE_MAX_PAGE_SIZE = 50');
+    expect(source).toContain('Math.min(');
+    expect(source).toContain('每页条数调整失败');
+  });
 });
 
 describe('public traffic crawler orchestration', () => {
