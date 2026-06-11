@@ -73,9 +73,35 @@ const contextWithOrderAnalysis: PublicTrafficDataReportContext = {
     capturedAt: '2026-06-12T00:00:00.000Z',
     runDate: '2026-06-12',
     pages: {
-      overview: { key: 'overview', label: '标准订单分析', dataDate: '2026-06-10', indicators: [{ label: '签约订单数', value: '103', delta: '较前日+32.1%' }] },
-      delivery: { key: 'delivery', label: '发货分析', dataDate: '2026-06-10', indicators: [{ label: '发货订单数', value: '64', delta: '较前日-4.48%' }] },
-      return: { key: 'return', label: '归还分析', dataDate: null, indicators: [{ label: '归还订单数', value: '15', delta: '较前日-12.8%' }] },
+      overview: {
+        key: 'overview',
+        label: '标准订单分析',
+        dataDate: '2026-06-10',
+        indicators: [
+          { label: '创建订单数', value: '194', delta: '较前日+71.7%' },
+          { label: '签约订单数', value: '103', delta: '较前日+32.1%' },
+          { label: '发货订单数', value: '64', delta: '较前日-4.48%' },
+          { label: '签约完成金额（元）', value: '3,977', delta: '较前日-25.6%' },
+        ],
+      },
+      delivery: {
+        key: 'delivery',
+        label: '发货分析',
+        dataDate: '2026-06-10',
+        indicators: [
+          { label: '发货订单数', value: '64', delta: '较前日-4.48%' },
+          { label: '待发货订单数', value: '168', delta: '较前日-34.4%' },
+        ],
+      },
+      return: {
+        key: 'return',
+        label: '归还分析',
+        dataDate: null,
+        indicators: [
+          { label: '归还订单数', value: '15', delta: '较前日-12.8%' },
+          { label: '逾期订单数', value: '5', delta: '较前日+28.6%' },
+        ],
+      },
       customs: { key: 'customs', label: '关单分析', dataDate: '2026-06-10', indicators: [{ label: '关单数', value: '90', delta: '较前日+31.0%' }] },
     },
   },
@@ -378,6 +404,32 @@ describe('public traffic report outputs', () => {
     const buffer = writePublicTrafficWorkbookBuffer(context);
     const workbook = XLSX.read(buffer, { type: 'buffer' });
     expect(workbook.SheetNames).not.toContain('订单分析');
+  });
+
+  it('卡片今日漏斗输出三行并标注数据日期', () => {
+    const card = buildPublicTrafficCard(contextWithOrderAnalysis, { markdownPath: 'report.md', workbookPath: 'report.xlsx' });
+    const json = JSON.stringify(card);
+    expect(json).toContain('公域（');
+    expect(json).toContain('订单（06-10）');
+    expect(json).toContain('履约（发货06-10｜归还未知｜关单06-10）');
+    expect(json).toContain('创建订单');
+    expect(json).toContain('签约金额');
+    expect(json).toContain('待发货');
+    expect(json).toContain('关单');
+  });
+
+  it('无订单分析时卡片漏斗保持单行旧版', () => {
+    const card = buildPublicTrafficCard(context, { markdownPath: 'report.md', workbookPath: 'report.xlsx' });
+    const json = JSON.stringify(card);
+    expect(json).not.toContain('履约（');
+    expect(json).toContain('今日漏斗');
+  });
+
+  it('Markdown 1日总览输出三行', () => {
+    const markdown = buildPublicTrafficMarkdown(contextWithOrderAnalysis);
+    expect(markdown).toContain('公域（');
+    expect(markdown).toContain('订单（06-10）：创建订单 194｜签约订单 103｜审出订单 -｜发货订单 64｜签约金额 3,977');
+    expect(markdown).toContain('履约（发货06-10｜归还未知｜关单06-10）：待发货 168｜归还 15｜逾期 5｜关单 90');
   });
 
   it('renders legacy Markdown and Feishu text with neutral insight defaults', () => {

@@ -1,4 +1,5 @@
 import type { FeishuCardPayload } from '../notify/feishuApp.js';
+import { findOrderAnalysisIndicator, shortDataDate } from './orderAnalysis.js';
 import type { PublicTrafficDataReportContext, PublicTrafficProductDataRow, PublicTrafficReportPaths, PublicTrafficReportSectionItem } from './types.js';
 
 function percent(value: number): string {
@@ -87,6 +88,42 @@ function funnelColumnSet(one: PublicTrafficDataReportContext['summary']['1d']): 
   ]);
 }
 
+function funnelElements(context: PublicTrafficDataReportContext): Record<string, unknown>[] {
+  const one = context.summary['1d'];
+  const oa = context.orderAnalysis;
+  if (!oa) {
+    return [funnelColumnSet(one)];
+  }
+  const overview = oa.pages.overview;
+  const delivery = oa.pages.delivery;
+  const returns = oa.pages.return;
+  const customs = oa.pages.customs;
+  return [
+    { tag: 'markdown', content: `公域（${context.date}）` },
+    columnSet([
+      `曝光\n**${one.exposure}**`,
+      `公域访问\n**${one.publicVisits}**`,
+      `后链路访问\n**${one.dashboardVisits}**`,
+      `金额\n**¥${one.amount.toFixed(2)}**`,
+    ]),
+    { tag: 'markdown', content: `订单（${shortDataDate(overview?.dataDate)}）` },
+    columnSet([
+      `创建订单\n**${findOrderAnalysisIndicator(overview, ['创建订单数'])}**`,
+      `签约订单\n**${findOrderAnalysisIndicator(overview, ['签约订单数'])}**`,
+      `审出订单\n**${findOrderAnalysisIndicator(overview, ['审出订单数'])}**`,
+      `发货订单\n**${findOrderAnalysisIndicator(overview, ['发货订单数'])}**`,
+      `签约金额\n**${findOrderAnalysisIndicator(overview, ['签约完成金额（元）', '签约完成金额'])}**`,
+    ]),
+    { tag: 'markdown', content: `履约（发货${shortDataDate(delivery?.dataDate)}｜归还${shortDataDate(returns?.dataDate)}｜关单${shortDataDate(customs?.dataDate)}）` },
+    columnSet([
+      `待发货\n**${findOrderAnalysisIndicator(delivery, ['待发货订单数'])}**`,
+      `归还\n**${findOrderAnalysisIndicator(returns, ['归还订单数'])}**`,
+      `逾期\n**${findOrderAnalysisIndicator(returns, ['逾期订单数'])}**`,
+      `关单\n**${findOrderAnalysisIndicator(customs, ['关单数'])}**`,
+    ]),
+  ];
+}
+
 function moduleColumnSet(context: PublicTrafficDataReportContext): Record<string, unknown> | null {
   const counts = moduleCounts(context);
   if (counts.length === 0) return null;
@@ -112,7 +149,7 @@ export function buildPublicTrafficCard(context: PublicTrafficDataReportContext, 
         conclusionColumnSet(context),
         { tag: 'hr' },
         { tag: 'markdown', content: '**今日漏斗**' },
-        funnelColumnSet(one),
+        ...funnelElements(context),
         { tag: 'markdown', content: rateText(one) },
         ...markdownElement(dataQualityText(context)),
         ...optionalElement(moduleColumnSet(context)),

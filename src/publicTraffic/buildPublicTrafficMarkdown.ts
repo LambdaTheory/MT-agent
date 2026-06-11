@@ -1,3 +1,4 @@
+import { findOrderAnalysisIndicator, shortDataDate } from './orderAnalysis.js';
 import type {
   ExposureOverviewMetric,
   PublicTrafficDataReportContext,
@@ -67,6 +68,22 @@ function overviewLines(summary: PublicTrafficDataSummary): string[] {
   ];
 }
 
+function oneDayOverviewLines(context: PublicTrafficDataReportContext): string[] {
+  const summary = context.summary['1d'];
+  const oa = context.orderAnalysis;
+  if (!oa) return overviewLines(summary);
+  const overview = oa.pages.overview;
+  const delivery = oa.pages.delivery;
+  const returns = oa.pages.return;
+  const customs = oa.pages.customs;
+  return [
+    `公域（${context.date}）：曝光 ${summary.exposure}｜公域访问 ${summary.publicVisits}｜后链路访问 ${summary.dashboardVisits}｜金额 ¥${summary.amount.toFixed(2)}`,
+    `订单（${shortDataDate(overview?.dataDate)}）：创建订单 ${findOrderAnalysisIndicator(overview, ['创建订单数'])}｜签约订单 ${findOrderAnalysisIndicator(overview, ['签约订单数'])}｜审出订单 ${findOrderAnalysisIndicator(overview, ['审出订单数'])}｜发货订单 ${findOrderAnalysisIndicator(overview, ['发货订单数'])}｜签约金额 ${findOrderAnalysisIndicator(overview, ['签约完成金额（元）', '签约完成金额'])}`,
+    `履约（发货${shortDataDate(delivery?.dataDate)}｜归还${shortDataDate(returns?.dataDate)}｜关单${shortDataDate(customs?.dataDate)}）：待发货 ${findOrderAnalysisIndicator(delivery, ['待发货订单数'])}｜归还 ${findOrderAnalysisIndicator(returns, ['归还订单数'])}｜逾期 ${findOrderAnalysisIndicator(returns, ['逾期订单数'])}｜关单 ${findOrderAnalysisIndicator(customs, ['关单数'])}`,
+    `曝光到访问率 ${(summary.exposureVisitRate * 100).toFixed(2)}%｜访问到下单率 ${(summary.visitCreatedOrderRate * 100).toFixed(2)}%｜访问到发货率 ${(summary.visitShipmentRate * 100).toFixed(2)}%`,
+  ];
+}
+
 function productLine(row: PublicTrafficProductDataRow, index: number): string {
   const one = row.periods['1d'];
   const visits = one.publicVisits || one.dashboardVisits;
@@ -100,7 +117,7 @@ export function buildPublicTrafficMarkdown(input: PublicTrafficDataReportContext
     ...context.conclusions.map((item) => `- ${item.label}：${item.text}`),
     '',
     '## 1日总览',
-    ...overviewLines(context.summary['1d']),
+    ...oneDayOverviewLines(context),
   ];
   if (context.dataQualityNotes?.length) {
     lines.push('', '## 数据提示', ...context.dataQualityNotes);
