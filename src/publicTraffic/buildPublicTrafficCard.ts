@@ -70,10 +70,10 @@ function nestedMetricColumn(title: string, metrics: Array<[string, string]>): Re
   };
 }
 
-function nestedFunnelColumnSet(groups: Array<{ title: string; metrics: Array<[string, string]> }>): Record<string, unknown> {
+function nestedFunnelColumnSet(groups: Array<{ title: string; metrics: Array<[string, string]> }>, elementId = 'funnel_summary'): Record<string, unknown> {
   return {
     tag: 'column_set',
-    element_id: 'funnel_summary',
+    element_id: elementId,
     flex_mode: 'stretch',
     horizontal_spacing: '8px',
     columns: groups.map((group) => nestedMetricColumn(group.title, group.metrics)),
@@ -90,11 +90,10 @@ function conclusionMarkdown(context: PublicTrafficDataReportContext): Record<str
 }
 
 function funnelColumnSet(one: PublicTrafficDataReportContext['summary']['1d']): Record<string, unknown> {
-  return nestedFunnelColumnSet([
-    { title: '公域', metrics: [['曝光', String(one.exposure)], ['访问', String(one.publicVisits)], ['金额', `¥${one.amount.toFixed(2)}`]] },
-    { title: '订单', metrics: [['创建', String(one.createdOrders)], ['发货', String(one.shippedOrders)]] },
-    { title: '履约', metrics: [['访问发货率', percent(one.visitShipmentRate)]] },
-  ]);
+  return { tag: 'column_set', element_id: 'funnel_summary', flex_mode: 'stretch', horizontal_spacing: '8px', columns: [
+    nestedMetricColumn('公域', [['曝光', String(one.exposure)], ['访问', String(one.publicVisits)], ['金额', `¥${one.amount.toFixed(2)}`]]),
+    nestedMetricColumn('订单', [['创建', String(one.createdOrders)], ['发货', String(one.shippedOrders)]]),
+  ] };
 }
 
 function funnelElements(context: PublicTrafficDataReportContext): Record<string, unknown>[] {
@@ -109,10 +108,15 @@ function funnelElements(context: PublicTrafficDataReportContext): Record<string,
   const customs = oa.pages.customs;
   return [
     nestedFunnelColumnSet([
-      { title: `公域（${context.date}）`, metrics: [['曝光', String(one.exposure)], ['公域访问', String(one.publicVisits)], ['后链路访问', String(one.dashboardVisits)], ['金额', `¥${one.amount.toFixed(2)}`]] },
-      { title: `订单（${shortDataDate(overview?.dataDate)}）`, metrics: [['创建订单', findOrderAnalysisIndicator(overview, ['创建订单数'])], ['签约订单', findOrderAnalysisIndicator(overview, ['签约订单数'])], ['审出订单', findOrderAnalysisIndicator(overview, ['审出订单数'])], ['发货订单', findOrderAnalysisIndicator(overview, ['发货订单数'])], ['签约金额', findOrderAnalysisIndicator(overview, ['签约完成金额（元）', '签约完成金额'])]] },
+      { title: `公域（${context.date}）`, metrics: [['曝光', String(one.exposure)], ['公域访问', String(one.publicVisits)], ['后链路访问', String(one.dashboardVisits)]] },
+    ], 'funnel_public'),
+    nestedFunnelColumnSet([
+      { title: `订单（${shortDataDate(overview?.dataDate)}）`, metrics: [['创建订单', findOrderAnalysisIndicator(overview, ['创建订单数'])], ['签约订单', findOrderAnalysisIndicator(overview, ['签约订单数'])], ['审出订单', findOrderAnalysisIndicator(overview, ['审出订单数'])]] },
+      { title: '订单补充', metrics: [['发货订单', findOrderAnalysisIndicator(overview, ['发货订单数'])], ['签约金额', findOrderAnalysisIndicator(overview, ['签约完成金额（元）', '签约完成金额'])], ['公域金额', `¥${one.amount.toFixed(2)}`]] },
+    ], 'funnel_order'),
+    nestedFunnelColumnSet([
       { title: `履约（发货${shortDataDate(delivery?.dataDate)}｜归还${shortDataDate(returns?.dataDate)}｜关单${shortDataDate(customs?.dataDate)}）`, metrics: [['待发货', findOrderAnalysisIndicator(delivery, ['待发货订单数'])], ['归还', findOrderAnalysisIndicator(returns, ['归还订单数'])], ['逾期', findOrderAnalysisIndicator(returns, ['逾期订单数'])], ['关单', findOrderAnalysisIndicator(customs, ['关单数'])]] },
-    ]),
+    ], 'funnel_fulfillment'),
   ];
 }
 

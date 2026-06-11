@@ -75,19 +75,16 @@ export function parsePreviousCumulativeSnapshot(text: string): ExposureCumulativ
 }
 
 async function loadPreviousCumulative(outputDir: string, date: string): Promise<PreviousCumulativeSnapshot> {
-  const prev = buildPublicTrafficPaths(outputDir, yesterday(date));
-  try {
-    return {
-      products: parsePreviousCumulativeSnapshot(await readFile(prev.exposureCumulativeProducts, 'utf8')),
-      found: true,
-    };
-  } catch (error) {
-    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
-      return { products: [], found: false };
+  for (const reportContextPath of previousReportContextCandidatePaths(outputDir, date)) {
+    const exposurePath = reportContextPath.replace(/公域数据上下文_([^/\\]+)\.json$/, '公域曝光商品快照_$1.json');
+    try {
+      return { products: parsePreviousCumulativeSnapshot(await readFile(exposurePath, 'utf8')), found: true };
+    } catch (error) {
+      if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') continue;
+      throw error;
     }
-
-    throw error;
   }
+  return { products: [], found: false };
 }
 
 export function previousReportContextCandidatePaths(outputDir: string, date: string, cwd = process.cwd()): string[] {
