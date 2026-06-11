@@ -10,9 +10,13 @@ interface HeaderIndexes {
   signedOrders: number;
   reviewedOrders: number;
   shippedOrders: number;
+  createdOrderAmount: number;
+  signedOrderAmount: number;
+  reviewedOrderAmount: number;
+  shippedOrderAmount: number;
 }
 
-const OPTIONAL_HEADERS = new Set<keyof HeaderIndexes>(['spuName', 'spuId']);
+const OPTIONAL_HEADERS = new Set<keyof HeaderIndexes>(['spuName', 'spuId', 'createdOrderAmount', 'signedOrderAmount', 'reviewedOrderAmount', 'shippedOrderAmount']);
 
 function findHeaderIndex(headers: string[], matchers: string[]): number {
   return headers.findIndex((header) => matchers.some((matcher) => header.includes(matcher)));
@@ -34,6 +38,10 @@ function findHeaderIndexes(headers: string[]): HeaderIndexes {
     signedOrders: findHeaderIndex(headers, ['签约订单数']),
     reviewedOrders: findHeaderIndex(headers, ['审出订单数']),
     shippedOrders: findHeaderIndex(headers, ['发货订单数']),
+    createdOrderAmount: findHeaderIndex(headers, ['创建订单金额']),
+    signedOrderAmount: findHeaderIndex(headers, ['签约订单金额']),
+    reviewedOrderAmount: findHeaderIndex(headers, ['审出订单金额']),
+    shippedOrderAmount: findHeaderIndex(headers, ['发货订单金额']),
   };
 }
 
@@ -58,5 +66,9 @@ export function normalizeRowsForPeriod(table: RawTableData): PeriodProductMetric
     signedOrders: parseCount(row[indexes.signedOrders]),
     reviewedOrders: parseCount(row[indexes.reviewedOrders]),
     shippedOrders: parseCount(row[indexes.shippedOrders]),
+    createdOrderAmount: indexes.createdOrderAmount >= 0 ? parseCount(row[indexes.createdOrderAmount]) : 0,
+    signedOrderAmount: indexes.signedOrderAmount >= 0 ? parseCount(row[indexes.signedOrderAmount]) : 0,
+    reviewedOrderAmount: indexes.reviewedOrderAmount >= 0 ? parseCount(row[indexes.reviewedOrderAmount]) : 0,
+    shippedOrderAmount: indexes.shippedOrderAmount >= 0 ? parseCount(row[indexes.shippedOrderAmount]) : 0,
   }));
 }

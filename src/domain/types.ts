@@ -39,6 +39,10 @@ export interface ProductMetrics {
   signedOrders: number;
   reviewedOrders: number;
   shippedOrders: number;
+  createdOrderAmount?: number;
+  signedOrderAmount?: number;
+  reviewedOrderAmount?: number;
+  shippedOrderAmount?: number;
 }
 
 export interface PeriodProductMetrics extends ProductMetrics {
