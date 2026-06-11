@@ -1,4 +1,4 @@
-# 订单分析页采集与日报数据增强 实施计划
+﻿# 订单分析页采集与日报数据增强 实施计划
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -33,179 +33,109 @@
 
 ---
 
-### Task 1: 一次性 probe——确认「1日」日期控件与指标项 DOM 结构
+### Task 1: 一次性 probe——确认「1日」日期控件与指标项 DOM 结构 ✅ 已完成
 
-**Files:**
-- Create: `tmp/probe-order-analysis-controls.ts`
+- [x] **Step 1-4: probe 已于 2026-06-11 执行（v1/v2/v3 三轮），脚本已删除**
 
-订单分析页与访问数据页同属 assistant-data-analysis 应用，大概率有相同的 `1日/7日/30日` 文本切换控件，但需实证。同时确认 `.merchant-ui-data-indicators-items-default` 每项的叶子文本结构（label/value/delta 是否分节点）。
+**Probe 结论（后续任务以此为准）：**
 
-- [ ] **Step 1: 写 probe 脚本**
-
-```ts
-// tmp/probe-order-analysis-controls.ts
-import { mkdir, writeFile } from 'node:fs/promises';
-import { chromium, type Page } from 'playwright';
-import { loadConfig } from '../src/config/loadConfig.js';
-import { clearBrowserProfileLocks, prepareDashboardPage } from '../src/crawler/browserProfile.js';
-import { selectSubAccountIfNeeded } from '../src/crawler/dashboardCrawler.js';
-import { waitForDashboardAfterLogin, waitForSettledLoginState } from '../src/crawler/loginState.js';
-
-const OVERVIEW_URL = 'https://b.alipay.com/page/recycle-im/app/assistant-data-analysis/index/order/overview?appId=2021005181665859';
-
-async function dumpIndicators(page: Page): Promise<unknown[]> {
-  return page.locator('.merchant-ui-data-indicators-items').evaluateAll((nodes) =>
-    nodes.map((node) => ({
-      className: node.className,
-      text: String(node.textContent ?? '').replace(/\s+/g, ' ').trim(),
-      leafTexts: Array.from(node.querySelectorAll('*'))
-        .filter((el) => el.children.length === 0)
-        .map((el) => String(el.textContent ?? '').replace(/\s+/g, ' ').trim())
-        .filter(Boolean),
-    })),
-  );
-}
-
-async function main(): Promise<void> {
-  const config = await loadConfig();
-  await mkdir('output/latest', { recursive: true });
-  await clearBrowserProfileLocks(config.browserProfileDir);
-  const browser = await chromium.launchPersistentContext(config.browserProfileDir, { headless: false });
-  const page = await prepareDashboardPage(browser.pages(), () => browser.newPage());
-
-  try {
-    await page.goto(OVERVIEW_URL, { waitUntil: 'domcontentloaded' });
-    const loginState = await waitForSettledLoginState(page, { timeoutMs: 60000, intervalMs: 1000 });
-    if (loginState === 'login-page') {
-      console.log('请扫码登录……');
-      await waitForDashboardAfterLogin(page);
-    }
-    await selectSubAccountIfNeeded(page);
-    if (!page.url().includes('/order/overview')) {
-      await page.goto(OVERVIEW_URL, { waitUntil: 'domcontentloaded' });
-    }
-    await page.waitForTimeout(5000);
-
-    const controls = await page
-      .locator('.ant-radio-button-wrapper, .ant-segmented-item, .ant-tabs-tab, .ant-select-selection-item, button')
-      .evaluateAll((nodes) => nodes.map((node) => ({ className: (node as HTMLElement).className, text: String(node.textContent ?? '').replace(/\s+/g, ' ').trim() })).filter((item) => item.text));
-    const indicatorsBefore = await dumpIndicators(page);
-
-    let oneDayClicked = false;
-    const oneDay = page.getByText('1日', { exact: true }).first();
-    if ((await oneDay.count()) > 0) {
-      await oneDay.click();
-      await page.waitForTimeout(3000);
-      oneDayClicked = true;
-    }
-
-    const toggles = page.locator('[class*="toggle-"]');
-    const toggleTexts = await toggles.evaluateAll((nodes) => nodes.map((node) => String(node.textContent ?? '').trim()));
-    for (let i = 0; i < (await toggles.count()); i += 1) {
-      if ((await toggles.nth(i).textContent())?.includes('展开')) {
-        await toggles.nth(i).click();
-        await page.waitForTimeout(500);
-      }
-    }
-
-    const indicatorsAfter = await dumpIndicators(page);
-    const bodyText = await page.locator('body').innerText().catch(() => '');
-    const dateMentions = bodyText.replace(/\s+/g, '').match(/\d{4}-\d{2}-\d{2}[^0-9]{0,10}/g) ?? [];
-
-    await writeFile(
-      'output/latest/order-analysis-controls-probe.json',
-      JSON.stringify({ url: page.url(), oneDayClicked, controls, toggleTexts, indicatorsBefore, indicatorsAfter, dateMentions: dateMentions.slice(0, 30) }, null, 2),
-      'utf8',
-    );
-    console.log(`oneDayClicked=${oneDayClicked} indicators=${indicatorsAfter.length}`);
-  } finally {
-    await browser.close();
-  }
-}
-
-main().catch((error) => {
-  console.error(error instanceof Error ? error.message : error);
-  process.exitCode = 1;
-});
-```
-
-- [ ] **Step 2: 运行 probe**
-
-Run: `npx tsx tmp/probe-order-analysis-controls.ts`（workdir `C:\works\MT-agent`，可能需扫码）
-Expected: 控制台输出 `oneDayClicked=true indicators=N`（N≥5），生成 `output/latest/order-analysis-controls-probe.json`
-
-- [ ] **Step 3: 阅读 probe 结果，记录三件事**
-
-1. 「1日」控件形态（哪个 className 命中、`getByText('1日')` 是否生效）；若 `oneDayClicked=false`，从 `controls` 里找日期控件实际文本/类名，并在 Task 3 中替换 `selectOneDayPeriod` 的选择器。
-2. `indicatorsAfter` 每项的 `leafTexts` 结构——确认 Task 2 解析器以整项 text 正则切分是否够用；若 label/value/delta 是独立叶子节点，Task 3 中改为按叶子节点取值（解析器保留为 fallback）。
-3. `dateMentions` 里数据日期的实际上下文格式，校对 Task 2 的 `extractOrderAnalysisDataDate` 正则。
-
-- [ ] **Step 4: 删除 probe 脚本并提交发现**
-
-```powershell
-Remove-Item -Recurse -Force tmp
-```
-
-把发现写进本计划文件 Task 1 末尾（追加 "Probe 结论：…"），提交：
-
-```bash
-git add docs/superpowers/plans/2026-06-11-order-analysis-capture.md
-git commit -m "计划：补充订单分析页控件probe结论"
-```
+1. **「1日」切换有效**：`page.getByText('1日', { exact: true }).first().click()` 生效。切换后指标值从 7 日窗口变为 1 日窗口（签约订单数 542→103），delta 文案从 `较前7日` 变为 `较前日`。
+2. **指标节点结构**：每个指标是 `.merchant-ui-data-indicator` 元素（收起态附加 `-default`，展开态附加 `-lighter`），内部用子选择器干净取三段：
+   - label：`.merchant-ui-data-indicator-main-indicator`（textContent，如 `签约订单数`）
+   - value：`.merchant-ui-data-indicator-value-content`（如 `103`、`3,977`，可含千分位逗号）
+   - delta：`.merchant-ui-data-indicator-supplement-items`（如 `较前日+32.1%`，原样保存）
+   - 注意：不要用 leaf 节点文本拼接（数值渲染在带子元素的节点里，leaf 取不到数字）；不要正则切整段文本。
+3. **展开有效**：`page.getByText('展开', { exact: true }).first().click()` 后约 3 秒，新增 `-lighter` 指标（创建订单数 194、发货订单数 64 等）。展开前 `.merchant-ui-data-indicator` 共 3 个，展开后 7 个左右。
+4. **数据日期来源**：页面正文无 `YYYY-MM-DD` 文本；日期在 `input[placeholder="请选择日期"]` 的 value 中，格式 `MM-DD`（如 `06-10`），需结合运行日补全年份（含跨年回退）。overview 1 日数据仅滞后 1 天。
 
 ---
 
-### Task 2: 订单分析类型与指标解析纯函数
+### Task 2: 订单分析类型与指标清洗/日期纯函数
 
 **Files:**
 - Create: `src/publicTraffic/orderAnalysis.ts`
 - Test: `tests/orderAnalysisParse.test.ts`
+
+按 Task 1 probe 结论：DOM 已可直接取 label/value/delta 三段，纯函数只做清洗（trim、过滤空项）和数据日期补年。
 
 - [ ] **Step 1: 写失败测试**
 
 ```ts
 // tests/orderAnalysisParse.test.ts
 import { describe, expect, it } from 'vitest';
-import { extractOrderAnalysisDataDate, parseOrderAnalysisIndicatorText } from '../src/publicTraffic/orderAnalysis.js';
+import {
+  cleanOrderAnalysisIndicator,
+  findOrderAnalysisIndicator,
+  resolveOrderAnalysisDataDate,
+  shortDataDate,
+  type OrderAnalysisPageData,
+} from '../src/publicTraffic/orderAnalysis.js';
 
-describe('parseOrderAnalysisIndicatorText', () => {
-  it('解析计数指标', () => {
-    expect(parseOrderAnalysisIndicatorText('签约订单数542较前7日+40.8%')).toEqual({ label: '签约订单数', value: '542', delta: '+40.8%' });
+describe('cleanOrderAnalysisIndicator', () => {
+  it('清洗正常指标', () => {
+    expect(cleanOrderAnalysisIndicator({ label: ' 签约订单数 ', value: ' 103 ', delta: ' 较前日+32.1% ' })).toEqual({
+      label: '签约订单数',
+      value: '103',
+      delta: '较前日+32.1%',
+    });
   });
 
-  it('解析万单位金额指标', () => {
-    expect(parseOrderAnalysisIndicatorText('签约完成金额（元）2.93万较前7日+20.3%')).toEqual({ label: '签约完成金额（元）', value: '2.93万', delta: '+20.3%' });
+  it('保留千分位与万单位数值原文', () => {
+    expect(cleanOrderAnalysisIndicator({ label: '签约完成金额（元）', value: '3,977', delta: '较前日-25.6%' })).toEqual({
+      label: '签约完成金额（元）',
+      value: '3,977',
+      delta: '较前日-25.6%',
+    });
   });
 
-  it('解析百分比指标', () => {
-    expect(parseOrderAnalysisIndicatorText('签约订单审出率83.0%较前7日+8.36%')).toEqual({ label: '签约订单审出率', value: '83.0%', delta: '+8.36%' });
+  it('delta 缺失时为空字符串', () => {
+    expect(cleanOrderAnalysisIndicator({ label: '平均发货天数', value: '3', delta: '' })).toEqual({ label: '平均发货天数', value: '3', delta: '' });
   });
 
-  it('解析负向变化', () => {
-    expect(parseOrderAnalysisIndicatorText('待发货订单数168较前7日-34.4%')).toEqual({ label: '待发货订单数', value: '168', delta: '-34.4%' });
-  });
-
-  it('无较前7日时 delta 为空', () => {
-    expect(parseOrderAnalysisIndicatorText('平均发货天数3')).toEqual({ label: '平均发货天数', value: '3', delta: '' });
-  });
-
-  it('容忍文本中的空白', () => {
-    expect(parseOrderAnalysisIndicatorText('关单数 590 较前7日 +31.0%')).toEqual({ label: '关单数', value: '590', delta: '+31.0%' });
-  });
-
-  it('非指标文本返回 null', () => {
-    expect(parseOrderAnalysisIndicatorText('订单转化漏斗')).toBeNull();
-    expect(parseOrderAnalysisIndicatorText('')).toBeNull();
+  it('label 或 value 为空返回 null', () => {
+    expect(cleanOrderAnalysisIndicator({ label: '', value: '103', delta: '' })).toBeNull();
+    expect(cleanOrderAnalysisIndicator({ label: '签约订单数', value: '', delta: '' })).toBeNull();
   });
 });
 
-describe('extractOrderAnalysisDataDate', () => {
-  it('从页面文本提取数据日期', () => {
-    expect(extractOrderAnalysisDataDate('……2026-06-08当日数据（06-08）54对比日数据（06-01）48……')).toBe('2026-06-08');
+describe('resolveOrderAnalysisDataDate', () => {
+  it('MM-DD 补全年份', () => {
+    expect(resolveOrderAnalysisDataDate('06-10', '2026-06-11')).toBe('2026-06-10');
   });
 
-  it('无日期返回 null', () => {
-    expect(extractOrderAnalysisDataDate('没有日期的文本')).toBeNull();
+  it('跨年回退到上一年', () => {
+    expect(resolveOrderAnalysisDataDate('12-31', '2026-01-01')).toBe('2025-12-31');
+  });
+
+  it('完整 YYYY-MM-DD 原样通过', () => {
+    expect(resolveOrderAnalysisDataDate('2026-06-10', '2026-06-11')).toBe('2026-06-10');
+  });
+
+  it('空值或非法格式返回 null', () => {
+    expect(resolveOrderAnalysisDataDate('', '2026-06-11')).toBeNull();
+    expect(resolveOrderAnalysisDataDate(null, '2026-06-11')).toBeNull();
+    expect(resolveOrderAnalysisDataDate('请选择日期', '2026-06-11')).toBeNull();
+  });
+});
+
+describe('findOrderAnalysisIndicator / shortDataDate', () => {
+  const page: OrderAnalysisPageData = {
+    key: 'overview',
+    label: '标准订单分析',
+    dataDate: '2026-06-10',
+    indicators: [{ label: '创建订单数', value: '194', delta: '较前日+71.7%' }],
+  };
+
+  it('按标签优先级取值，缺失回退 -', () => {
+    expect(findOrderAnalysisIndicator(page, ['创建订单数'])).toBe('194');
+    expect(findOrderAnalysisIndicator(page, ['不存在', '创建订单数'])).toBe('194');
+    expect(findOrderAnalysisIndicator(page, ['不存在'])).toBe('-');
+    expect(findOrderAnalysisIndicator(undefined, ['创建订单数'])).toBe('-');
+  });
+
+  it('shortDataDate 截取月日，空值返回未知', () => {
+    expect(shortDataDate('2026-06-10')).toBe('06-10');
+    expect(shortDataDate(null)).toBe('未知');
   });
 });
 ```
@@ -252,19 +182,24 @@ export interface OrderAnalysisResult extends OrderAnalysisCapture {
   runDate: string;
 }
 
-const INDICATOR_PATTERN = /^(.+?)(-?\d[\d.,]*(?:万|亿)?%?)(?:较前7日(.*))?$/;
-
-export function parseOrderAnalysisIndicatorText(text: string): OrderAnalysisIndicator | null {
-  const normalized = text.replace(/\s+/g, '');
-  if (!normalized) return null;
-  const match = normalized.match(INDICATOR_PATTERN);
-  if (!match || !match[1] || !match[2]) return null;
-  return { label: match[1], value: match[2], delta: (match[3] ?? '').trim() };
+function normalizeText(value: string | null | undefined): string {
+  return (value ?? '').replace(/\s+/g, ' ').trim();
 }
 
-export function extractOrderAnalysisDataDate(bodyText: string): string | null {
-  const match = bodyText.replace(/\s+/g, '').match(/(\d{4}-\d{2}-\d{2})当日数据/);
-  return match ? match[1] : null;
+export function cleanOrderAnalysisIndicator(raw: { label: string; value: string; delta: string }): OrderAnalysisIndicator | null {
+  const label = normalizeText(raw.label);
+  const value = normalizeText(raw.value);
+  if (!label || !value) return null;
+  return { label, value, delta: normalizeText(raw.delta) };
+}
+
+export function resolveOrderAnalysisDataDate(rawValue: string | null | undefined, referenceDate: string): string | null {
+  const value = normalizeText(rawValue);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  if (!/^\d{2}-\d{2}$/.test(value)) return null;
+  const year = Number(referenceDate.slice(0, 4));
+  const candidate = `${year}-${value}`;
+  return candidate <= referenceDate ? candidate : `${year - 1}-${value}`;
 }
 
 export function findOrderAnalysisIndicator(page: OrderAnalysisPageData | undefined, labels: string[]): string {
@@ -285,42 +220,11 @@ export function shortDataDate(date: string | null | undefined): string {
 Run: `npx vitest run tests/orderAnalysisParse.test.ts`
 Expected: PASS
 
-- [ ] **Step 5: 给 helper 补两组断言（同文件追加）**
-
-```ts
-import type { OrderAnalysisPageData } from '../src/publicTraffic/orderAnalysis.js';
-import { findOrderAnalysisIndicator, shortDataDate } from '../src/publicTraffic/orderAnalysis.js';
-
-describe('findOrderAnalysisIndicator / shortDataDate', () => {
-  const page: OrderAnalysisPageData = {
-    key: 'overview',
-    label: '标准订单分析',
-    dataDate: '2026-06-08',
-    indicators: [{ label: '创建订单数', value: '924', delta: '+46.7%' }],
-  };
-
-  it('按标签优先级取值，缺失回退 -', () => {
-    expect(findOrderAnalysisIndicator(page, ['创建订单数'])).toBe('924');
-    expect(findOrderAnalysisIndicator(page, ['不存在', '创建订单数'])).toBe('924');
-    expect(findOrderAnalysisIndicator(page, ['不存在'])).toBe('-');
-    expect(findOrderAnalysisIndicator(undefined, ['创建订单数'])).toBe('-');
-  });
-
-  it('shortDataDate 截取月日，空值返回未知', () => {
-    expect(shortDataDate('2026-06-08')).toBe('06-08');
-    expect(shortDataDate(null)).toBe('未知');
-  });
-});
-```
-
-Run: `npx vitest run tests/orderAnalysisParse.test.ts`
-Expected: PASS
-
-- [ ] **Step 6: 提交**
+- [ ] **Step 5: 提交**
 
 ```bash
 git add src/publicTraffic/orderAnalysis.ts tests/orderAnalysisParse.test.ts
-git commit -m "功能：订单分析指标解析纯函数"
+git commit -m "功能：订单分析指标清洗与日期纯函数"
 ```
 
 ---
@@ -331,7 +235,7 @@ git commit -m "功能：订单分析指标解析纯函数"
 - Create: `src/crawler/orderAnalysisCrawler.ts`
 - Test: `tests/orderAnalysisCrawlerSource.test.ts`
 
-爬虫依赖真实页面，无法单元测试；按仓库惯例用源码 wiring 断言（参照 `tests/exposureCrawlerSource.test.ts`）。若 Task 1 probe 结论与下面代码的选择器不符，以 probe 结论为准调整。
+爬虫依赖真实页面，无法单元测试；按仓库惯例用源码 wiring 断言（参照 `tests/exposureCrawlerSource.test.ts`）。选择器以 Task 1 probe 结论为准。
 
 - [ ] **Step 1: 写失败的源码断言测试**
 
@@ -343,18 +247,19 @@ import { describe, expect, it } from 'vitest';
 describe('orderAnalysisCrawler wiring', () => {
   it('覆盖四个页面、1日切换、展开与指标选择器，且空指标抛错', async () => {
     const source = await readFile('src/crawler/orderAnalysisCrawler.ts', 'utf8');
-    expect(source).toContain("'overview'");
-    expect(source).toContain("'delivery'");
-    expect(source).toContain("'return'");
-    expect(source).toContain("'customs'");
     expect(source).toContain('assistant-data-analysis/index/order/');
+    expect(source).toContain('ORDER_ANALYSIS_PAGE_KEYS');
     expect(source).toContain("getByText('1日', { exact: true })");
-    expect(source).toContain('展开');
-    expect(source).toContain('merchant-ui-data-indicators-items-default');
+    expect(source).toContain("getByText('展开', { exact: true })");
+    expect(source).toContain('.merchant-ui-data-indicator');
+    expect(source).toContain('merchant-ui-data-indicator-main-indicator');
+    expect(source).toContain('merchant-ui-data-indicator-value-content');
+    expect(source).toContain('merchant-ui-data-indicator-supplement-items');
+    expect(source).toContain('请选择日期');
     expect(source).toContain('selectSubAccountIfNeeded');
     expect(source).toContain('指标为空');
-    expect(source).toContain('parseOrderAnalysisIndicatorText');
-    expect(source).toContain('extractOrderAnalysisDataDate');
+    expect(source).toContain('cleanOrderAnalysisIndicator');
+    expect(source).toContain('resolveOrderAnalysisDataDate');
   });
 });
 ```
@@ -371,10 +276,10 @@ Expected: FAIL（文件不存在）
 import type { Page } from 'playwright';
 import type { AgentConfig } from '../domain/types.js';
 import {
-  extractOrderAnalysisDataDate,
+  cleanOrderAnalysisIndicator,
   ORDER_ANALYSIS_PAGE_KEYS,
   ORDER_ANALYSIS_PAGE_LABELS,
-  parseOrderAnalysisIndicatorText,
+  resolveOrderAnalysisDataDate,
   type OrderAnalysisCapture,
   type OrderAnalysisIndicator,
   type OrderAnalysisPageData,
@@ -400,22 +305,31 @@ async function selectOneDayPeriod(page: Page, key: OrderAnalysisPageKey): Promis
   await page.waitForTimeout(3000);
 }
 
-async function expandToggles(page: Page): Promise<void> {
-  const toggles = page.locator('[class*="toggle-"]', { hasText: '展开' });
-  const count = await toggles.count();
-  for (let index = 0; index < count; index += 1) {
-    await toggles.nth(index).click().catch(() => undefined);
-    await page.waitForTimeout(500);
-  }
+async function expandIndicators(page: Page): Promise<void> {
+  const expand = page.getByText('展开', { exact: true }).first();
+  if ((await expand.count()) === 0) return;
+  await expand.click().catch(() => undefined);
+  await page.waitForTimeout(3000);
 }
 
 async function extractIndicators(page: Page): Promise<OrderAnalysisIndicator[]> {
-  const texts: string[] = await page
-    .locator('.merchant-ui-data-indicators-items.merchant-ui-data-indicators-items-default')
-    .evaluateAll((nodes) => nodes.map((node) => String(node.textContent ?? '').replace(/\s+/g, ' ').trim()).filter(Boolean));
-  return texts
-    .map((text) => parseOrderAnalysisIndicatorText(text))
+  const raw: { label: string; value: string; delta: string }[] = await page
+    .locator('.merchant-ui-data-indicator')
+    .evaluateAll((nodes) =>
+      nodes.map((node) => ({
+        label: String(node.querySelector('.merchant-ui-data-indicator-main-indicator')?.textContent ?? ''),
+        value: String(node.querySelector('.merchant-ui-data-indicator-value-content')?.textContent ?? ''),
+        delta: String(node.querySelector('.merchant-ui-data-indicator-supplement-items')?.textContent ?? ''),
+      })),
+    );
+  return raw
+    .map((item) => cleanOrderAnalysisIndicator(item))
     .filter((item): item is OrderAnalysisIndicator => item !== null);
+}
+
+async function readDataDate(page: Page): Promise<string | null> {
+  const value = await page.locator('input[placeholder="请选择日期"]').first().inputValue().catch(() => '');
+  return resolveOrderAnalysisDataDate(value, new Date().toISOString().slice(0, 10));
 }
 
 async function collectOrderAnalysisPage(page: Page, key: OrderAnalysisPageKey): Promise<OrderAnalysisPageData> {
@@ -424,20 +338,19 @@ async function collectOrderAnalysisPage(page: Page, key: OrderAnalysisPageKey): 
   if (!page.url().includes(`/order/${key}`)) {
     await page.goto(orderAnalysisUrl(key), { waitUntil: 'domcontentloaded' });
   }
-  await page.waitForSelector('.merchant-ui-data-indicators-items', { timeout: 60000 });
+  await page.waitForSelector('.merchant-ui-data-indicator', { timeout: 60000 });
   await selectOneDayPeriod(page, key);
-  await expandToggles(page);
+  await expandIndicators(page);
 
   const indicators = await extractIndicators(page);
   if (indicators.length === 0) {
     throw new Error(`订单分析页 ${key} 指标为空，页面可能改版或日期切换失败`);
   }
 
-  const bodyText = await page.locator('body').innerText().catch(() => '');
   return {
     key,
     label: ORDER_ANALYSIS_PAGE_LABELS[key],
-    dataDate: extractOrderAnalysisDataDate(bodyText),
+    dataDate: await readDataDate(page),
     indicators,
   };
 }
@@ -842,10 +755,10 @@ it('包含订单分析 sheet（context 带 orderAnalysis 时）', () => {
       capturedAt: '2026-06-12T00:00:00.000Z',
       runDate: '2026-06-12',
       pages: {
-        overview: { key: 'overview', label: '标准订单分析', dataDate: '2026-06-08', indicators: [{ label: '签约订单数', value: '542', delta: '+40.8%' }] },
-        delivery: { key: 'delivery', label: '发货分析', dataDate: '2026-06-06', indicators: [{ label: '发货订单数', value: '336', delta: '+66.3%' }] },
-        return: { key: 'return', label: '归还分析', dataDate: null, indicators: [{ label: '归还订单数', value: '105', delta: '-12.8%' }] },
-        customs: { key: 'customs', label: '关单分析', dataDate: '2026-06-08', indicators: [{ label: '关单数', value: '590', delta: '+31.0%' }] },
+        overview: { key: 'overview', label: '标准订单分析', dataDate: '2026-06-10', indicators: [{ label: '签约订单数', value: '103', delta: '较前日+32.1%' }] },
+        delivery: { key: 'delivery', label: '发货分析', dataDate: '2026-06-10', indicators: [{ label: '发货订单数', value: '64', delta: '较前日-4.48%' }] },
+        return: { key: 'return', label: '归还分析', dataDate: null, indicators: [{ label: '归还订单数', value: '15', delta: '较前日-12.8%' }] },
+        customs: { key: 'customs', label: '关单分析', dataDate: '2026-06-10', indicators: [{ label: '关单数', value: '90', delta: '较前日+31.0%' }] },
       },
     },
   };
@@ -854,10 +767,10 @@ it('包含订单分析 sheet（context 带 orderAnalysis 时）', () => {
   expect(workbook.SheetNames).toContain('订单分析');
   const rows = XLSX.utils.sheet_to_json<string[]>(workbook.Sheets['订单分析'], { header: 1 });
   const flat = rows.map((row) => (row ?? []).join('|')).join('\n');
-  expect(flat).toContain('【标准订单分析】数据日期：2026-06-08');
-  expect(flat).toContain('签约订单数|542|+40.8%');
+  expect(flat).toContain('【标准订单分析】数据日期：2026-06-10');
+  expect(flat).toContain('签约订单数|103|较前日+32.1%');
   expect(flat).toContain('【归还分析】数据日期：未知');
-  expect(flat).toContain('指标|数值|较前7日');
+  expect(flat).toContain('指标|数值|环比');
 });
 
 it('context 不带 orderAnalysis 时无订单分析 sheet', () => {
@@ -927,7 +840,7 @@ function orderAnalysisSheet(result: OrderAnalysisResult): XLSX.WorkSheet {
   for (const key of ORDER_ANALYSIS_PAGE_KEYS) {
     const page = result.pages[key];
     aoa.push([`【${page.label}】数据日期：${page.dataDate ?? '未知'}`]);
-    aoa.push(['指标', '数值', '较前7日']);
+    aoa.push(['指标', '数值', '环比']);
     for (const item of page.indicators) {
       aoa.push([item.label, item.value, item.delta]);
     }
@@ -965,15 +878,15 @@ git commit -m "功能：商品明细汉化、金额列与订单分析sheet"
 
 - [ ] **Step 1: 写失败测试**
 
-`tests/publicTrafficReport.test.ts` 追加（`contextWithOrderAnalysis` 复用 Task 8 fixture，建议提为文件级共享 fixture；overview indicators 补全为：创建订单数 924、签约订单数 542、发货订单数 336、签约完成金额（元）2.93万；delivery 补 待发货订单数 168；return 补 逾期订单数 5）：
+`tests/publicTrafficReport.test.ts` 追加（`contextWithOrderAnalysis` 复用 Task 8 fixture，建议提为文件级共享 fixture；overview indicators 补全为：创建订单数 194、签约订单数 103、发货订单数 64、签约完成金额（元）3,977；delivery 补 待发货订单数 168；return 补 逾期订单数 5）：
 
 ```ts
 it('卡片今日漏斗输出三行并标注数据日期', () => {
   const card = buildPublicTrafficCard(contextWithOrderAnalysis, paths);
   const json = JSON.stringify(card);
   expect(json).toContain('公域（');
-  expect(json).toContain('订单（06-08）');
-  expect(json).toContain('履约（发货06-06｜归还未知｜关单06-08）');
+  expect(json).toContain('订单（06-10）');
+  expect(json).toContain('履约（发货06-10｜归还未知｜关单06-10）');
   expect(json).toContain('创建订单');
   expect(json).toContain('签约金额');
   expect(json).toContain('待发货');
@@ -990,8 +903,8 @@ it('无订单分析时卡片漏斗保持单行旧版', () => {
 it('Markdown 1日总览输出三行', () => {
   const markdown = buildPublicTrafficMarkdown(contextWithOrderAnalysis);
   expect(markdown).toContain('公域（');
-  expect(markdown).toContain('订单（06-08）：创建订单 924｜签约订单 542｜审出订单 -｜发货订单 336｜签约金额 2.93万');
-  expect(markdown).toContain('履约（发货06-06｜归还未知｜关单06-08）：待发货 168｜归还 105｜逾期 5｜关单 590');
+  expect(markdown).toContain('订单（06-10）：创建订单 194｜签约订单 103｜审出订单 -｜发货订单 64｜签约金额 3,977');
+  expect(markdown).toContain('履约（发货06-10｜归还未知｜关单06-10）：待发货 168｜归还 15｜逾期 5｜关单 90');
 });
 ```
 
@@ -1137,4 +1050,4 @@ git commit -m "验证：订单分析采集实跑通过"
 
 - Spec 覆盖：四页抓取（Task 3）、1日切换（Task 1/3）、失败即整体失败（Task 3 抛错 + Task 4 主流程不捕获）、JSON 落盘（Task 5）、订单分析 sheet（Task 8）、漏斗三行（Task 9）、商品明细汉化（Task 8）、金额列（Task 6/7/8）、测试与回归（各任务 + Task 10）。
 - 类型一致性：`OrderAnalysisCapture`（爬虫返回）与 `OrderAnalysisResult`（含 runDate，入 context/xlsx）已区分；`findOrderAnalysisIndicator`/`shortDataDate` 在 Task 2 定义、Task 9 引用。
-- 已知不确定点：「1日」控件形态与指标项叶子结构依赖 Task 1 probe 实证；`审出订单数` 可能不在 overview 指标项中（probe 仅见 `签约订单审出率`），缺失时漏斗显示 `-`，属预期行为。
+- 已知不确定点（Task 1 probe 已消除大部分）：「1日」切换、展开、指标节点结构、数据日期来源均已实证；`审出订单数` 不在 overview 收起态指标中（probe 见 `签约订单审出率`），若展开态也无此项则漏斗显示 `-`，属预期行为；delivery/return/customs 三页的指标项结构假定与 overview 相同（同一组件库），Task 10 实跑验证。
