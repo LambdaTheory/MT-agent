@@ -1046,6 +1046,70 @@ git commit -m "验证：订单分析采集实跑通过"
 
 ---
 
+### Task 11: 曝光页每页条数提速
+
+**Files:**
+- Modify: `src/crawler/exposureCrawler.ts`
+- Test: `tests/exposureCrawlerSource.test.ts`（追加断言）
+
+曝光页商品表目前按默认每页条数逐页点「下一页」（258 商品约 26 页、每页等 2 秒）。复用 `pageSizeProbe.ts` 的 `setDashboardPageSize`（通用 antd size-changer 操作，`.ant-pagination-options-size-changer` 取 `.last()`），在分页循环前尽量调大每页条数。曝光页若无 size-changer 控件则保持默认，不影响正确性——必须 best-effort，失败不抛错。
+
+- [ ] **Step 1: 写失败的源码断言测试**
+
+`tests/exposureCrawlerSource.test.ts` 追加一个 it：
+
+```ts
+it('曝光页分页前尝试调大每页条数（best-effort）', async () => {
+  const source = await readFile('src/crawler/exposureCrawler.ts', 'utf8');
+  expect(source).toContain('setDashboardPageSize');
+  expect(source).toContain('preferredPageSize');
+  expect(source).toContain('每页条数调整失败');
+});
+```
+
+- [ ] **Step 2: 运行确认失败**
+
+Run: `npx vitest run tests/exposureCrawlerSource.test.ts`
+Expected: 新增用例 FAIL
+
+- [ ] **Step 3: 改 exposureCrawler.ts**
+
+```ts
+// 顶部 import 追加：
+import { setDashboardPageSize } from './pageSizeProbe.js';
+
+// 新增函数（放在 extractProductRows 之前）：
+async function tryEnlargePageSize(page: Page, preferredPageSize: number): Promise<void> {
+  try {
+    await setDashboardPageSize(page, preferredPageSize);
+    console.log(`[曝光] 每页条数已调整为 ${preferredPageSize}`);
+  } catch (error) {
+    console.log(`[曝光] 每页条数调整失败，保持默认: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+// 在调用 extractProductRows(page) 之前（collectExposurePage 内商品表就绪后）插入：
+  await tryEnlargePageSize(page, config.preferredPageSize);
+```
+
+注意：插入点必须在商品表已渲染之后（`extractProductRows` 调用前一行）；`config` 在 `collectExposurePage` 作用域内已有。
+
+- [ ] **Step 4: 运行确认通过**
+
+Run: `npx vitest run tests/exposureCrawlerSource.test.ts`
+Expected: PASS
+
+- [ ] **Step 5: 提交**
+
+```bash
+git add src/crawler/exposureCrawler.ts tests/exposureCrawlerSource.test.ts
+git commit -m "优化：曝光页调大每页条数提速"
+```
+
+Task 10 实跑时验证：运行日志中 `[曝光] 每页条数已调整为 100`（或调整失败提示），且 `[曝光] 第N页` 总页数明显减少、商品总数不变（≈258）。
+
+---
+
 ## Self-Review 记录
 
 - Spec 覆盖：四页抓取（Task 3）、1日切换（Task 1/3）、失败即整体失败（Task 3 抛错 + Task 4 主流程不捕获）、JSON 落盘（Task 5）、订单分析 sheet（Task 8）、漏斗三行（Task 9）、商品明细汉化（Task 8）、金额列（Task 6/7/8）、测试与回归（各任务 + Task 10）。
