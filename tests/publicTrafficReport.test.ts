@@ -604,6 +604,21 @@ describe('public traffic report outputs', () => {
     expect(markdown).toContain('发货/审出 0.00%');
   });
 
+  it('renders missing fulfillment rates for non-numeric indicators', () => {
+    const orderAnalysis = makeOrderAnalysisResult([
+      { label: '创建订单数', value: '100', delta: '' },
+      { label: '签约订单数', value: '暂无', delta: '' },
+      { label: '审出订单数', value: '25', delta: '' },
+      { label: '发货订单数', value: '10', delta: '' },
+    ]);
+    const reportContext = makeDataReportContext({ orderAnalysis });
+    const cardJson = JSON.stringify(buildPublicTrafficCard(reportContext, { markdownPath: 'report.md', workbookPath: 'report.xlsx' }));
+    const markdown = buildPublicTrafficMarkdown(reportContext);
+
+    expect(cardJson).toContain('签约/创建 -');
+    expect(markdown).toContain('签约/创建 -');
+  });
+
   it('omits fulfillment rate section without order analysis', () => {
     const cardJson = JSON.stringify(buildPublicTrafficCard(context, { markdownPath: 'report.md', workbookPath: 'report.xlsx' }));
     const markdown = buildPublicTrafficMarkdown(context);
