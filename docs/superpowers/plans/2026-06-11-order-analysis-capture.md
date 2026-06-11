@@ -1046,7 +1046,11 @@ git commit -m "验证：订单分析采集实跑通过"
 
 ---
 
-### Task 11: 曝光页每页条数提速
+### Task 11: 曝光页每页条数提速 ❌ 已回滚（2026-06-11）
+
+**回滚原因（实跑验证发现数据污染）：** 实跑中 `setDashboardPageSize` 的全局 `.last()` 选择器在曝光页误触了非商品表的控件——成功日志为误报（`readCurrentPageSize` 读到的是其他分页器的 50）。结果商品表被异常过滤为 50 条（昨日快照 412 条），污染当日快照、日差分与已发送的飞书卡片。已 revert（`3a21c0a`、`91d218c`）并重跑恢复。若未来重做，必须把 size-changer 严格限定在商品表的 `.ant-table-wrapper` 内（参照 `clickCurrentTableNext` 的表定位方式），并以「商品总数与上日快照同量级」做成功校验。
+
+原任务内容（已作废，仅留档）：
 
 **Files:**
 - Modify: `src/crawler/exposureCrawler.ts`
