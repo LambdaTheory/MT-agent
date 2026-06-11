@@ -213,12 +213,21 @@ describe('public traffic report outputs', () => {
         { label: '公域访问', text: '公域访问 20，较昨日上升 2' },
         { label: '金额', text: '金额 30元，较昨日上升 3元' },
       ],
-      lowExposure: Array.from({ length: 6 }, (_, index) => ({ identifier: `低曝光${index}`, action: '检查托管状态', reason: `低曝光原因${index}` })),
+      lowExposure: [
+        { identifier: '重复商品', action: '检查托管状态', reason: '低曝光原因' },
+        ...Array.from({ length: 6 }, (_, index) => ({ identifier: `低曝光${index}`, action: '检查托管状态', reason: `低曝光原因${index}` })),
+      ],
       weakClick: Array.from({ length: 6 }, (_, index) => ({ identifier: `点击弱${index}`, action: '优化主图', reason: `点击弱原因${index}` })),
-      weakConversion: Array.from({ length: 6 }, (_, index) => ({ identifier: `转化弱${index}`, action: '检查价格', reason: `转化弱原因${index}` })),
+      weakConversion: [
+        { identifier: '重复商品', action: '检查价格', reason: '转化弱原因' },
+        ...Array.from({ length: 6 }, (_, index) => ({ identifier: `转化弱${index}`, action: '检查价格', reason: `转化弱原因${index}` })),
+      ],
       highPotential: Array.from({ length: 2 }, (_, index) => ({ identifier: `高潜力${index}`, action: '继续放量', reason: `高潜力原因${index}` })),
       lifecycleGovernance: Array.from({ length: 2 }, (_, index) => ({ identifier: `治理${index}`, action: '下架或重做', reason: `治理原因${index}` })),
-      recommendedActions: Array.from({ length: 12 }, (_, index) => ({ identifier: `建议${index}`, action: index % 2 === 0 ? '检查价格' : '优化主图', reason: `建议原因${index}` })),
+      recommendedActions: [
+        { identifier: '重复商品', action: '检查价格', reason: '转化弱原因' },
+        ...Array.from({ length: 12 }, (_, index) => ({ identifier: `建议${index}`, action: index % 2 === 0 ? '检查价格' : '优化主图', reason: `建议原因${index}` })),
+      ],
       newProductObservation: Array.from({ length: 11 }, (_, index) => ({ identifier: `新品${index}`, action: '新品数据监控', reason: `新品原因${index}` })),
     });
     const expectedDiagnosticRows = context.lowExposure.length + context.weakClick.length + context.weakConversion.length + context.highPotential.length + context.lifecycleGovernance.length;
@@ -241,6 +250,7 @@ describe('public traffic report outputs', () => {
     expect(newProductRows).toHaveLength(expectedNewProductRows);
     expect(diagnosticRows).toContainEqual(expect.objectContaining({ type: '曝光不足', product: '低曝光0', action: '检查托管状态', reason: '低曝光原因0' }));
     expect(actionRows).toContainEqual(expect.objectContaining({ product: '建议0', action: '检查价格', reason: '建议原因0' }));
+    expect(actionRows).toContainEqual(expect.objectContaining({ type: '转化弱', product: '重复商品', action: '检查价格', reason: '转化弱原因' }));
     expect(newProductRows).toContainEqual(expect.objectContaining({ product: '新品0', action: '新品数据监控', reason: '新品原因0' }));
 
     const cardText = JSON.stringify(card);

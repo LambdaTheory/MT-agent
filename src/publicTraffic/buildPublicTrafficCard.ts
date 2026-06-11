@@ -187,7 +187,11 @@ function diagnosticRows(context: PublicTrafficDataReportContext): FeishuTableRow
   return sections.flatMap(([type, items]) => items.map((item) => ({ type, product: item.identifier, action: item.action, reason: item.reason })));
 }
 
-function sectionTypeByIdentifier(context: PublicTrafficDataReportContext): Map<string, string> {
+function sectionTypeKey(item: PublicTrafficReportSectionItem): string {
+  return `${item.identifier}\u0000${item.action}\u0000${item.reason}`;
+}
+
+function sectionTypeByItem(context: PublicTrafficDataReportContext): Map<string, string> {
   const sections: Array<[string, PublicTrafficReportSectionItem[]]> = [
     ['曝光不足', context.lowExposure],
     ['点击弱', context.weakClick],
@@ -199,17 +203,18 @@ function sectionTypeByIdentifier(context: PublicTrafficDataReportContext): Map<s
   const map = new Map<string, string>();
   for (const [type, items] of sections) {
     for (const item of items) {
-      if (!map.has(item.identifier)) map.set(item.identifier, type);
+      const key = sectionTypeKey(item);
+      if (!map.has(key)) map.set(key, type);
     }
   }
   return map;
 }
 
 function actionRows(context: PublicTrafficDataReportContext): FeishuTableRow[] {
-  const typeByIdentifier = sectionTypeByIdentifier(context);
+  const typeByItem = sectionTypeByItem(context);
   return [...context.recommendedActions]
     .sort((a, b) => a.action.localeCompare(b.action, 'zh-Hans-CN') || a.identifier.localeCompare(b.identifier, 'zh-Hans-CN'))
-    .map((item) => ({ action: item.action, type: typeByIdentifier.get(item.identifier) ?? '', product: item.identifier, reason: item.reason }));
+    .map((item) => ({ action: item.action, type: typeByItem.get(sectionTypeKey(item)) ?? '', product: item.identifier, reason: item.reason }));
 }
 
 function newProductRows(context: PublicTrafficDataReportContext): FeishuTableRow[] {
