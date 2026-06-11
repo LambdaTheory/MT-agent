@@ -197,6 +197,16 @@ describe('runPublicTrafficReportCli public traffic sequencing', () => {
     expect(source).toContain('cumulativeProducts: crawlResult.products');
   });
 
+  it('resolves previous report context from parent output when running in a worktree', async () => {
+    const { previousReportContextCandidatePaths } = await import('../src/cli/publicTrafficReport.js');
+    const candidates = previousReportContextCandidatePaths('C:/repo/.worktrees/feature/output', '2026-06-11', 'C:/repo/.worktrees/feature');
+
+    expect(candidates.map((item) => item.replace(/\\/g, '/'))).toEqual([
+      'C:/repo/.worktrees/feature/output/2026-06-10/公域数据上下文_2026-06-10.json',
+      'C:/repo/output/2026-06-10/公域数据上下文_2026-06-10.json',
+    ]);
+  });
+
   it('parses optional Feishu send target argument', async () => {
     const { parseFeishuSendToArg } = await import('../src/cli/publicTrafficReport.js');
 

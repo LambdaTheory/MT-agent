@@ -1,7 +1,6 @@
-import { flattenDiagnosticItems, sortedActions } from './diagnosticItems.js';
 import type { FeishuCardPayload } from '../notify/feishuApp.js';
 import { findOrderAnalysisIndicator, fulfillmentRateLines, shortDataDate } from './orderAnalysis.js';
-import type { PublicTrafficDataReportContext, PublicTrafficProductDataRow, PublicTrafficReportPaths, PublicTrafficReportSectionItem } from './types.js';
+import type { PublicTrafficDataReportContext, PublicTrafficProductDataRow, PublicTrafficReportPaths } from './types.js';
 
 function percent(value: number): string {
   return `${(value * 100).toFixed(2)}%`;
@@ -38,6 +37,10 @@ function rateText(one: PublicTrafficDataReportContext['summary']['1d']): string 
   return `**转化率**\n曝光到访问率 ${percent(one.exposureVisitRate)}｜访问到发货率 ${percent(one.visitShipmentRate)}`;
 }
 
+function shortId(row: PublicTrafficProductDataRow): string {
+  return row.displayProductId.replace(/^端内ID\s*/, '') || row.displayProductId;
+}
+
 function fulfillmentRateText(context: PublicTrafficDataReportContext): string | null {
   const lines = fulfillmentRateLines(context.orderAnalysis?.pages.overview);
   return lines.length > 0 ? ['**履约比率**', ...lines].join('\n') : null;
@@ -61,12 +64,13 @@ function markdownColumn(content: string): Record<string, unknown> {
     tag: 'column',
     width: 'weighted',
     weight: 1,
+    vertical_align: 'top',
     elements: [{ tag: 'markdown', content }],
   };
 }
 
-function columnSet(columns: string[]): Record<string, unknown> {
-  return { tag: 'column_set', columns: columns.map(markdownColumn) };
+function columnSet(columns: string[], elementId?: string): Record<string, unknown> {
+  return { tag: 'column_set', ...(elementId ? { element_id: elementId } : {}), flex_mode: 'bisect', horizontal_spacing: '8px', columns: columns.map(markdownColumn) };
 }
 
 function optionalElement(element: Record<string, unknown> | null): Record<string, unknown>[] {
@@ -80,13 +84,10 @@ function conclusionMarkdown(context: PublicTrafficDataReportContext): Record<str
 
 function funnelColumnSet(one: PublicTrafficDataReportContext['summary']['1d']): Record<string, unknown> {
   return columnSet([
-    `曝光\n**${one.exposure}**`,
-    `公域访问\n**${one.publicVisits}**`,
-    `后链路访问\n**${one.dashboardVisits}**`,
-    `订单\n**${one.createdOrders}**`,
-    `发货\n**${one.shippedOrders}**`,
-    `金额\n**¥${one.amount.toFixed(2)}**`,
-  ]);
+    `**公域**\n曝光 **${one.exposure}**\n公域访问 **${one.publicVisits}**\n后链路访问 **${one.dashboardVisits}**\n金额 **¥${one.amount.toFixed(2)}**`,
+    `**订单**\n创建订单 **${one.createdOrders}**\n发货订单 **${one.shippedOrders}**`,
+    `**履约**\n访问到发货率 **${percent(one.visitShipmentRate)}**`,
+  ], 'funnel_summary');
 }
 
 function funnelElements(context: PublicTrafficDataReportContext): Record<string, unknown>[] {
@@ -100,28 +101,11 @@ function funnelElements(context: PublicTrafficDataReportContext): Record<string,
   const returns = oa.pages.return;
   const customs = oa.pages.customs;
   return [
-    { tag: 'markdown', content: `公域（${context.date}）` },
     columnSet([
-      `曝光\n**${one.exposure}**`,
-      `公域访问\n**${one.publicVisits}**`,
-      `后链路访问\n**${one.dashboardVisits}**`,
-      `金额\n**¥${one.amount.toFixed(2)}**`,
-    ]),
-    { tag: 'markdown', content: `订单（${shortDataDate(overview?.dataDate)}）` },
-    columnSet([
-      `创建订单\n**${findOrderAnalysisIndicator(overview, ['创建订单数'])}**`,
-      `签约订单\n**${findOrderAnalysisIndicator(overview, ['签约订单数'])}**`,
-      `审出订单\n**${findOrderAnalysisIndicator(overview, ['审出订单数'])}**`,
-      `发货订单\n**${findOrderAnalysisIndicator(overview, ['发货订单数'])}**`,
-      `签约金额\n**${findOrderAnalysisIndicator(overview, ['签约完成金额（元）', '签约完成金额'])}**`,
-    ]),
-    { tag: 'markdown', content: `履约（发货${shortDataDate(delivery?.dataDate)}｜归还${shortDataDate(returns?.dataDate)}｜关单${shortDataDate(customs?.dataDate)}）` },
-    columnSet([
-      `待发货\n**${findOrderAnalysisIndicator(delivery, ['待发货订单数'])}**`,
-      `归还\n**${findOrderAnalysisIndicator(returns, ['归还订单数'])}**`,
-      `逾期\n**${findOrderAnalysisIndicator(returns, ['逾期订单数'])}**`,
-      `关单\n**${findOrderAnalysisIndicator(customs, ['关单数'])}**`,
-    ]),
+      `**公域（${context.date}）**\n曝光 **${one.exposure}**\n公域访问 **${one.publicVisits}**\n后链路访问 **${one.dashboardVisits}**\n金额 **¥${one.amount.toFixed(2)}**`,
+      `**订单（${shortDataDate(overview?.dataDate)}）**\n创建订单 **${findOrderAnalysisIndicator(overview, ['创建订单数'])}**\n签约订单 **${findOrderAnalysisIndicator(overview, ['签约订单数'])}**\n审出订单 **${findOrderAnalysisIndicator(overview, ['审出订单数'])}**\n发货订单 **${findOrderAnalysisIndicator(overview, ['发货订单数'])}**\n签约金额 **${findOrderAnalysisIndicator(overview, ['签约完成金额（元）', '签约完成金额'])}**`,
+      `**履约（发货${shortDataDate(delivery?.dataDate)}｜归还${shortDataDate(returns?.dataDate)}｜关单${shortDataDate(customs?.dataDate)}）**\n待发货 **${findOrderAnalysisIndicator(delivery, ['待发货订单数'])}**\n归还 **${findOrderAnalysisIndicator(returns, ['归还订单数'])}**\n逾期 **${findOrderAnalysisIndicator(returns, ['逾期订单数'])}**\n关单 **${findOrderAnalysisIndicator(customs, ['关单数'])}**`,
+    ], 'funnel_summary'),
   ];
 }
 
@@ -135,23 +119,23 @@ function markdownElement(content: string | null): { tag: 'markdown'; content: st
   return content ? [{ tag: 'markdown', content }] : [];
 }
 
-type TableColumnKey = 'type' | 'product' | 'action' | 'reason';
+type TableColumnKey = 'product' | 'id' | 'exposure' | 'visits' | 'deals' | 'custodyDays';
 
 interface FeishuTableColumn {
   name: TableColumnKey;
   display_name: string;
-  data_type: 'text';
+  data_type: 'text' | 'number';
   horizontal_align: 'left';
   width: 'auto';
 }
 
-type FeishuTableRow = Partial<Record<TableColumnKey, string>>;
+type FeishuTableRow = Partial<Record<TableColumnKey, string | number>>;
 
 interface FeishuTableElement extends Record<string, unknown> {
   tag: 'table';
   element_id: string;
   page_size: 10;
-  row_height: 'auto';
+  row_height: 'low';
   row_max_height: '124px';
   freeze_first_column: true;
   header_style: {
@@ -163,17 +147,16 @@ interface FeishuTableElement extends Record<string, unknown> {
   rows: FeishuTableRow[];
 }
 
-function tableColumn(name: TableColumnKey, displayName: string): FeishuTableColumn {
-  return { name, display_name: displayName, data_type: 'text', horizontal_align: 'left', width: 'auto' };
+function tableColumn(name: TableColumnKey, displayName: string, dataType: 'text' | 'number' = 'text'): FeishuTableColumn {
+  return { name, display_name: displayName, data_type: dataType, horizontal_align: 'left', width: 'auto' };
 }
 
-function tableElement(elementId: string, columns: FeishuTableColumn[], rows: FeishuTableRow[]): FeishuTableElement | null {
-  if (rows.length === 0) return null;
+function tableElement(elementId: string, columns: FeishuTableColumn[], rows: FeishuTableRow[]): FeishuTableElement {
   return {
     tag: 'table',
     element_id: elementId,
     page_size: 10,
-    row_height: 'auto',
+    row_height: 'low',
     row_max_height: '124px',
     freeze_first_column: true,
     header_style: { background_style: 'grey', text_size: 'normal', text_align: 'left' },
@@ -182,43 +165,58 @@ function tableElement(elementId: string, columns: FeishuTableColumn[], rows: Fei
   };
 }
 
-function diagnosticRows(context: PublicTrafficDataReportContext): FeishuTableRow[] {
-  return flattenDiagnosticItems(context).map(({ type, item }) => ({ type, product: item.identifier, action: item.action, reason: item.reason }));
+function rowScore(row: PublicTrafficProductDataRow): number {
+  const one = row.periods['1d'];
+  return one.exposure || one.publicVisits || one.dashboardVisits;
 }
 
-function sectionTypeKey(item: PublicTrafficReportSectionItem): string {
-  return `${item.identifier}\u0000${item.action}\u0000${item.reason}`;
+function exposureTopRows(context: PublicTrafficDataReportContext): FeishuTableRow[] {
+  return [...context.rows].sort((a, b) => rowScore(b) - rowScore(a)).slice(0, 10).map((row) => {
+    const one = row.periods['1d'];
+    return { product: row.productName || 'Unknown', id: shortId(row), exposure: one.exposure, visits: one.publicVisits || one.dashboardVisits, deals: one.shippedOrders };
+  });
 }
 
-function sectionTypeByItem(context: PublicTrafficDataReportContext): Map<string, string> {
-  const map = new Map<string, string>();
-  for (const { type, item } of flattenDiagnosticItems(context)) {
-    const key = sectionTypeKey(item);
-    if (!map.has(key)) map.set(key, type);
-  }
-  for (const item of context.newProductObservation) {
-    const key = sectionTypeKey(item);
-    if (!map.has(key)) map.set(key, '新品观察');
-  }
-  return map;
+function exposureBandRows(context: PublicTrafficDataReportContext, min: number, max: number): FeishuTableRow[] {
+  return context.rows
+    .filter((row) => row.periods['1d'].hasExposureData && row.periods['1d'].exposure >= min && row.periods['1d'].exposure < max)
+    .sort((a, b) => a.periods['1d'].exposure - b.periods['1d'].exposure || (b.periods['1d'].publicVisits || b.periods['1d'].dashboardVisits) - (a.periods['1d'].publicVisits || a.periods['1d'].dashboardVisits))
+    .map((row) => ({ id: shortId(row), exposure: row.periods['1d'].exposure, visits: row.periods['1d'].publicVisits || row.periods['1d'].dashboardVisits, custodyDays: row.custodyDays ?? '-' }));
 }
 
-function actionRows(context: PublicTrafficDataReportContext): FeishuTableRow[] {
-  const typeByItem = sectionTypeByItem(context);
-  return sortedActions(context.recommendedActions)
-    .map((item) => ({ action: item.action, type: typeByItem.get(sectionTypeKey(item)) ?? '', product: item.identifier, reason: item.reason }));
+function analysisPanel(context: PublicTrafficDataReportContext, bands: Array<{ label: string; rows: FeishuTableRow[] }>): Record<string, unknown> {
+  const lines = [
+    `- **曝光优化**：${bands.map((band) => `${band.label} ${band.rows.length}个`).join('；')}。优先检查托管状态、标题、主图、类目和投放。`,
+    `- **转化链路**：转化弱 ${context.weakConversion.length} 个。优先检查价格、押金、库存、风控和履约链路。`,
+    `- **新品观察**：当前 ${context.newProductObservation.length} 个，先不展开商品列表，后续单独澄清新品观察口径。`,
+  ];
+  return {
+    tag: 'collapsible_panel',
+    element_id: 'analysis_panel',
+    expanded: false,
+    header: { title: { tag: 'plain_text', content: '分析与建议' }, vertical_align: 'center', icon: { tag: 'standard_icon', token: 'down-small-ccm_outlined', size: '16px 16px' }, icon_position: 'right', icon_expanded_angle: -180 },
+    border: { color: 'grey', corner_radius: '5px' },
+    padding: '8px 8px 8px 8px',
+    elements: [{ tag: 'markdown', content: lines.join('\n') }],
+  };
 }
 
-function newProductRows(context: PublicTrafficDataReportContext): FeishuTableRow[] {
-  return context.newProductObservation.map((item) => ({ product: item.identifier, action: item.action, reason: item.reason }));
-}
-
-function diagnosticTables(context: PublicTrafficDataReportContext): Record<string, unknown>[] {
+function metricTables(context: PublicTrafficDataReportContext): Record<string, unknown>[] {
+  const bands = [
+    { label: '曝光 0-10', elementId: 'exposure_0_10_table', rows: exposureBandRows(context, 0, 10) },
+    { label: '曝光 10-50', elementId: 'exposure_10_50_table', rows: exposureBandRows(context, 10, 50) },
+    { label: '曝光 50-100', elementId: 'exposure_50_100_table', rows: exposureBandRows(context, 50, 100) },
+  ];
+  const bandColumns = [tableColumn('id', 'ID'), tableColumn('exposure', '曝光', 'number'), tableColumn('visits', '访问', 'number'), tableColumn('custodyDays', '托管天')];
   return [
-    tableElement('diag_table', [tableColumn('type', '类型'), tableColumn('product', '商品'), tableColumn('action', '动作'), tableColumn('reason', '原因')], diagnosticRows(context)),
-    tableElement('action_table', [tableColumn('action', '动作'), tableColumn('type', '类型'), tableColumn('product', '商品'), tableColumn('reason', '原因')], actionRows(context)),
-    tableElement('new_table', [tableColumn('product', '商品'), tableColumn('action', '动作'), tableColumn('reason', '原因')], newProductRows(context)),
-  ].filter((element): element is FeishuTableElement => element !== null);
+    { tag: 'markdown', content: '**曝光 Top10**' },
+    tableElement('exposure_top_table', [tableColumn('product', '商品'), tableColumn('id', 'ID'), tableColumn('exposure', '曝光', 'number'), tableColumn('visits', '访问', 'number'), tableColumn('deals', '成交', 'number')], exposureTopRows(context)),
+    { tag: 'hr' },
+    { tag: 'markdown', content: '**待优化**' },
+    ...bands.flatMap((band) => [{ tag: 'markdown', content: `**${band.label}（${band.rows.length}个）**` }, tableElement(band.elementId, bandColumns, band.rows)]),
+    { tag: 'hr' },
+    analysisPanel(context, bands),
+  ];
 }
 
 export function buildPublicTrafficCard(context: PublicTrafficDataReportContext, _paths: PublicTrafficReportPaths): FeishuCardPayload {
@@ -242,10 +240,8 @@ export function buildPublicTrafficCard(context: PublicTrafficDataReportContext, 
         ...markdownElement(dataQualityText(context)),
         ...optionalElement(moduleColumnSet(context)),
         { tag: 'hr' },
-        { tag: 'markdown', content: topExposureText(context.rows) },
+        ...metricTables(context),
         ...markdownElement(warningText),
-        { tag: 'hr' },
-        ...diagnosticTables(context),
       ],
     },
   };

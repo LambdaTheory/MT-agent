@@ -1,4 +1,5 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { basename, isAbsolute, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { loadConfig } from '../config/loadConfig.js';
 import { loadEnv } from '../config/loadEnv.js';
@@ -89,10 +90,27 @@ async function loadPreviousCumulative(outputDir: string, date: string): Promise<
   }
 }
 
+export function previousReportContextCandidatePaths(outputDir: string, date: string, cwd = process.cwd()): string[] {
+  const previousDate = yesterday(date);
+  const resolvedOutputDir = isAbsolute(outputDir) ? outputDir : resolve(cwd, outputDir);
+  const candidates = [buildPublicTrafficPaths(resolvedOutputDir, previousDate).reportContext];
+  const normalizedCwd = cwd.replace(/\\/g, '/');
+  const marker = '/.worktrees/';
+  const markerIndex = normalizedCwd.indexOf(marker);
+  if (markerIndex >= 0) {
+    const parentRoot = normalizedCwd.slice(0, markerIndex);
+    candidates.push(buildPublicTrafficPaths(`${parentRoot}/${basename(resolvedOutputDir)}`, previousDate).reportContext);
+  }
+  return Array.from(new Set(candidates));
+}
+
 async function loadPreviousReportSummary(outputDir: string, date: string, log: ReturnType<typeof createRunLog>): Promise<PublicTrafficDataSummary | undefined> {
-  const prev = buildPublicTrafficPaths(outputDir, yesterday(date));
+  const candidates = previousReportContextCandidatePaths(outputDir, date);
+  let missing = true;
+  for (const reportContextPath of candidates) {
   try {
-    const parsed = JSON.parse(await readFile(prev.reportContext, 'utf8')) as unknown;
+    const parsed = JSON.parse(await readFile(reportContextPath, 'utf8')) as unknown;
+    missing = false;
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
       throw new Error('Invalid previous public traffic summary');
     }
@@ -100,15 +118,19 @@ async function loadPreviousReportSummary(outputDir: string, date: string, log: R
     if (!isPublicTrafficDataSummary(summary)) {
       throw new Error('Invalid previous public traffic summary');
     }
+    log.addEvent(`昨日公域数据上下文已读取: ${reportContextPath}`);
     return summary;
   } catch (error) {
     if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
-      log.addEvent('昨日公域数据上下文缺失: 结论使用今日基准值');
-      return undefined;
+      continue;
     }
+    missing = false;
     log.addEvent(`昨日公域数据上下文读取失败: ${error instanceof Error ? error.message : String(error)}`);
     return undefined;
   }
+  }
+  if (missing) log.addEvent('昨日公域数据上下文缺失: 结论使用今日基准值');
+  return undefined;
 }
 
 function isPublicTrafficDataSummary(value: unknown): value is PublicTrafficDataSummary {

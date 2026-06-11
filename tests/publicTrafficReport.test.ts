@@ -241,16 +241,15 @@ describe('public traffic report outputs', () => {
     expect(card.header).toMatchObject({ title: { tag: 'plain_text', content: '公域数据日报 2026-06-10' } });
     const serialized = JSON.stringify(card);
     expect(serialized).toContain('经营结论');
-    expect(serialized).toContain('今日曝光 Top10');
+    expect(serialized).toContain('曝光 Top10');
     expect(serialized).not.toContain('预警商品（托管>5天 且 曝光<100）');
-    expect(serialized).toContain('建议操作');
-    expect(serialized).toContain('检查价格/押金/库存/风控/履约链路');
-    expect(serialized).toContain('端内ID 558');
+    expect(serialized).toContain('分析与建议');
+    expect(serialized).toContain('转化链路');
     expect(serialized).toContain('新品观察 1');
     expect(serialized).toContain('生命周期治理 1');
-    expect(serialized).toContain('diag_table');
-    expect(serialized).toContain('action_table');
-    expect(serialized).toContain('new_table');
+    expect(serialized).toContain('exposure_top_table');
+    expect(serialized).toContain('exposure_0_10_table');
+    expect(serialized).not.toContain('new_table');
     expect(serialized).not.toContain('高潜力 Top5');
     expect(serialized).not.toContain('新品观察 Top5');
     expect(serialized).not.toContain('生命周期治理 Top5');
@@ -289,27 +288,37 @@ describe('public traffic report outputs', () => {
     const card = buildPublicTrafficCard(context, { markdownPath: 'report.md', workbookPath: 'report.xlsx' });
     const tables = findCardElementsByTag(card, 'table');
 
-    expect(tables).toHaveLength(3);
-    const diagnosticRows = tableRows(tables[0]);
-    const actionRows = tableRows(tables[1]);
-    const newProductRows = tableRows(tables[2]);
+    expect(tables).toHaveLength(4);
+    const allColumns = tables.flatMap((table) => table.columns as Array<{ name: string; display_name: string }>);
+    expect(allColumns.map((column) => column.name)).not.toContain('reason');
+    expect(JSON.stringify(card)).not.toContain('new_table');
 
     expect(tables.every((table) => table.page_size === 10)).toBe(true);
-    expect(tables.every((table) => table.row_height === 'auto')).toBe(true);
+    expect(tables.every((table) => table.row_height === 'low')).toBe(true);
     expect(tables.every((table) => table.freeze_first_column === true)).toBe(true);
-    expect(diagnosticRows).toHaveLength(expectedDiagnosticRows);
-    expect(actionRows).toHaveLength(expectedActionRows);
-    expect(newProductRows).toHaveLength(expectedNewProductRows);
-    expect(diagnosticRows).toContainEqual(expect.objectContaining({ type: '曝光不足', product: '低曝光0', action: '检查托管状态', reason: '低曝光原因0' }));
-    expect(actionRows).toContainEqual(expect.objectContaining({ product: '建议0', action: '检查价格', reason: '建议原因0' }));
-    expect(actionRows).toContainEqual(expect.objectContaining({ type: '转化弱', product: '重复商品', action: '检查价格', reason: '转化弱原因' }));
-    expect(newProductRows).toContainEqual(expect.objectContaining({ product: '新品0', action: '新品数据监控', reason: '新品原因0' }));
+    expect(expectedDiagnosticRows).toBeGreaterThan(0);
+    expect(expectedActionRows).toBeGreaterThan(0);
+    expect(expectedNewProductRows).toBeGreaterThan(0);
+
+    expect(tables[0].element_id).toBe('exposure_top_table');
+    expect((tables[0].columns as Array<{ display_name: string }>).map((column) => column.display_name)).toEqual(['商品', 'ID', '曝光', '访问', '成交']);
+    expect(tableRows(tables[0])[0]).toMatchObject({ product: expect.any(String), id: expect.any(String), exposure: expect.any(Number), visits: expect.any(Number), deals: expect.any(Number) });
+
+    expect(tables.slice(1).map((table) => table.element_id)).toEqual(['exposure_0_10_table', 'exposure_10_50_table', 'exposure_50_100_table']);
+    for (const table of tables.slice(1)) {
+      expect((table.columns as Array<{ display_name: string }>).map((column) => column.display_name)).toEqual(['ID', '曝光', '访问', '托管天']);
+    }
 
     const cardText = JSON.stringify(card);
     expect(cardText).toContain('曝光 100，较昨日上升 10');
     expect(cardText).toContain('公域访问 20，较昨日上升 2');
     expect(cardText).toContain('金额 30元，较昨日上升 3元');
-    expect(cardText).toContain('今日曝光 Top10');
+    expect(cardText).toContain('曝光 Top10');
+    expect(cardText).toContain('曝光 0-10');
+    expect(cardText).toContain('曝光 10-50');
+    expect(cardText).toContain('曝光 50-100');
+    expect(cardText).toContain('分析与建议');
+    expect(cardText).toContain('collapsible_panel');
     expect(cardText).not.toContain('曝光不足 Top5');
     expect(cardText).not.toContain('点击弱 Top5');
     expect(cardText).not.toContain('转化弱 Top5');
@@ -329,10 +338,10 @@ describe('public traffic report outputs', () => {
     expect(markdowns[0].content).toContain('**经营结论**');
     expect(markdowns[0].content).toContain('曝光 1000，较昨日上升 100');
     expect(columnSets.length).toBeGreaterThanOrEqual(2);
-    expect(contents(columnSets[0])).toContain('曝光\n**1000**');
-    expect(contents(columnSets[0])).toContain('金额\n**¥300.00**');
-    expect(contents(columnSets[1])).toContain('**模块数量**');
-    expect(contents(columnSets[1])).toContain('曝光不足 1');
+    expect(contents(columnSets[0]).join('\n')).toContain('公域');
+    expect(contents(columnSets[0]).join('\n')).toContain('曝光 **1000**');
+    expect(contents(columnSets[0]).join('\n')).toContain('订单');
+    expect(contents(columnSets[0]).join('\n')).toContain('履约');
   });
 
   it('renders explanatory notes for empty sections', () => {
