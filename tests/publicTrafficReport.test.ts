@@ -224,7 +224,7 @@ describe('public traffic report outputs', () => {
     expect(text).toContain('诊断问题');
     expect(text).toContain('3. 转化弱｜端内ID 900｜点击有但转化弱｜访问有发货弱');
     expect(text).toContain('1. 检查价格/押金/库存/风控/履约链路｜端内ID 900｜访问有发货弱');
-    expect(text).toContain('曝光 1000｜公域访问 50｜后链路访问 40｜订单 4｜发货 2｜金额 ¥300.00');
+    expect(text).toContain('曝光 1000｜公域访问 50｜商品页访问 40｜订单 4｜发货 2｜金额 ¥300.00');
     expect(text).toContain('曝光到访问率 5.00%｜访问到发货率 5.00%');
     expect(text).toContain('曝光不足 1｜点击弱 1｜转化弱 1｜高潜力 1｜新品观察 1｜生命周期治理 1｜建议操作 1');
     expect(text).not.toContain('转化弱 Top5');
@@ -244,11 +244,13 @@ describe('public traffic report outputs', () => {
     expect(serialized).toContain('曝光 Top10');
     expect(serialized).not.toContain('预警商品（托管>5天 且 曝光<100）');
     expect(serialized).toContain('分析与建议');
-    expect(serialized).toContain('转化链路');
+    expect(serialized).toContain('动作聚焦');
     expect(serialized).toContain('新品观察 1');
     expect(serialized).toContain('生命周期治理 1');
     expect(serialized).toContain('exposure_top_table');
-    expect(serialized).toContain('exposure_0_10_table');
+    expect(serialized).toContain('boost_table');
+    expect(serialized).toContain('conversion_table');
+    expect(serialized).toContain('scale_table');
     expect(serialized).not.toContain('new_table');
     expect(serialized).not.toContain('高潜力 Top5');
     expect(serialized).not.toContain('新品观察 Top5');
@@ -304,19 +306,20 @@ describe('public traffic report outputs', () => {
     expect((tables[0].columns as Array<{ display_name: string }>).map((column) => column.display_name)).toEqual(['商品', 'ID', '曝光', '访问', '成交']);
     expect(tableRows(tables[0])[0]).toMatchObject({ product: expect.any(String), id: expect.any(String), exposure: expect.any(Number), visits: expect.any(Number), deals: expect.any(Number) });
 
-    expect(tables.slice(1).map((table) => table.element_id)).toEqual(['exposure_0_10_table', 'exposure_10_50_table', 'exposure_50_100_table']);
-    for (const table of tables.slice(1)) {
-      expect((table.columns as Array<{ display_name: string }>).map((column) => column.display_name)).toEqual(['ID', '曝光', '访问', '托管天']);
-    }
+    expect(tables.slice(1).map((table) => table.element_id)).toEqual(['boost_table', 'conversion_table', 'scale_table']);
+    expect((tables[1].columns as Array<{ display_name: string }>).map((column) => column.display_name)).toEqual(['补曝光（0）', 'ID', '曝光', '访问', '托管天']);
+    expect((tables[2].columns as Array<{ display_name: string }>).map((column) => column.display_name)).toEqual(['提转化（0）', 'ID', '访问', '成交', '转化率']);
+    expect((tables[3].columns as Array<{ display_name: string }>).map((column) => column.display_name)).toEqual(['继续放量（0）', 'ID', '曝光', '访问', '成交']);
 
     const cardText = JSON.stringify(card);
     expect(cardText).toContain('曝光 100，较昨日上升 10');
     expect(cardText).toContain('公域访问 20，较昨日上升 2');
     expect(cardText).toContain('金额 30元，较昨日上升 3元');
     expect(cardText).toContain('曝光 Top10');
-    expect(cardText).toContain('曝光 0-10');
-    expect(cardText).toContain('曝光 10-50');
-    expect(cardText).toContain('曝光 50-100');
+    expect(cardText).toContain('待优化');
+    expect(cardText).toContain('补曝光（0）');
+    expect(cardText).toContain('提转化（0）');
+    expect(cardText).toContain('继续放量（0）');
     expect(cardText).toContain('分析与建议');
     expect(cardText).toContain('collapsible_panel');
     expect(cardText).not.toContain('曝光不足 Top5');
@@ -339,9 +342,9 @@ describe('public traffic report outputs', () => {
     expect(markdowns[0].content).toContain('曝光 1000，较昨日上升 100');
     expect(columnSets.length).toBeGreaterThanOrEqual(2);
     expect(contents(columnSets[0]).join('\n')).toContain('公域');
-    expect(contents(columnSets[0]).join('\n')).toContain('曝光 **1000**');
+    expect(JSON.stringify(columnSets[0])).toContain('曝光\\n**1000**');
     expect(contents(columnSets[0]).join('\n')).toContain('订单');
-    expect(contents(columnSets[0]).join('\n')).toContain('履约');
+    expect(JSON.stringify(columnSets[0])).toContain('发货\\n**2**');
   });
 
   it('renders explanatory notes for empty sections', () => {
