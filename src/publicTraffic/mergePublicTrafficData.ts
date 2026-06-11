@@ -39,6 +39,12 @@ function emptyPeriods(): Record<PeriodKey, PublicTrafficPeriodMetrics> {
   return { '1d': emptyPeriod(), '7d': emptyPeriod(), '30d': emptyPeriod() };
 }
 
+function canonicalPlatformProductId(platformProductId: string, mapping: ProductIdMapping): string {
+  if (Object.prototype.hasOwnProperty.call(mapping, platformProductId)) return platformProductId;
+  const withoutTrailingPriceDigit = platformProductId.slice(0, -1);
+  return Object.prototype.hasOwnProperty.call(mapping, withoutTrailingPriceDigit) ? withoutTrailingPriceDigit : platformProductId;
+}
+
 export function mergePublicTrafficData(input: MergePublicTrafficDataInput): PublicTrafficDataContext {
   const productNames = new Map<string, string>();
   const custodyDays = new Map<string, number | null>();
@@ -53,15 +59,17 @@ export function mergePublicTrafficData(input: MergePublicTrafficDataInput): Publ
   }
 
   for (const row of input.cumulativeProducts) {
-    productNames.set(row.platformProductId, row.productName);
-    custodyDays.set(row.platformProductId, row.custodyDays);
-    ensure(row.platformProductId);
+    const platformProductId = canonicalPlatformProductId(row.platformProductId, input.mapping);
+    productNames.set(platformProductId, row.productName);
+    custodyDays.set(platformProductId, row.custodyDays);
+    ensure(platformProductId);
   }
 
   for (const period of PERIODS) {
     for (const row of input.exposureByPeriod[period] ?? []) {
-      productNames.set(row.platformProductId, productNames.get(row.platformProductId) || row.productName);
-      const metrics = ensure(row.platformProductId)[period];
+      const platformProductId = canonicalPlatformProductId(row.platformProductId, input.mapping);
+      productNames.set(platformProductId, productNames.get(platformProductId) || row.productName);
+      const metrics = ensure(platformProductId)[period];
       metrics.exposure = row.exposure;
       metrics.publicVisits = row.visits;
       metrics.amount = row.amount;
@@ -71,8 +79,9 @@ export function mergePublicTrafficData(input: MergePublicTrafficDataInput): Publ
   }
 
   for (const row of input.dashboardRows) {
-    productNames.set(row.platformProductId, productNames.get(row.platformProductId) || row.productName);
-    const metrics = ensure(row.platformProductId)[row.period];
+    const platformProductId = canonicalPlatformProductId(row.platformProductId, input.mapping);
+    productNames.set(platformProductId, productNames.get(platformProductId) || row.productName);
+    const metrics = ensure(platformProductId)[row.period];
     metrics.dashboardVisits = row.visits;
     metrics.createdOrders = row.createdOrders;
     metrics.signedOrders = row.signedOrders;

@@ -208,8 +208,9 @@ describe('analyzePublicTrafficData', () => {
 
     expect(report.newProductObservation[0]).toMatchObject({
       identifier: '端内ID 888',
-      action: '观察 3-7 天，重点看曝光、访问和首单/发货',
+      action: '新品数据监控',
     });
+    expect(report.newProductObservation[0]?.reason).toContain('1日曝光 12，访问 0，发货 0，金额 0.00');
   });
 
   it('builds lifecycle governance from weak thirty-day performance', () => {

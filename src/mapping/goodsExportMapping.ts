@@ -19,7 +19,9 @@ function normalize(value: unknown): string {
 
 function internalIdFromMerchantCode(code: string): string | null {
   const parts = code.split('-').map((part) => part.trim()).filter(Boolean);
-  return parts.length >= 3 ? parts[1] ?? null : null;
+  if (parts.length >= 3 && /^\d+$/.test(parts[1] ?? '')) return parts[1] ?? null;
+  if (parts.length > 0 && /^\d+$/.test(parts[0] ?? '')) return parts[0] ?? null;
+  return null;
 }
 
 function findColumn(headers: string[], name: string): number {

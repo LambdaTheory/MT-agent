@@ -21,6 +21,13 @@ describe('exposureCrawler Playwright evaluation', () => {
     expect(source).toContain('export async function collectExposurePage(');
     expect(source).toContain('await ensureExposurePage(config, page);');
   });
+
+  it('does not embed a product-price regex literal inside page.evaluate source', async () => {
+    const source = await readFile(new URL('../src/crawler/exposureCrawler.ts', import.meta.url), 'utf8');
+
+    expect(source).not.toContain('元\\/日|出售中|已下架');
+    expect(source).toContain("text.includes('元/日')");
+  });
 });
 
 describe('public traffic crawler orchestration', () => {
@@ -31,5 +38,14 @@ describe('public traffic crawler orchestration', () => {
     expect(source).toContain('await collectExposurePage(config, page);');
     expect(source).toContain('await collectDashboardPage(config, page);');
     expect(source).toContain('chromium.launchPersistentContext');
+  });
+
+  it('downloads goods export in the same persistent browser context before traffic pages', async () => {
+    const source = await readFile(new URL('../src/crawler/publicTrafficCrawler.ts', import.meta.url), 'utf8');
+
+    expect(source).toContain('goodsExportPath: string');
+    expect(source).toContain('await collectGoodsExportPage(config, browser, page, goodsExportPath);');
+    expect(source.indexOf('await collectGoodsExportPage')).toBeLessThan(source.indexOf('await collectExposurePage'));
+    expect(source).toContain('acceptDownloads: true');
   });
 });

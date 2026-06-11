@@ -16,7 +16,7 @@ describe('CLI loadEnv wiring', () => {
     const text = await source('../src/cli/publicTrafficReport.ts');
     expect(text).toContain("import { loadEnv } from '../config/loadEnv.js';");
     expect(text.indexOf('await loadEnv();')).toBeLessThan(text.indexOf('const config = await loadConfig();'));
-    expect(text.indexOf('await loadEnv();')).toBeLessThan(text.indexOf('sendFeishuCard(process.env, card, fallbackText)'));
+    expect(text.indexOf('await loadEnv();')).toBeLessThan(text.indexOf('sendFeishuCard(env, card, fallbackText)'));
     expect(text).not.toContain('sendFeishuText(process.env, text)');
   });
 

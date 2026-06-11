@@ -20,7 +20,7 @@ describe('publicTrafficReport rules wiring', () => {
     expect(source).toContain('aggregateExposureDeltas(thirtyDayDeltas)');
     expect(source).toContain('paths.exposure7dSummary');
     expect(source).toContain('paths.exposure30dSummary');
-    expect(source.indexOf('const { exposure: crawlResult, dashboard: rawTables } = await crawlPublicTrafficSources(config);')).toBeLessThan(
+    expect(source.indexOf('const { goodsExportPath, exposure: crawlResult, dashboard: rawTables } = await crawlPublicTrafficSources(config, paths.goodsExportWorkbook);')).toBeLessThan(
       source.indexOf('mergePublicTrafficData({'),
     );
     expect(source.indexOf('mergePublicTrafficData({')).toBeLessThan(source.indexOf('analyzePublicTrafficData({'));
@@ -28,6 +28,6 @@ describe('publicTrafficReport rules wiring', () => {
     expect(source).toContain('await writeFile(paths.markdown, buildPublicTrafficMarkdown(context),');
     expect(source).toContain('await writeFile(paths.workbook, writePublicTrafficWorkbookBuffer(context));');
     expect(source).toContain('buildPublicTrafficCard(context,');
-    expect(source).toContain('sendFeishuCard(process.env, card, fallbackText)');
+    expect(source).toContain('sendFeishuCard(env, card, fallbackText)');
   });
 });

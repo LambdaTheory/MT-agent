@@ -74,6 +74,9 @@ describe('public traffic report outputs', () => {
     expect(markdown).toContain('## 经营结论');
     expect(markdown).toContain('曝光 1000，较昨日上升 100');
     expect(markdown).toContain('## 1日总览');
+    expect(markdown).toContain('## 今日曝光 Top10');
+    expect(markdown).toContain('端内ID 1001｜公域商品A｜曝光 100｜访问 10｜金额 ¥88.50');
+    expect(markdown).not.toContain('## 预警商品（托管>5天 且 曝光<100）');
     expect(markdown).toContain('## 建议操作');
     expect(markdown).toContain('端内ID 900：检查价格/押金/库存/风控/履约链路。原因：访问有发货弱');
     expect(markdown).toContain('## 曝光不足');
@@ -92,17 +95,20 @@ describe('public traffic report outputs', () => {
     expect(text).toContain('公域数据日报 2026-06-10');
     expect(text).toContain('经营结论');
     expect(text).toContain('建议操作');
+    expect(text).toContain('今日曝光 Top10');
+    expect(text).toContain('端内ID 1001｜公域商品A｜曝光 100｜访问 10｜金额 ¥88.50');
+    expect(text).not.toContain('预警商品（托管>5天 且 曝光<100）');
     expect(text).toContain('端内ID 900｜检查价格/押金/库存/风控/履约链路｜访问有发货弱');
-    expect(text).toContain('曝光：1000');
-    expect(text).toContain('曝光不足：1个');
-    expect(text).toContain('新品观察：1个');
-    expect(text).toContain('生命周期治理：1个');
+    expect(text).toContain('曝光 1000｜公域访问 50｜后链路访问 40｜订单 4｜发货 2｜金额 ¥300.00');
+    expect(text).toContain('曝光到访问率 5.00%｜访问到发货率 5.00%');
+    expect(text).toContain('曝光不足 1｜点击弱 1｜转化弱 1｜高潜力 1｜新品观察 1｜生命周期治理 1｜建议操作 1');
     expect(text).toContain('转化弱 Top5');
     expect(text).toContain('高潜力 Top5');
     expect(text).toContain('新品观察 Top5');
     expect(text).toContain('生命周期治理 Top5');
     expect(text).toContain('端内ID 900');
-    expect(text).toContain('Markdown：report.md');
+    expect(text).not.toContain('Markdown：report.md');
+    expect(text).not.toContain('XLSX：report.xlsx');
   });
 
   it('builds a Feishu card payload', () => {
@@ -110,14 +116,33 @@ describe('public traffic report outputs', () => {
     expect(card.header).toMatchObject({ title: { tag: 'plain_text', content: '公域数据日报 2026-06-10' } });
     const serialized = JSON.stringify(card);
     expect(serialized).toContain('经营结论');
+    expect(serialized).toContain('今日曝光 Top10');
+    expect(serialized).not.toContain('预警商品（托管>5天 且 曝光<100）');
     expect(serialized).toContain('建议操作');
     expect(serialized).toContain('检查价格/押金/库存/风控/履约链路');
     expect(serialized).toContain('端内ID 558');
-    expect(serialized).toContain('新品观察：1个');
-    expect(serialized).toContain('生命周期治理：1个');
+    expect(serialized).toContain('新品观察 1');
+    expect(serialized).toContain('生命周期治理 1');
     expect(serialized).toContain('高潜力 Top5');
     expect(serialized).toContain('新品观察 Top5');
     expect(serialized).toContain('生命周期治理 Top5');
+    expect(serialized).not.toContain('report.md');
+    expect(serialized).not.toContain('report.xlsx');
+  });
+
+  it('uses column sets to beautify the card summary sections', () => {
+    const card = buildPublicTrafficCard(context, { markdownPath: 'report.md', workbookPath: 'report.xlsx' });
+    const elements = (card.body as { elements: Array<Record<string, unknown>> }).elements;
+    const columnSets = elements.filter((element) => element.tag === 'column_set');
+    const contents = (columnSet: Record<string, unknown>) =>
+      (columnSet.columns as Array<{ elements: Array<{ content: string }> }>).flatMap((column) => column.elements.map((element) => element.content));
+
+    expect(columnSets.length).toBeGreaterThanOrEqual(3);
+    expect(contents(columnSets[0])).toContain('**经营结论**');
+    expect(contents(columnSets[1])).toContain('曝光\n**1000**');
+    expect(contents(columnSets[1])).toContain('金额\n**¥300.00**');
+    expect(contents(columnSets[2])).toContain('**模块数量**');
+    expect(contents(columnSets[2])).toContain('曝光不足 1');
   });
 
   it('renders explanatory notes for empty sections', () => {
@@ -132,11 +157,88 @@ describe('public traffic report outputs', () => {
       lifecycleGovernance: [],
     };
     const markdown = buildPublicTrafficMarkdown(empty);
-    expect(markdown).toContain('## 建议操作\n暂无需要立即处理的建议操作。');
-    expect(markdown).toContain('## 曝光不足\n暂无达到阈值的曝光不足商品。');
+    expect(markdown).not.toContain('## 建议操作');
+    expect(markdown).not.toContain('## 曝光不足');
+    expect(markdown).not.toContain('暂无达到阈值');
     const text = buildPublicTrafficFeishuText(empty, { markdownPath: 'report.md', workbookPath: 'report.xlsx' });
-    expect(text).toContain('建议操作\n暂无需要立即处理的建议操作。');
-    expect(text).toContain('曝光不足 Top5\n暂无达到阈值的曝光不足商品。');
+    expect(text).not.toContain('建议操作\n暂无');
+    expect(text).not.toContain('曝光不足 Top5');
+    expect(text).not.toContain('暂无达到阈值');
+
+    const serialized = JSON.stringify(buildPublicTrafficCard(empty, { markdownPath: 'report.md', workbookPath: 'report.xlsx' }));
+    expect(serialized).not.toContain('曝光不足 Top5');
+    expect(serialized).not.toContain('暂无达到阈值');
+  });
+
+  it('omits zero-count modules from compact module count line', () => {
+    const mixed: PublicTrafficDataReportContext = {
+      ...context,
+      lowExposure: [],
+      weakClick: [],
+      highPotential: [],
+      lifecycleGovernance: [],
+    };
+
+    const text = buildPublicTrafficFeishuText(mixed, { markdownPath: 'report.md', workbookPath: 'report.xlsx' });
+    expect(text).toContain('模块数量\n转化弱 1｜新品观察 1｜建议操作 1');
+    expect(text).not.toContain('曝光不足 0');
+    expect(text).not.toContain('点击弱 0');
+  });
+
+  it('uses one-day visits to backfill top exposure when same-day exposure is unavailable', () => {
+    const fallback: PublicTrafficDataReportContext = {
+      ...context,
+      rows: [
+        {
+          platformProductId: 'P-visit',
+          displayProductId: '端内ID 888',
+          productName: '访问兜底商品',
+          custodyDays: null,
+          periods: {
+            '1d': metrics({ exposure: 0, publicVisits: 0, dashboardVisits: 66, amount: 0, hasExposureData: false, hasDashboardData: true }),
+            '7d': metrics({}),
+            '30d': metrics({}),
+          },
+        },
+      ],
+    };
+
+    expect(buildPublicTrafficFeishuText(fallback, { markdownPath: 'report.md', workbookPath: 'report.xlsx' })).toContain('端内ID 888｜访问兜底商品｜曝光 0｜访问 66｜金额 ¥0.00');
+  });
+
+  it('renders warning products with internal id first', () => {
+    const warning: PublicTrafficDataReportContext = {
+      ...context,
+      rows: [
+        {
+          platformProductId: 'P-warning',
+          displayProductId: '端内ID 284',
+          productName: '预警商品A',
+          custodyDays: 12,
+          periods: {
+            '1d': metrics({ exposure: 9, publicVisits: 1, dashboardVisits: 1, amount: 0 }),
+            '7d': metrics({}),
+            '30d': metrics({}),
+          },
+        },
+      ],
+    };
+
+    const text = buildPublicTrafficFeishuText(warning, { markdownPath: 'report.md', workbookPath: 'report.xlsx' });
+    expect(text).toContain('预警商品（托管>5天 且 曝光<100）');
+    expect(text).toContain('端内ID 284｜预警商品A｜曝光 9｜访问 1｜金额 ¥0.00｜托管 12天');
+    expect(text).not.toContain('预警商品A (端内ID 284)');
+  });
+
+  it('renders dashboard freshness notes in compact outputs', () => {
+    const stale: PublicTrafficDataReportContext = {
+      ...context,
+      dataQualityNotes: ['今日访问数据支付宝暂未更新，本期访问量板块指标缺失。'],
+    };
+
+    expect(buildPublicTrafficMarkdown(stale)).toContain('## 数据提示\n今日访问数据支付宝暂未更新，本期访问量板块指标缺失。');
+    expect(buildPublicTrafficFeishuText(stale, { markdownPath: 'report.md', workbookPath: 'report.xlsx' })).toContain('数据提示\n今日访问数据支付宝暂未更新，本期访问量板块指标缺失。');
+    expect(JSON.stringify(buildPublicTrafficCard(stale, { markdownPath: 'report.md', workbookPath: 'report.xlsx' }))).toContain('今日访问数据支付宝暂未更新，本期访问量板块指标缺失。');
   });
 
   it('truncates Feishu top5 to five items', () => {
@@ -242,13 +344,13 @@ describe('public traffic report outputs', () => {
     expect(markdown).toContain('暂无昨日公域数据上下文');
     expect(markdown).toContain('今日仅展示基准值：曝光 48103。');
     expect(markdown).not.toContain('今日仅展示基准值：曝光 70000。');
-    expect(markdown).toContain('## 建议操作\n暂无需要立即处理的建议操作。');
+    expect(markdown).not.toContain('## 建议操作');
 
     const text = buildPublicTrafficFeishuText(legacy, { markdownPath: 'report.md', workbookPath: 'report.xlsx' });
     expect(text).toContain('经营结论');
     expect(text).toContain('暂无昨日公域数据上下文');
     expect(text).toContain('今日仅展示基准值：曝光 48103。');
     expect(text).not.toContain('今日仅展示基准值：曝光 70000。');
-    expect(text).toContain('建议操作\n暂无需要立即处理的建议操作。');
+    expect(text).not.toContain('建议操作\n暂无需要立即处理的建议操作。');
   });
 });

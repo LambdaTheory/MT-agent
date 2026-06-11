@@ -38,6 +38,22 @@ describe('parseGoodsExportMapping', () => {
     expect(result.skippedRows).toEqual([]);
   });
 
+  it('uses numeric merchant-side codes as internal product ID fallback', async () => {
+    const path = await writeWorkbook([
+      ['商品名称', '商家侧编码', '平台侧编码'],
+      ['商品A', '284', '2025122422000686849975'],
+      ['商品B', '333-1', '2026011222000691436531'],
+    ]);
+
+    const result = parseGoodsExportMapping(path);
+
+    expect(result.mapping).toEqual({
+      '2025122422000686849975': '284',
+      '2026011222000691436531': '333',
+    });
+    expect(result.skippedRows).toEqual([]);
+  });
+
   it('skips rows with invalid merchant-side codes', async () => {
     const path = await writeWorkbook([
       ['商品名称', '商家侧编码', '平台侧编码'],

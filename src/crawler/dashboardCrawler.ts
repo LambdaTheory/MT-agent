@@ -17,6 +17,48 @@ function normalize(value: string | null | undefined): string {
   return (value ?? '').replace(/\s+/g, ' ').trim();
 }
 
+export function isDashboardEmptyStateText(text: string | null | undefined): boolean {
+  const normalized = normalize(text);
+  return normalized.includes('未查询到相关数据') || normalized.includes('暂无数据');
+}
+
+async function isDashboardEmptyStateVisible(page: Page): Promise<boolean> {
+  const text = await page.locator('body').textContent().catch(() => '');
+  return isDashboardEmptyStateText(text);
+}
+
+function emptyDashboardTable(period: keyof typeof PERIOD_LABELS): RawTableData {
+  return {
+    period,
+    headers: [],
+    rows: [],
+    collection: {
+      period,
+      actualPageSizes: [],
+      pageCount: 0,
+      rowCount: 0,
+      dedupedRowCount: 0,
+      displayedTotalCount: 0,
+      pageSizeFallback: false,
+      complete: false,
+    },
+  };
+}
+
+async function waitForTableOrEmptyState(page: Page, timeout: number): Promise<void> {
+  await Promise.race([
+    page.waitForSelector('.ant-table table', { timeout }),
+    page.waitForFunction(
+      () => {
+        const text = String(document.body?.innerText ?? '').replace(/\s+/g, ' ').trim();
+        return text.includes('未查询到相关数据') || text.includes('暂无数据');
+      },
+      undefined,
+      { timeout },
+    ),
+  ]);
+}
+
 async function waitForTableRefresh(page: Page): Promise<void> {
   await page.waitForTimeout(2000);
 }
@@ -120,8 +162,15 @@ async function extractCurrentTable(page: Page): Promise<{ headers: string[]; row
 
 async function collectPeriod(page: Page, period: keyof typeof PERIOD_LABELS, pageSize: number, preferredPageSize: number): Promise<RawTableData> {
   await selectPeriod(page, period);
+  if (await isDashboardEmptyStateVisible(page)) {
+    return emptyDashboardTable(period);
+  }
+
   await setDashboardPageSize(page, pageSize);
-  await page.waitForSelector('.ant-table table', { timeout: 30000 });
+  await waitForTableOrEmptyState(page, 30000);
+  if (await isDashboardEmptyStateVisible(page)) {
+    return emptyDashboardTable(period);
+  }
 
   const allRows: string[][] = [];
   let headers: string[] = [];
@@ -253,9 +302,9 @@ export async function collectDashboardPage(config: AgentConfig, page: Page): Pro
   await page.waitForURL(/assistant-data-analysis\/index\/product\/list/, { timeout: 180000 }).catch(() => undefined);
 
   try {
-    await page.waitForSelector('.ant-table table', { timeout: 180000 });
+    await waitForTableOrEmptyState(page, 180000);
   } catch {
-    throw new Error('Dashboard table did not appear within 180 seconds. Complete QR login in the opened browser window.');
+    throw new Error('Dashboard table or empty-state did not appear within 180 seconds. Complete QR login in the opened browser window.');
   }
 
   const rawDir = `${config.outputDir}/latest`;

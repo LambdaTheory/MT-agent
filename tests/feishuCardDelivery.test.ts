@@ -24,4 +24,42 @@ describe('sendFeishuCard', () => {
     expect(result).toEqual({ sent: true, channel: 'app' });
     expect(JSON.parse(String(calls[1].init.body)).msg_type).toBe('interactive');
   });
+
+  it('defaults to personal recipient and can send to both personal and group', async () => {
+    const messageUrls: string[] = [];
+    const messageBodies: unknown[] = [];
+    const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
+      const asString = String(url);
+      if (asString.includes('/auth/v3/tenant_access_token/internal')) return jsonResponse({ code: 0, tenant_access_token: 'token' });
+      messageUrls.push(asString);
+      messageBodies.push(JSON.parse(String(init?.body)));
+      return jsonResponse({ code: 0 });
+    };
+
+    const baseEnv = {
+      FEISHU_APP_ID: 'cli',
+      FEISHU_APP_SECRET: 'secret',
+      FEISHU_PERSONAL_RECEIVE_ID_TYPE: 'open_id',
+      FEISHU_PERSONAL_RECEIVE_ID: 'ou_personal',
+      FEISHU_GROUP_RECEIVE_ID_TYPE: 'chat_id',
+      FEISHU_GROUP_RECEIVE_ID: 'oc_group',
+    };
+
+    await expect(sendFeishuCard(baseEnv, { schema: '2.0' }, 'fallback', fetchImpl as typeof fetch)).resolves.toEqual({ sent: true, channel: 'app' });
+    expect(messageUrls.at(-1)).toBe('https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=open_id');
+    expect(messageBodies.at(-1)).toMatchObject({ receive_id: 'ou_personal' });
+
+    await expect(sendFeishuCard({ ...baseEnv, FEISHU_SEND_TO: 'group' }, { schema: '2.0' }, 'fallback', fetchImpl as typeof fetch)).resolves.toEqual({ sent: true, channel: 'app' });
+    expect(messageUrls.at(-1)).toBe('https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id');
+    expect(messageBodies.at(-1)).toMatchObject({ receive_id: 'oc_group' });
+
+    messageUrls.length = 0;
+    messageBodies.length = 0;
+    await expect(sendFeishuCard({ ...baseEnv, FEISHU_SEND_TO: 'both' }, { schema: '2.0' }, 'fallback', fetchImpl as typeof fetch)).resolves.toEqual({ sent: true, channel: 'app' });
+    expect(messageUrls).toEqual([
+      'https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=open_id',
+      'https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=chat_id',
+    ]);
+    expect(messageBodies).toMatchObject([{ receive_id: 'ou_personal' }, { receive_id: 'oc_group' }]);
+  });
 });

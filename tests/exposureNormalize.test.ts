@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { productNameFromInfo, resolveProductNameFromInfo } from '../src/crawler/exposureCrawler.js';
 import { normalizeExposureProductRows, parseMoney, parseNumberText } from '../src/publicTraffic/exposureNormalize.js';
 
 describe('exposure normalization', () => {
@@ -101,5 +102,23 @@ describe('exposure normalization', () => {
         [['DJI Pocket 3', '2026052122000827682227', '5,801', '159', '¥5.00', '¥10.00']],
       ),
     ).toThrow('Missing exposure column');
+  });
+
+  it('cleans exposure table product names from preview controls, price, status, and product id', () => {
+    const infoText = '预览富士in tax wide300宽幅拍立得 复... .60 ~ 287.00元/日出售中 商品ID：20260602220008305711059';
+
+    expect(productNameFromInfo(infoText, '20260602220008305711059')).toBe('富士in tax wide300宽幅拍立得 复...');
+  });
+
+  it('cleans default-hidden exposure names when id and price are adjacent', () => {
+    const infoText = '预览富士in tax wide300宽幅拍立得 复...ID：20260602220008305711059.60 ~ 287.00元/日出售中';
+
+    expect(productNameFromInfo(infoText, '20260602220008305711059')).toBe('富士in tax wide300宽幅拍立得 复...');
+  });
+
+  it('falls back to full exposure info text when preferred title is only preview control text', () => {
+    const infoText = '预览佳能G7X3 Mark III数码相机 冷白皮 ...ID：20260601220005303244401.24 ~ 370.34元/日出售中';
+
+    expect(resolveProductNameFromInfo('预览', infoText, '20260601220005303244401')).toBe('佳能G7X3 Mark III数码相机 冷白皮 ...');
   });
 });

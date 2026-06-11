@@ -1,17 +1,105 @@
 import type { FeishuCardPayload } from '../notify/feishuApp.js';
-import type { PublicTrafficDataReportContext, PublicTrafficReportPaths, PublicTrafficReportSectionItem } from './types.js';
+import type { PublicTrafficDataReportContext, PublicTrafficProductDataRow, PublicTrafficReportPaths, PublicTrafficReportSectionItem } from './types.js';
 
 function percent(value: number): string {
   return `${(value * 100).toFixed(2)}%`;
 }
 
-function topText(title: string, items: PublicTrafficReportSectionItem[], emptyNote: string, limit = 5): string {
-  const lines = items.length > 0 ? items.slice(0, limit).map((item, index) => `${index + 1}. ${item.identifier}｜${item.action}｜${item.reason}`) : [emptyNote];
-  return `**${title}**\n${lines.join('\n')}`;
+function optionalTopText(title: string, items: PublicTrafficReportSectionItem[], limit = 5): string | null {
+  if (items.length === 0) return null;
+  return `**${title}**\n${items.slice(0, limit).map((item, index) => `${index + 1}. ${item.identifier}｜${item.action}｜${item.reason}`).join('\n')}`;
 }
 
-export function buildPublicTrafficCard(context: PublicTrafficDataReportContext, paths: PublicTrafficReportPaths): FeishuCardPayload {
+function productLine(row: PublicTrafficProductDataRow, index: number): string {
+  const one = row.periods['1d'];
+  const visits = one.publicVisits || one.dashboardVisits;
+  return `${index + 1}. ${row.displayProductId}｜${row.productName || 'Unknown'}｜曝光 ${one.exposure}｜访问 ${visits}｜金额 ¥${one.amount.toFixed(2)}`;
+}
+
+function topExposureText(rows: PublicTrafficProductDataRow[]): string {
+  const score = (row: PublicTrafficProductDataRow) => row.periods['1d'].exposure || row.periods['1d'].publicVisits || row.periods['1d'].dashboardVisits;
+  const items = [...rows].sort((a, b) => score(b) - score(a)).slice(0, 10);
+  const lines = items.map(productLine);
+  return `**今日曝光 Top10**\n${lines.join('\n')}`;
+}
+
+function warningProductsText(rows: PublicTrafficProductDataRow[]): string {
+  const items = rows
+    .filter((row) => typeof row.custodyDays === 'number' && row.custodyDays > 5 && row.periods['1d'].exposure < 100)
+    .sort((a, b) => a.periods['1d'].exposure - b.periods['1d'].exposure || (b.custodyDays ?? 0) - (a.custodyDays ?? 0))
+    .slice(0, 15);
+  if (items.length === 0) return '';
+  const lines = items.map((row, index) => `${productLine(row, index)}｜托管 ${row.custodyDays}天`);
+  return `**预警商品（托管>5天 且 曝光<100）**\n${lines.join('\n')}`;
+}
+
+function dataQualityText(context: PublicTrafficDataReportContext): string | null {
+  return context.dataQualityNotes?.length ? `**数据提示**\n${context.dataQualityNotes.join('\n')}` : null;
+}
+
+function rateText(one: PublicTrafficDataReportContext['summary']['1d']): string {
+  return `**转化率**\n曝光到访问率 ${percent(one.exposureVisitRate)}｜访问到发货率 ${percent(one.visitShipmentRate)}`;
+}
+
+function moduleCounts(context: PublicTrafficDataReportContext): Array<[string, number]> {
+  const counts: Array<[string, number]> = [
+    ['曝光不足', context.lowExposure.length],
+    ['点击弱', context.weakClick.length],
+    ['转化弱', context.weakConversion.length],
+    ['高潜力', context.highPotential.length],
+    ['新品观察', context.newProductObservation.length],
+    ['生命周期治理', context.lifecycleGovernance.length],
+    ['建议操作', context.recommendedActions.length],
+  ];
+  return counts.filter(([, count]) => count > 0);
+}
+
+function markdownColumn(content: string): Record<string, unknown> {
+  return {
+    tag: 'column',
+    width: 'weighted',
+    weight: 1,
+    elements: [{ tag: 'markdown', content }],
+  };
+}
+
+function columnSet(columns: string[]): Record<string, unknown> {
+  return { tag: 'column_set', columns: columns.map(markdownColumn) };
+}
+
+function optionalElement(element: Record<string, unknown> | null): Record<string, unknown>[] {
+  return element ? [element] : [];
+}
+
+function conclusionColumnSet(context: PublicTrafficDataReportContext): Record<string, unknown> {
+  const lines = context.conclusions.map((item) => `**${item.label}**\n${item.text}`);
+  return columnSet(['**经营结论**', ...lines].slice(0, 3));
+}
+
+function funnelColumnSet(one: PublicTrafficDataReportContext['summary']['1d']): Record<string, unknown> {
+  return columnSet([
+    `曝光\n**${one.exposure}**`,
+    `公域访问\n**${one.publicVisits}**`,
+    `后链路访问\n**${one.dashboardVisits}**`,
+    `订单\n**${one.createdOrders}**`,
+    `发货\n**${one.shippedOrders}**`,
+    `金额\n**¥${one.amount.toFixed(2)}**`,
+  ]);
+}
+
+function moduleColumnSet(context: PublicTrafficDataReportContext): Record<string, unknown> | null {
+  const counts = moduleCounts(context);
+  if (counts.length === 0) return null;
+  return columnSet(['**模块数量**', ...counts.map(([label, count]) => `${label} ${count}`)]);
+}
+
+function markdownElement(content: string | null): { tag: 'markdown'; content: string }[] {
+  return content ? [{ tag: 'markdown', content }] : [];
+}
+
+export function buildPublicTrafficCard(context: PublicTrafficDataReportContext, _paths: PublicTrafficReportPaths): FeishuCardPayload {
   const one = context.summary['1d'];
+  const warningText = warningProductsText(context.rows);
   return {
     schema: '2.0',
     config: { update_multi: true },
@@ -21,21 +109,25 @@ export function buildPublicTrafficCard(context: PublicTrafficDataReportContext, 
     },
     body: {
       elements: [
-        { tag: 'markdown', content: `**经营结论**\n${context.conclusions.map((item) => `${item.label}：${item.text}`).join('\n')}` },
+        conclusionColumnSet(context),
         { tag: 'hr' },
-        { tag: 'markdown', content: `**今日漏斗**\n曝光：${one.exposure}\n公域访问：${one.publicVisits}\n后链路访问：${one.dashboardVisits}\n订单：${one.createdOrders}\n发货：${one.shippedOrders}\n金额：¥${one.amount.toFixed(2)}\n曝光到访问率：${percent(one.exposureVisitRate)}\n访问到发货率：${percent(one.visitShipmentRate)}` },
+        { tag: 'markdown', content: '**今日漏斗**' },
+        funnelColumnSet(one),
+        { tag: 'markdown', content: rateText(one) },
+        ...markdownElement(dataQualityText(context)),
+        ...optionalElement(moduleColumnSet(context)),
         { tag: 'hr' },
-        { tag: 'markdown', content: `**模块数量**\n曝光不足：${context.lowExposure.length}个\n点击弱：${context.weakClick.length}个\n转化弱：${context.weakConversion.length}个\n高潜力：${context.highPotential.length}个\n新品观察：${context.newProductObservation.length}个\n生命周期治理：${context.lifecycleGovernance.length}个` },
+        { tag: 'markdown', content: topExposureText(context.rows) },
+        ...markdownElement(warningText),
         { tag: 'hr' },
-        { tag: 'markdown', content: topText('建议操作', context.recommendedActions, context.emptySectionNotes.recommendedActions, 8) },
+        ...markdownElement(optionalTopText('建议操作', context.recommendedActions, 8)),
         { tag: 'hr' },
-        { tag: 'markdown', content: topText('曝光不足 Top5', context.lowExposure, context.emptySectionNotes.lowExposure) },
-        { tag: 'markdown', content: topText('点击弱 Top5', context.weakClick, context.emptySectionNotes.weakClick) },
-        { tag: 'markdown', content: topText('转化弱 Top5', context.weakConversion, context.emptySectionNotes.weakConversion) },
-        { tag: 'markdown', content: topText('高潜力 Top5', context.highPotential, context.emptySectionNotes.highPotential) },
-        { tag: 'markdown', content: topText('新品观察 Top5', context.newProductObservation, context.emptySectionNotes.newProductObservation) },
-        { tag: 'markdown', content: topText('生命周期治理 Top5', context.lifecycleGovernance, context.emptySectionNotes.lifecycleGovernance) },
-        { tag: 'markdown', content: `**报告文件**\nMarkdown：${paths.markdownPath}\nXLSX：${paths.workbookPath}` },
+        ...markdownElement(optionalTopText('曝光不足 Top5', context.lowExposure)),
+        ...markdownElement(optionalTopText('点击弱 Top5', context.weakClick)),
+        ...markdownElement(optionalTopText('转化弱 Top5', context.weakConversion)),
+        ...markdownElement(optionalTopText('高潜力 Top5', context.highPotential)),
+        ...markdownElement(optionalTopText('新品观察 Top5', context.newProductObservation)),
+        ...markdownElement(optionalTopText('生命周期治理 Top5', context.lifecycleGovernance)),
       ],
     },
   };

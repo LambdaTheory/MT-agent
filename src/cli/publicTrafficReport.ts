@@ -2,7 +2,6 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { loadConfig } from '../config/loadConfig.js';
 import { loadEnv } from '../config/loadEnv.js';
-import { downloadGoodsExport } from '../crawler/goodsExportCrawler.js';
 import { crawlPublicTrafficSources } from '../crawler/publicTrafficCrawler.js';
 import { normalizeRowsForPeriod } from '../extractor/normalizeRows.js';
 import { loadProductIdMapping } from '../mapping/productIdMapping.js';
@@ -21,6 +20,17 @@ import { loadRecentExposureDeltas } from '../publicTraffic/recentExposureDeltas.
 import type { PeriodProductMetrics, RawTableData } from '../domain/types.js';
 import type { ExposureCumulativeProduct, PublicTrafficDataReportContext, PublicTrafficDataSummary } from '../publicTraffic/types.js';
 import { createRunLog } from '../storage/runLog.js';
+
+const TODAY_DASHBOARD_NOT_UPDATED_NOTE = '今日访问数据支付宝暂未更新，本期访问量板块指标缺失。';
+type FeishuSendTo = 'personal' | 'group' | 'both';
+
+export function parseFeishuSendToArg(argv: string[]): FeishuSendTo | undefined {
+  const flagIndex = argv.indexOf('--send-to');
+  const rawValue = flagIndex >= 0 ? argv[flagIndex + 1] : argv.find((item) => item.startsWith('--send-to='))?.slice('--send-to='.length);
+  if (!rawValue) return undefined;
+  if (rawValue === 'personal' || rawValue === 'group' || rawValue === 'both') return rawValue;
+  throw new Error(`Invalid --send-to value: ${rawValue}. Expected personal, group, or both.`);
+}
 
 function today(): string {
   return new Date().toISOString().slice(0, 10);
@@ -157,27 +167,35 @@ function resolveProductIdMappingPath(config: Awaited<ReturnType<typeof loadConfi
   return config.productIdMappingPath ?? 'config/product-id-map.json';
 }
 
-async function refreshProductIdMappingForReport(config: Awaited<ReturnType<typeof loadConfig>>, paths: ReturnType<typeof buildPublicTrafficPaths>, log: ReturnType<typeof createRunLog>): Promise<void> {
-  const mappingPath = resolveProductIdMappingPath(config);
-  log.addEvent('开始下载商品总表并刷新商品ID映射');
-  const exportPath = await downloadGoodsExport(config, paths.goodsExportWorkbook);
-  const mappingCount = await writeProductIdMappingFromExport(exportPath, mappingPath, paths.productIdMappingSyncLog);
+async function refreshProductIdMappingForReport(exportPath: string, mappingPath: string, logPath: string, log: ReturnType<typeof createRunLog>): Promise<void> {
+  log.addEvent('开始从商品总表刷新商品ID映射');
+  const mappingCount = await writeProductIdMappingFromExport(exportPath, mappingPath, logPath);
   log.addEvent(`商品ID映射已刷新: ${mappingCount} 条, source=${exportPath}`);
+}
+
+function isEmptyDashboardTable(table: RawTableData): boolean {
+  return table.headers.length === 0 && table.rows.length === 0 && table.collection.rowCount === 0 && table.collection.dedupedRowCount === 0 && table.collection.complete === false;
+}
+
+function dashboardDataQualityNotes(rawTables: RawTableData[]): string[] {
+  return rawTables.some((table) => table.period === '1d' && isEmptyDashboardTable(table)) ? [TODAY_DASHBOARD_NOT_UPDATED_NOTE] : [];
 }
 
 export async function runPublicTrafficReportCli(): Promise<void> {
   await loadEnv();
   const config = await loadConfig();
-  const date = today();
-  const paths = buildPublicTrafficPaths(config.outputDir, date);
+  const runDate = today();
+  const dataDate = yesterday(runDate);
+  const paths = buildPublicTrafficPaths(config.outputDir, runDate);
   const log = createRunLog(new Date().toISOString(), config.exposureUrl ?? config.targetUrl);
 
   await mkdir(paths.dir, { recursive: true });
 
   try {
-    await refreshProductIdMappingForReport(config, paths, log);
-    log.addEvent('开始抓取曝光与后链路数据');
-    const { exposure: crawlResult, dashboard: rawTables } = await crawlPublicTrafficSources(config);
+    const mappingPath = resolveProductIdMappingPath(config);
+    log.addEvent('开始下载商品总表、抓取曝光与后链路数据');
+    const { goodsExportPath, exposure: crawlResult, dashboard: rawTables } = await crawlPublicTrafficSources(config, paths.goodsExportWorkbook);
+    await refreshProductIdMappingForReport(goodsExportPath, mappingPath, paths.productIdMappingSyncLog, log);
 
     await writeFile(paths.exposureCumulativeProducts, JSON.stringify(crawlResult.products, null, 2), 'utf8');
     log.addEvent(`保存累计快照: ${crawlResult.products.length} 条商品`);
@@ -187,16 +205,16 @@ export async function runPublicTrafficReportCli(): Promise<void> {
       log.addEvent(`保存总体概况: ${crawlResult.overview.length} 个周期`);
     }
 
-    const previous = await loadPreviousCumulative(config.outputDir, date);
+    const previous = await loadPreviousCumulative(config.outputDir, runDate);
     if (!previous.found) {
       log.addEvent('商品级曝光历史不足: 跳过商品级日差分');
     }
-    const dailyDelta = previous.found ? computeExposureDailyDelta(date, previous.products, crawlResult.products) : [];
+    const dailyDelta = previous.found ? computeExposureDailyDelta(dataDate, previous.products, crawlResult.products) : [];
     await writeFile(paths.exposureDailyDelta, JSON.stringify(dailyDelta, null, 2), 'utf8');
     log.addEvent(`日差分: ${dailyDelta.length} 条, 新品=${dailyDelta.filter((row) => row.flags.includes('new_product')).length}`);
 
-    const sevenDayDeltas = await loadRecentExposureDeltas(config.outputDir, date, 7);
-    const thirtyDayDeltas = await loadRecentExposureDeltas(config.outputDir, date, 30);
+    const sevenDayDeltas = await loadRecentExposureDeltas(config.outputDir, runDate, 7);
+    const thirtyDayDeltas = await loadRecentExposureDeltas(config.outputDir, runDate, 30);
     const sevenDaySummary = aggregateExposureDeltas(sevenDayDeltas);
     const thirtyDaySummary = aggregateExposureDeltas(thirtyDayDeltas);
     await writeFile(paths.exposure7dSummary, JSON.stringify(sevenDaySummary, null, 2), 'utf8');
@@ -210,9 +228,11 @@ export async function runPublicTrafficReportCli(): Promise<void> {
       log.addPeriodStats(table.collection);
     }
     const dashboardRows = normalizeDashboardRowsForReport(rawTables, log);
+    const dataQualityNotes = dashboardDataQualityNotes(rawTables);
+    for (const note of dataQualityNotes) log.addEvent(note);
     log.addEvent(`后链路数据: ${dashboardRows.length} 条周期商品记录`);
 
-    const mapping = await loadMappingSafely(resolveProductIdMappingPath(config), log);
+    const mapping = await loadMappingSafely(mappingPath, log);
     const merged = mergePublicTrafficData({
       dashboardRows,
       exposureByPeriod: {
@@ -232,12 +252,13 @@ export async function runPublicTrafficReportCli(): Promise<void> {
       cumulativeProducts: crawlResult.products,
       mapping,
     });
-    const previousSummary = await loadPreviousReportSummary(config.outputDir, date, log);
+    const previousSummary = await loadPreviousReportSummary(config.outputDir, runDate, log);
     const context = analyzePublicTrafficData({
-      date,
+      date: dataDate,
       rows: merged.rows,
       overview: crawlResult.overview,
       previousSummary,
+      dataQualityNotes,
       dailyDelta,
       sevenDaySummary,
       thirtyDaySummary,
@@ -276,7 +297,9 @@ export async function runPublicTrafficReportCli(): Promise<void> {
 
 async function sendFeishuCardSafely(card: Record<string, unknown>, fallbackText: string, log: ReturnType<typeof createRunLog>): Promise<void> {
   try {
-    const feishuResult = await sendFeishuCard(process.env, card, fallbackText);
+    const sendTo = parseFeishuSendToArg(process.argv);
+    const env = sendTo ? { ...process.env, FEISHU_SEND_TO: sendTo } : process.env;
+    const feishuResult = await sendFeishuCard(env, card, fallbackText);
     log.addEvent(feishuResult.sent ? '飞书通知已发送' : `飞书通知跳过: ${feishuResult.reason}`);
   } catch (error) {
     log.addEvent(`飞书通知失败: ${error instanceof Error ? error.message : String(error)}`);

@@ -157,6 +157,7 @@ export interface PublicTrafficDataReportContext {
   date: string;
   summary: Record<PeriodKey, PublicTrafficDataSummary>;
   conclusions: PublicTrafficConclusion[];
+  dataQualityNotes?: string[];
   rows: PublicTrafficProductDataRow[];
   lowExposure: PublicTrafficReportSectionItem[];
   weakClick: PublicTrafficReportSectionItem[];
@@ -172,6 +173,7 @@ export interface PublicTrafficDataAnalysisInput extends PublicTrafficDataContext
   date: string;
   overview?: ExposureOverviewMetric[];
   previousSummary?: PublicTrafficDataSummary;
+  dataQualityNotes?: string[];
   dailyDelta?: ExposureDailyDelta[];
   sevenDaySummary?: ExposureProductSummary[];
   thirtyDaySummary?: ExposureProductSummary[];

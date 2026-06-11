@@ -111,6 +111,21 @@ function item(row: PublicTrafficProductDataRow, action: string, reason: string):
   return { identifier: row.displayProductId, action, reason };
 }
 
+function internalIdNumber(row: PublicTrafficProductDataRow): number | null {
+  const match = /^端内ID\s+(\d+)$/.exec(row.displayProductId.trim());
+  if (!match) return null;
+  const parsed = Number.parseInt(match[1], 10);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function monitoringReason(row: PublicTrafficProductDataRow): string {
+  const one = row.periods['1d'];
+  const seven = row.periods['7d'];
+  const oneVisits = one.publicVisits || one.dashboardVisits;
+  const sevenVisits = seven.publicVisits || seven.dashboardVisits;
+  return `1日曝光 ${one.exposure}，访问 ${oneVisits}，发货 ${one.shippedOrders}，金额 ${one.amount.toFixed(2)}；7日曝光 ${seven.exposure}，访问 ${sevenVisits}，发货 ${seven.shippedOrders}，金额 ${seven.amount.toFixed(2)}`;
+}
+
 function byPlatformId(rows: PublicTrafficProductDataRow[]): Map<string, PublicTrafficProductDataRow> {
   return new Map(rows.map((row) => [row.platformProductId, row]));
 }
@@ -152,13 +167,18 @@ export function analyzePublicTrafficData(input: PublicTrafficDataAnalysisInput):
   const dailyDelta = input.dailyDelta ?? [];
 
   const lowExposure = rows
-    .filter((row) => seven(row).hasExposureData)
-    .filter((row) => (one(row).exposure <= 50 && seven(row).exposure <= 300) || (seven(row).publicVisits <= 3 && thirty(row).publicVisits <= 10))
+    .filter((row) => {
+      const custodyLowExposure = typeof row.custodyDays === 'number' && row.custodyDays > 5 && one(row).hasExposureData && one(row).exposure < 100;
+      const exposureHistoryLow = one(row).hasExposureData && seven(row).hasExposureData && one(row).exposure <= 50 && seven(row).exposure <= 300;
+      const hasVisitEvidence = one(row).publicVisits > 0 || seven(row).publicVisits > 0 || thirty(row).publicVisits > 0;
+      const visitEvidenceLow = (seven(row).hasExposureData || seven(row).hasDashboardData || thirty(row).hasDashboardData) && hasVisitEvidence && seven(row).publicVisits <= 3 && thirty(row).publicVisits <= 10;
+      return custodyLowExposure || exposureHistoryLow || visitEvidenceLow;
+    })
     .filter((row) => one(row).shippedOrders === 0 && seven(row).shippedOrders === 0)
     .sort((a, b) => seven(a).exposure - seven(b).exposure || one(a).exposure - one(b).exposure)
     .slice(0, TOP_N)
     .map((row) =>
-      item(row, '检查托管状态、标题、主图、类目和是否继续投放', `1日曝光 ${one(row).exposure}，7日曝光 ${seven(row).exposure}，7日访问 ${seven(row).publicVisits}`),
+      item(row, '检查托管状态、标题、主图、类目和是否继续投放', `已托管 ${row.custodyDays ?? '未知'} 天，1日曝光 ${one(row).exposure}，7日曝光 ${seven(row).exposure}，7日访问 ${seven(row).publicVisits}`),
     );
 
   const weakClick = rows
@@ -200,13 +220,20 @@ export function analyzePublicTrafficData(input: PublicTrafficDataAnalysisInput):
       ),
     );
 
-  const newProductObservation = dailyDelta
+  const newProductObservationFromDelta = dailyDelta
     .filter((row) => row.flags.includes('new_product'))
     .map((delta) => ({ delta, row: rowsById.get(delta.platformProductId) }))
     .filter((entry): entry is { delta: (typeof dailyDelta)[number]; row: PublicTrafficProductDataRow } => Boolean(entry.row))
     .sort((a, b) => a.delta.exposure - b.delta.exposure || a.delta.visits - b.delta.visits)
-    .slice(0, TOP_N)
-    .map(({ delta, row }) => item(row, '观察 3-7 天，重点看曝光、访问和首单/发货', `新品今日进入公域快照，曝光 ${delta.exposure}，访问 ${delta.visits}，金额 ${delta.amount.toFixed(2)}`));
+    .map(({ row }) => item(row, '新品数据监控', monitoringReason(row)));
+
+  const newProductObservation = [
+    ...rows
+      .filter((row) => (internalIdNumber(row) ?? 0) > 700)
+      .sort((a, b) => (internalIdNumber(a) ?? 0) - (internalIdNumber(b) ?? 0))
+      .map((row) => item(row, '新品数据监控', monitoringReason(row))),
+    ...newProductObservationFromDelta,
+  ].filter((entry, index, all) => all.findIndex((candidate) => candidate.identifier === entry.identifier) === index).slice(0, TOP_N);
 
   const lifecycleGovernance = rows
     .filter((row) => typeof row.custodyDays === 'number' && row.custodyDays >= 30)
@@ -223,6 +250,7 @@ export function analyzePublicTrafficData(input: PublicTrafficDataAnalysisInput):
     date: input.date,
     summary,
     conclusions: buildConclusions(summary['1d'], input.previousSummary),
+    dataQualityNotes: input.dataQualityNotes,
     rows,
     lowExposure,
     weakClick,

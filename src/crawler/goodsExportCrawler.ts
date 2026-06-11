@@ -95,26 +95,32 @@ async function prepareGoodsExportPage(config: AgentConfig, browser: BrowserConte
   await browser.pages()[0]?.waitForTimeout(1000);
 }
 
+export async function collectGoodsExportPage(config: AgentConfig, browser: BrowserContext, page: Page, outputPath = 'output/latest/goods-export.xlsx'): Promise<string> {
+  await mkdir(dirname(outputPath), { recursive: true });
+
+  await prepareGoodsExportPage(config, browser, page);
+
+  const downloadPromise = page.waitForEvent('download', { timeout: 180000 });
+  await clickExportDropdown(page);
+  await clickExportMenuItem(page);
+  const download = await downloadPromise;
+  await download.saveAs(outputPath);
+
+  return outputPath;
+}
+
 export async function downloadGoodsExport(config: AgentConfig, outputPath = 'output/latest/goods-export.xlsx'): Promise<string> {
   await mkdir(config.browserProfileDir, { recursive: true });
-  await mkdir(dirname(outputPath), { recursive: true });
   await clearBrowserProfileLocks(config.browserProfileDir);
 
-  const browser = await chromium.launchPersistentContext(config.browserProfileDir, { acceptDownloads: true, headless: false });
+  const browser = await chromium.launchPersistentContext(config.browserProfileDir, { acceptDownloads: true, headless: false, viewport: { width: 1920, height: 1080 } });
   const page = await prepareDashboardPage(browser.pages(), () => browser.newPage());
   let completed = false;
 
   try {
-    await prepareGoodsExportPage(config, browser, page);
-
-    const downloadPromise = page.waitForEvent('download', { timeout: 180000 });
-    await clickExportDropdown(page);
-    await clickExportMenuItem(page);
-    const download = await downloadPromise;
-    await download.saveAs(outputPath);
-
+    const exportPath = await collectGoodsExportPage(config, browser, page, outputPath);
     completed = true;
-    return outputPath;
+    return exportPath;
   } finally {
     if (completed || !shouldKeepBrowserOpenOnFailure(process.env.MT_AGENT_KEEP_BROWSER_ON_FAILURE)) {
       await browser.close();

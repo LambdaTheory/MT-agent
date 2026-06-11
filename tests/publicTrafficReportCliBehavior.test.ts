@@ -65,6 +65,7 @@ describe('runPublicTrafficReportCli public traffic sequencing', () => {
       browserProfileDir: join(mocks.outputDir, 'profile'),
     });
     mocks.crawlPublicTrafficSources.mockResolvedValue({
+      goodsExportPath: join(mocks.outputDir, 'goods.xlsx'),
       exposure: {
         overview: [
           { period: '1d', exposure: 10, visits: 2, amount: 3, conversionRate: 20 },
@@ -156,6 +157,20 @@ describe('runPublicTrafficReportCli public traffic sequencing', () => {
     await expect(readFile(todayPaths.publicVisitRaw['30d'], 'utf8')).resolves.toContain('"period": "30d"');
   });
 
+  it('uses the source data date in the report title while keeping output paths on the run date', async () => {
+    vi.setSystemTime(new Date('2026-06-11T12:00:00Z'));
+    const { runPublicTrafficReportCli } = await import('../src/cli/publicTrafficReport.js');
+
+    await runPublicTrafficReportCli();
+
+    const runPaths = buildPublicTrafficPaths(mocks.outputDir, '2026-06-11');
+    const context = JSON.parse(await readFile(runPaths.reportContext, 'utf8')) as PublicTrafficDataReportContext;
+    const markdown = await readFile(runPaths.markdown, 'utf8');
+    expect(context.date).toBe('2026-06-10');
+    expect(markdown).toContain('# 公域数据日报 2026-06-10');
+    await expect(readFile(buildPublicTrafficPaths(mocks.outputDir, '2026-06-10').reportContext, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
   it('passes previous report context and exposure histories into analyzer', async () => {
     const source = await readFile(join(process.cwd(), 'src/cli/publicTrafficReport.ts'), 'utf8');
 
@@ -167,13 +182,23 @@ describe('runPublicTrafficReportCli public traffic sequencing', () => {
     expect(source).toContain('cumulativeProducts: crawlResult.products');
   });
 
+  it('parses optional Feishu send target argument', async () => {
+    const { parseFeishuSendToArg } = await import('../src/cli/publicTrafficReport.js');
+
+    expect(parseFeishuSendToArg(['node', 'cli'])).toBeUndefined();
+    expect(parseFeishuSendToArg(['node', 'cli', '--send-to', 'group'])).toBe('group');
+    expect(parseFeishuSendToArg(['node', 'cli', '--send-to=both'])).toBe('both');
+    expect(() => parseFeishuSendToArg(['node', 'cli', '--send-to', 'bad'])).toThrow('Invalid --send-to value: bad');
+  });
+
   it('refreshes product id mapping from goods export before loading mapping', async () => {
     const source = await readFile(join(process.cwd(), 'src/cli/publicTrafficReport.ts'), 'utf8');
 
-    expect(source).toContain("import { downloadGoodsExport } from '../crawler/goodsExportCrawler.js';");
     expect(source).toContain("import { writeProductIdMappingFromExport } from '../mapping/refreshProductIdMapping.js';");
-    expect(source).toContain('await refreshProductIdMappingForReport(config, paths, log);');
-    expect(source.indexOf('await refreshProductIdMappingForReport(config, paths, log);')).toBeLessThan(source.indexOf('const mapping = await loadMappingSafely'));
+    expect(source).not.toContain("import { downloadGoodsExport } from '../crawler/goodsExportCrawler.js';");
+    expect(source).toContain('const { goodsExportPath, exposure: crawlResult, dashboard: rawTables } = await crawlPublicTrafficSources(config, paths.goodsExportWorkbook);');
+    expect(source).toContain('await refreshProductIdMappingForReport(goodsExportPath, mappingPath, paths.productIdMappingSyncLog, log);');
+    expect(source.indexOf('await refreshProductIdMappingForReport(goodsExportPath')).toBeLessThan(source.indexOf('const mapping = await loadMappingSafely'));
     expect(source).toContain('paths.goodsExportWorkbook');
     expect(source).toContain('paths.productIdMappingSyncLog');
   });
@@ -183,7 +208,8 @@ describe('runPublicTrafficReportCli public traffic sequencing', () => {
 
     await runPublicTrafficReportCli();
 
-    expect(mocks.writeProductIdMappingFromExport).toHaveBeenCalledWith(expect.any(String), 'config/product-id-map.json', expect.any(String));
+    expect(mocks.crawlPublicTrafficSources).toHaveBeenCalledWith(expect.any(Object), expect.stringContaining('商品总表_2026-06-10.xlsx'));
+    expect(mocks.writeProductIdMappingFromExport).toHaveBeenCalledWith(join(mocks.outputDir, 'goods.xlsx'), 'config/product-id-map.json', expect.any(String));
     expect(mocks.loadProductIdMapping).toHaveBeenCalledWith('config/product-id-map.json');
   });
 
@@ -259,6 +285,43 @@ describe('runPublicTrafficReportCli public traffic sequencing', () => {
     await expect(readFile(todayPaths.log, 'utf8')).resolves.toContain('昨日公域数据上下文读取失败: Invalid previous public traffic summary');
   });
 
+  it('marks one-day dashboard empty table as Alipay not updated instead of zero traffic', async () => {
+    mocks.crawlPublicTrafficSources.mockResolvedValueOnce({
+      goodsExportPath: join(mocks.outputDir, 'goods.xlsx'),
+      exposure: {
+        overview: [{ period: '1d', exposure: 10, visits: 2, amount: 3, conversionRate: 20 }],
+        products: [{ productName: '当前商品', platformProductId: 'p-current', exposure: 1000, visits: 100, amount: 200, custodyDays: null, raw: {} }],
+      },
+      dashboard: [
+        {
+          period: '1d',
+          headers: [],
+          rows: [],
+          collection: { period: '1d', actualPageSizes: [], pageCount: 0, rowCount: 0, dedupedRowCount: 0, displayedTotalCount: 0, pageSizeFallback: false, complete: false },
+        },
+        ...(['7d', '30d'] as const).map((period) => ({
+          period,
+          headers: [],
+          rows: [],
+          collection: { period, actualPageSizes: [1], pageCount: 1, rowCount: 1, dedupedRowCount: 1, displayedTotalCount: 1, pageSizeFallback: false, complete: true },
+        })),
+      ] satisfies RawTableData[],
+    });
+    mocks.normalizeRowsForPeriod.mockImplementation((table) => {
+      if (table.period === '1d') throw new Error('Missing required headers for 1d');
+      return [];
+    });
+    const { runPublicTrafficReportCli } = await import('../src/cli/publicTrafficReport.js');
+
+    await runPublicTrafficReportCli();
+
+    const todayPaths = buildPublicTrafficPaths(mocks.outputDir, '2026-06-10');
+    const context = JSON.parse(await readFile(todayPaths.reportContext, 'utf8')) as PublicTrafficDataReportContext;
+    expect(context.dataQualityNotes).toEqual(['今日访问数据支付宝暂未更新，本期访问量板块指标缺失。']);
+    await expect(readFile(todayPaths.markdown, 'utf8')).resolves.toContain('今日访问数据支付宝暂未更新，本期访问量板块指标缺失。');
+    await expect(readFile(todayPaths.log, 'utf8')).resolves.toContain('今日访问数据支付宝暂未更新，本期访问量板块指标缺失。');
+  });
+
   it('treats an existing empty previous cumulative snapshot as history for new-product daily deltas', async () => {
     const yesterdayPaths = buildPublicTrafficPaths(mocks.outputDir, '2026-06-09');
     await writeFile(yesterdayPaths.exposureCumulativeProducts, '[]', 'utf8');
@@ -270,7 +333,7 @@ describe('runPublicTrafficReportCli public traffic sequencing', () => {
     const dailyDelta = JSON.parse(await readFile(todayPaths.exposureDailyDelta, 'utf8')) as ExposureDailyDelta[];
     expect(dailyDelta).toHaveLength(1);
     expect(dailyDelta[0]).toMatchObject({
-      date: '2026-06-10',
+      date: '2026-06-09',
       productName: '当前商品',
       platformProductId: 'p-current',
       exposure: 1000,
