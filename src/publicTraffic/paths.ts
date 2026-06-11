@@ -13,6 +13,7 @@ export interface PublicTrafficPaths {
   productIdMappingSyncLog: string;
   newProductObservation: string;
   observationState: string;
+  orderAnalysis: string;
   markdown: string;
   workbook: string;
   reportContext: string;
@@ -38,6 +39,7 @@ export function buildPublicTrafficPaths(outputDir: string, date: string): Public
     productIdMappingSyncLog: `${dir}/商品ID映射同步日志_${date}.log`,
     newProductObservation: `${dir}/new-product-observation.json`,
     observationState: `${dir}/observation-state.json`,
+    orderAnalysis: `${dir}/订单分析_${date}.json`,
     markdown: `${dir}/公域数据日报_${date}.md`,
     workbook: `${dir}/公域数据日报_${date}.xlsx`,
     reportContext: `${dir}/公域数据上下文_${date}.json`,

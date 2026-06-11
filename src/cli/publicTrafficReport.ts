@@ -194,11 +194,16 @@ export async function runPublicTrafficReportCli(): Promise<void> {
   try {
     const mappingPath = resolveProductIdMappingPath(config);
     log.addEvent('开始下载商品总表、抓取曝光与后链路数据');
-    const { goodsExportPath, exposure: crawlResult, dashboard: rawTables } = await crawlPublicTrafficSources(config, paths.goodsExportWorkbook);
+    const { goodsExportPath, exposure: crawlResult, dashboard: rawTables, orderAnalysis: orderAnalysisCapture } = await crawlPublicTrafficSources(config, paths.goodsExportWorkbook);
     await refreshProductIdMappingForReport(goodsExportPath, mappingPath, paths.productIdMappingSyncLog, log);
 
     await writeFile(paths.exposureCumulativeProducts, JSON.stringify(crawlResult.products, null, 2), 'utf8');
     log.addEvent(`保存累计快照: ${crawlResult.products.length} 条商品`);
+
+    const orderAnalysis = { ...orderAnalysisCapture, runDate };
+    await writeFile(paths.orderAnalysis, JSON.stringify(orderAnalysis, null, 2), 'utf8');
+    await writeFile('output/latest/order-analysis.json', JSON.stringify(orderAnalysis, null, 2), 'utf8');
+    log.addEvent(`订单分析: ${Object.values(orderAnalysis.pages).map((page) => `${page.label}=${page.indicators.length}条(${page.dataDate ?? '未知'})`).join(', ')}`);
 
     if (crawlResult.overview.length > 0) {
       await writeFile(paths.exposureOverview, JSON.stringify(crawlResult.overview, null, 2), 'utf8');
@@ -263,6 +268,7 @@ export async function runPublicTrafficReportCli(): Promise<void> {
       sevenDaySummary,
       thirtyDaySummary,
       cumulativeProducts: crawlResult.products,
+      orderAnalysis,
     });
     log.addEvent(
       `规则分析: 曝光不足=${context.lowExposure.length}, 点击弱=${context.weakClick.length}, 转化弱=${context.weakConversion.length}, 高潜力=${context.highPotential.length}, 新品观察=${context.newProductObservation.length}, 生命周期治理=${context.lifecycleGovernance.length}, 建议操作=${context.recommendedActions.length}`,

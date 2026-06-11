@@ -1,4 +1,5 @@
 import type { PeriodKey } from '../domain/types.js';
+import type { OrderAnalysisResult } from './orderAnalysis.js';
 
 export interface ExposureOverviewMetric {
   period: '1d' | '7d' | '30d';
@@ -167,6 +168,7 @@ export interface PublicTrafficDataReportContext {
   lifecycleGovernance: PublicTrafficReportSectionItem[];
   recommendedActions: PublicTrafficReportSectionItem[];
   emptySectionNotes: PublicTrafficEmptySectionNotes;
+  orderAnalysis?: OrderAnalysisResult;
 }
 
 export interface PublicTrafficDataAnalysisInput extends PublicTrafficDataContext {
@@ -178,4 +180,5 @@ export interface PublicTrafficDataAnalysisInput extends PublicTrafficDataContext
   sevenDaySummary?: ExposureProductSummary[];
   thirtyDaySummary?: ExposureProductSummary[];
   cumulativeProducts?: ExposureCumulativeProduct[];
+  orderAnalysis?: OrderAnalysisResult;
 }

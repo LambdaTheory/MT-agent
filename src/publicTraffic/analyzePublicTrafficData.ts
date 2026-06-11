@@ -260,5 +260,6 @@ export function analyzePublicTrafficData(input: PublicTrafficDataAnalysisInput):
     lifecycleGovernance,
     recommendedActions,
     emptySectionNotes: EMPTY_SECTION_NOTES,
+    orderAnalysis: input.orderAnalysis,
   };
 }

@@ -89,6 +89,15 @@ describe('runPublicTrafficReportCli public traffic sequencing', () => {
           complete: true,
         },
       })) satisfies RawTableData[],
+      orderAnalysis: {
+        capturedAt: '2026-06-10T12:00:00Z',
+        pages: {
+          overview: { key: 'overview', label: '标准订单分析', dataDate: '2026-06-09', indicators: [{ label: '创建订单量', value: '1', delta: '' }] },
+          delivery: { key: 'delivery', label: '发货分析', dataDate: '2026-06-09', indicators: [] },
+          return: { key: 'return', label: '归还分析', dataDate: '2026-06-09', indicators: [] },
+          customs: { key: 'customs', label: '关单分析', dataDate: '2026-06-09', indicators: [] },
+        },
+      },
     });
     mocks.downloadGoodsExport.mockResolvedValue(join(mocks.outputDir, 'goods.xlsx'));
     mocks.writeProductIdMappingFromExport.mockResolvedValue(50);
@@ -196,7 +205,7 @@ describe('runPublicTrafficReportCli public traffic sequencing', () => {
 
     expect(source).toContain("import { writeProductIdMappingFromExport } from '../mapping/refreshProductIdMapping.js';");
     expect(source).not.toContain("import { downloadGoodsExport } from '../crawler/goodsExportCrawler.js';");
-    expect(source).toContain('const { goodsExportPath, exposure: crawlResult, dashboard: rawTables } = await crawlPublicTrafficSources(config, paths.goodsExportWorkbook);');
+    expect(source).toContain('const { goodsExportPath, exposure: crawlResult, dashboard: rawTables, orderAnalysis: orderAnalysisCapture } = await crawlPublicTrafficSources(config, paths.goodsExportWorkbook);');
     expect(source).toContain('await refreshProductIdMappingForReport(goodsExportPath, mappingPath, paths.productIdMappingSyncLog, log);');
     expect(source.indexOf('await refreshProductIdMappingForReport(goodsExportPath')).toBeLessThan(source.indexOf('const mapping = await loadMappingSafely'));
     expect(source).toContain('paths.goodsExportWorkbook');
@@ -306,6 +315,15 @@ describe('runPublicTrafficReportCli public traffic sequencing', () => {
           collection: { period, actualPageSizes: [1], pageCount: 1, rowCount: 1, dedupedRowCount: 1, displayedTotalCount: 1, pageSizeFallback: false, complete: true },
         })),
       ] satisfies RawTableData[],
+      orderAnalysis: {
+        capturedAt: '2026-06-10T12:00:00Z',
+        pages: {
+          overview: { key: 'overview', label: '标准订单分析', dataDate: '2026-06-09', indicators: [] },
+          delivery: { key: 'delivery', label: '发货分析', dataDate: '2026-06-09', indicators: [] },
+          return: { key: 'return', label: '归还分析', dataDate: '2026-06-09', indicators: [] },
+          customs: { key: 'customs', label: '关单分析', dataDate: '2026-06-09', indicators: [] },
+        },
+      },
     });
     mocks.normalizeRowsForPeriod.mockImplementation((table) => {
       if (table.period === '1d') throw new Error('Missing required headers for 1d');

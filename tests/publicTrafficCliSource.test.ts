@@ -11,10 +11,10 @@ describe('public traffic CLI wiring', () => {
     expect(text).toContain("import { crawlPublicTrafficSources } from '../crawler/publicTrafficCrawler.js';");
     expect(text).not.toContain("import { crawlDashboard } from '../crawler/dashboardCrawler.js';");
     expect(text).not.toContain("import { crawlExposurePage } from '../crawler/exposureCrawler.js';");
-    expect(text).toContain('const { goodsExportPath, exposure: crawlResult, dashboard: rawTables } = await crawlPublicTrafficSources(config, paths.goodsExportWorkbook);');
+    expect(text).toContain('const { goodsExportPath, exposure: crawlResult, dashboard: rawTables, orderAnalysis: orderAnalysisCapture } = await crawlPublicTrafficSources(config, paths.goodsExportWorkbook);');
     expect(text).not.toContain('await crawlExposurePage(config)');
     expect(text).not.toContain('await crawlDashboard(config)');
-    expect(text.indexOf('const { goodsExportPath, exposure: crawlResult, dashboard: rawTables } = await crawlPublicTrafficSources(config, paths.goodsExportWorkbook);')).toBeLessThan(
+    expect(text.indexOf('const { goodsExportPath, exposure: crawlResult, dashboard: rawTables, orderAnalysis: orderAnalysisCapture } = await crawlPublicTrafficSources(config, paths.goodsExportWorkbook);')).toBeLessThan(
       text.indexOf('mergePublicTrafficData({'),
     );
     expect(text).toContain('await refreshProductIdMappingForReport(goodsExportPath, mappingPath, paths.productIdMappingSyncLog, log);');
@@ -46,5 +46,17 @@ describe('public traffic CLI wiring', () => {
     const text = await source('../src/crawler/publicTrafficCrawler.ts');
     expect(text).toContain('collectOrderAnalysisPages');
     expect(text).toContain('orderAnalysis');
+  });
+
+  it('CLI 落盘订单分析 JSON 并传入分析上下文', async () => {
+    const text = await source('../src/cli/publicTrafficReport.ts');
+    expect(text).toContain('paths.orderAnalysis');
+    expect(text).toContain('output/latest/order-analysis.json');
+    expect(text).toContain('orderAnalysis,');
+  });
+
+  it('paths 定义订单分析中文路径', async () => {
+    const text = await source('../src/publicTraffic/paths.ts');
+    expect(text).toContain('订单分析_');
   });
 });
