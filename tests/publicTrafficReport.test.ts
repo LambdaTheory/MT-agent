@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import XLSX from 'xlsx-js-style';
+import { analyzePublicTrafficData } from '../src/publicTraffic/analyzePublicTrafficData.js';
 import { buildPublicTrafficCard } from '../src/publicTraffic/buildPublicTrafficCard.js';
 import { buildPublicTrafficFeishuText } from '../src/publicTraffic/buildPublicTrafficFeishu.js';
 import { buildPublicTrafficMarkdown } from '../src/publicTraffic/buildPublicTrafficMarkdown.js';
@@ -107,7 +108,39 @@ const contextWithOrderAnalysis: PublicTrafficDataReportContext = {
   },
 };
 
+function makeDataReportContext(overrides: Partial<PublicTrafficDataReportContext>): PublicTrafficDataReportContext {
+  return { ...context, ...overrides };
+}
+
+function findCardElementsByTag(card: { body?: { elements?: unknown[] } }, tag: string): Record<string, unknown>[] {
+  return (card.body?.elements ?? []).filter((element): element is Record<string, unknown> => {
+    return Boolean(element && typeof element === 'object' && (element as Record<string, unknown>).tag === tag);
+  });
+}
+
+function tableRows(table: Record<string, unknown>): Record<string, unknown>[] {
+  return Array.isArray(table.rows) ? (table.rows as Record<string, unknown>[]) : [];
+}
+
 describe('public traffic report outputs', () => {
+  it('does not truncate diagnostic sections in analysis output', () => {
+    const rows = Array.from({ length: 7 }, (_, index) => ({
+      platformProductId: `P-low-${index}`,
+      displayProductId: `端内ID ${1000 + index}`,
+      productName: `低曝光商品${index}`,
+      custodyDays: 12,
+      periods: {
+        '1d': metrics({ exposure: 10 + index, publicVisits: 0, dashboardVisits: 0, shippedOrders: 0 }),
+        '7d': metrics({ exposure: 70 + index, publicVisits: 0, dashboardVisits: 0, shippedOrders: 0 }),
+        '30d': metrics({ exposure: 300 + index, publicVisits: 0, dashboardVisits: 0, shippedOrders: 0 }),
+      },
+    }));
+
+    const report = analyzePublicTrafficData({ date: '2026-06-10', rows });
+
+    expect(report.lowExposure).toHaveLength(7);
+  });
+
   it('builds markdown sections', () => {
     const markdown = buildPublicTrafficMarkdown(context);
     expect(markdown).toContain('# 公域数据日报 2026-06-10');
@@ -168,6 +201,56 @@ describe('public traffic report outputs', () => {
     expect(serialized).toContain('生命周期治理 Top5');
     expect(serialized).not.toContain('report.md');
     expect(serialized).not.toContain('report.xlsx');
+  });
+
+  it('renders full diagnostic sections as paginated root-level Feishu tables', () => {
+    const context = makeDataReportContext({
+      conclusions: [
+        { label: '曝光', text: '曝光 100，较昨日上升 10' },
+        { label: '公域访问', text: '公域访问 20，较昨日上升 2' },
+        { label: '金额', text: '金额 30元，较昨日上升 3元' },
+      ],
+      lowExposure: Array.from({ length: 6 }, (_, index) => ({ identifier: `低曝光${index}`, action: '检查托管状态', reason: `低曝光原因${index}` })),
+      weakClick: Array.from({ length: 6 }, (_, index) => ({ identifier: `点击弱${index}`, action: '优化主图', reason: `点击弱原因${index}` })),
+      weakConversion: Array.from({ length: 6 }, (_, index) => ({ identifier: `转化弱${index}`, action: '检查价格', reason: `转化弱原因${index}` })),
+      highPotential: Array.from({ length: 2 }, (_, index) => ({ identifier: `高潜力${index}`, action: '继续放量', reason: `高潜力原因${index}` })),
+      lifecycleGovernance: Array.from({ length: 2 }, (_, index) => ({ identifier: `治理${index}`, action: '下架或重做', reason: `治理原因${index}` })),
+      recommendedActions: Array.from({ length: 12 }, (_, index) => ({ identifier: `建议${index}`, action: index % 2 === 0 ? '检查价格' : '优化主图', reason: `建议原因${index}` })),
+      newProductObservation: Array.from({ length: 11 }, (_, index) => ({ identifier: `新品${index}`, action: '新品数据监控', reason: `新品原因${index}` })),
+    });
+    const expectedDiagnosticRows = context.lowExposure.length + context.weakClick.length + context.weakConversion.length + context.highPotential.length + context.lifecycleGovernance.length;
+    const expectedActionRows = context.recommendedActions.length;
+    const expectedNewProductRows = context.newProductObservation.length;
+
+    const card = buildPublicTrafficCard(context, { markdownPath: 'report.md', workbookPath: 'report.xlsx' });
+    const tables = findCardElementsByTag(card, 'table');
+
+    expect(tables).toHaveLength(3);
+    const diagnosticRows = tableRows(tables[0]);
+    const actionRows = tableRows(tables[1]);
+    const newProductRows = tableRows(tables[2]);
+
+    expect(tables.every((table) => table.page_size === 10)).toBe(true);
+    expect(tables.every((table) => table.row_height === 'auto')).toBe(true);
+    expect(tables.every((table) => table.freeze_first_column === true)).toBe(true);
+    expect(diagnosticRows).toHaveLength(expectedDiagnosticRows);
+    expect(actionRows).toHaveLength(expectedActionRows);
+    expect(newProductRows).toHaveLength(expectedNewProductRows);
+    expect(diagnosticRows).toContainEqual(expect.objectContaining({ type: '曝光不足', product: '低曝光0', action: '检查托管状态', reason: '低曝光原因0' }));
+    expect(actionRows).toContainEqual(expect.objectContaining({ product: '建议0', action: '检查价格', reason: '建议原因0' }));
+    expect(newProductRows).toContainEqual(expect.objectContaining({ product: '新品0', action: '新品数据监控', reason: '新品原因0' }));
+
+    const cardText = JSON.stringify(card);
+    expect(cardText).toContain('曝光 100，较昨日上升 10');
+    expect(cardText).toContain('公域访问 20，较昨日上升 2');
+    expect(cardText).toContain('金额 30元，较昨日上升 3元');
+    expect(cardText).toContain('今日曝光 Top10');
+    expect(cardText).not.toContain('曝光不足 Top5');
+    expect(cardText).not.toContain('点击弱 Top5');
+    expect(cardText).not.toContain('转化弱 Top5');
+    expect(cardText).not.toContain('高潜力 Top5');
+    expect(cardText).not.toContain('新品观察 Top5');
+    expect(cardText).not.toContain('生命周期治理 Top5');
   });
 
   it('uses column sets to beautify the card summary sections', () => {

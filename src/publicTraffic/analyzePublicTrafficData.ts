@@ -10,7 +10,6 @@ import type {
 } from './types.js';
 
 const PERIODS: PeriodKey[] = ['1d', '7d', '30d'];
-const TOP_N = 5;
 
 function emptySummary(): PublicTrafficDataSummary {
   return {
@@ -151,7 +150,7 @@ function buildRecommendedActions(sections: {
     ...sections.highPotential,
     ...sections.newProductObservation,
     ...sections.lowExposure,
-  ].slice(0, 20);
+  ];
 }
 
 export function analyzePublicTrafficData(input: PublicTrafficDataAnalysisInput): PublicTrafficDataReportContext {
@@ -176,7 +175,6 @@ export function analyzePublicTrafficData(input: PublicTrafficDataAnalysisInput):
     })
     .filter((row) => one(row).shippedOrders === 0 && seven(row).shippedOrders === 0)
     .sort((a, b) => seven(a).exposure - seven(b).exposure || one(a).exposure - one(b).exposure)
-    .slice(0, TOP_N)
     .map((row) =>
       item(row, '检查托管状态、标题、主图、类目和是否继续投放', `已托管 ${row.custodyDays ?? '未知'} 天，1日曝光 ${one(row).exposure}，7日曝光 ${seven(row).exposure}，7日访问 ${seven(row).publicVisits}`),
     );
@@ -185,7 +183,6 @@ export function analyzePublicTrafficData(input: PublicTrafficDataAnalysisInput):
     .filter((row) => (one(row).hasExposureData || seven(row).hasExposureData) && (one(row).exposure >= 1000 || seven(row).exposure >= 3000))
     .filter((row) => (one(row).exposure >= 1000 && one(row).exposureVisitRate < 0.01) || (seven(row).exposure >= 3000 && seven(row).exposureVisitRate < 0.015))
     .sort((a, b) => seven(a).exposureVisitRate - seven(b).exposureVisitRate || one(a).exposureVisitRate - one(b).exposureVisitRate || seven(b).exposure - seven(a).exposure)
-    .slice(0, TOP_N)
     .map((row) =>
       item(
         row,
@@ -198,7 +195,6 @@ export function analyzePublicTrafficData(input: PublicTrafficDataAnalysisInput):
     .filter((row) => (one(row).hasDashboardData || seven(row).hasDashboardData) && (one(row).dashboardVisits >= 50 || seven(row).dashboardVisits >= 100))
     .filter((row) => (one(row).dashboardVisits >= 50 && one(row).shippedOrders === 0) || (seven(row).dashboardVisits >= 100 && seven(row).visitShipmentRate < 0.01))
     .sort((a, b) => one(b).dashboardVisits - one(a).dashboardVisits || seven(b).dashboardVisits - seven(a).dashboardVisits)
-    .slice(0, TOP_N)
     .map((row) =>
       item(
         row,
@@ -211,7 +207,6 @@ export function analyzePublicTrafficData(input: PublicTrafficDataAnalysisInput):
     .filter((row) => (one(row).hasExposureData || seven(row).hasExposureData) && (one(row).shippedOrders > 0 || seven(row).shippedOrders >= 3 || seven(row).amount >= 500))
     .filter((row) => one(row).publicVisits >= 100 || seven(row).publicVisits >= 300 || seven(row).amount >= 500)
     .sort((a, b) => seven(b).amount - seven(a).amount || seven(b).shippedOrders - seven(a).shippedOrders || one(b).publicVisits - one(a).publicVisits)
-    .slice(0, TOP_N)
     .map((row) =>
       item(
         row,
@@ -233,7 +228,7 @@ export function analyzePublicTrafficData(input: PublicTrafficDataAnalysisInput):
       .sort((a, b) => (internalIdNumber(a) ?? 0) - (internalIdNumber(b) ?? 0))
       .map((row) => item(row, '新品数据监控', monitoringReason(row))),
     ...newProductObservationFromDelta,
-  ].filter((entry, index, all) => all.findIndex((candidate) => candidate.identifier === entry.identifier) === index).slice(0, TOP_N);
+  ].filter((entry, index, all) => all.findIndex((candidate) => candidate.identifier === entry.identifier) === index);
 
   const lifecycleGovernance = rows
     .filter((row) => typeof row.custodyDays === 'number' && row.custodyDays >= 30)
@@ -241,7 +236,6 @@ export function analyzePublicTrafficData(input: PublicTrafficDataAnalysisInput):
     .filter((row) => hasReliableThirtyDaySummary(input.thirtyDaySummary, row.platformProductId))
     .filter((row) => thirty(row).exposure <= 100 && thirty(row).publicVisits <= 3 && thirty(row).amount <= 1)
     .sort((a, b) => (b.custodyDays ?? 0) - (a.custodyDays ?? 0) || thirty(a).exposure - thirty(b).exposure)
-    .slice(0, TOP_N)
     .map((row) => item(row, '下架、替换或重做素材', `已托管 ${row.custodyDays} 天，30日曝光 ${thirty(row).exposure}，访问 ${thirty(row).publicVisits}，金额 ${thirty(row).amount.toFixed(2)}`));
 
   const recommendedActions = buildRecommendedActions({ weakConversion, weakClick, lifecycleGovernance, highPotential, newProductObservation, lowExposure });
