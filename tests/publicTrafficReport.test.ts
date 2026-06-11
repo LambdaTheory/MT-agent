@@ -5,6 +5,7 @@ import { buildPublicTrafficCard } from '../src/publicTraffic/buildPublicTrafficC
 import { buildPublicTrafficFeishuText } from '../src/publicTraffic/buildPublicTrafficFeishu.js';
 import { buildPublicTrafficMarkdown } from '../src/publicTraffic/buildPublicTrafficMarkdown.js';
 import { writePublicTrafficWorkbookBuffer } from '../src/publicTraffic/buildPublicTrafficWorkbook.js';
+import type { OrderAnalysisResult } from '../src/publicTraffic/orderAnalysis.js';
 import type { PublicTrafficDataReportContext, PublicTrafficPeriodMetrics, PublicTrafficReportContext } from '../src/publicTraffic/types.js';
 
 function metrics(overrides: Partial<PublicTrafficPeriodMetrics>): PublicTrafficPeriodMetrics {
@@ -110,6 +111,19 @@ const contextWithOrderAnalysis: PublicTrafficDataReportContext = {
 
 function makeDataReportContext(overrides: Partial<PublicTrafficDataReportContext>): PublicTrafficDataReportContext {
   return { ...context, ...overrides };
+}
+
+function makeOrderAnalysisResult(indicators: OrderAnalysisResult['pages']['overview']['indicators']): OrderAnalysisResult {
+  return {
+    capturedAt: '2026-06-12T00:00:00.000Z',
+    runDate: '2026-06-12',
+    pages: {
+      overview: { key: 'overview', label: '标准订单分析', dataDate: '2026-06-10', indicators },
+      delivery: { key: 'delivery', label: '发货分析', dataDate: '2026-06-10', indicators: [] },
+      return: { key: 'return', label: '归还分析', dataDate: null, indicators: [] },
+      customs: { key: 'customs', label: '关单分析', dataDate: '2026-06-10', indicators: [] },
+    },
+  };
 }
 
 function findCardElementsByTag(card: { body?: { elements?: unknown[] } }, tag: string): Record<string, unknown>[] {
@@ -528,6 +542,30 @@ describe('public traffic report outputs', () => {
     expect(markdown).toContain('公域（');
     expect(markdown).toContain('订单（06-10）：创建订单 194｜签约订单 103｜审出订单 -｜发货订单 64｜签约金额 3,977');
     expect(markdown).toContain('履约（发货06-10｜归还未知｜关单06-10）：待发货 168｜归还 15｜逾期 5｜关单 90');
+  });
+
+  it('renders fulfillment as rates', () => {
+    const orderAnalysis = makeOrderAnalysisResult([
+      { label: '创建订单数', value: '100', delta: '' },
+      { label: '签约订单数', value: '50', delta: '' },
+      { label: '审出订单数', value: '25', delta: '' },
+      { label: '发货订单数', value: '10', delta: '' },
+    ]);
+    const reportContext = makeDataReportContext({ orderAnalysis });
+
+    const cardJson = JSON.stringify(buildPublicTrafficCard(reportContext, { markdownPath: 'report.md', workbookPath: 'report.xlsx' }));
+
+    expect(cardJson).toContain('签约/创建 50.00%');
+    expect(cardJson).toContain('审出/签约 50.00%');
+    expect(cardJson).toContain('发货/审出 40.00%');
+    expect(cardJson).toContain('暂无昨日履约率对比');
+
+    const markdown = buildPublicTrafficMarkdown(reportContext);
+    expect(markdown.indexOf('## 履约比率')).toBeGreaterThan(markdown.indexOf('## 1日总览'));
+    expect(markdown).toContain('签约/创建 50.00%');
+    expect(markdown).toContain('审出/签约 50.00%');
+    expect(markdown).toContain('发货/审出 40.00%');
+    expect(markdown).toContain('暂无昨日履约率对比');
   });
 
   it('renders legacy Markdown and Feishu text with neutral insight defaults', () => {

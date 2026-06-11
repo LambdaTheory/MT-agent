@@ -1,4 +1,5 @@
 import { findOrderAnalysisIndicator, shortDataDate } from './orderAnalysis.js';
+import type { OrderAnalysisPageData } from './orderAnalysis.js';
 import type {
   ExposureOverviewMetric,
   PublicTrafficDataReportContext,
@@ -68,6 +69,34 @@ function overviewLines(summary: PublicTrafficDataSummary): string[] {
   ];
 }
 
+function parseOrderAnalysisNumber(value: string): number | null {
+  const normalized = value.replace(/,/g, '').trim();
+  if (!/^-?\d+(\.\d+)?$/.test(normalized)) return null;
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function orderAnalysisNumber(page: OrderAnalysisPageData | undefined, labels: string[]): number | null {
+  return parseOrderAnalysisNumber(findOrderAnalysisIndicator(page, labels));
+}
+
+function fulfillmentRate(numerator: number | null, denominator: number | null): string {
+  if (numerator === null || denominator === null || denominator === 0) return '-';
+  return `${((numerator / denominator) * 100).toFixed(2)}%`;
+}
+
+function fulfillmentRateLines(overview: OrderAnalysisPageData | undefined): string[] {
+  if (!overview) return [];
+  const created = orderAnalysisNumber(overview, ['创建订单数']);
+  const signed = orderAnalysisNumber(overview, ['签约订单数']);
+  const reviewed = orderAnalysisNumber(overview, ['审出订单数']);
+  const shipped = orderAnalysisNumber(overview, ['发货订单数']);
+  return [
+    `签约/创建 ${fulfillmentRate(signed, created)}｜审出/签约 ${fulfillmentRate(reviewed, signed)}｜发货/审出 ${fulfillmentRate(shipped, reviewed)}`,
+    '暂无昨日履约率对比',
+  ];
+}
+
 function oneDayOverviewLines(context: PublicTrafficDataReportContext): string[] {
   const summary = context.summary['1d'];
   const oa = context.orderAnalysis;
@@ -119,6 +148,7 @@ export function buildPublicTrafficMarkdown(input: PublicTrafficDataReportContext
     '## 1日总览',
     ...oneDayOverviewLines(context),
   ];
+  appendMarkdownSection(lines, '履约比率', fulfillmentRateLines(context.orderAnalysis?.pages.overview));
   if (context.dataQualityNotes?.length) {
     lines.push('', '## 数据提示', ...context.dataQualityNotes);
   }
