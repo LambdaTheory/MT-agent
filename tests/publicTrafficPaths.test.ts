@@ -17,6 +17,7 @@ describe('buildPublicTrafficPaths', () => {
       },
       goodsListSnapshot: 'output/2026-06-09/goods-list-snapshot.json',
       goodsFirstSeenState: 'output/state/goods-first-seen.json',
+      goodsLinkLifecycleState: 'output/state/goods-link-lifecycle.json',
       goodsExportWorkbook: 'output/2026-06-09/商品总表_2026-06-09.xlsx',
       productIdMappingSyncLog: 'output/2026-06-09/商品ID映射同步日志_2026-06-09.log',
       newProductObservation: 'output/2026-06-09/new-product-observation.json',

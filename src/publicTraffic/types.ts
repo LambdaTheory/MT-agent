@@ -149,6 +149,19 @@ export interface PublicTrafficConclusion {
   text: string;
 }
 
+export interface AgentRemovedLinkContextItem {
+  productId: string;
+  platformProductId: string;
+  productName: string;
+  removedDate: string;
+  reason: '商品总表缺失';
+  source: 'goods_snapshot_diff';
+}
+
+export interface PublicTrafficAgentData {
+  removedLinks: AgentRemovedLinkContextItem[];
+}
+
 export interface PublicTrafficEmptySectionNotes {
   lowExposure: string;
   weakClick: string;
@@ -166,6 +179,7 @@ export interface PublicTrafficDataReportContext {
   dataQualityNotes?: string[];
   newProductPoolItems?: GoodsManagerNewProductPoolItem[];
   newProductPoolIds?: string[];
+  agentData?: PublicTrafficAgentData;
   rows: PublicTrafficProductDataRow[];
   lowExposure: PublicTrafficReportSectionItem[];
   weakClick: PublicTrafficReportSectionItem[];
