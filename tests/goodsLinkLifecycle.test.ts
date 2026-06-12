@@ -51,6 +51,22 @@ describe('goods link lifecycle', () => {
     ]);
   });
 
+  it('keeps the latest existing removed link when duplicates are out of order', () => {
+    const previous: GoodsLinkLifecycleState = {
+      active: {},
+      removedLinks: [
+        { productId: '701', platformProductId: 'platform-701-new', productName: '商品 701 新', removedDate: '2026-06-11', reason: '商品总表缺失', source: 'goods_snapshot_diff' },
+        { productId: '701', platformProductId: 'platform-701-old', productName: '商品 701 旧', removedDate: '2026-06-09', reason: '商品总表缺失', source: 'goods_snapshot_diff' },
+      ],
+    };
+
+    const result = updateGoodsLinkLifecycle({ currentDate: '2026-06-12', previous, current: [] });
+
+    expect(result.removedLinks).toEqual([
+      { productId: '701', platformProductId: 'platform-701-new', productName: '商品 701 新', removedDate: '2026-06-11', reason: '商品总表缺失', source: 'goods_snapshot_diff' },
+    ]);
+  });
+
   it('ignores invalid internal ids', () => {
     const previous: GoodsLinkLifecycleState = { active: {}, removedLinks: [] };
     const result = updateGoodsLinkLifecycle({
