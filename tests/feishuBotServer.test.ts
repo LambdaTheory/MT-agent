@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { extractTextMessage, startFeishuBotServer } from '../src/feishuBot/server.js';
+import type { FeishuBotIncomingTextMessage } from '../src/feishuBot/types.js';
 
 describe('extractTextMessage', () => {
   it('extracts Feishu text content', () => {
@@ -51,13 +52,17 @@ describe('startFeishuBotServer', () => {
     }
   });
 
-  it('routes text event through intent handler and replies', async () => {
+  it('routes text event through dispatcher and replies', async () => {
     const replies: Array<{ messageId: string; text: string }> = [];
+    const messages: FeishuBotIncomingTextMessage[] = [];
     const server = startFeishuBotServer({
       port: 0,
       appId: 'app',
       appSecret: 'secret',
-      handleIntent: async (intent) => ({ text: `handled:${intent.type}` }),
+      dispatchMessage: async (message) => {
+        messages.push(message);
+        return { text: `handled:${message.text}`, skipped: false };
+      },
       replyText: async ({ messageId }, text) => {
         replies.push({ messageId, text });
         return { sent: true, channel: 'app' };
@@ -71,12 +76,44 @@ describe('startFeishuBotServer', () => {
       const response = await fetch(`http://127.0.0.1:${address.port}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ event: { message: { message_id: 'mid', message_type: 'text', content: JSON.stringify({ text: '今日概况' }) } } }),
+        body: JSON.stringify({ event: { message: { message_id: 'mid-http-route', chat_id: 'chat', message_type: 'text', content: JSON.stringify({ text: '今日概况' }) }, sender: { sender_id: { open_id: 'ou_1' } } } }),
       });
 
       expect(response.status).toBe(200);
       await new Promise((resolve) => setTimeout(resolve, 10));
-      expect(replies).toEqual([{ messageId: 'mid', text: 'handled:latest_summary' }]);
+      expect(messages).toEqual([{ messageId: 'mid-http-route', text: '今日概况', source: 'http', chatId: 'chat', senderOpenId: 'ou_1' }]);
+      expect(replies).toEqual([{ messageId: 'mid-http-route', text: 'handled:今日概况' }]);
+    } finally {
+      server.close();
+    }
+  });
+
+  it('does not reply when dispatcher skips a duplicate message', async () => {
+    const replies: Array<{ messageId: string; text: string }> = [];
+    const server = startFeishuBotServer({
+      port: 0,
+      appId: 'app',
+      appSecret: 'secret',
+      dispatchMessage: async () => ({ text: '', skipped: true }),
+      replyText: async ({ messageId }, text) => {
+        replies.push({ messageId, text });
+        return { sent: true, channel: 'app' };
+      },
+    });
+    try {
+      await new Promise<void>((resolve) => server.once('listening', resolve));
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+
+      const response = await fetch(`http://127.0.0.1:${address.port}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ event: { message: { message_id: 'mid-http-skip', message_type: 'text', content: JSON.stringify({ text: '今日概况' }) } } }),
+      });
+
+      expect(response.status).toBe(200);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(replies).toEqual([]);
     } finally {
       server.close();
     }
