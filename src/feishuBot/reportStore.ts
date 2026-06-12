@@ -11,8 +11,8 @@ export async function findLatestReportContext(outputDir = 'output'): Promise<{ p
     .reverse();
 
   for (const date of dates) {
-    for (const filename of ['report-context.json', `公域数据上下文_${date}.json`]) {
-      const path = join(outputDir, date, filename);
+    for (const fileName of [`公域数据上下文_${date}.json`, 'report-context.json']) {
+      const path = join(outputDir, date, fileName);
       try {
         return { path, context: JSON.parse(await readFile(path, 'utf8')) as PublicTrafficDataReportContext };
       } catch (error) {

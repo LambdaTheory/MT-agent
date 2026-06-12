@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getLatestOverview, getProductPerformance, getProblemProducts, getNewProductPool } from '../src/agentData/publicTrafficQueries.js';
+import { getLatestOverview, getProductPerformance, getProblemProducts, getNewProductPool, getRemovedLinks } from '../src/agentData/publicTrafficQueries.js';
 import type { PublicTrafficDataReportContext } from '../src/publicTraffic/types.js';
 
 type ExtendedContext = Omit<PublicTrafficDataReportContext, 'newProductPoolItems' | 'newProductPoolIds'> & {
@@ -47,5 +47,24 @@ describe('agent public traffic queries', () => {
   it('returns problem products and new product pool', () => {
     expect(getProblemProducts(publicContext, 'low_exposure')).toEqual([{ type: 'low_exposure', productId: '251', action: '补曝光', reason: '曝光不足' }]);
     expect(getNewProductPool(publicContext)).toEqual([{ productId: '701', productName: '新品 Alpha', maintenanceStatus: '待维护' }]);
+  });
+
+  it('returns removed links from Agent-only report context data', () => {
+    const withRemovedLinks = {
+      ...context,
+      agentData: {
+        removedLinks: [
+          { productId: '701', platformProductId: 'p701', productName: '已下架链接', removedDate: '2026-06-12', reason: '商品总表缺失', source: 'goods_snapshot_diff' },
+        ],
+      },
+    } as unknown as PublicTrafficDataReportContext;
+
+    expect(getRemovedLinks(withRemovedLinks)).toEqual([
+      { productId: '701', platformProductId: 'p701', productName: '已下架链接', removedDate: '2026-06-12', reason: '商品总表缺失', source: 'goods_snapshot_diff' },
+    ]);
+  });
+
+  it('returns an empty removed-link list when Agent data is absent', () => {
+    expect(getRemovedLinks(publicContext)).toEqual([]);
   });
 });

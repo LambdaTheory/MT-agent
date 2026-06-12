@@ -17,6 +17,7 @@ import { resolveFallbackProductId } from '../publicTraffic/extractProductIdFromI
 import { buildPublicTrafficFeishuText } from '../publicTraffic/buildPublicTrafficFeishu.js';
 import { buildPublicTrafficMarkdown } from '../publicTraffic/buildPublicTrafficMarkdown.js';
 import { writePublicTrafficWorkbookBuffer } from '../publicTraffic/buildPublicTrafficWorkbook.js';
+import { updateGoodsLinkLifecycle, type GoodsLinkLifecycleState } from '../publicTraffic/goodsLinkLifecycle.js';
 import { fetchRecentGoodsManagerProducts } from '../publicTraffic/goodsManagerNewProducts.js';
 import { filterFirstSeenWithinDays, updateGoodsFirstSeen, type GoodsFirstSeenIndex } from '../publicTraffic/goodsSnapshot.js';
 import { mergePublicTrafficData } from '../publicTraffic/mergePublicTrafficData.js';
@@ -253,6 +254,7 @@ async function loadGoodsFirstSeenState(path: string): Promise<{ state: GoodsFirs
         firstSeenDate: record.firstSeenDate,
         platformProductId: typeof record.platformProductId === 'string' ? record.platformProductId : '',
         productName: typeof record.productName === 'string' ? record.productName : '',
+        ...(record.baseline === true ? { baseline: true } : {}),
       };
     }
     return { state, found: true };
@@ -263,6 +265,47 @@ async function loadGoodsFirstSeenState(path: string): Promise<{ state: GoodsFirs
 }
 
 async function saveGoodsFirstSeenState(path: string, state: GoodsFirstSeenIndex): Promise<void> {
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, `${JSON.stringify(state, null, 2)}\n`, 'utf8');
+}
+
+function isGoodsLinkLifecycleState(value: unknown): value is GoodsLinkLifecycleState {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const state = value as Record<string, unknown>;
+  if (!state.active || typeof state.active !== 'object' || Array.isArray(state.active) || !Array.isArray(state.removedLinks)) return false;
+  const activeValid = Object.values(state.active as Record<string, unknown>).every((entry) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return false;
+    const record = entry as Record<string, unknown>;
+    return typeof record.platformProductId === 'string' && typeof record.productName === 'string';
+  });
+  const removedValid = state.removedLinks.every((entry) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return false;
+    const record = entry as Record<string, unknown>;
+    return (
+      typeof record.productId === 'string' &&
+      typeof record.platformProductId === 'string' &&
+      typeof record.productName === 'string' &&
+      typeof record.removedDate === 'string' &&
+      record.reason === '商品总表缺失' &&
+      record.source === 'goods_snapshot_diff'
+    );
+  });
+  return activeValid && removedValid;
+}
+
+async function loadGoodsLinkLifecycleState(path: string, log: ReturnType<typeof createRunLog>): Promise<GoodsLinkLifecycleState | null> {
+  try {
+    const parsed = JSON.parse(await readFile(path, 'utf8')) as unknown;
+    if (!isGoodsLinkLifecycleState(parsed)) throw new Error('Invalid goods link lifecycle state');
+    return parsed;
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return null;
+    log.addEvent('商品链接生命周期状态损坏: 重新初始化');
+    return null;
+  }
+}
+
+async function saveGoodsLinkLifecycleState(path: string, state: GoodsLinkLifecycleState): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, `${JSON.stringify(state, null, 2)}\n`, 'utf8');
 }
@@ -316,6 +359,14 @@ export async function runPublicTrafficReportCli(): Promise<void> {
       baseline: !previousFirstSeen.found,
     });
     await saveGoodsFirstSeenState(paths.goodsFirstSeenState, firstSeenState);
+    const previousLinkLifecycleState = await loadGoodsLinkLifecycleState(paths.goodsLinkLifecycleState, log);
+    const linkLifecycle = updateGoodsLinkLifecycle({
+      currentDate: runDate,
+      previous: previousLinkLifecycleState,
+      current: currentGoodsSnapshot,
+    });
+    await saveGoodsLinkLifecycleState(paths.goodsLinkLifecycleState, linkLifecycle.state);
+    log.addEvent(`商品链接生命周期: 当前=${Object.keys(linkLifecycle.state.active).length}, 近7天下架=${linkLifecycle.removedLinks.length}`);
 
     try {
       const annotatedCount = annotateGoodsExportWorkbookWithInternalId(paths.goodsExportWorkbook);
@@ -407,6 +458,7 @@ export async function runPublicTrafficReportCli(): Promise<void> {
       context.newProductPoolItems = newProductPoolItems;
       context.newProductPoolIds = newProductPoolItems.map((item) => item.productId);
     }
+    context.agentData = { ...(context.agentData ?? {}), removedLinks: linkLifecycle.removedLinks };
     log.addEvent(
       `规则分析: 曝光不足=${context.lowExposure.length}, 点击弱=${context.weakClick.length}, 转化弱=${context.weakConversion.length}, 高潜力=${context.highPotential.length}, 新品观察=${context.newProductObservation.length}, 生命周期治理=${context.lifecycleGovernance.length}, 建议操作=${context.recommendedActions.length}`,
     );
