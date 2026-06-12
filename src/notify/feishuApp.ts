@@ -9,6 +9,12 @@ export type FeishuAppSendResult = { sent: true; channel: 'app' } | { sent: false
 
 export type FeishuCardPayload = Record<string, unknown>;
 
+export interface FeishuReplyConfig {
+  appId: string;
+  appSecret: string;
+  messageId: string;
+}
+
 async function getTenantAccessToken(config: FeishuAppConfig, fetchImpl: typeof fetch): Promise<{ token: string } | { reason: string }> {
   const tokenResponse = await fetchImpl('https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal', {
     method: 'POST',
@@ -94,5 +100,30 @@ export async function sendFeishuAppCard(
     return { sent: false, channel: 'app', reason: `message send failed: ${messageText}` };
   }
 
+  return { sent: true, channel: 'app' };
+}
+
+export async function replyFeishuMessageText(config: FeishuReplyConfig, text: string, fetchImpl: typeof fetch = fetch): Promise<FeishuAppSendResult> {
+  const token = await getTenantAccessToken(config, fetchImpl);
+  if ('reason' in token) {
+    return { sent: false, channel: 'app', reason: token.reason };
+  }
+
+  const response = await fetchImpl(`https://open.feishu.cn/open-apis/im/v1/messages/${encodeURIComponent(config.messageId)}/reply`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token.token}`,
+    },
+    body: JSON.stringify({
+      msg_type: 'text',
+      content: JSON.stringify({ text }),
+    }),
+  });
+
+  const body = await response.text();
+  if (!response.ok) return { sent: false, channel: 'app', reason: `message reply failed: http ${response.status}: ${body}` };
+  const parsed = JSON.parse(body) as { code?: number };
+  if (parsed.code !== 0) return { sent: false, channel: 'app', reason: `message reply failed: ${body}` };
   return { sent: true, channel: 'app' };
 }
