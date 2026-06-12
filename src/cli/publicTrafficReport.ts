@@ -253,6 +253,7 @@ async function loadGoodsFirstSeenState(path: string): Promise<{ state: GoodsFirs
         firstSeenDate: record.firstSeenDate,
         platformProductId: typeof record.platformProductId === 'string' ? record.platformProductId : '',
         productName: typeof record.productName === 'string' ? record.productName : '',
+        ...(record.baseline === true ? { baseline: true } : {}),
       };
     }
     return { state, found: true };
