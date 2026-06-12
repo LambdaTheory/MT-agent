@@ -162,7 +162,7 @@ function markdownElement(content: string | null): { tag: 'markdown'; content: st
   return content ? [{ tag: 'markdown', content }] : [];
 }
 
-type TableColumnKey = 'product' | 'id' | 'exposure' | 'visits' | 'deals' | 'custodyDays' | 'rate';
+type TableColumnKey = 'product' | 'id' | 'exposure' | 'visits' | 'deals' | 'custodyDays' | 'rate' | 'status' | 'criteria' | 'action' | 'liveDays' | 'dailyVisits';
 
 interface FeishuTableColumn {
   name: TableColumnKey;
@@ -262,6 +262,106 @@ function newProductPoolCount(context: PublicTrafficDataReportContext): number {
   return context.newProductPoolItems?.length ? context.newProductPoolItems.length : context.newProductPoolIds?.length ?? context.newProductObservation.length;
 }
 
+type ColdStartStatus = '强跑通' | '优秀链接' | '访问达标' | '有苗头' | '未启动' | '危险' | '待观察';
+
+interface NewLinkColdStartRow {
+  product: string;
+  id: string;
+  liveDays: string;
+  dailyVisits: number;
+  visits: number;
+  deals: number;
+  status: ColdStartStatus;
+}
+
+const coldStartStatusMeta: Array<{ status: ColdStartStatus; criteria: string; action: string }> = [
+  { status: '强跑通', criteria: '7天成交 >=1', action: '继续放量' },
+  { status: '优秀链接', criteria: '日均访问 >=10', action: '放量观察' },
+  { status: '访问达标', criteria: '日均访问 >=6', action: '看转化' },
+  { status: '有苗头', criteria: '日均访问 3-5.9', action: '优化图/价/标题' },
+  { status: '未启动', criteria: '日均访问 <3', action: '补曝光' },
+  { status: '危险', criteria: '72h 0访问 / 日均<1', action: '优先重做' },
+  { status: '待观察', criteria: '日报未匹配', action: '确认链接同步' },
+];
+
+function parseSubmittedAt(value: string): Date | null {
+  if (!value.trim()) return null;
+  const date = new Date(value.trim().replace(' ', 'T'));
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function reportEnd(date: string): Date {
+  return new Date(`${date}T23:59:59.999`);
+}
+
+function coldStartLiveDays(submittedAt: string, reportDate: string): { label: string; days: number; hours: number } {
+  const submitted = parseSubmittedAt(submittedAt);
+  if (!submitted) return { label: '-', days: 7, hours: 168 };
+  const hours = Math.max(0, (reportEnd(reportDate).getTime() - submitted.getTime()) / 36e5);
+  const days = Math.max(hours / 24, 0.25);
+  return { label: `${days.toFixed(1)}天`, days, hours };
+}
+
+function classifyColdStart(dailyVisits: number, visits: number, deals: number, liveHours: number, matched: boolean): ColdStartStatus {
+  if (!matched) return '待观察';
+  if (deals >= 1) return '强跑通';
+  if ((liveHours >= 72 && visits === 0) || dailyVisits < 1) return '危险';
+  if (dailyVisits >= 10) return '优秀链接';
+  if (dailyVisits >= 6) return '访问达标';
+  if (dailyVisits >= 3) return '有苗头';
+  return '未启动';
+}
+
+function coldStartStatusOrder(status: ColdStartStatus): number {
+  return ['危险', '未启动', '有苗头', '访问达标', '优秀链接', '强跑通', '待观察'].indexOf(status);
+}
+
+function newLinkColdStartRows(context: PublicTrafficDataReportContext): NewLinkColdStartRow[] {
+  return (context.newProductPoolItems ?? []).map((item) => {
+    const row = findRowByIdentifier(context, item.productId);
+    const seven = row?.periods['7d'];
+    const live = coldStartLiveDays(item.submittedAt, context.date);
+    const totalVisits = seven?.dashboardVisits ?? 0;
+    const deals = seven?.shippedOrders ?? 0;
+    const dailyVisits = Number((totalVisits / live.days).toFixed(1));
+    return {
+      product: `商品ID ${item.productId} ${shortNewProductName(item.productName)}`.trim(),
+      id: item.productId,
+      liveDays: live.label,
+      dailyVisits,
+      visits: totalVisits,
+      deals,
+      status: classifyColdStart(dailyVisits, totalVisits, deals, live.hours, Boolean(row)),
+    };
+  }).sort((a, b) => coldStartStatusOrder(a.status) - coldStartStatusOrder(b.status) || a.dailyVisits - b.dailyVisits || a.id.localeCompare(b.id));
+}
+
+function averageDailyVisits(rows: NewLinkColdStartRow[]): string {
+  if (rows.length === 0) return '0.0';
+  return (rows.reduce((sum, row) => sum + row.dailyVisits, 0) / rows.length).toFixed(1);
+}
+
+function coldStartMarkdown(rows: NewLinkColdStartRow[], count: number, fallbackPreview: string): string {
+  const statusCounts = (status: ColdStartStatus): number => rows.filter((row) => row.status === status).length;
+  const statusLines = coldStartStatusMeta
+    .map((meta) => ({ ...meta, count: statusCounts(meta.status) }))
+    .filter((item) => item.count > 0)
+    .map((item) => `- ${item.status} ${item.count} 条｜${item.criteria}｜${item.action}`);
+  const detailLines = rows.slice(0, 10).map((row, index) => `${index + 1}. ${row.product}｜上线 ${row.liveDays}｜日均访问 ${row.dailyVisits}/天｜访问 ${row.visits}｜成交 ${row.deals}｜${row.status}`);
+  return [
+    `近7天链接 ${count} 条`,
+    `强跑通 ${statusCounts('强跑通')}｜优秀 ${statusCounts('优秀链接')}｜访问达标 ${statusCounts('访问达标')}｜有苗头 ${statusCounts('有苗头')}｜未启动 ${statusCounts('未启动')}｜危险 ${statusCounts('危险')}`,
+    `平均访问 ${averageDailyVisits(rows)}/天｜认可线 >=6/天｜优秀线 >=10/天`,
+    '',
+    '**分层状态**',
+    ...statusLines,
+    '',
+    '**优先处理链接**',
+    ...detailLines,
+    ...(rows.some((row) => row.status === '待观察') && fallbackPreview ? ['', '**待观察链接**', fallbackPreview] : []),
+  ].join('\n');
+}
+
 function analysisSummary(context: PublicTrafficDataReportContext, boostRows: FeishuTableRow[], conversionRowsData: FeishuTableRow[], scaleRowsData: FeishuTableRow[]): Record<string, unknown> {
   const conclusionLines = context.conclusions.slice(0, 4).map((item) => `- **${item.label}**：${item.text}`);
   const lines = [
@@ -275,19 +375,26 @@ function analysisSummary(context: PublicTrafficDataReportContext, boostRows: Fei
 
 function newProductPoolPanel(context: PublicTrafficDataReportContext): Record<string, unknown> {
   const count = newProductPoolCount(context);
-  const preview = context.newProductPoolItems?.length
-    ? context.newProductPoolItems.slice(0, 10).map((item) => `- 商品ID ${item.productId} ${shortNewProductName(item.productName)}：${item.maintenanceStatus}`).join('\n')
+  const coldStartRows = newLinkColdStartRows(context);
+  const fallbackPreview = context.newProductPoolItems?.length
+    ? context.newProductPoolItems.slice(0, 10).map((item) => `- 商品ID ${item.productId} ${shortNewProductName(item.productName)}：待观察`).join('\n')
     : context.newProductPoolIds?.length
-      ? context.newProductPoolIds.slice(0, 10).map((id) => `- 商品ID ${id}：待维护`).join('\n')
+      ? context.newProductPoolIds.slice(0, 10).map((id) => `- 商品ID ${id}：待观察`).join('\n')
       : context.newProductObservation.slice(0, 10).map((item) => `- ${item.identifier}：${item.reason}`).join('\n');
+  const statusCounts = (status: ColdStartStatus): number => coldStartRows.filter((row) => row.status === status).length;
+  const elements: Record<string, unknown>[] = coldStartRows.length > 0
+    ? [
+        { tag: 'markdown', content: coldStartMarkdown(coldStartRows, count, fallbackPreview) },
+      ]
+    : [{ tag: 'markdown', content: [`近7天链接 ${count} 条。`, fallbackPreview].filter(Boolean).join('\n') }];
   return {
     tag: 'collapsible_panel',
     element_id: 'new_product_pool',
     expanded: false,
-    header: { title: { tag: 'plain_text', content: `新品维护池（${count}）` }, vertical_align: 'center', icon: { tag: 'standard_icon', token: 'down-small-ccm_outlined', size: '16px 16px' }, icon_position: 'right', icon_expanded_angle: -180 },
+    header: { title: { tag: 'plain_text', content: `新链接冷启动（${count}）` }, vertical_align: 'center', icon: { tag: 'standard_icon', token: 'down-small-ccm_outlined', size: '16px 16px' }, icon_position: 'right', icon_expanded_angle: -180 },
     border: { color: 'grey', corner_radius: '5px' },
     padding: '8px 8px 8px 8px',
-    elements: [{ tag: 'markdown', content: [`当前新品维护池 ${count} 个。`, preview].filter(Boolean).join('\n') }],
+    elements,
   };
 }
 

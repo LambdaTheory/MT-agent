@@ -4,6 +4,7 @@ export interface FetchRecentGoodsManagerProductIdsOptions {
   referenceDate: string;
   fetchImpl?: typeof fetch;
   pageSize?: number;
+  requireAlipaySynced?: boolean;
 }
 
 export type FetchRecentGoodsManagerProductsOptions = FetchRecentGoodsManagerProductIdsOptions;
@@ -106,6 +107,10 @@ function toNewProductPoolItem(item: GoodsManagerGoodsItem, productId: string): G
   };
 }
 
+function isAlipaySynced(item: GoodsManagerGoodsItem): boolean {
+  return normalizeText(item.是否同步支付宝) === '已同步';
+}
+
 function sortProductIds(ids: string[]): string[] {
   return [...ids].sort((a, b) => {
     const aNumber = /^\d+$/.test(a) ? Number(a) : null;
@@ -140,7 +145,7 @@ export async function fetchRecentGoodsManagerProducts(options: FetchRecentGoodsM
     totalPages = Math.max(1, Number(result.total_pages) || 1);
     for (const item of result.data ?? []) {
       const id = typeof item.ID === 'string' || typeof item.ID === 'number' ? String(item.ID).trim() : '';
-      if (id && !products.has(id) && inWindow(item.最近提交时间, options.referenceDate, days)) {
+      if (id && !products.has(id) && inWindow(item.最近提交时间, options.referenceDate, days) && (!options.requireAlipaySynced || isAlipaySynced(item))) {
         products.set(id, toNewProductPoolItem(item, id));
       }
     }
