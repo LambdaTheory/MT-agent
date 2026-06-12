@@ -13,6 +13,8 @@ export interface FeishuMessageDispatcher {
   dispatch(message: FeishuBotIncomingTextMessage): Promise<FeishuBotDispatchResult>;
 }
 
+const seenMessageIds = new Set<string>();
+
 function formatError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -33,7 +35,6 @@ function canonicalizeIntent(intent: BotIntent): BotIntent {
 }
 
 export function createFeishuMessageDispatcher(config: FeishuMessageDispatcherConfig = {}): FeishuMessageDispatcher {
-  const seenMessageIds = new Set<string>();
   const resolveIntent = config.resolveIntent ?? ((text: string) => parseBotIntent(text));
   const handleIntent = config.handleIntent ?? handleBotIntent;
   const logError = config.logError ?? ((error, message) => console.error(`飞书消息处理失败 ${message.messageId}:`, error));
