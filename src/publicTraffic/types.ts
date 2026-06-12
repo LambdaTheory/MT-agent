@@ -163,6 +163,7 @@ export interface PublicTrafficDataReportContext {
   summary: Record<PeriodKey, PublicTrafficDataSummary>;
   conclusions: PublicTrafficConclusion[];
   dataQualityNotes?: string[];
+  newProductPoolIds?: string[];
   rows: PublicTrafficProductDataRow[];
   lowExposure: PublicTrafficReportSectionItem[];
   weakClick: PublicTrafficReportSectionItem[];
