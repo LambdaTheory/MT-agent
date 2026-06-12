@@ -55,6 +55,10 @@ describe('startFeishuBotServer', () => {
   it('routes text event through dispatcher and replies', async () => {
     const replies: Array<{ messageId: string; text: string }> = [];
     const messages: FeishuBotIncomingTextMessage[] = [];
+    let resolveReplySent!: () => void;
+    const replySent = new Promise<void>((resolve) => {
+      resolveReplySent = resolve;
+    });
     const server = startFeishuBotServer({
       port: 0,
       appId: 'app',
@@ -65,6 +69,7 @@ describe('startFeishuBotServer', () => {
       },
       replyText: async ({ messageId }, text) => {
         replies.push({ messageId, text });
+        resolveReplySent();
         return { sent: true, channel: 'app' };
       },
     });
@@ -80,7 +85,7 @@ describe('startFeishuBotServer', () => {
       });
 
       expect(response.status).toBe(200);
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      await replySent;
       expect(messages).toEqual([{ messageId: 'mid-http-route', text: '今日概况', source: 'http', chatId: 'chat', senderOpenId: 'ou_1' }]);
       expect(replies).toEqual([{ messageId: 'mid-http-route', text: 'handled:今日概况' }]);
     } finally {
@@ -90,11 +95,18 @@ describe('startFeishuBotServer', () => {
 
   it('does not reply when dispatcher skips a duplicate message', async () => {
     const replies: Array<{ messageId: string; text: string }> = [];
+    let resolveDispatchCalled!: () => void;
+    const dispatchCalled = new Promise<void>((resolve) => {
+      resolveDispatchCalled = resolve;
+    });
     const server = startFeishuBotServer({
       port: 0,
       appId: 'app',
       appSecret: 'secret',
-      dispatchMessage: async () => ({ text: '', skipped: true }),
+      dispatchMessage: async () => {
+        resolveDispatchCalled();
+        return { text: '', skipped: true };
+      },
       replyText: async ({ messageId }, text) => {
         replies.push({ messageId, text });
         return { sent: true, channel: 'app' };
@@ -112,7 +124,7 @@ describe('startFeishuBotServer', () => {
       });
 
       expect(response.status).toBe(200);
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      await dispatchCalled;
       expect(replies).toEqual([]);
     } finally {
       server.close();
