@@ -550,6 +550,22 @@ describe('public traffic report outputs', () => {
     });
   });
 
+  it('writes goods-manager new product pool IDs into workbook and Feishu text', () => {
+    const withPool: PublicTrafficDataReportContext = { ...context, newProductPoolIds: ['701', '702'] };
+    const workbook = XLSX.read(writePublicTrafficWorkbookBuffer(withPool), { type: 'buffer' });
+    expect(workbook.SheetNames).toContain('新品池维护');
+    const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets['新品池维护']);
+    expect(rows).toEqual([
+      { 商品ID: '701', 维护状态: '待维护', 备注: '' },
+      { 商品ID: '702', 维护状态: '待维护', 备注: '' },
+    ]);
+
+    const text = buildPublicTrafficFeishuText(withPool, { markdownPath: 'report.md', workbookPath: 'report.xlsx' });
+    expect(text).toContain('新品池维护 2');
+    expect(text).toContain('新品池维护');
+    expect(text).toContain('1. 商品ID 701｜待维护');
+  });
+
   it('writes explanatory notes for empty workbook sections', () => {
     const empty: PublicTrafficDataReportContext = {
       ...context,

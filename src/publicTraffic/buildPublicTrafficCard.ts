@@ -35,6 +35,7 @@ function moduleCounts(context: PublicTrafficDataReportContext): Array<[string, n
     ['转化弱', context.weakConversion.length],
     ['高潜力', context.highPotential.length],
     ['新品观察', context.newProductObservation.length],
+    ['新品池维护', context.newProductPoolIds?.length ?? 0],
     ['生命周期治理', context.lifecycleGovernance.length],
     ['建议操作', context.recommendedActions.length],
   ];
@@ -253,27 +254,35 @@ function scaleRows(context: PublicTrafficDataReportContext, productNameMap: Prod
     .map((row) => ({ product: shortProductName(row, productNameMap), id: shortId(row), exposure: row.periods['1d'].exposure, visits: visits(row), deals: row.periods['1d'].shippedOrders }));
 }
 
+function newProductPoolCount(context: PublicTrafficDataReportContext): number {
+  return context.newProductPoolIds?.length ?? context.newProductObservation.length;
+}
+
 function analysisSummary(context: PublicTrafficDataReportContext, boostRows: FeishuTableRow[], conversionRowsData: FeishuTableRow[], scaleRowsData: FeishuTableRow[]): Record<string, unknown> {
   const conclusionLines = context.conclusions.slice(0, 4).map((item) => `- **${item.label}**：${item.text}`);
   const lines = [
     '**分析与建议**',
     ...conclusionLines,
     `- **动作聚焦**：补曝光 ${boostRows.length} 个；提转化 ${conversionRowsData.length} 个；继续放量 ${scaleRowsData.length} 个。`,
-    `- **建议**：优先排查成交/转化弱商品，再处理托管超过 7 天且曝光 0-50 的商品；新品 ${context.newProductObservation.length} 个先进入维护池观察。`,
+    `- **建议**：优先排查成交/转化弱商品，再处理托管超过 7 天且曝光 0-50 的商品；新品 ${newProductPoolCount(context)} 个先进入维护池观察。`,
   ];
   return { tag: 'markdown', content: lines.join('\n') };
 }
 
 function newProductPoolPanel(context: PublicTrafficDataReportContext): Record<string, unknown> {
-  const preview = context.newProductObservation.slice(0, 10).map((item) => `- ${item.identifier}：${item.reason}`).join('\n');
+  const poolIds = context.newProductPoolIds;
+  const count = newProductPoolCount(context);
+  const preview = poolIds?.length
+    ? poolIds.slice(0, 10).map((id) => `- 商品ID ${id}：待维护`).join('\n')
+    : context.newProductObservation.slice(0, 10).map((item) => `- ${item.identifier}：${item.reason}`).join('\n');
   return {
     tag: 'collapsible_panel',
     element_id: 'new_product_pool',
     expanded: false,
-    header: { title: { tag: 'plain_text', content: `新品维护池（${context.newProductObservation.length}）` }, vertical_align: 'center', icon: { tag: 'standard_icon', token: 'down-small-ccm_outlined', size: '16px 16px' }, icon_position: 'right', icon_expanded_angle: -180 },
+    header: { title: { tag: 'plain_text', content: `新品维护池（${count}）` }, vertical_align: 'center', icon: { tag: 'standard_icon', token: 'down-small-ccm_outlined', size: '16px 16px' }, icon_position: 'right', icon_expanded_angle: -180 },
     border: { color: 'grey', corner_radius: '5px' },
     padding: '8px 8px 8px 8px',
-    elements: [{ tag: 'markdown', content: [`当前新品观察 ${context.newProductObservation.length} 个。后续需要单独设计新品维护池：进入、观察、转动作、冷却、退出。`, preview].filter(Boolean).join('\n') }],
+    elements: [{ tag: 'markdown', content: [`当前新品维护池 ${count} 个。`, preview].filter(Boolean).join('\n') }],
   };
 }
 

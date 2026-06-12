@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   crawlPublicTrafficSources: vi.fn(),
   normalizeRowsForPeriod: vi.fn<(table: RawTableData) => PeriodProductMetrics[]>(),
   sendFeishuCard: vi.fn(),
+  fetchRecentGoodsManagerProductIds: vi.fn(),
 }));
 
 vi.mock('../src/config/loadEnv.js', () => ({
@@ -47,6 +48,10 @@ vi.mock('../src/extractor/normalizeRows.js', () => ({
 
 vi.mock('../src/notify/feishu.js', () => ({
   sendFeishuCard: mocks.sendFeishuCard,
+}));
+
+vi.mock('../src/publicTraffic/goodsManagerNewProducts.js', () => ({
+  fetchRecentGoodsManagerProductIds: mocks.fetchRecentGoodsManagerProductIds,
 }));
 
 describe('runPublicTrafficReportCli public traffic sequencing', () => {
@@ -115,6 +120,7 @@ describe('runPublicTrafficReportCli public traffic sequencing', () => {
       },
     ]);
     mocks.sendFeishuCard.mockResolvedValue({ sent: false, reason: 'test' });
+    mocks.fetchRecentGoodsManagerProductIds.mockResolvedValue([]);
 
     const historicalPaths = buildPublicTrafficPaths(mocks.outputDir, '2026-06-09');
     await mkdir(historicalPaths.dir, { recursive: true });
@@ -139,6 +145,24 @@ describe('runPublicTrafficReportCli public traffic sequencing', () => {
     if (mocks.outputDir) {
       await rm(mocks.outputDir, { recursive: true, force: true });
     }
+  });
+
+  it('loads goods-manager new product pool IDs when GOODS_MANAGER_BASE_URL is configured', async () => {
+    vi.stubEnv('GOODS_MANAGER_BASE_URL', 'http://192.168.1.22:3010');
+    mocks.fetchRecentGoodsManagerProductIds.mockResolvedValueOnce(['701', '702']);
+    const { runPublicTrafficReportCli } = await import('../src/cli/publicTrafficReport.js');
+
+    await runPublicTrafficReportCli();
+
+    expect(mocks.fetchRecentGoodsManagerProductIds).toHaveBeenCalledWith({
+      baseUrl: 'http://192.168.1.22:3010',
+      days: 7,
+      referenceDate: '2026-06-10',
+    });
+    const todayPaths = buildPublicTrafficPaths(mocks.outputDir, '2026-06-10');
+    const context = JSON.parse(await readFile(todayPaths.reportContext, 'utf8')) as PublicTrafficDataReportContext;
+    expect(context.newProductPoolIds).toEqual(['701', '702']);
+    await expect(readFile(todayPaths.log, 'utf8')).resolves.toContain('goods-manager 新品池: 2 个商品');
   });
 
   it('keeps first-run daily delta empty while historical deltas still feed report summaries and rows', async () => {

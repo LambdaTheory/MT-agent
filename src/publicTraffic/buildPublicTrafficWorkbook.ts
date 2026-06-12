@@ -97,6 +97,13 @@ function orderAnalysisSheet(result: OrderAnalysisResult): XLSX.WorkSheet {
   return XLSX.utils.aoa_to_sheet(aoa);
 }
 
+function newProductPoolSheet(ids: string[]): XLSX.WorkSheet {
+  return XLSX.utils.aoa_to_sheet([
+    ['商品ID', '维护状态', '备注'],
+    ...ids.map((id) => [id, '待维护', '']),
+  ]);
+}
+
 function writeLegacyWorkbookBuffer(context: PublicTrafficReportContext): Buffer {
   const workbook = XLSX.utils.book_new();
   const overviewAoa: (string | number)[][] = [['period', 'exposure', 'visits', 'conversionRate', 'amount']];
@@ -129,6 +136,9 @@ export function writePublicTrafficWorkbookBuffer(context: PublicTrafficDataRepor
   XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(sectionRows(context.weakConversion, context.emptySectionNotes.weakConversion)), '转化弱');
   XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(sectionRows(context.highPotential, context.emptySectionNotes.highPotential)), '高潜力');
   XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(sectionRows(context.newProductObservation, context.emptySectionNotes.newProductObservation)), '新品观察');
+  if (context.newProductPoolIds?.length) {
+    XLSX.utils.book_append_sheet(workbook, newProductPoolSheet(context.newProductPoolIds), '新品池维护');
+  }
   XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(sectionRows(context.lifecycleGovernance, context.emptySectionNotes.lifecycleGovernance)), '生命周期治理');
   if (context.orderAnalysis) {
     XLSX.utils.book_append_sheet(workbook, orderAnalysisSheet(context.orderAnalysis), '订单分析');
