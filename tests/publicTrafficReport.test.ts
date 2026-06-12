@@ -595,7 +595,7 @@ describe('public traffic report outputs', () => {
     expect(cardJson).toContain('新品池维护 11');
     expect(cardJson).toContain('新品维护池（11）');
     expect(cardJson).toContain('商品ID 701 新品 Alpha：待维护');
-    expect(cardJson).toContain('商品ID 710 超长商品名称用于验证卡片会做...：待维护');
+    expect(cardJson).toContain('商品ID 710 超长商品名称用于验证卡片会做简短展示...：待维护');
     expect(cardJson).not.toContain('第十一个不展示');
   });
 

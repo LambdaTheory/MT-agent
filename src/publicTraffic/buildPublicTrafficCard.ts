@@ -222,7 +222,7 @@ function shortProductName(row: PublicTrafficProductDataRow, productNameMap: Prod
 }
 
 function shortNewProductName(name: string): string {
-  return name.length > 18 ? `${name.slice(0, 14)}...` : name;
+  return name.length > 18 ? `${name.slice(0, 18)}...` : name;
 }
 
 function findRowByIdentifier(context: PublicTrafficDataReportContext, identifier: string): PublicTrafficProductDataRow | undefined {
