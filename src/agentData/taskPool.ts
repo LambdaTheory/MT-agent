@@ -16,7 +16,7 @@ export function buildAgentTaskPool(context: PublicTrafficDataReportContext): Age
   }
   const uniqueTasks = new Map<string, AgentTaskItem>();
   for (const task of tasks) {
-    const key = `${task.productId}\0${task.suggestedAction}\0${task.reason}`;
+    const key = `${task.productId}\0${task.suggestedAction}`;
     const existing = uniqueTasks.get(key);
     if (!existing || task.priority > existing.priority) {
       uniqueTasks.set(key, task);
