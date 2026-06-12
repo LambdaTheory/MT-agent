@@ -34,3 +34,21 @@ export interface FeishuUrlVerificationPayload {
   challenge?: string;
   token?: string;
 }
+
+export type FeishuBotMessageSource = 'sdk' | 'http';
+
+export interface FeishuBotIncomingTextMessage {
+  messageId: string;
+  text: string;
+  source: FeishuBotMessageSource;
+  chatId?: string;
+  senderOpenId?: string;
+}
+
+export interface FeishuBotDispatchResult extends BotResponse {
+  skipped: boolean;
+}
+
+export type BotIntentResolver = (text: string, message: FeishuBotIncomingTextMessage) => BotIntent;
+
+export type FutureBotIntentHook = 'ask_report_question' | 'suggest_operation' | 'request_approval' | 'execute_operation';
