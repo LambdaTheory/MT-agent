@@ -1,8 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { replyFeishuMessageText, type FeishuAppSendResult, type FeishuReplyConfig } from '../notify/feishuApp.js';
-import { parseBotIntent } from './intent.js';
-import { handleBotIntent } from './tools.js';
-import type { BotIntent, BotResponse, FeishuMessageEvent } from './types.js';
+import { createFeishuMessageDispatcher } from './dispatcher.js';
+import type { BotIntent, BotResponse, FeishuBotDispatchResult, FeishuBotIncomingTextMessage, FeishuMessageEvent } from './types.js';
 import { handleUrlVerification } from './verify.js';
 
 export interface FeishuBotServerConfig {
@@ -13,6 +12,7 @@ export interface FeishuBotServerConfig {
   encryptKey?: string;
   outputDir?: string;
   handleIntent?: (intent: BotIntent, outputDir?: string) => Promise<BotResponse>;
+  dispatchMessage?: (message: FeishuBotIncomingTextMessage) => Promise<FeishuBotDispatchResult>;
   replyText?: (config: FeishuReplyConfig, text: string) => Promise<FeishuAppSendResult>;
 }
 
@@ -27,14 +27,17 @@ function writeJson(res: ServerResponse, status: number, value: unknown): void {
   res.end(JSON.stringify(value));
 }
 
-export function extractTextMessage(payload: FeishuMessageEvent): { messageId: string; text: string } | null {
+export function extractTextMessage(payload: FeishuMessageEvent): { messageId: string; text: string; chatId?: string; senderOpenId?: string } | null {
   const message = payload.event?.message;
   if (!message?.message_id || message.message_type !== 'text' || !message.content) return null;
   const content = JSON.parse(message.content) as { text?: string };
-  return content.text ? { messageId: message.message_id, text: content.text } : null;
+  return content.text ? { messageId: message.message_id, text: content.text, chatId: message.chat_id, senderOpenId: payload.event?.sender?.sender_id?.open_id } : null;
 }
 
 export function startFeishuBotServer(config: FeishuBotServerConfig) {
+  const dispatcher = createFeishuMessageDispatcher({ outputDir: config.outputDir, handleIntent: config.handleIntent });
+  const dispatchMessage = config.dispatchMessage ?? dispatcher.dispatch;
+
   const server = createServer(async (req, res) => {
     if (req.method !== 'POST') return writeJson(res, 404, { error: 'not found' });
 
@@ -49,8 +52,8 @@ export function startFeishuBotServer(config: FeishuBotServerConfig) {
 
     writeJson(res, 200, { ok: true });
 
-    const response = await (config.handleIntent ?? handleBotIntent)(parseBotIntent(textMessage.text), config.outputDir);
-    await (config.replyText ?? replyFeishuMessageText)({ appId: config.appId, appSecret: config.appSecret, messageId: textMessage.messageId }, response.text);
+    const response = await dispatchMessage({ ...textMessage, source: 'http' });
+    if (!response.skipped) await (config.replyText ?? replyFeishuMessageText)({ appId: config.appId, appSecret: config.appSecret, messageId: textMessage.messageId }, response.text);
   });
 
   server.listen(config.port);

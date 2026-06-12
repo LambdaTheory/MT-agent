@@ -2,9 +2,10 @@
 
 ## Branch
 
-- Worktree: `C:\works\MT-agent\.worktrees\feishu-bot-readonly-command-agent`
-- Branch: `feature/feishu-bot-readonly-command-agent`
-- Base commit: `e065884 调整：精简公域卡片顶部标题`
+- Original HTTP callback branch: `feature/feishu-bot-readonly-command-agent` (already merged into `master`).
+- Current SDK long-connection worktree: `C:\works\MT-agent\.worktrees\feishu-sdk-long-connection-communication`
+- Current SDK long-connection branch: `feature/feishu-sdk-long-connection-communication`
+- Current branch base: `master`
 
 ## Scope
 
@@ -18,6 +19,8 @@ This branch implements phase 1 agentization through Feishu server-side APIs:
 - Feishu message reply API wrapper.
 - `npm run feishu-bot` server entrypoint.
 
+The current SDK long-connection branch adds a primary SDK persistent-connection entrypoint and shared message dispatcher on top of the already-merged HTTP callback implementation.
+
 It intentionally does not implement:
 
 - LLM integration.
@@ -26,7 +29,7 @@ It intentionally does not implement:
 - Long-term memory.
 - Encrypted event payload decryption. Keep Feishu Encrypt Key empty for phase 1.
 
-## Commits
+## Original HTTP Callback Commits
 
 - `f6b8541 功能：新增飞书机器人意图解析`
 - `68dcd44 功能：新增飞书机器人事件校验`
@@ -38,6 +41,10 @@ It intentionally does not implement:
 - `26a5037 文档：更新飞书机器人联调验证说明`
 - `a2af5ba 修复：飞书机器人不将 Encrypt Key 用作签名密钥`
 
+## SDK Long Connection Commits
+
+Use `git log --oneline master..feature/feishu-sdk-long-connection-communication` to inspect the current SDK branch commit range. Do not maintain a copied SHA list in this document; it becomes stale whenever the handoff docs are updated.
+
 ## Main Files Added
 
 - `src/feishuBot/types.ts`
@@ -45,8 +52,11 @@ It intentionally does not implement:
 - `src/feishuBot/verify.ts`
 - `src/feishuBot/reportStore.ts`
 - `src/feishuBot/tools.ts`
+- `src/feishuBot/dispatcher.ts`
+- `src/feishuBot/sdkClient.ts`
 - `src/feishuBot/server.ts`
 - `src/cli/feishuBot.ts`
+- `src/cli/feishuBotSdk.ts`
 - `src/agentData/types.ts`
 - `src/agentData/publicTrafficQueries.ts`
 - `src/agentData/taskPool.ts`
@@ -55,6 +65,8 @@ It intentionally does not implement:
 - `tests/feishuBotVerify.test.ts`
 - `tests/feishuBotReportStore.test.ts`
 - `tests/feishuBotTools.test.ts`
+- `tests/feishuBotDispatcher.test.ts`
+- `tests/feishuBotSdkClient.test.ts`
 - `tests/feishuBotReply.test.ts`
 - `tests/feishuBotServer.test.ts`
 - `tests/agentDataTypesSource.test.ts`
@@ -64,40 +76,32 @@ It intentionally does not implement:
 
 ## Main Files Modified
 
-- `package.json`: adds `feishu-bot` script.
+- `package.json`: adds Feishu bot scripts and Feishu SDK dependency.
+- `package-lock.json`: locks Feishu SDK dependency graph and overrides.
 - `src/notify/feishuApp.ts`: adds `replyFeishuMessageText` and broadens token config typing.
 - `.env.example`: adds bot event server variables.
 - `TODO.md`: records phase 1 bot scope.
 
 ## Merge Notes
 
-Your main session has many uncommitted changes on `master`. Prefer cherry-picking or manually applying this branch after those changes are settled.
+The original readonly HTTP callback branch is already merged into `master`. This handoff now covers the SDK long-connection branch that builds on top of `master` and keeps the HTTP callback server as fallback.
+
+If your main session has uncommitted changes on `master`, settle or stash them before merging, cherry-picking, or manually applying this branch.
 
 Recommended merge flow from main session:
 
 ```powershell
-git fetch . feature/feishu-bot-readonly-command-agent
-git log --oneline master..feature/feishu-bot-readonly-command-agent
-git diff master..feature/feishu-bot-readonly-command-agent -- src/feishuBot src/agentData src/cli/feishuBot.ts src/notify/feishuApp.ts package.json .env.example TODO.md tests/feishuBot*.test.ts tests/agentData*.test.ts docs/feishu-bot-readonly-command-agent-merge-handoff.md
+git fetch . feature/feishu-sdk-long-connection-communication
+git log --oneline master..feature/feishu-sdk-long-connection-communication
+git diff master..feature/feishu-sdk-long-connection-communication -- package.json package-lock.json .env.example src/feishuBot src/cli/feishuBotSdk.ts tests/feishuBot*.test.ts tests/cliLoadEnvSource.test.ts docs/feishu-bot-readonly-command-agent-merge-handoff.md docs/superpowers/plans/2026-06-12-feishu-sdk-long-connection-communication.md
+git merge --no-ff feature/feishu-sdk-long-connection-communication
 ```
 
-If main has diverged significantly, cherry-pick one commit at a time:
+If main has diverged significantly and a merge is not appropriate, inspect the current range and cherry-pick the complete ordered SDK branch range rather than copying a fixed SHA list into this document:
 
 ```powershell
-git cherry-pick f6b8541
-git cherry-pick 68dcd44
-git cherry-pick 683f454
-git cherry-pick a6414b5
-git cherry-pick ec06a1f
-git cherry-pick 31c7caf
-git cherry-pick 1aaeb59
-git cherry-pick 26a5037
-git cherry-pick a2af5ba
-git cherry-pick e804f3c
-git cherry-pick 37a0c1d
-git cherry-pick 566ca56
-git cherry-pick 5f36d4c
-git cherry-pick 7959e5f
+git log --reverse --oneline master..feature/feishu-sdk-long-connection-communication
+git cherry-pick <oldest-sdk-commit>^..<newest-sdk-commit>
 ```
 
 ## Runtime Setup
@@ -143,6 +147,7 @@ Run after merge:
 
 ```powershell
 npm test -- tests/feishuBotIntent.test.ts tests/feishuBotVerify.test.ts tests/feishuBotReportStore.test.ts tests/feishuBotTools.test.ts tests/feishuBotReply.test.ts tests/feishuBotServer.test.ts
+npm test -- tests/feishuBotDispatcher.test.ts tests/feishuBotSdkClient.test.ts tests/feishuBotServer.test.ts
 npm test -- tests/agentDataTypesSource.test.ts tests/agentDataPublicTrafficQueries.test.ts tests/agentDataTaskPool.test.ts tests/agentDataIntent.test.ts
 npm test
 npm run build
@@ -164,3 +169,26 @@ Manual smoke test:
 5. Send `查询 565`.
 6. Send `重发日报 发我`.
 7. Send `跑日报` only when browser login state is ready.
+
+## SDK Long Connection Mode
+
+`feature/feishu-sdk-long-connection-communication` adds a primary Feishu SDK long-connection entrypoint while keeping the HTTP callback server as fallback.
+
+Start SDK mode locally:
+
+```powershell
+npm run feishu-bot:sdk
+```
+
+Required environment:
+
+```text
+FEISHU_APP_ID=cli_xxxxxxxxxxxxxxxx
+FEISHU_APP_SECRET=replace-with-your-secret
+FEISHU_BOT_USE_SDK=true
+MT_AGENT_OUTPUT_DIR=output
+```
+
+In Feishu Open Platform, configure event subscription to receive events through persistent connection, and subscribe to `im.message.receive_v1`.
+
+The SDK mode still uses deterministic command parsing. LLM intent resolving, approval buttons, and product mutation are only future extension points.

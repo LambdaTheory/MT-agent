@@ -6,6 +6,14 @@ async function source(path: string): Promise<string> {
 }
 
 describe('CLI loadEnv wiring', () => {
+  it('guards Feishu SDK bot startup when imported', async () => {
+    const text = await source('../src/cli/feishuBotSdk.ts');
+    expect(text).toContain("import { pathToFileURL } from 'node:url';");
+    expect(text).toContain('export async function main(): Promise<void>');
+    expect(text).toContain('await bot.start();');
+    expect(text).toContain('import.meta.url === pathToFileURL(process.argv[1]).href');
+  });
+
   it('loads .env before Feishu test send', async () => {
     const text = await source('../src/cli/testFeishu.ts');
     expect(text).toContain("import { loadEnv } from '../config/loadEnv.js';");

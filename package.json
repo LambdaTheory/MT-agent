@@ -13,12 +13,17 @@
     "rebuild-latest": "tsx src/cli/rebuildLatestReport.ts",
     "public-traffic-report": "tsx src/cli/publicTrafficReport.ts",
     "feishu-bot": "tsx src/cli/feishuBot.ts",
+    "feishu-bot:sdk": "tsx src/cli/feishuBotSdk.ts",
     "build": "tsc -p tsconfig.json",
     "test": "vitest run"
   },
   "dependencies": {
+    "@larksuiteoapi/node-sdk": "^1.66.1",
     "playwright": "^1.52.0",
     "xlsx-js-style": "^1.2.0"
+  },
+  "overrides": {
+    "axios": "1.17.0"
   },
   "devDependencies": {
     "@types/node": "^22.15.30",
