@@ -7,3 +7,5 @@ output/
 .env.*
 !.env.example
 .worktrees/
+config/product-id-map.json
+config/product-id-map.backup.json
