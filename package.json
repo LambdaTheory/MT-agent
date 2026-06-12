@@ -17,9 +17,12 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@larksuiteoapi/node-sdk": "1.56.1",
+    "@larksuiteoapi/node-sdk": "^1.66.1",
     "playwright": "^1.52.0",
     "xlsx-js-style": "^1.2.0"
+  },
+  "overrides": {
+    "axios": "1.17.0"
   },
   "devDependencies": {
     "@types/node": "^22.15.30",
