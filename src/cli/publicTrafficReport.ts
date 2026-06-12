@@ -17,12 +17,13 @@ import { resolveFallbackProductId } from '../publicTraffic/extractProductIdFromI
 import { buildPublicTrafficFeishuText } from '../publicTraffic/buildPublicTrafficFeishu.js';
 import { buildPublicTrafficMarkdown } from '../publicTraffic/buildPublicTrafficMarkdown.js';
 import { writePublicTrafficWorkbookBuffer } from '../publicTraffic/buildPublicTrafficWorkbook.js';
-import { fetchRecentGoodsManagerProductIds } from '../publicTraffic/goodsManagerNewProducts.js';
+import { fetchRecentGoodsManagerProducts } from '../publicTraffic/goodsManagerNewProducts.js';
 import { mergePublicTrafficData } from '../publicTraffic/mergePublicTrafficData.js';
 import { buildPublicTrafficPaths } from '../publicTraffic/paths.js';
 import { loadProductNameMap } from '../publicTraffic/productDisplayName.js';
 import { loadRecentExposureDeltas } from '../publicTraffic/recentExposureDeltas.js';
 import type { PeriodProductMetrics, RawTableData } from '../domain/types.js';
+import type { GoodsManagerNewProductPoolItem } from '../publicTraffic/goodsManagerNewProducts.js';
 import type { ExposureCumulativeProduct, PublicTrafficDataReportContext, PublicTrafficDataSummary } from '../publicTraffic/types.js';
 import { createRunLog } from '../storage/runLog.js';
 
@@ -212,14 +213,14 @@ async function loadMappingSafely(path: string | undefined, log: ReturnType<typeo
   }
 }
 
-async function loadGoodsManagerNewProductPool(date: string, log: ReturnType<typeof createRunLog>): Promise<string[]> {
+async function loadGoodsManagerNewProductPool(date: string, log: ReturnType<typeof createRunLog>): Promise<GoodsManagerNewProductPoolItem[]> {
   const baseUrl = process.env.GOODS_MANAGER_BASE_URL?.trim();
   if (!baseUrl) return [];
 
   try {
-    const ids = await fetchRecentGoodsManagerProductIds({ baseUrl, days: 7, referenceDate: date });
-    log.addEvent(`goods-manager 新品池: ${ids.length} 个商品`);
-    return ids;
+    const products = await fetchRecentGoodsManagerProducts({ baseUrl, days: 7, referenceDate: date });
+    log.addEvent(`goods-manager 新品池: ${products.length} 个商品`);
+    return products;
   } catch (error) {
     log.addEvent(`goods-manager 新品池读取失败: ${error instanceof Error ? error.message : String(error)}`);
     return [];
@@ -342,8 +343,11 @@ export async function runPublicTrafficReportCli(): Promise<void> {
       cumulativeProducts: crawlResult.products,
       orderAnalysis,
     });
-    const newProductPoolIds = await loadGoodsManagerNewProductPool(runDate, log);
-    if (newProductPoolIds.length > 0) context.newProductPoolIds = newProductPoolIds;
+    const newProductPoolItems = await loadGoodsManagerNewProductPool(runDate, log);
+    if (newProductPoolItems.length > 0) {
+      context.newProductPoolItems = newProductPoolItems;
+      context.newProductPoolIds = newProductPoolItems.map((item) => item.productId);
+    }
     log.addEvent(
       `规则分析: 曝光不足=${context.lowExposure.length}, 点击弱=${context.weakClick.length}, 转化弱=${context.weakConversion.length}, 高潜力=${context.highPotential.length}, 新品观察=${context.newProductObservation.length}, 生命周期治理=${context.lifecycleGovernance.length}, 建议操作=${context.recommendedActions.length}`,
     );

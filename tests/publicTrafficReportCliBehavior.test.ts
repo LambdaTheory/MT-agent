@@ -15,7 +15,7 @@ const mocks = vi.hoisted(() => ({
   crawlPublicTrafficSources: vi.fn(),
   normalizeRowsForPeriod: vi.fn<(table: RawTableData) => PeriodProductMetrics[]>(),
   sendFeishuCard: vi.fn(),
-  fetchRecentGoodsManagerProductIds: vi.fn(),
+  fetchRecentGoodsManagerProducts: vi.fn(),
 }));
 
 vi.mock('../src/config/loadEnv.js', () => ({
@@ -51,7 +51,7 @@ vi.mock('../src/notify/feishu.js', () => ({
 }));
 
 vi.mock('../src/publicTraffic/goodsManagerNewProducts.js', () => ({
-  fetchRecentGoodsManagerProductIds: mocks.fetchRecentGoodsManagerProductIds,
+  fetchRecentGoodsManagerProducts: mocks.fetchRecentGoodsManagerProducts,
 }));
 
 describe('runPublicTrafficReportCli public traffic sequencing', () => {
@@ -120,7 +120,7 @@ describe('runPublicTrafficReportCli public traffic sequencing', () => {
       },
     ]);
     mocks.sendFeishuCard.mockResolvedValue({ sent: false, reason: 'test' });
-    mocks.fetchRecentGoodsManagerProductIds.mockResolvedValue([]);
+    mocks.fetchRecentGoodsManagerProducts.mockResolvedValue([]);
 
     const historicalPaths = buildPublicTrafficPaths(mocks.outputDir, '2026-06-09');
     await mkdir(historicalPaths.dir, { recursive: true });
@@ -147,14 +147,41 @@ describe('runPublicTrafficReportCli public traffic sequencing', () => {
     }
   });
 
-  it('loads goods-manager new product pool IDs when GOODS_MANAGER_BASE_URL is configured', async () => {
+  it('loads goods-manager new product pool items when GOODS_MANAGER_BASE_URL is configured', async () => {
     vi.stubEnv('GOODS_MANAGER_BASE_URL', 'http://192.168.1.22:3010');
-    mocks.fetchRecentGoodsManagerProductIds.mockResolvedValueOnce(['701', '702']);
+    mocks.fetchRecentGoodsManagerProducts.mockResolvedValueOnce([
+      {
+        productId: '701',
+        productName: '新品 Alpha',
+        shortTitle: 'Alpha 短标题',
+        submittedAt: '2026-06-12 09:00:00',
+        merchant: '主商家',
+        alipaySyncStatus: '已同步',
+        alipayCode: 'ALI-701',
+        stock: 8,
+        skuCount: 2,
+        maintenanceStatus: '待维护',
+        note: '',
+      },
+      {
+        productId: '702',
+        productName: '新品 Beta',
+        shortTitle: '',
+        submittedAt: '2026-06-12 10:00:00',
+        merchant: '',
+        alipaySyncStatus: '',
+        alipayCode: '',
+        stock: 0,
+        skuCount: 0,
+        maintenanceStatus: '待维护',
+        note: '',
+      },
+    ]);
     const { runPublicTrafficReportCli } = await import('../src/cli/publicTrafficReport.js');
 
     await runPublicTrafficReportCli();
 
-    expect(mocks.fetchRecentGoodsManagerProductIds).toHaveBeenCalledWith({
+    expect(mocks.fetchRecentGoodsManagerProducts).toHaveBeenCalledWith({
       baseUrl: 'http://192.168.1.22:3010',
       days: 7,
       referenceDate: '2026-06-10',
@@ -162,6 +189,10 @@ describe('runPublicTrafficReportCli public traffic sequencing', () => {
     const todayPaths = buildPublicTrafficPaths(mocks.outputDir, '2026-06-10');
     const context = JSON.parse(await readFile(todayPaths.reportContext, 'utf8')) as PublicTrafficDataReportContext;
     expect(context.newProductPoolIds).toEqual(['701', '702']);
+    expect(context.newProductPoolItems).toEqual([
+      expect.objectContaining({ productId: '701', productName: '新品 Alpha', stock: 8, skuCount: 2 }),
+      expect.objectContaining({ productId: '702', productName: '新品 Beta', stock: 0, skuCount: 0 }),
+    ]);
     await expect(readFile(todayPaths.log, 'utf8')).resolves.toContain('goods-manager 新品池: 2 个商品');
   });
 
