@@ -819,6 +819,7 @@ Required environment:
 ```text
 FEISHU_APP_ID=cli_xxxxxxxxxxxxxxxx
 FEISHU_APP_SECRET=replace-with-your-secret
+FEISHU_BOT_USE_SDK=true
 MT_AGENT_OUTPUT_DIR=output
 ```
 
