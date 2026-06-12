@@ -1,5 +1,21 @@
+type ProductIdMappingLike = Record<string, string>;
+
 const PLATFORM_ID_PATTERN = /\b(20\d{20,})\b/;
 const ID_BEFORE_PRICE_PATTERN = /(?:ID|商品ID|平台商品ID)\s*[:：]?\s*(20\d{21,})(?=\.\d{1,2}\s*~)/i;
+
+function hasMapping(mapping: ProductIdMappingLike, platformProductId: string): boolean {
+  return Object.prototype.hasOwnProperty.call(mapping, platformProductId);
+}
+
+export function resolveFallbackProductId(platformProductId: string | null, mapping: ProductIdMappingLike): string | null {
+  if (!platformProductId) return null;
+  if (hasMapping(mapping, platformProductId)) return platformProductId;
+
+  const withoutTrailingDigit = platformProductId.slice(0, -1);
+  if (hasMapping(mapping, withoutTrailingDigit)) return withoutTrailingDigit;
+
+  return null;
+}
 
 export function extractProductIdFromInfo(text: string): string | null {
   const normalized = text.replace(/\s+/g, ' ').trim();

@@ -23,8 +23,16 @@ export function isDashboardEmptyStateText(text: string | null | undefined): bool
 }
 
 async function isDashboardEmptyStateVisible(page: Page): Promise<boolean> {
+  const emptyText = page.locator('.emptyTxt-LkXGcaGA').filter({ hasText: '未查询到相关数据' }).first();
+  if ((await emptyText.count().catch(() => 0)) > 0 && (await emptyText.isVisible().catch(() => false))) return true;
   const text = await page.locator('body').textContent().catch(() => '');
   return isDashboardEmptyStateText(text);
+}
+
+async function confirmDashboardEmptyState(page: Page): Promise<boolean> {
+  if (!(await isDashboardEmptyStateVisible(page))) return false;
+  await page.waitForTimeout(10000);
+  return isDashboardEmptyStateVisible(page);
 }
 
 function emptyDashboardTable(period: keyof typeof PERIOD_LABELS): RawTableData {
@@ -49,10 +57,7 @@ async function waitForTableOrEmptyState(page: Page, timeout: number): Promise<vo
   await Promise.race([
     page.waitForSelector('.ant-table table', { timeout }),
     page.waitForFunction(
-      () => {
-        const text = String(document.body?.innerText ?? '').replace(/\s+/g, ' ').trim();
-        return text.includes('未查询到相关数据') || text.includes('暂无数据');
-      },
+      () => Boolean(document.querySelector('.emptyTxt-LkXGcaGA')) || String(document.body?.innerText ?? '').replace(/\s+/g, ' ').trim().includes('未查询到相关数据') || String(document.body?.innerText ?? '').replace(/\s+/g, ' ').trim().includes('暂无数据'),
       undefined,
       { timeout },
     ),
@@ -162,13 +167,13 @@ async function extractCurrentTable(page: Page): Promise<{ headers: string[]; row
 
 async function collectPeriod(page: Page, period: keyof typeof PERIOD_LABELS, pageSize: number, preferredPageSize: number): Promise<RawTableData> {
   await selectPeriod(page, period);
-  if (await isDashboardEmptyStateVisible(page)) {
+  if (await confirmDashboardEmptyState(page)) {
     return emptyDashboardTable(period);
   }
 
   await setDashboardPageSize(page, pageSize);
   await waitForTableOrEmptyState(page, 30000);
-  if (await isDashboardEmptyStateVisible(page)) {
+  if (await confirmDashboardEmptyState(page)) {
     return emptyDashboardTable(period);
   }
 

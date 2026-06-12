@@ -261,6 +261,55 @@ describe('public traffic report outputs', () => {
     expect(serialized).not.toContain('report.xlsx');
   });
 
+  it('uses manual product short names only in Feishu card tables', () => {
+    const card = buildPublicTrafficCard(context, { markdownPath: 'report.md', workbookPath: 'report.xlsx' }, { productNameMap: { '1001': '佳能 SX70' } });
+    const serialized = JSON.stringify(card);
+
+    expect(serialized).toContain('佳能 SX70');
+    expect(serialized).not.toContain('公域商品A');
+    expect(buildPublicTrafficMarkdown(context)).toContain('公域商品A');
+  });
+
+  it('cleans noisy product names and falls back to ID for empty names in Feishu card tables', () => {
+    const noisyContext = makeDataReportContext({
+      rows: [
+        {
+          platformProductId: 'P-251',
+          displayProductId: '端内ID 251',
+          productName: '佳能 SX70 65倍长焦4K相机演唱会出游日常记录出片神器芝麻免押租赁 ZFB',
+          custodyDays: 12,
+          periods: {
+            '1d': metrics({ exposure: 120, publicVisits: 4, dashboardVisits: 4, shippedOrders: 0 }),
+            '7d': metrics({ exposure: 700, publicVisits: 20, dashboardVisits: 18, shippedOrders: 1 }),
+            '30d': metrics({ exposure: 3000, publicVisits: 80, dashboardVisits: 70, shippedOrders: 3 }),
+          },
+        },
+        {
+          platformProductId: 'P-empty',
+          displayProductId: '端内ID 999',
+          productName: '  ',
+          custodyDays: 12,
+          periods: {
+            '1d': metrics({ exposure: 80, publicVisits: 1, dashboardVisits: 1, shippedOrders: 0 }),
+            '7d': metrics({ exposure: 300, publicVisits: 10, dashboardVisits: 8, shippedOrders: 0 }),
+            '30d': metrics({ exposure: 1200, publicVisits: 40, dashboardVisits: 30, shippedOrders: 1 }),
+          },
+        },
+      ],
+      weakConversion: [],
+      highPotential: [],
+      newProductObservation: [],
+      recommendedActions: [],
+    });
+
+    const serialized = JSON.stringify(buildPublicTrafficCard(noisyContext, { markdownPath: 'report.md', workbookPath: 'report.xlsx' }));
+
+    expect(serialized).toContain('佳能 SX70');
+    expect(serialized).not.toContain('演唱会');
+    expect(serialized).not.toContain('芝麻免押');
+    expect(serialized).toContain('端内ID 999');
+  });
+
   it('renders full diagnostic sections as paginated root-level Feishu tables', () => {
     const context = makeDataReportContext({
       conclusions: [

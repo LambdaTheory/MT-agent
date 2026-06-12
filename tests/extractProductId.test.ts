@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { extractProductIdFromInfo } from '../src/publicTraffic/extractProductIdFromInfo.js';
+import { extractProductIdFromInfo, resolveFallbackProductId } from '../src/publicTraffic/extractProductIdFromInfo.js';
 
 describe('extractProductIdFromInfo', () => {
   it('extracts platform product ID from composite cell text', () => {
@@ -17,5 +17,24 @@ describe('extractProductIdFromInfo', () => {
 
   it('returns null when no product ID found', () => {
     expect(extractProductIdFromInfo('暂无数据')).toBeNull();
+  });
+});
+
+describe('resolveFallbackProductId', () => {
+  const mapping = {
+    '2026030222000898839075': '251',
+    '2026011222000691436531': '333',
+  };
+
+  it('accepts an exact mapping hit', () => {
+    expect(resolveFallbackProductId('2026030222000898839075', mapping)).toBe('2026030222000898839075');
+  });
+
+  it('repairs a trailing price digit when the shortened ID exists in mapping', () => {
+    expect(resolveFallbackProductId('20260302220008988390751', mapping)).toBe('2026030222000898839075');
+  });
+
+  it('rejects fallback IDs that do not match mapping exactly or after one trailing digit is removed', () => {
+    expect(resolveFallbackProductId('202603022200089883907599', mapping)).toBeNull();
   });
 });

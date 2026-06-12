@@ -23,4 +23,17 @@ describe('computeExposureDailyDelta', () => {
       { date: '2026-06-09', productName: 'D', platformProductId: '1004', exposure: 0, visits: 0, amount: 0, custodyDays: 20, flags: ['missing'] },
     ]);
   });
+
+  it('canonicalizes polluted historical IDs before computing deltas', () => {
+    expect(
+      computeExposureDailyDelta(
+        '2026-06-11',
+        [{ productName: 'SX70', platformProductId: '20260302220008988390751', exposure: 160078, visits: 7969, amount: 27308, custodyDays: 102, raw: {} }],
+        [{ productName: 'SX70', platformProductId: '2026030222000898839075', exposure: 160206, visits: 7973, amount: 27308, custodyDays: 103, raw: {} }],
+        { '2026030222000898839075': '251' },
+      ),
+    ).toEqual([
+      { date: '2026-06-11', productName: 'SX70', platformProductId: '2026030222000898839075', exposure: 128, visits: 4, amount: 0, custodyDays: 103, flags: [] },
+    ]);
+  });
 });

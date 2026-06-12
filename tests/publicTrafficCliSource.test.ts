@@ -23,14 +23,17 @@ describe('public traffic CLI wiring', () => {
   it('loads product mapping and sends a Feishu card', async () => {
     const text = await source('../src/cli/publicTrafficReport.ts');
     expect(text).toContain("import { loadProductIdMapping } from '../mapping/productIdMapping.js';");
+    expect(text).toContain("import { loadProductNameMap } from '../publicTraffic/productDisplayName.js';");
+    expect(text).toContain("const productNameMap = await loadProductNameMap('config/product-name-map.json', (message) => log.addEvent(message));");
     expect(text).toContain('buildPublicTrafficCard(context,');
+    expect(text).toContain('productNameMap,');
     expect(text).toContain('const sendTo = parseFeishuSendToArg(process.argv);');
     expect(text).toContain('sendFeishuCard(env, card, fallbackText)');
   });
 
   it('passes overview to analyzer and only skips same-day product exposure delta when the previous snapshot is missing', async () => {
     const text = await source('../src/cli/publicTrafficReport.ts');
-    expect(text).toContain('const dailyDelta = previous.found ? computeExposureDailyDelta(dataDate, previous.products, crawlResult.products) : [];');
+    expect(text).toContain('const dailyDelta = previous.found ? computeExposureDailyDelta(dataDate, previous.products, crawlResult.products, mapping) : [];');
     expect(text).toContain('if (!previous.found) {');
     expect(text).toContain("log.addEvent('商品级曝光历史不足: 跳过商品级日差分');");
     expect(text).toContain("'1d': dailyDelta.map((row) => ({");

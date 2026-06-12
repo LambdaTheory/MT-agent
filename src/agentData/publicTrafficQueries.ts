@@ -1,5 +1,5 @@
 import type { PeriodKey } from '../domain/types.js';
-import type { PublicTrafficDataReportContext, PublicTrafficPeriodMetrics, PublicTrafficReportSectionItem } from '../publicTraffic/types.js';
+import type { PublicTrafficDataReportContext, PublicTrafficReportSectionItem } from '../publicTraffic/types.js';
 import type {
   AgentNewProductPoolItem,
   AgentOverviewAnswer,
@@ -10,82 +10,101 @@ import type {
   AgentProductPeriodMetric,
 } from './types.js';
 
-type ContextWithNewProductPool = PublicTrafficDataReportContext & {
-  newProductPoolItems?: Array<{ productId: string; productName: string; maintenanceStatus?: string }>;
+type PublicTrafficContextWithNewProductPool = PublicTrafficDataReportContext & {
+  newProductPoolItems?: Array<{
+    productId: string;
+    productName: string;
+    maintenanceStatus?: string;
+  } & Record<string, unknown>>;
   newProductPoolIds?: string[];
 };
 
 const PERIODS: PeriodKey[] = ['1d', '7d', '30d'];
 
-function toOverviewMetric(period: PeriodKey, metric: PublicTrafficDataReportContext['summary'][PeriodKey]): AgentOverviewMetric {
-  return {
-    period,
-    exposure: metric.exposure,
-    publicVisits: metric.publicVisits,
-    createdOrders: metric.createdOrders,
-    shippedOrders: metric.shippedOrders,
-    amount: metric.amount,
-    exposureVisitRate: metric.exposureVisitRate,
-    visitShipmentRate: metric.visitShipmentRate,
-  };
-}
-
-function toProductMetric(period: PeriodKey, metric: PublicTrafficPeriodMetrics): AgentProductPeriodMetric {
-  return {
-    period,
-    exposure: metric.exposure,
-    publicVisits: metric.publicVisits,
-    createdOrders: metric.createdOrders,
-    shippedOrders: metric.shippedOrders,
-    amount: metric.amount,
-    exposureVisitRate: metric.exposureVisitRate,
-    visitShipmentRate: metric.visitShipmentRate,
-  };
-}
-
-function sectionItems(type: AgentProblemType, rows: PublicTrafficReportSectionItem[]): AgentProblemProduct[] {
-  return rows.map((row) => ({ type, productId: row.identifier, action: row.action, reason: row.reason }));
-}
-
 export function getLatestOverview(context: PublicTrafficDataReportContext): AgentOverviewAnswer {
   return {
     date: context.date,
-    metrics: PERIODS.map((period) => toOverviewMetric(period, context.summary[period])),
+    metrics: PERIODS.map((period): AgentOverviewMetric => {
+      const metric = context.summary[period];
+
+      return {
+        period,
+        exposure: metric.exposure,
+        publicVisits: metric.publicVisits,
+        createdOrders: metric.createdOrders,
+        shippedOrders: metric.shippedOrders,
+        amount: metric.amount,
+        exposureVisitRate: metric.exposureVisitRate,
+        visitShipmentRate: metric.visitShipmentRate,
+      };
+    }),
     dataQualityNotes: context.dataQualityNotes ?? [],
   };
 }
 
 export function getProductPerformance(context: PublicTrafficDataReportContext, keyword: string): AgentProductAnswer | null {
-  const normalized = keyword.trim().toLowerCase();
-  if (!normalized) return null;
+  const normalizedKeyword = keyword.trim().toLowerCase();
+  if (!normalizedKeyword) {
+    return null;
+  }
 
-  const row = context.rows.find(
-    (item) =>
-      item.displayProductId.toLowerCase() === normalized ||
-      item.platformProductId.toLowerCase() === normalized ||
-      item.productName.toLowerCase().includes(normalized),
-  );
-  if (!row) return null;
+  const row = context.rows.find((item) => {
+    return (
+      item.displayProductId.toLowerCase() === normalizedKeyword ||
+      item.platformProductId.toLowerCase() === normalizedKeyword ||
+      item.productName.toLowerCase().includes(normalizedKeyword)
+    );
+  });
+
+  if (!row) {
+    return null;
+  }
 
   return {
     productId: row.displayProductId,
     productName: row.productName,
     platformProductId: row.platformProductId,
     custodyDays: row.custodyDays,
-    periods: PERIODS.map((period) => toProductMetric(period, row.periods[period])),
+    periods: PERIODS.map((period): AgentProductPeriodMetric => {
+      const metric = row.periods[period];
+
+      return {
+        period,
+        exposure: metric.exposure,
+        publicVisits: metric.publicVisits,
+        createdOrders: metric.createdOrders,
+        shippedOrders: metric.shippedOrders,
+        amount: metric.amount,
+        exposureVisitRate: metric.exposureVisitRate,
+        visitShipmentRate: metric.visitShipmentRate,
+      };
+    }),
   };
 }
 
-export function getProblemProducts(context: PublicTrafficDataReportContext, type: AgentProblemType): AgentProblemProduct[] {
-  if (type === 'low_exposure') return sectionItems(type, context.lowExposure);
-  if (type === 'weak_conversion') return sectionItems(type, context.weakConversion);
-  if (type === 'high_potential') return sectionItems(type, context.highPotential);
-  if (type === 'recommended_action') return sectionItems(type, context.recommendedActions);
-  return getNewProductPool(context).map((item) => ({ type: 'new_product_pool', productId: item.productId, action: item.maintenanceStatus, reason: item.productName }));
+export function getProblemProducts(
+  context: PublicTrafficDataReportContext,
+  type: AgentProblemType,
+): AgentProblemProduct[] {
+  if (type === 'new_product_pool') {
+    return getNewProductPool(context).map((item) => ({
+      type,
+      productId: item.productId,
+      action: item.maintenanceStatus,
+      reason: item.productName,
+    }));
+  }
+
+  return getProblemSource(context, type).map((item) => ({
+    type,
+    productId: item.identifier,
+    action: item.action,
+    reason: item.reason,
+  }));
 }
 
 export function getNewProductPool(context: PublicTrafficDataReportContext): AgentNewProductPoolItem[] {
-  const extended = context as ContextWithNewProductPool;
+  const extended = context as PublicTrafficContextWithNewProductPool;
   if (extended.newProductPoolItems?.length) {
     return extended.newProductPoolItems.map((item) => ({
       productId: item.productId,
@@ -94,5 +113,25 @@ export function getNewProductPool(context: PublicTrafficDataReportContext): Agen
     }));
   }
 
-  return (extended.newProductPoolIds ?? []).map((productId) => ({ productId, productName: '', maintenanceStatus: '待维护' }));
+  return (extended.newProductPoolIds ?? []).map((productId) => ({
+    productId,
+    productName: '',
+    maintenanceStatus: '待维护',
+  }));
+}
+
+function getProblemSource(
+  context: PublicTrafficDataReportContext,
+  type: Exclude<AgentProblemType, 'new_product_pool'>,
+): PublicTrafficReportSectionItem[] {
+  switch (type) {
+    case 'low_exposure':
+      return context.lowExposure;
+    case 'weak_conversion':
+      return context.weakConversion;
+    case 'high_potential':
+      return context.highPotential;
+    case 'recommended_action':
+      return context.recommendedActions;
+  }
 }

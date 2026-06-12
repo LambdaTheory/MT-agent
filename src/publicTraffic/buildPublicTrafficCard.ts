@@ -1,6 +1,11 @@
 import type { FeishuCardPayload } from '../notify/feishuApp.js';
 import { findOrderAnalysisIndicator, fulfillmentRateLines, shortDataDate } from './orderAnalysis.js';
+import { resolveProductDisplayName, type ProductNameMap } from './productDisplayName.js';
 import type { PublicTrafficDataReportContext, PublicTrafficProductDataRow, PublicTrafficReportPaths } from './types.js';
+
+export interface PublicTrafficCardOptions {
+  productNameMap?: ProductNameMap;
+}
 
 function percent(value: number): string {
   return `${(value * 100).toFixed(2)}%`;
@@ -211,9 +216,8 @@ function visits(row: PublicTrafficProductDataRow): number {
   return one.publicVisits || one.dashboardVisits;
 }
 
-function shortProductName(row: PublicTrafficProductDataRow): string {
-  const name = row.productName || 'Unknown';
-  return name.length > 18 ? `${name.slice(0, 18)}...` : name;
+function shortProductName(row: PublicTrafficProductDataRow, productNameMap: ProductNameMap = {}): string {
+  return resolveProductDisplayName(row, productNameMap);
 }
 
 function findRowByIdentifier(context: PublicTrafficDataReportContext, identifier: string): PublicTrafficProductDataRow | undefined {
@@ -221,32 +225,32 @@ function findRowByIdentifier(context: PublicTrafficDataReportContext, identifier
   return context.rows.find((row) => row.displayProductId === identifier || shortId(row) === id);
 }
 
-function exposureTopRows(context: PublicTrafficDataReportContext): FeishuTableRow[] {
+function exposureTopRows(context: PublicTrafficDataReportContext, productNameMap: ProductNameMap): FeishuTableRow[] {
   return [...context.rows].sort((a, b) => rowScore(b) - rowScore(a)).slice(0, 10).map((row) => {
     const one = row.periods['1d'];
-    return { product: shortProductName(row), id: shortId(row), exposure: one.exposure, visits: visits(row), deals: one.shippedOrders };
+    return { product: shortProductName(row, productNameMap), id: shortId(row), exposure: one.exposure, visits: visits(row), deals: one.shippedOrders };
   });
 }
 
-function exposureBoostRows(context: PublicTrafficDataReportContext): FeishuTableRow[] {
+function exposureBoostRows(context: PublicTrafficDataReportContext, productNameMap: ProductNameMap): FeishuTableRow[] {
   return context.rows
     .filter((row) => row.periods['1d'].hasExposureData && row.periods['1d'].exposure >= 0 && row.periods['1d'].exposure <= 50 && typeof row.custodyDays === 'number' && row.custodyDays > 7)
     .sort((a, b) => a.periods['1d'].exposure - b.periods['1d'].exposure || (b.custodyDays ?? 0) - (a.custodyDays ?? 0) || visits(a) - visits(b))
-    .map((row) => ({ product: shortProductName(row), id: shortId(row), exposure: row.periods['1d'].exposure, visits: visits(row), custodyDays: row.custodyDays ?? '-' }));
+    .map((row) => ({ product: shortProductName(row, productNameMap), id: shortId(row), exposure: row.periods['1d'].exposure, visits: visits(row), custodyDays: row.custodyDays ?? '-' }));
 }
 
-function conversionRows(context: PublicTrafficDataReportContext): FeishuTableRow[] {
+function conversionRows(context: PublicTrafficDataReportContext, productNameMap: ProductNameMap): FeishuTableRow[] {
   return context.weakConversion
     .map((item) => findRowByIdentifier(context, item.identifier))
     .filter((row): row is PublicTrafficProductDataRow => Boolean(row))
-    .map((row) => ({ product: shortProductName(row), id: shortId(row), visits: visits(row), deals: row.periods['1d'].shippedOrders, rate: percent(row.periods['1d'].visitShipmentRate) }));
+    .map((row) => ({ product: shortProductName(row, productNameMap), id: shortId(row), visits: visits(row), deals: row.periods['1d'].shippedOrders, rate: percent(row.periods['1d'].visitShipmentRate) }));
 }
 
-function scaleRows(context: PublicTrafficDataReportContext): FeishuTableRow[] {
+function scaleRows(context: PublicTrafficDataReportContext, productNameMap: ProductNameMap): FeishuTableRow[] {
   return context.highPotential
     .map((item) => findRowByIdentifier(context, item.identifier))
     .filter((row): row is PublicTrafficProductDataRow => Boolean(row))
-    .map((row) => ({ product: shortProductName(row), id: shortId(row), exposure: row.periods['1d'].exposure, visits: visits(row), deals: row.periods['1d'].shippedOrders }));
+    .map((row) => ({ product: shortProductName(row, productNameMap), id: shortId(row), exposure: row.periods['1d'].exposure, visits: visits(row), deals: row.periods['1d'].shippedOrders }));
 }
 
 function analysisSummary(context: PublicTrafficDataReportContext, boostRows: FeishuTableRow[], conversionRowsData: FeishuTableRow[], scaleRowsData: FeishuTableRow[]): Record<string, unknown> {
@@ -273,15 +277,15 @@ function newProductPoolPanel(context: PublicTrafficDataReportContext): Record<st
   };
 }
 
-function metricTables(context: PublicTrafficDataReportContext): Record<string, unknown>[] {
-  const boostRows = exposureBoostRows(context);
-  const conversionRowsData = conversionRows(context);
-  const scaleRowsData = scaleRows(context);
+function metricTables(context: PublicTrafficDataReportContext, productNameMap: ProductNameMap): Record<string, unknown>[] {
+  const boostRows = exposureBoostRows(context, productNameMap);
+  const conversionRowsData = conversionRows(context, productNameMap);
+  const scaleRowsData = scaleRows(context, productNameMap);
   return [
     analysisSummary(context, boostRows, conversionRowsData, scaleRowsData),
     { tag: 'hr' },
     { tag: 'markdown', content: '**曝光 Top10**' },
-    tableElement('exposure_top_table', [tableColumn('product', '商品'), tableColumn('id', 'ID'), tableColumn('exposure', '曝光', 'number'), tableColumn('visits', '访问', 'number'), tableColumn('deals', '成交', 'number')], exposureTopRows(context)),
+    tableElement('exposure_top_table', [tableColumn('product', '商品'), tableColumn('id', 'ID'), tableColumn('exposure', '曝光', 'number'), tableColumn('visits', '访问', 'number'), tableColumn('deals', '成交', 'number')], exposureTopRows(context, productNameMap)),
     { tag: 'hr' },
     { tag: 'markdown', content: '**待优化**' },
     tableElement('boost_table', [tableColumn('product', `补曝光（${boostRows.length}）`), tableColumn('id', 'ID'), tableColumn('exposure', '曝光', 'number'), tableColumn('visits', '访问', 'number'), tableColumn('custodyDays', '托管天')], boostRows),
@@ -292,8 +296,9 @@ function metricTables(context: PublicTrafficDataReportContext): Record<string, u
   ];
 }
 
-export function buildPublicTrafficCard(context: PublicTrafficDataReportContext, _paths: PublicTrafficReportPaths): FeishuCardPayload {
+export function buildPublicTrafficCard(context: PublicTrafficDataReportContext, _paths: PublicTrafficReportPaths, options: PublicTrafficCardOptions = {}): FeishuCardPayload {
   const one = context.summary['1d'];
+  const productNameMap = options.productNameMap ?? {};
   return {
     schema: '2.0',
     config: { update_multi: true },
@@ -309,7 +314,7 @@ export function buildPublicTrafficCard(context: PublicTrafficDataReportContext, 
         ...markdownElement(dataQualityText(context)),
         ...optionalElement(moduleColumnSet(context)),
         { tag: 'hr' },
-        ...metricTables(context),
+        ...metricTables(context, productNameMap),
       ],
     },
   };

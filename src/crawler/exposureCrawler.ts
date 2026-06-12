@@ -1,8 +1,9 @@
 import { chromium, type Page } from 'playwright';
 import type { AgentConfig } from '../domain/types.js';
+import { loadProductIdMapping, type ProductIdMapping } from '../mapping/productIdMapping.js';
 import type { ExposureCumulativeProduct, ExposureOverviewMetric } from '../publicTraffic/types.js';
 import { extractOverviewFromText } from '../publicTraffic/extractOverviewFromText.js';
-import { extractProductIdFromInfo } from '../publicTraffic/extractProductIdFromInfo.js';
+import { extractProductIdFromInfo, resolveFallbackProductId } from '../publicTraffic/extractProductIdFromInfo.js';
 import { parseMoney, parseNumberText } from '../publicTraffic/exposureNormalize.js';
 import { clearBrowserProfileLocks, prepareDashboardPage } from './browserProfile.js';
 import { selectSubAccountIfNeeded } from './dashboardCrawler.js';
@@ -110,7 +111,7 @@ async function extractAllOverviews(page: Page): Promise<ExposureOverviewMetric[]
 
 async function getCurrentTable(page: Page): Promise<{
   headers: string[];
-  rows: Array<{ cells: string[]; productTitle: string }>;
+  rows: Array<{ cells: string[]; productTitle: string; domProductId: string }>;
 }> {
   return page.evaluate(`(() => {
     const clean = (value) => String(value ?? '').replace(/\s+/g, ' ').trim();
@@ -140,11 +141,17 @@ async function getCurrentTable(page: Page): Promise<{
         .filter((text) => text && text !== '预览' && !text.includes('商品ID') && !text.includes('平台商品ID') && !text.includes('元/日') && !text.includes('出售中') && !text.includes('已下架'));
       return candidates.sort((a, b) => b.length - a.length)[0] ?? '';
     };
+    const idFromInfoCell = (cell) => {
+      const idText = clean(cell.querySelector('[class*="idWrap"] span')?.textContent);
+      return idText.match(/(?:ID|商品ID|平台商品ID)\s*[:：]?\s*(20\d{20,})/)?.[1] ?? '';
+    };
     const rows = Array.from(table.querySelectorAll('tbody tr')).map((row) => {
       const cells = Array.from(row.querySelectorAll('td'));
+      const infoCell = infoIndex >= 0 ? cells[infoIndex] : undefined;
       return {
         cells: cells.map((cell) => clean(cell.textContent)),
-        productTitle: infoIndex >= 0 && cells[infoIndex] ? titleFromInfoCell(cells[infoIndex]) : '',
+        productTitle: infoCell ? titleFromInfoCell(infoCell) : '',
+        domProductId: infoCell ? idFromInfoCell(infoCell) : '',
       };
     });
 
@@ -176,9 +183,23 @@ async function clickCurrentTableNext(page: Page): Promise<boolean> {
   })()`);
 }
 
-async function extractProductRows(page: Page): Promise<ExposureCumulativeProduct[]> {
+async function loadExposureFallbackMapping(config: AgentConfig): Promise<ProductIdMapping> {
+  const mappingPath = config.productIdMappingPath ?? 'config/product-id-map.json';
+  try {
+    return await loadProductIdMapping(mappingPath);
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
+      console.warn(`[曝光] 商品ID映射缺失，正则兜底将跳过未校验ID: ${mappingPath}`);
+      return {};
+    }
+    throw error;
+  }
+}
+
+async function extractProductRows(page: Page, mapping: ProductIdMapping): Promise<ExposureCumulativeProduct[]> {
   const products: ExposureCumulativeProduct[] = [];
   let pageNum = 0;
+  let skippedProductIdRows = 0;
 
   while (true) {
     pageNum += 1;
@@ -193,10 +214,12 @@ async function extractProductRows(page: Page): Promise<ExposureCumulativeProduct
       throw new Error(`Missing exposure table columns. Actual headers: ${headers.join(', ')}`);
     }
 
-    for (const { cells, productTitle } of rows) {
+    for (const { cells, productTitle, domProductId } of rows) {
       const infoText = normalizeText(cells[infoIndex]);
-      const platformProductId = extractProductIdFromInfo(infoText);
+      const regexProductId = extractProductIdFromInfo(infoText);
+      const platformProductId = domProductId || resolveFallbackProductId(regexProductId, mapping);
       if (!platformProductId) {
+        skippedProductIdRows += 1;
         continue;
       }
 
@@ -225,6 +248,10 @@ async function extractProductRows(page: Page): Promise<ExposureCumulativeProduct
     await page.waitForTimeout(2000);
   }
 
+  if (skippedProductIdRows > 0) {
+    console.warn(`[曝光] 跳过${skippedProductIdRows}行: DOM ID 缺失且正则 ID 未命中商品总表映射`);
+  }
+
   return products;
 }
 
@@ -232,7 +259,8 @@ export async function collectExposurePage(config: AgentConfig, page: Page): Prom
   await ensureExposurePage(config, page);
   const overview = await extractAllOverviews(page);
   await page.waitForSelector('.ant-table-tbody tr', { timeout: 30000 }).catch(() => undefined);
-  const products = await extractProductRows(page);
+  const mapping = await loadExposureFallbackMapping(config);
+  const products = await extractProductRows(page, mapping);
 
   console.log(`[曝光] 总体概况: ${overview.length}个周期`);
   console.log(`[曝光] 当前托管商品: ${products.length} 条`);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeDashboardRowsForReport, parsePreviousCumulativeSnapshot } from '../src/cli/publicTrafficReport.js';
+import { mergePreviousCumulativeSnapshots, normalizeDashboardRowsForReport, parsePreviousCumulativeSnapshot } from '../src/cli/publicTrafficReport.js';
 import type { RawTableData } from '../src/domain/types.js';
 import { createRunLog } from '../src/storage/runLog.js';
 
@@ -24,6 +24,23 @@ describe('parsePreviousCumulativeSnapshot', () => {
         ]),
       ),
     ).toHaveLength(1);
+  });
+});
+
+describe('mergePreviousCumulativeSnapshots', () => {
+  it('uses an older snapshot when the newest snapshot is missing a canonical product', () => {
+    expect(
+      mergePreviousCumulativeSnapshots(
+        [
+          [{ productName: 'Other', platformProductId: '2026060122000000000000', exposure: 10, visits: 1, amount: 0, custodyDays: 1, raw: {} }],
+          [{ productName: 'SX70', platformProductId: '20260302220008988390751', exposure: 160078, visits: 7969, amount: 27308, custodyDays: 102, raw: {} }],
+        ],
+        { '2026030222000898839075': '251' },
+      ),
+    ).toEqual([
+      { productName: 'Other', platformProductId: '2026060122000000000000', exposure: 10, visits: 1, amount: 0, custodyDays: 1, raw: {} },
+      { productName: 'SX70', platformProductId: '2026030222000898839075', exposure: 160078, visits: 7969, amount: 27308, custodyDays: 102, raw: {} },
+    ]);
   });
 });
 

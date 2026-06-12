@@ -13,11 +13,13 @@ import { analyzePublicTrafficData } from '../publicTraffic/analyzePublicTrafficD
 import { buildPublicTrafficCard } from '../publicTraffic/buildPublicTrafficCard.js';
 import { aggregateExposureDeltas } from '../publicTraffic/exposureAggregate.js';
 import { computeExposureDailyDelta } from '../publicTraffic/exposureDelta.js';
+import { resolveFallbackProductId } from '../publicTraffic/extractProductIdFromInfo.js';
 import { buildPublicTrafficFeishuText } from '../publicTraffic/buildPublicTrafficFeishu.js';
 import { buildPublicTrafficMarkdown } from '../publicTraffic/buildPublicTrafficMarkdown.js';
 import { writePublicTrafficWorkbookBuffer } from '../publicTraffic/buildPublicTrafficWorkbook.js';
 import { mergePublicTrafficData } from '../publicTraffic/mergePublicTrafficData.js';
 import { buildPublicTrafficPaths } from '../publicTraffic/paths.js';
+import { loadProductNameMap } from '../publicTraffic/productDisplayName.js';
 import { loadRecentExposureDeltas } from '../publicTraffic/recentExposureDeltas.js';
 import type { PeriodProductMetrics, RawTableData } from '../domain/types.js';
 import type { ExposureCumulativeProduct, PublicTrafficDataReportContext, PublicTrafficDataSummary } from '../publicTraffic/types.js';
@@ -41,6 +43,12 @@ function today(): string {
 function yesterday(date: string): string {
   const d = new Date(date);
   d.setDate(d.getDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
+function daysBefore(date: string, days: number): string {
+  const d = new Date(date);
+  d.setDate(d.getDate() - days);
   return d.toISOString().slice(0, 10);
 }
 
@@ -74,16 +82,36 @@ export function parsePreviousCumulativeSnapshot(text: string): ExposureCumulativ
   return parsed;
 }
 
-async function loadPreviousCumulative(outputDir: string, date: string): Promise<PreviousCumulativeSnapshot> {
-  for (const reportContextPath of previousReportContextCandidatePaths(outputDir, date)) {
-    const exposurePath = reportContextPath.replace(/公域数据上下文_([^/\\]+)\.json$/, '公域曝光商品快照_$1.json');
+function canonicalProductId(platformProductId: string, mapping: Record<string, string>): string {
+  return resolveFallbackProductId(platformProductId, mapping) ?? platformProductId;
+}
+
+export function mergePreviousCumulativeSnapshots(snapshots: ExposureCumulativeProduct[][], mapping: Record<string, string>): ExposureCumulativeProduct[] {
+  const merged = new Map<string, ExposureCumulativeProduct>();
+  for (const snapshot of snapshots) {
+    for (const row of snapshot) {
+      const platformProductId = canonicalProductId(row.platformProductId, mapping);
+      if (!merged.has(platformProductId)) {
+        merged.set(platformProductId, { ...row, platformProductId });
+      }
+    }
+  }
+  return Array.from(merged.values());
+}
+
+async function loadPreviousCumulative(outputDir: string, date: string, mapping: Record<string, string>): Promise<PreviousCumulativeSnapshot> {
+  const snapshots: ExposureCumulativeProduct[][] = [];
+  for (let days = 1; days <= 7; days += 1) {
+    const snapshotDate = daysBefore(date, days);
+    const exposurePath = buildPublicTrafficPaths(outputDir, snapshotDate).exposureCumulativeProducts;
     try {
-      return { products: parsePreviousCumulativeSnapshot(await readFile(exposurePath, 'utf8')), found: true };
+      snapshots.push(parsePreviousCumulativeSnapshot(await readFile(exposurePath, 'utf8')));
     } catch (error) {
       if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') continue;
       throw error;
     }
   }
+  if (snapshots.length > 0) return { products: mergePreviousCumulativeSnapshots(snapshots, mapping), found: true };
   return { products: [], found: false };
 }
 
@@ -216,6 +244,7 @@ export async function runPublicTrafficReportCli(): Promise<void> {
     log.addEvent('开始下载商品总表、抓取曝光与后链路数据');
     const { goodsExportPath, exposure: crawlResult, dashboard: rawTables, orderAnalysis: orderAnalysisCapture } = await crawlPublicTrafficSources(config, paths.goodsExportWorkbook);
     await refreshProductIdMappingForReport(goodsExportPath, mappingPath, paths.productIdMappingSyncLog, log);
+    const mapping = await loadMappingSafely(mappingPath, log);
 
     try {
       const annotatedCount = annotateGoodsExportWorkbookWithInternalId(paths.goodsExportWorkbook);
@@ -239,18 +268,18 @@ export async function runPublicTrafficReportCli(): Promise<void> {
       log.addEvent(`保存总体概况: ${crawlResult.overview.length} 个周期`);
     }
 
-    const previous = await loadPreviousCumulative(config.outputDir, runDate);
+    const previous = await loadPreviousCumulative(config.outputDir, runDate, mapping);
     if (!previous.found) {
       log.addEvent('商品级曝光历史不足: 跳过商品级日差分');
     }
-    const dailyDelta = previous.found ? computeExposureDailyDelta(dataDate, previous.products, crawlResult.products) : [];
+    const dailyDelta = previous.found ? computeExposureDailyDelta(dataDate, previous.products, crawlResult.products, mapping) : [];
     await writeFile(paths.exposureDailyDelta, JSON.stringify(dailyDelta, null, 2), 'utf8');
     log.addEvent(`日差分: ${dailyDelta.length} 条, 新品=${dailyDelta.filter((row) => row.flags.includes('new_product')).length}`);
 
     const sevenDayDeltas = await loadRecentExposureDeltas(config.outputDir, runDate, 7);
     const thirtyDayDeltas = await loadRecentExposureDeltas(config.outputDir, runDate, 30);
-    const sevenDaySummary = aggregateExposureDeltas(sevenDayDeltas);
-    const thirtyDaySummary = aggregateExposureDeltas(thirtyDayDeltas);
+    const sevenDaySummary = aggregateExposureDeltas(sevenDayDeltas, mapping);
+    const thirtyDaySummary = aggregateExposureDeltas(thirtyDayDeltas, mapping);
     await writeFile(paths.exposure7dSummary, JSON.stringify(sevenDaySummary, null, 2), 'utf8');
     await writeFile(paths.exposure30dSummary, JSON.stringify(thirtyDaySummary, null, 2), 'utf8');
     log.addEvent(`7日汇总: ${sevenDaySummary.length} 条商品`);
@@ -266,7 +295,6 @@ export async function runPublicTrafficReportCli(): Promise<void> {
     for (const note of dataQualityNotes) log.addEvent(note);
     log.addEvent(`后链路数据: ${dashboardRows.length} 条周期商品记录`);
 
-    const mapping = await loadMappingSafely(mappingPath, log);
     const merged = mergePublicTrafficData({
       dashboardRows,
       exposureByPeriod: {
@@ -308,9 +336,12 @@ export async function runPublicTrafficReportCli(): Promise<void> {
     await writeFile(paths.workbook, writePublicTrafficWorkbookBuffer(context));
     log.addEvent(`报告已生成: ${paths.markdown}`);
 
+    const productNameMap = await loadProductNameMap('config/product-name-map.json', (message) => log.addEvent(message));
     const card = buildPublicTrafficCard(context, {
       markdownPath: paths.markdown,
       workbookPath: paths.workbook,
+    }, {
+      productNameMap,
     });
     const fallbackText = buildPublicTrafficFeishuText(context, {
       markdownPath: paths.markdown,
