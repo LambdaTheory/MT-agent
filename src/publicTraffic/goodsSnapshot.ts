@@ -4,6 +4,7 @@ export interface GoodsFirstSeenEntry {
   firstSeenDate: string;
   platformProductId: string;
   productName: string;
+  baseline?: boolean;
 }
 
 export type GoodsFirstSeenIndex = Record<string, GoodsFirstSeenEntry>;
@@ -47,7 +48,7 @@ export function latestInternalIds(items: GoodsSnapshotItem[], limit: number): Go
     .slice(0, limit);
 }
 
-export function updateGoodsFirstSeen(input: { currentDate: string; previous: GoodsFirstSeenIndex; current: GoodsSnapshotItem[] }): GoodsFirstSeenIndex {
+export function updateGoodsFirstSeen(input: { currentDate: string; previous: GoodsFirstSeenIndex; current: GoodsSnapshotItem[]; baseline?: boolean }): GoodsFirstSeenIndex {
   const next: GoodsFirstSeenIndex = { ...input.previous };
   for (const item of input.current) {
     const internalId = validInternalId(item);
@@ -56,6 +57,7 @@ export function updateGoodsFirstSeen(input: { currentDate: string; previous: Goo
       firstSeenDate: input.currentDate,
       platformProductId: item.platformProductId,
       productName: item.productName,
+      ...(input.baseline ? { baseline: true } : {}),
     };
   }
   return next;
@@ -74,7 +76,7 @@ export function filterFirstSeenWithinDays(current: GoodsSnapshotItem[], firstSee
     const internalId = validInternalId(item);
     if (internalId === null) return false;
     const entry = firstSeen[internalId];
-    if (!entry) return false;
+    if (!entry || entry.baseline) return false;
     const firstSeenDate = new Date(`${entry.firstSeenDate}T00:00:00.000`);
     return firstSeenDate >= start && firstSeenDate <= end;
   });

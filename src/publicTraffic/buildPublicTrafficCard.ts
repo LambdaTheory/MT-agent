@@ -294,16 +294,17 @@ function reportEnd(date: string): Date {
   return new Date(`${date}T23:59:59.999`);
 }
 
-function coldStartLiveDays(submittedAt: string, reportDate: string): { label: string; days: number; hours: number } {
+function coldStartLiveDays(submittedAt: string, reportDate: string): { label: string; days: number; hours: number; afterReportDate: boolean } {
   const submitted = parseSubmittedAt(submittedAt);
-  if (!submitted) return { label: '-', days: 7, hours: 168 };
-  const hours = Math.max(0, (reportEnd(reportDate).getTime() - submitted.getTime()) / 36e5);
+  if (!submitted) return { label: '-', days: 7, hours: 168, afterReportDate: false };
+  const reportEndTime = reportEnd(reportDate).getTime();
+  const hours = Math.max(0, (reportEndTime - submitted.getTime()) / 36e5);
   const days = Math.max(hours / 24, 0.25);
-  return { label: `${days.toFixed(1)}天`, days, hours };
+  return { label: `${days.toFixed(1)}天`, days, hours, afterReportDate: submitted.getTime() > reportEndTime };
 }
 
-function classifyColdStart(dailyVisits: number, visits: number, deals: number, liveHours: number, matched: boolean): ColdStartStatus {
-  if (!matched) return '待观察';
+function classifyColdStart(dailyVisits: number, visits: number, deals: number, liveHours: number, matched: boolean, afterReportDate = false): ColdStartStatus {
+  if (!matched || afterReportDate) return '待观察';
   if (deals >= 1) return '强跑通';
   if ((liveHours >= 72 && visits === 0) || dailyVisits < 1) return '危险';
   if (dailyVisits >= 10) return '优秀链接';
@@ -331,7 +332,7 @@ function newLinkColdStartRows(context: PublicTrafficDataReportContext): NewLinkC
       dailyVisits,
       visits: totalVisits,
       deals,
-      status: classifyColdStart(dailyVisits, totalVisits, deals, live.hours, Boolean(row)),
+      status: classifyColdStart(dailyVisits, totalVisits, deals, live.hours, Boolean(row), live.afterReportDate),
     };
   }).sort((a, b) => coldStartStatusOrder(a.status) - coldStartStatusOrder(b.status) || a.dailyVisits - b.dailyVisits || a.id.localeCompare(b.id));
 }

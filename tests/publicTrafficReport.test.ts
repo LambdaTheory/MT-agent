@@ -628,6 +628,34 @@ describe('public traffic report outputs', () => {
     expect(panel?.elements?.some((element) => element.tag === 'table')).toBe(false);
   });
 
+  it('marks links submitted after the report data date as waiting instead of dangerous', () => {
+    const withPool: PublicTrafficDataReportContext = {
+      ...context,
+      date: '2026-06-10',
+      rows: [
+        {
+          platformProductId: 'P-701',
+          displayProductId: '端内ID 701',
+          productName: '今日新同步链接',
+          custodyDays: 0,
+          periods: {
+            '1d': metrics({ dashboardVisits: 0, shippedOrders: 0 }),
+            '7d': metrics({ dashboardVisits: 0, shippedOrders: 0 }),
+            '30d': metrics({ dashboardVisits: 0, shippedOrders: 0 }),
+          },
+        },
+      ],
+      newProductPoolItems: [
+        { productId: '701', productName: '今日新同步链接', shortTitle: '', submittedAt: '2026-06-11 09:00:00', merchant: '', alipaySyncStatus: '已同步', alipayCode: '', stock: 0, skuCount: 0, maintenanceStatus: '待维护', note: '' },
+      ],
+    };
+
+    const cardJson = JSON.stringify(buildPublicTrafficCard(withPool, { markdownPath: 'report.md', workbookPath: 'report.xlsx' }));
+    expect(cardJson).toContain('待观察');
+    expect(cardJson).not.toContain('危险 1');
+    expect(cardJson).not.toContain('优先重做');
+  });
+
   it('renders enriched goods-manager new product pool summaries in Feishu text and card', () => {
     const longName = '超长商品名称用于验证卡片会做简短展示避免过宽';
     const withPool: PublicTrafficDataReportContext = {

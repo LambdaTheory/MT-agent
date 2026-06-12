@@ -4,7 +4,7 @@
 
 **Goal:** Filter goods-manager recent links so `新链接冷启动` only includes synced internal IDs that first appeared in the Alipay goods export within the last 7 days.
 
-**Architecture:** Reuse the existing goods export parsing patterns and `GoodsSnapshotItem` type. Add a small first-seen state module under `src/publicTraffic/` that updates `output/state/goods-first-seen.json`, then have the public traffic CLI filter `fetchRecentGoodsManagerProducts()` results through that state and the current goods export snapshot.
+**Architecture:** Reuse the existing goods export parsing patterns and `GoodsSnapshotItem` type. Add a small first-seen state module under `src/publicTraffic/` that updates `output/state/goods-first-seen.json`, then have the public traffic CLI filter `fetchRecentGoodsManagerProducts()` results through that state and the current goods export snapshot. When the state file is missing, initialize current goods as baseline entries so first deployment does not classify all existing links as new.
 
 **Tech Stack:** TypeScript, Node fs/promises, xlsx-js-style, Vitest.
 

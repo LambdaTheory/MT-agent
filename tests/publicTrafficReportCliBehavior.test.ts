@@ -150,6 +150,11 @@ describe('runPublicTrafficReportCli public traffic sequencing', () => {
   it('loads goods-manager new product pool items when GOODS_MANAGER_BASE_URL is configured', async () => {
     vi.stubEnv('GOODS_MANAGER_BASE_URL', 'http://192.168.1.22:3010');
     mocks.loadProductIdMapping.mockResolvedValueOnce({ p701: '701', p702: '702' });
+    await mkdir(join(mocks.outputDir, 'state'), { recursive: true });
+    await writeFile(join(mocks.outputDir, 'state', 'goods-first-seen.json'), JSON.stringify({
+      '701': { firstSeenDate: '2026-06-10', platformProductId: 'p701', productName: '新品 Alpha' },
+      '702': { firstSeenDate: '2026-06-10', platformProductId: 'p702', productName: '新品 Beta' },
+    }), 'utf8');
     mocks.fetchRecentGoodsManagerProducts.mockResolvedValueOnce([
       {
         productId: '701',
@@ -221,6 +226,24 @@ describe('runPublicTrafficReportCli public traffic sequencing', () => {
     expect(context.newProductPoolIds).toEqual(['701']);
     expect(context.newProductPoolItems?.map((item) => item.productId)).toEqual(['701']);
     await expect(readFile(todayPaths.log, 'utf8')).resolves.toContain('goods-manager 新链接观察: 原始=3, 商品总表近7天首次出现=1');
+  });
+
+  it('initializes first-seen state as baseline and does not treat all existing goods as new links', async () => {
+    vi.stubEnv('GOODS_MANAGER_BASE_URL', 'http://192.168.1.22:3010');
+    mocks.loadProductIdMapping.mockResolvedValueOnce({ p701: '701' });
+    mocks.fetchRecentGoodsManagerProducts.mockResolvedValueOnce([
+      { productId: '701', productName: '存量链接', shortTitle: '', submittedAt: '2026-06-10 09:00:00', merchant: '', alipaySyncStatus: '已同步', alipayCode: '', stock: 0, skuCount: 0, maintenanceStatus: '待维护', note: '' },
+    ]);
+    const { runPublicTrafficReportCli } = await import('../src/cli/publicTrafficReport.js');
+
+    await runPublicTrafficReportCli();
+
+    const todayPaths = buildPublicTrafficPaths(mocks.outputDir, '2026-06-10');
+    const context = JSON.parse(await readFile(todayPaths.reportContext, 'utf8')) as PublicTrafficDataReportContext;
+    expect(context.newProductPoolItems).toBeUndefined();
+    const firstSeen = JSON.parse(await readFile(todayPaths.goodsFirstSeenState, 'utf8')) as Record<string, { baseline?: boolean }>;
+    expect(firstSeen['701']?.baseline).toBe(true);
+    await expect(readFile(todayPaths.log, 'utf8')).resolves.toContain('goods-manager 新链接观察: 原始=1, 商品总表近7天首次出现=0');
   });
 
   it('keeps first-run daily delta empty while historical deltas still feed report summaries and rows', async () => {

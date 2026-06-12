@@ -240,10 +240,10 @@ function goodsSnapshotFromMapping(mapping: ProductIdMapping): GoodsSnapshotItem[
   return items;
 }
 
-async function loadGoodsFirstSeenState(path: string): Promise<GoodsFirstSeenIndex> {
+async function loadGoodsFirstSeenState(path: string): Promise<{ state: GoodsFirstSeenIndex; found: boolean }> {
   try {
     const parsed = JSON.parse(await readFile(path, 'utf8')) as unknown;
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { state: {}, found: true };
     const state: GoodsFirstSeenIndex = {};
     for (const [internalId, value] of Object.entries(parsed)) {
       if (!/^\d+$/.test(internalId) || !value || typeof value !== 'object' || Array.isArray(value)) continue;
@@ -255,9 +255,9 @@ async function loadGoodsFirstSeenState(path: string): Promise<GoodsFirstSeenInde
         productName: typeof record.productName === 'string' ? record.productName : '',
       };
     }
-    return state;
+    return { state, found: true };
   } catch (error) {
-    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return {};
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return { state: {}, found: false };
     throw error;
   }
 }
@@ -308,10 +308,12 @@ export async function runPublicTrafficReportCli(): Promise<void> {
     const mapping = await loadMappingSafely(mappingPath, log);
     const currentGoodsSnapshot = goodsSnapshotFromMapping(mapping);
     await writeFile(paths.goodsListSnapshot, JSON.stringify(currentGoodsSnapshot, null, 2), 'utf8');
+    const previousFirstSeen = await loadGoodsFirstSeenState(paths.goodsFirstSeenState);
     const firstSeenState = updateGoodsFirstSeen({
       currentDate: runDate,
-      previous: await loadGoodsFirstSeenState(paths.goodsFirstSeenState),
+      previous: previousFirstSeen.state,
       current: currentGoodsSnapshot,
+      baseline: !previousFirstSeen.found,
     });
     await saveGoodsFirstSeenState(paths.goodsFirstSeenState, firstSeenState);
 
