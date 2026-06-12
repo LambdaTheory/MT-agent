@@ -11,7 +11,7 @@
 This branch implements phase 1 agentization through Feishu server-side APIs:
 
 - Feishu event callback HTTP server.
-- URL verification and optional request signature helper.
+- URL verification with Feishu Verification Token.
 - Text intent parsing for help, latest summary, product query, run report, and resend report.
 - Readonly report context query tools.
 - Feishu message reply API wrapper.
@@ -23,6 +23,7 @@ It intentionally does not implement:
 - Product mutation.
 - Approval cards or card callback handling.
 - Long-term memory.
+- Encrypted event payload decryption. Keep Feishu Encrypt Key empty for phase 1.
 
 ## Commits
 
@@ -92,6 +93,8 @@ FEISHU_BOT_ENCRYPT_KEY=
 MT_AGENT_OUTPUT_DIR=output
 ```
 
+Phase 1 expects Feishu event callbacks as plaintext JSON. If Feishu Encrypt Key is enabled in the Open Platform, disable it or leave `FEISHU_BOT_ENCRYPT_KEY` empty until encrypted event decryption is implemented.
+
 Start locally:
 
 ```powershell
@@ -127,6 +130,7 @@ Latest worktree verification:
 - `npm test -- tests/feishuBotIntent.test.ts tests/feishuBotVerify.test.ts tests/feishuBotReportStore.test.ts tests/feishuBotTools.test.ts tests/feishuBotReply.test.ts tests/feishuBotServer.test.ts`: 6 files, 20 tests passed.
 - `npm test`: 53 files, 236 tests passed.
 - `npm run build`: passed.
+- Local `.env` URL verification smoke test: passed with `local feishu bot verification ok`.
 
 Manual smoke test:
 

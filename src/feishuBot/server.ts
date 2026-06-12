@@ -3,7 +3,7 @@ import { replyFeishuMessageText, type FeishuAppSendResult, type FeishuReplyConfi
 import { parseBotIntent } from './intent.js';
 import { handleBotIntent } from './tools.js';
 import type { BotIntent, BotResponse, FeishuMessageEvent } from './types.js';
-import { handleUrlVerification, verifyFeishuSignature } from './verify.js';
+import { handleUrlVerification } from './verify.js';
 
 export interface FeishuBotServerConfig {
   port: number;
@@ -39,17 +39,6 @@ export function startFeishuBotServer(config: FeishuBotServerConfig) {
     if (req.method !== 'POST') return writeJson(res, 404, { error: 'not found' });
 
     const body = await readBody(req);
-    if (
-      !verifyFeishuSignature({
-        timestamp: req.headers['x-lark-request-timestamp'] as string | undefined,
-        nonce: req.headers['x-lark-request-nonce'] as string | undefined,
-        signature: req.headers['x-lark-signature'] as string | undefined,
-        body,
-        secret: config.encryptKey,
-      })
-    ) {
-      return writeJson(res, 401, { error: 'invalid signature' });
-    }
 
     const payload = JSON.parse(body) as FeishuMessageEvent & { type?: string; challenge?: string; token?: string };
     const verification = handleUrlVerification(payload, config.verificationToken);

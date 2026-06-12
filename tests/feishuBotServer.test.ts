@@ -31,6 +31,26 @@ describe('startFeishuBotServer', () => {
     }
   });
 
+  it('does not treat encrypt key as request signature secret for url verification', async () => {
+    const server = startFeishuBotServer({ port: 0, appId: 'app', appSecret: 'secret', verificationToken: 'token', encryptKey: 'encrypt-key' });
+    try {
+      await new Promise<void>((resolve) => server.once('listening', resolve));
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+
+      const response = await fetch(`http://127.0.0.1:${address.port}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'url_verification', challenge: 'challenge-value', token: 'token' }),
+      });
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({ challenge: 'challenge-value' });
+    } finally {
+      server.close();
+    }
+  });
+
   it('routes text event through intent handler and replies', async () => {
     const replies: Array<{ messageId: string; text: string }> = [];
     const server = startFeishuBotServer({
