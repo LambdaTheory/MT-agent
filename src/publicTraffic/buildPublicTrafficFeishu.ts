@@ -56,6 +56,17 @@ function itemLines<T>(items: T[], formatter: (item: T) => string): string[] {
   return items.map((item, index) => `${index + 1}. ${formatter(item)}`);
 }
 
+function newProductPoolCount(context: PublicTrafficDataReportContext): number {
+  return context.newProductPoolItems?.length ?? context.newProductPoolIds?.length ?? 0;
+}
+
+function newProductPoolLines(context: PublicTrafficDataReportContext): string[] {
+  if (context.newProductPoolItems?.length) {
+    return itemLines(context.newProductPoolItems.slice(0, 10), (item) => `商品ID ${item.productId} ${item.productName}：${item.maintenanceStatus}`);
+  }
+  return itemLines(context.newProductPoolIds?.slice(0, 10) ?? [], (id) => `商品ID ${id}｜待维护`);
+}
+
 function productLine(row: PublicTrafficProductDataRow, index: number): string {
   const one = row.periods['1d'];
   const visits = one.publicVisits || one.dashboardVisits;
@@ -82,7 +93,7 @@ function moduleCountLine(context: PublicTrafficDataReportContext): string | null
     ['转化弱', context.weakConversion.length],
     ['高潜力', context.highPotential.length],
     ['新品观察', context.newProductObservation.length],
-    ['新品池维护', context.newProductPoolIds?.length ?? 0],
+    ['新品池维护', newProductPoolCount(context)],
     ['生命周期治理', context.lifecycleGovernance.length],
     ['建议操作', context.recommendedActions.length],
   ].filter(([, count]) => Number(count) > 0);
@@ -112,7 +123,7 @@ export function buildPublicTrafficFeishuText(input: PublicTrafficDataReportConte
   appendSection(lines, '今日曝光 Top10', topExposureLines(context.rows));
   appendSection(lines, '诊断问题', itemLines(flattenDiagnosticItems(context), (diag) => `${diag.type}｜${diag.item.identifier}｜${diag.item.action}｜${diag.item.reason}`));
   appendSection(lines, '建议操作', itemLines(sortedActions(context.recommendedActions), (item) => `${item.action}｜${item.identifier}｜${item.reason}`));
-  appendSection(lines, '新品池维护', itemLines(context.newProductPoolIds ?? [], (id) => `商品ID ${id}｜待维护`));
+  appendSection(lines, '新品池维护', newProductPoolLines(context));
   appendSection(lines, '新品观察', itemLines(context.newProductObservation, (item) => `${item.identifier}｜${item.action}｜${item.reason}`));
   return lines.join('\n');
 }

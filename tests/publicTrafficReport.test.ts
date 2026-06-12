@@ -566,6 +566,39 @@ describe('public traffic report outputs', () => {
     expect(text).toContain('1. 商品ID 701｜待维护');
   });
 
+  it('renders enriched goods-manager new product pool summaries in Feishu text and card', () => {
+    const longName = '超长商品名称用于验证卡片会做简短展示避免过宽';
+    const withPool: PublicTrafficDataReportContext = {
+      ...context,
+      newProductPoolItems: Array.from({ length: 11 }, (_, index) => ({
+        productId: String(701 + index),
+        productName: index === 0 ? '新品 Alpha' : index === 10 ? '第十一个不展示' : longName,
+        shortTitle: '',
+        submittedAt: '2026-06-12 09:00:00',
+        merchant: '',
+        alipaySyncStatus: '',
+        alipayCode: '',
+        stock: 0,
+        skuCount: 0,
+        maintenanceStatus: '待维护',
+        note: '',
+      })),
+    };
+
+    const text = buildPublicTrafficFeishuText(withPool, { markdownPath: 'report.md', workbookPath: 'report.xlsx' });
+    expect(text).toContain('新品池维护 11');
+    expect(text).toContain('1. 商品ID 701 新品 Alpha：待维护');
+    expect(text).toContain('10. 商品ID 710 超长商品名称用于验证卡片会做简短展示避免过宽：待维护');
+    expect(text).not.toContain('第十一个不展示');
+
+    const cardJson = JSON.stringify(buildPublicTrafficCard(withPool, { markdownPath: 'report.md', workbookPath: 'report.xlsx' }));
+    expect(cardJson).toContain('新品池维护 11');
+    expect(cardJson).toContain('新品维护池（11）');
+    expect(cardJson).toContain('商品ID 701 新品 Alpha：待维护');
+    expect(cardJson).toContain('商品ID 710 超长商品名称用于验证卡片会做...：待维护');
+    expect(cardJson).not.toContain('第十一个不展示');
+  });
+
   it('writes enriched goods-manager new product pool items into workbook maintenance sheet', () => {
     const withPool: PublicTrafficDataReportContext = {
       ...context,

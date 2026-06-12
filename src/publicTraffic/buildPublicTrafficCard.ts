@@ -35,7 +35,7 @@ function moduleCounts(context: PublicTrafficDataReportContext): Array<[string, n
     ['转化弱', context.weakConversion.length],
     ['高潜力', context.highPotential.length],
     ['新品观察', context.newProductObservation.length],
-    ['新品池维护', context.newProductPoolIds?.length ?? 0],
+    ['新品池维护', context.newProductPoolItems?.length ?? context.newProductPoolIds?.length ?? 0],
     ['生命周期治理', context.lifecycleGovernance.length],
     ['建议操作', context.recommendedActions.length],
   ];
@@ -221,6 +221,10 @@ function shortProductName(row: PublicTrafficProductDataRow, productNameMap: Prod
   return resolveProductDisplayName(row, productNameMap);
 }
 
+function shortNewProductName(name: string): string {
+  return name.length > 18 ? `${name.slice(0, 14)}...` : name;
+}
+
 function findRowByIdentifier(context: PublicTrafficDataReportContext, identifier: string): PublicTrafficProductDataRow | undefined {
   const id = identifier.replace(/^端内ID\s*/, '');
   return context.rows.find((row) => row.displayProductId === identifier || shortId(row) === id);
@@ -255,7 +259,7 @@ function scaleRows(context: PublicTrafficDataReportContext, productNameMap: Prod
 }
 
 function newProductPoolCount(context: PublicTrafficDataReportContext): number {
-  return context.newProductPoolIds?.length ?? context.newProductObservation.length;
+  return context.newProductPoolItems?.length ?? context.newProductPoolIds?.length ?? context.newProductObservation.length;
 }
 
 function analysisSummary(context: PublicTrafficDataReportContext, boostRows: FeishuTableRow[], conversionRowsData: FeishuTableRow[], scaleRowsData: FeishuTableRow[]): Record<string, unknown> {
@@ -270,11 +274,12 @@ function analysisSummary(context: PublicTrafficDataReportContext, boostRows: Fei
 }
 
 function newProductPoolPanel(context: PublicTrafficDataReportContext): Record<string, unknown> {
-  const poolIds = context.newProductPoolIds;
   const count = newProductPoolCount(context);
-  const preview = poolIds?.length
-    ? poolIds.slice(0, 10).map((id) => `- 商品ID ${id}：待维护`).join('\n')
-    : context.newProductObservation.slice(0, 10).map((item) => `- ${item.identifier}：${item.reason}`).join('\n');
+  const preview = context.newProductPoolItems?.length
+    ? context.newProductPoolItems.slice(0, 10).map((item) => `- 商品ID ${item.productId} ${shortNewProductName(item.productName)}：${item.maintenanceStatus}`).join('\n')
+    : context.newProductPoolIds?.length
+      ? context.newProductPoolIds.slice(0, 10).map((id) => `- 商品ID ${id}：待维护`).join('\n')
+      : context.newProductObservation.slice(0, 10).map((item) => `- ${item.identifier}：${item.reason}`).join('\n');
   return {
     tag: 'collapsible_panel',
     element_id: 'new_product_pool',
