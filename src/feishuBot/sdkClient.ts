@@ -42,6 +42,7 @@ export interface FeishuSdkBotConfig {
   appSecret: string;
   outputDir?: string;
   dispatchMessage?: (message: FeishuBotIncomingTextMessage) => Promise<FeishuBotDispatchResult>;
+  logError?: (error: unknown, context: { messageId: string; phase: 'reply' | 'dispatch' }) => void;
   sdk?: FeishuSdkModule;
 }
 
@@ -51,6 +52,13 @@ export interface FeishuSdkBot {
 
 function isSdkMessageData(data: unknown): data is SdkMessageData {
   return typeof data === 'object' && data !== null;
+}
+
+async function replyText(client: FeishuSdkClient, messageId: string, text: string): Promise<void> {
+  await client.im.v1.message.reply({
+    path: { message_id: messageId },
+    data: { content: JSON.stringify({ text }), msg_type: 'text' },
+  });
 }
 
 export function extractSdkTextMessage(data: unknown): FeishuBotIncomingTextMessage | null {
@@ -82,6 +90,7 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
   const wsClient = new sdk.WSClient({ appId: config.appId, appSecret: config.appSecret });
   const eventDispatcher = new sdk.EventDispatcher({});
   const dispatchMessage = config.dispatchMessage ?? createFeishuMessageDispatcher({ outputDir: config.outputDir }).dispatch;
+  const logError = config.logError ?? ((error: unknown, context: { messageId: string; phase: 'reply' | 'dispatch' }) => console.error(`飞书SDK消息处理失败 ${context.phase} ${context.messageId}:`, error));
 
   eventDispatcher.register({
     'im.message.receive_v1': async (data: unknown) => {
@@ -91,10 +100,11 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
       const response = await dispatchMessage(message);
       if (response.skipped) return;
 
-      await client.im.v1.message.reply({
-        path: { message_id: message.messageId },
-        data: { content: JSON.stringify({ text: response.text }), msg_type: 'text' },
-      });
+      try {
+        await replyText(client, message.messageId, response.text);
+      } catch (error) {
+        logError(error, { messageId: message.messageId, phase: 'reply' });
+      }
     },
   });
 

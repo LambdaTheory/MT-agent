@@ -104,4 +104,44 @@ describe('createFeishuSdkBot', () => {
 
     expect(sent).toEqual([]);
   });
+
+  it('logs rejected SDK replies without rejecting the event handler', async () => {
+    const registered: Record<string, (data: unknown) => Promise<void>> = {};
+    const replyError = new Error('reply failed');
+    const logged: unknown[] = [];
+
+    class FakeClient {
+      im = { v1: { message: { reply: async () => Promise.reject(replyError) } } };
+    }
+
+    class FakeWSClient {
+      start() {
+        return undefined;
+      }
+    }
+
+    class FakeEventDispatcher {
+      register(handlers: Record<string, (data: unknown) => Promise<void>>) {
+        Object.assign(registered, handlers);
+        return this;
+      }
+    }
+
+    const bot = createFeishuSdkBot({
+      appId: 'app',
+      appSecret: 'secret',
+      dispatchMessage: async () => ({ text: 'reply', skipped: false }),
+      logError: (error, context) => logged.push({ error, context }),
+      sdk: { Client: FakeClient, WSClient: FakeWSClient, EventDispatcher: FakeEventDispatcher },
+    });
+
+    bot.start();
+    await expect(
+      registered['im.message.receive_v1']({
+        message: { message_id: 'mid-sdk-reply-fails', message_type: 'text', content: JSON.stringify({ text: '帮助' }) },
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(logged).toEqual([{ error: replyError, context: { messageId: 'mid-sdk-reply-fails', phase: 'reply' } }]);
+  });
 });
