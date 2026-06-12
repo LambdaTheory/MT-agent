@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { getLatestOverview, getNewProductPool, getProblemProducts, getProductPerformance } from '../src/agentData/publicTrafficQueries.js';
 import type { PublicTrafficDataReportContext } from '../src/publicTraffic/types.js';
 
-type ExtendedContext = PublicTrafficDataReportContext & {
+type ExtendedContext = Omit<PublicTrafficDataReportContext, 'newProductPoolItems' | 'newProductPoolIds'> & {
   newProductPoolItems?: Array<{ productId: string; productName: string; maintenanceStatus?: string }>;
   newProductPoolIds?: string[];
 };
