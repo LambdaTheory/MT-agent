@@ -11,12 +11,14 @@ export async function findLatestReportContext(outputDir = 'output'): Promise<{ p
     .reverse();
 
   for (const date of dates) {
-    const path = join(outputDir, date, 'report-context.json');
-    try {
-      return { path, context: JSON.parse(await readFile(path, 'utf8')) as PublicTrafficDataReportContext };
-    } catch (error) {
-      if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') continue;
-      throw error;
+    for (const filename of ['report-context.json', `公域数据上下文_${date}.json`]) {
+      const path = join(outputDir, date, filename);
+      try {
+        return { path, context: JSON.parse(await readFile(path, 'utf8')) as PublicTrafficDataReportContext };
+      } catch (error) {
+        if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') continue;
+        throw error;
+      }
     }
   }
 
