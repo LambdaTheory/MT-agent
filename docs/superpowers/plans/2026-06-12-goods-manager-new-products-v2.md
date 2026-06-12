@@ -1,5 +1,7 @@
 # Goods Manager New Product Pool V2 Implementation Plan
 
+> **Archive status:** Implementation and delivery verification for this plan are complete. The unchecked task boxes below are preserved as the original execution plan and are not current task status.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Upgrade MT-agent's goods-manager new product pool output from an ID list to an operations-ready product maintenance table.

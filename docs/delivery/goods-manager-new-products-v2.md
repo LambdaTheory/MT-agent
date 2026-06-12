@@ -19,8 +19,12 @@
 
 ## 验证
 
-- `npm test`: PASS
-- `npm run build`: PASS
+- `npm test`: PASS，49 files / 244 tests。
+- `npm run build`: PASS。
+- `git status --short`: clean。
+- `git rebase master`: completed without conflicts。
+- `git merge-tree $(git merge-base master HEAD) master HEAD`: no conflict markers。
+- Previous delivery HEAD before documentation evidence fix: `c1931e26cc450031dbf68752975bd83dd2983706`。
 
 ## 非范围
 
