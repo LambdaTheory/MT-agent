@@ -50,6 +50,17 @@ describe('feishu bot report store', () => {
     expect(found?.context.date).toBe('2026-06-11');
   });
 
+  it('finds latest 公域数据上下文 file by date directory', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'mt-agent-bot-'));
+    await mkdir(join(dir, '2026-06-12'), { recursive: true });
+    await writeFile(join(dir, '2026-06-12', '公域数据上下文_2026-06-12.json'), JSON.stringify({ ...context, date: '2026-06-12' }));
+
+    const found = await findLatestReportContext(dir);
+
+    expect(found?.context.date).toBe('2026-06-12');
+    expect(found?.path).toContain('公域数据上下文_2026-06-12.json');
+  });
+
   it('formats latest summary', () => {
     expect(formatLatestSummary(context as any)).toContain('2026-06-11');
     expect(formatLatestSummary(context as any)).toContain('曝光 1000');
