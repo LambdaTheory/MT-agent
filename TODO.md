@@ -2,6 +2,11 @@
 
 ## High Priority
 
+- Phase 1 Feishu bot agentization.
+  - Readonly Q&A over latest report context.
+  - Feishu command entry for running or resending public traffic report.
+  - No product mutations, approvals, or execution in this phase.
+
 - Add Feishu report delivery.
   - Configure Feishu webhook URL in config or environment.
   - Push the daily Markdown summary after report generation.
