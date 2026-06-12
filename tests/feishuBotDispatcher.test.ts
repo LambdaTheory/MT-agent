@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createFeishuMessageDispatcher } from '../src/feishuBot/dispatcher.js';
+import { createFeishuMessageDispatcher, MAX_SEEN_MESSAGE_IDS } from '../src/feishuBot/dispatcher.js';
 import type { BotIntent } from '../src/feishuBot/types.js';
 
 describe('createFeishuMessageDispatcher', () => {
@@ -43,6 +43,21 @@ describe('createFeishuMessageDispatcher', () => {
     await expect(firstDispatcher.dispatch({ messageId: 'mid-duplicate-process', text: '今日概况', source: 'sdk' })).resolves.toEqual({ text: 'handled', skipped: false });
     await expect(secondDispatcher.dispatch({ messageId: 'mid-duplicate-process', text: '今日概况', source: 'http' })).resolves.toEqual({ text: '', skipped: true });
     expect(handleIntent).toHaveBeenCalledTimes(1);
+  });
+
+  it('evicts old message ids after the process-local dedupe window is full', async () => {
+    const handleIntent = vi.fn(async () => ({ text: 'handled' }));
+    const dispatcher = createFeishuMessageDispatcher({
+      resolveIntent: () => ({ type: 'latest_summary' }),
+      handleIntent,
+    });
+
+    await expect(dispatcher.dispatch({ messageId: 'mid-evict-oldest', text: '今日概况', source: 'sdk' })).resolves.toEqual({ text: 'handled', skipped: false });
+    for (let index = 0; index < MAX_SEEN_MESSAGE_IDS; index += 1) {
+      await expect(dispatcher.dispatch({ messageId: `mid-evict-filler-${index}`, text: '今日概况', source: 'sdk' })).resolves.toEqual({ text: 'handled', skipped: false });
+    }
+    await expect(dispatcher.dispatch({ messageId: 'mid-evict-oldest', text: '今日概况', source: 'sdk' })).resolves.toEqual({ text: 'handled', skipped: false });
+    expect(handleIntent).toHaveBeenCalledTimes(MAX_SEEN_MESSAGE_IDS + 2);
   });
 
   it('returns a user-visible failure response when handling throws', async () => {

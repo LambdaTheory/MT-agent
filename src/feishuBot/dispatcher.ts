@@ -13,7 +13,16 @@ export interface FeishuMessageDispatcher {
   dispatch(message: FeishuBotIncomingTextMessage): Promise<FeishuBotDispatchResult>;
 }
 
+export const MAX_SEEN_MESSAGE_IDS = 1000;
 const seenMessageIds = new Set<string>();
+
+function rememberMessageId(messageId: string): void {
+  seenMessageIds.add(messageId);
+  if (seenMessageIds.size <= MAX_SEEN_MESSAGE_IDS) return;
+
+  const oldestMessageId = seenMessageIds.values().next().value;
+  if (oldestMessageId !== undefined) seenMessageIds.delete(oldestMessageId);
+}
 
 function formatError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -42,7 +51,7 @@ export function createFeishuMessageDispatcher(config: FeishuMessageDispatcherCon
   return {
     async dispatch(message): Promise<FeishuBotDispatchResult> {
       if (seenMessageIds.has(message.messageId)) return { text: '', skipped: true };
-      seenMessageIds.add(message.messageId);
+      rememberMessageId(message.messageId);
 
       try {
         const intent = canonicalizeIntent(resolveIntent(message.text, message));
