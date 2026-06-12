@@ -6,9 +6,33 @@ export interface FetchRecentGoodsManagerProductIdsOptions {
   pageSize?: number;
 }
 
+export type FetchRecentGoodsManagerProductsOptions = FetchRecentGoodsManagerProductIdsOptions;
+
+export interface GoodsManagerNewProductPoolItem {
+  productId: string;
+  productName: string;
+  shortTitle: string;
+  submittedAt: string;
+  merchant: string;
+  alipaySyncStatus: string;
+  alipayCode: string;
+  stock: number;
+  skuCount: number;
+  maintenanceStatus: '待维护';
+  note: '';
+}
+
 interface GoodsManagerGoodsItem {
   ID?: unknown;
+  商品名称?: unknown;
+  短标题?: unknown;
   最近提交时间?: unknown;
+  merchant?: unknown;
+  商家?: unknown;
+  是否同步支付宝?: unknown;
+  支付宝编码?: unknown;
+  库存?: unknown;
+  skus?: unknown;
 }
 
 interface GoodsManagerGoodsResponse {
@@ -52,6 +76,36 @@ function inWindow(value: unknown, referenceDate: string, days: number): boolean 
   return submittedAt >= start && submittedAt <= end;
 }
 
+function normalizeText(value: unknown): string {
+  if (value === null || value === undefined) return '';
+  return String(value).trim();
+}
+
+function normalizeNumber(value: unknown): number {
+  const number = typeof value === 'number' ? value : typeof value === 'string' && value.trim() ? Number(value) : 0;
+  return Number.isFinite(number) ? number : 0;
+}
+
+function normalizeSkuCount(value: unknown): number {
+  return Array.isArray(value) ? value.length : 0;
+}
+
+function toNewProductPoolItem(item: GoodsManagerGoodsItem, productId: string): GoodsManagerNewProductPoolItem {
+  return {
+    productId,
+    productName: normalizeText(item.商品名称),
+    shortTitle: normalizeText(item.短标题),
+    submittedAt: normalizeText(item.最近提交时间),
+    merchant: normalizeText(item.merchant) || normalizeText(item.商家),
+    alipaySyncStatus: normalizeText(item.是否同步支付宝),
+    alipayCode: normalizeText(item.支付宝编码),
+    stock: normalizeNumber(item.库存),
+    skuCount: normalizeSkuCount(item.skus),
+    maintenanceStatus: '待维护',
+    note: '',
+  };
+}
+
 function sortProductIds(ids: string[]): string[] {
   return [...ids].sort((a, b) => {
     const aNumber = /^\d+$/.test(a) ? Number(a) : null;
@@ -70,10 +124,15 @@ async function fetchGoodsPage(fetchImpl: typeof fetch, url: string): Promise<Goo
 }
 
 export async function fetchRecentGoodsManagerProductIds(options: FetchRecentGoodsManagerProductIdsOptions): Promise<string[]> {
+  const products = await fetchRecentGoodsManagerProducts(options);
+  return products.map((item) => item.productId);
+}
+
+export async function fetchRecentGoodsManagerProducts(options: FetchRecentGoodsManagerProductsOptions): Promise<GoodsManagerNewProductPoolItem[]> {
   const days = options.days ?? 7;
   const pageSize = options.pageSize ?? 500;
   const fetchImpl = options.fetchImpl ?? fetch;
-  const ids = new Set<string>();
+  const products = new Map<string, GoodsManagerNewProductPoolItem>();
   let totalPages = 1;
 
   for (let page = 1; page <= totalPages; page += 1) {
@@ -81,9 +140,11 @@ export async function fetchRecentGoodsManagerProductIds(options: FetchRecentGood
     totalPages = Math.max(1, Number(result.total_pages) || 1);
     for (const item of result.data ?? []) {
       const id = typeof item.ID === 'string' || typeof item.ID === 'number' ? String(item.ID).trim() : '';
-      if (id && inWindow(item.最近提交时间, options.referenceDate, days)) ids.add(id);
+      if (id && !products.has(id) && inWindow(item.最近提交时间, options.referenceDate, days)) {
+        products.set(id, toNewProductPoolItem(item, id));
+      }
     }
   }
 
-  return sortProductIds([...ids]);
+  return sortProductIds([...products.keys()]).map((id) => products.get(id)!);
 }
