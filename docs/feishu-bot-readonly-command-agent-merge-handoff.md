@@ -34,6 +34,8 @@ It intentionally does not implement:
 - `ec06a1f 功能：新增飞书机器人事件服务`
 - `31c7caf 文档：补充飞书机器人配置与合并说明`
 - `1aaeb59 测试：覆盖飞书机器人 HTTP 回调链路`
+- `26a5037 文档：更新飞书机器人联调验证说明`
+- `a2af5ba 修复：飞书机器人不将 Encrypt Key 用作签名密钥`
 
 ## Main Files Added
 
@@ -127,7 +129,7 @@ npm run build
 
 Latest worktree verification:
 
-- `npm test -- tests/feishuBotIntent.test.ts tests/feishuBotVerify.test.ts tests/feishuBotReportStore.test.ts tests/feishuBotTools.test.ts tests/feishuBotReply.test.ts tests/feishuBotServer.test.ts`: 6 files, 20 tests passed.
+- `npm test -- tests/feishuBotIntent.test.ts tests/feishuBotVerify.test.ts tests/feishuBotReportStore.test.ts tests/feishuBotTools.test.ts tests/feishuBotReply.test.ts tests/feishuBotServer.test.ts`: 6 files, 21 tests passed.
 - `npm test`: 53 files, 236 tests passed.
 - `npm run build`: passed.
 - Local `.env` URL verification smoke test: passed with `local feishu bot verification ok`.
