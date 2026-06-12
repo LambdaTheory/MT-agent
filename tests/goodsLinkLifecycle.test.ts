@@ -67,6 +67,20 @@ describe('goods link lifecycle', () => {
     ]);
   });
 
+  it('removes existing removed links when the product is active again', () => {
+    const previous: GoodsLinkLifecycleState = {
+      active: {},
+      removedLinks: [
+        { productId: '701', platformProductId: 'platform-701', productName: '商品 701', removedDate: '2026-06-11', reason: '商品总表缺失', source: 'goods_snapshot_diff' },
+      ],
+    };
+
+    const result = updateGoodsLinkLifecycle({ currentDate: '2026-06-12', previous, current: goods(['701']) });
+
+    expect(result.removedLinks).toEqual([]);
+    expect(Object.keys(result.state.active)).toEqual(['701']);
+  });
+
   it('ignores invalid internal ids', () => {
     const previous: GoodsLinkLifecycleState = { active: {}, removedLinks: [] };
     const result = updateGoodsLinkLifecycle({

@@ -58,6 +58,7 @@ export function updateGoodsLinkLifecycle(input: { currentDate: string; previous:
 
   const latestRemoved = new Map<string, GoodsRemovedLinkItem>();
   for (const item of input.previous.removedLinks) {
+    if (active[item.productId]) continue;
     const existing = latestRemoved.get(item.productId);
     if (inRetentionWindow(item.removedDate, input.currentDate, retentionDays) && (!existing || item.removedDate > existing.removedDate)) latestRemoved.set(item.productId, item);
   }
