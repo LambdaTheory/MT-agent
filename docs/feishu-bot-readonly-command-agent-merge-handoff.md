@@ -164,3 +164,25 @@ Manual smoke test:
 5. Send `查询 565`.
 6. Send `重发日报 发我`.
 7. Send `跑日报` only when browser login state is ready.
+
+## SDK Long Connection Mode
+
+`feature/feishu-sdk-long-connection-communication` adds a primary Feishu SDK long-connection entrypoint while keeping the HTTP callback server as fallback.
+
+Start SDK mode locally:
+
+```powershell
+npm run feishu-bot:sdk
+```
+
+Required environment:
+
+```text
+FEISHU_APP_ID=cli_xxxxxxxxxxxxxxxx
+FEISHU_APP_SECRET=replace-with-your-secret
+MT_AGENT_OUTPUT_DIR=output
+```
+
+In Feishu Open Platform, configure event subscription to receive events through persistent connection, and subscribe to `im.message.receive_v1`.
+
+The SDK mode still uses deterministic command parsing. LLM intent resolving, approval buttons, and product mutation are only future extension points.
