@@ -35,7 +35,7 @@ function moduleCounts(context: PublicTrafficDataReportContext): Array<[string, n
     ['转化弱', context.weakConversion.length],
     ['高潜力', context.highPotential.length],
     ['新品观察', context.newProductObservation.length],
-    ['新品池维护', context.newProductPoolItems?.length ?? context.newProductPoolIds?.length ?? 0],
+    ['新品池维护', context.newProductPoolItems?.length ? context.newProductPoolItems.length : context.newProductPoolIds?.length ?? 0],
     ['生命周期治理', context.lifecycleGovernance.length],
     ['建议操作', context.recommendedActions.length],
   ];
@@ -259,7 +259,7 @@ function scaleRows(context: PublicTrafficDataReportContext, productNameMap: Prod
 }
 
 function newProductPoolCount(context: PublicTrafficDataReportContext): number {
-  return context.newProductPoolItems?.length ?? context.newProductPoolIds?.length ?? context.newProductObservation.length;
+  return context.newProductPoolItems?.length ? context.newProductPoolItems.length : context.newProductPoolIds?.length ?? context.newProductObservation.length;
 }
 
 function analysisSummary(context: PublicTrafficDataReportContext, boostRows: FeishuTableRow[], conversionRowsData: FeishuTableRow[], scaleRowsData: FeishuTableRow[]): Record<string, unknown> {

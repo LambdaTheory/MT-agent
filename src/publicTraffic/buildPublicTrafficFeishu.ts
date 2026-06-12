@@ -57,7 +57,7 @@ function itemLines<T>(items: T[], formatter: (item: T) => string): string[] {
 }
 
 function newProductPoolCount(context: PublicTrafficDataReportContext): number {
-  return context.newProductPoolItems?.length ?? context.newProductPoolIds?.length ?? 0;
+  return context.newProductPoolItems?.length ? context.newProductPoolItems.length : context.newProductPoolIds?.length ?? 0;
 }
 
 function newProductPoolLines(context: PublicTrafficDataReportContext): string[] {

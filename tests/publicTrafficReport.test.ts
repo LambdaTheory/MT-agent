@@ -566,6 +566,19 @@ describe('public traffic report outputs', () => {
     expect(text).toContain('1. 商品ID 701｜待维护');
   });
 
+  it('falls back to new product pool IDs when enriched pool items are empty', () => {
+    const withPool: PublicTrafficDataReportContext = { ...context, newProductPoolItems: [], newProductPoolIds: ['701', '702'] };
+
+    const text = buildPublicTrafficFeishuText(withPool, { markdownPath: 'report.md', workbookPath: 'report.xlsx' });
+    expect(text).toContain('新品池维护 2');
+    expect(text).toContain('1. 商品ID 701｜待维护');
+
+    const cardJson = JSON.stringify(buildPublicTrafficCard(withPool, { markdownPath: 'report.md', workbookPath: 'report.xlsx' }));
+    expect(cardJson).toContain('新品池维护 2');
+    expect(cardJson).toContain('新品维护池（2）');
+    expect(cardJson).toContain('商品ID 701：待维护');
+  });
+
   it('renders enriched goods-manager new product pool summaries in Feishu text and card', () => {
     const longName = '超长商品名称用于验证卡片会做简短展示避免过宽';
     const withPool: PublicTrafficDataReportContext = {
