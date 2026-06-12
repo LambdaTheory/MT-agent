@@ -261,6 +261,21 @@ describe('public traffic report outputs', () => {
     expect(serialized).not.toContain('report.xlsx');
   });
 
+  it('keeps removed-link Agent data out of visible Markdown and Feishu card outputs', () => {
+    const withRemovedLinks: PublicTrafficDataReportContext = {
+      ...context,
+      agentData: {
+        removedLinks: [
+          { productId: '701', platformProductId: 'p701', productName: '已下架链接', removedDate: '2026-06-12', reason: '商品总表缺失', source: 'goods_snapshot_diff' },
+        ],
+      },
+    };
+
+    expect(buildPublicTrafficMarkdown(withRemovedLinks)).not.toContain('已下架链接');
+    expect(JSON.stringify(buildPublicTrafficCard(withRemovedLinks, { markdownPath: 'report.md', workbookPath: 'report.xlsx' }))).not.toContain('已下架链接');
+    expect(buildPublicTrafficFeishuText(withRemovedLinks, { markdownPath: 'report.md', workbookPath: 'report.xlsx' })).not.toContain('已下架链接');
+  });
+
   it('uses manual product short names only in Feishu card tables', () => {
     const card = buildPublicTrafficCard(context, { markdownPath: 'report.md', workbookPath: 'report.xlsx' }, { productNameMap: { '1001': '佳能 SX70' } });
     const serialized = JSON.stringify(card);
