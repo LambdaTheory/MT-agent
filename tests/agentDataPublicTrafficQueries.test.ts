@@ -52,19 +52,21 @@ const context: ExtendedContext = {
   emptySectionNotes: { lowExposure: '', weakClick: '', weakConversion: '', highPotential: '', newProductObservation: '', lifecycleGovernance: '', recommendedActions: '' },
 };
 
+const publicContext = context as unknown as PublicTrafficDataReportContext;
+
 describe('agent public traffic queries', () => {
   it('returns overview metrics and quality notes', () => {
-    expect(getLatestOverview(context)).toMatchObject({ date: '2026-06-12', dataQualityNotes: ['后链路数据为空'] });
-    expect(getLatestOverview(context).metrics.map((item) => item.period)).toEqual(['1d', '7d', '30d']);
+    expect(getLatestOverview(publicContext)).toMatchObject({ date: '2026-06-12', dataQualityNotes: ['后链路数据为空'] });
+    expect(getLatestOverview(publicContext).metrics.map((item) => item.period)).toEqual(['1d', '7d', '30d']);
   });
 
   it('finds a product by display id or product name keyword', () => {
-    expect(getProductPerformance(context, '251')?.productName).toBe('佳能 G7X2');
-    expect(getProductPerformance(context, 'G7X2')?.productId).toBe('251');
+    expect(getProductPerformance(publicContext, '251')?.productName).toBe('佳能 G7X2');
+    expect(getProductPerformance(publicContext, 'G7X2')?.productId).toBe('251');
   });
 
   it('returns problem products and new product pool', () => {
-    expect(getProblemProducts(context, 'low_exposure')).toEqual([{ type: 'low_exposure', productId: '251', action: '补曝光', reason: '曝光不足' }]);
-    expect(getNewProductPool(context)).toEqual([{ productId: '701', productName: '新品 Alpha', maintenanceStatus: '待维护' }]);
+    expect(getProblemProducts(publicContext, 'low_exposure')).toEqual([{ type: 'low_exposure', productId: '251', action: '补曝光', reason: '曝光不足' }]);
+    expect(getNewProductPool(publicContext)).toEqual([{ productId: '701', productName: '新品 Alpha', maintenanceStatus: '待维护' }]);
   });
 });
