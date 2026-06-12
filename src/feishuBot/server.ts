@@ -1,8 +1,8 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { replyFeishuMessageText } from '../notify/feishuApp.js';
+import { replyFeishuMessageText, type FeishuAppSendResult, type FeishuReplyConfig } from '../notify/feishuApp.js';
 import { parseBotIntent } from './intent.js';
 import { handleBotIntent } from './tools.js';
-import type { FeishuMessageEvent } from './types.js';
+import type { BotIntent, BotResponse, FeishuMessageEvent } from './types.js';
 import { handleUrlVerification, verifyFeishuSignature } from './verify.js';
 
 export interface FeishuBotServerConfig {
@@ -12,6 +12,8 @@ export interface FeishuBotServerConfig {
   verificationToken?: string;
   encryptKey?: string;
   outputDir?: string;
+  handleIntent?: (intent: BotIntent, outputDir?: string) => Promise<BotResponse>;
+  replyText?: (config: FeishuReplyConfig, text: string) => Promise<FeishuAppSendResult>;
 }
 
 async function readBody(req: IncomingMessage): Promise<string> {
@@ -58,8 +60,8 @@ export function startFeishuBotServer(config: FeishuBotServerConfig) {
 
     writeJson(res, 200, { ok: true });
 
-    const response = await handleBotIntent(parseBotIntent(textMessage.text), config.outputDir);
-    await replyFeishuMessageText({ appId: config.appId, appSecret: config.appSecret, messageId: textMessage.messageId }, response.text);
+    const response = await (config.handleIntent ?? handleBotIntent)(parseBotIntent(textMessage.text), config.outputDir);
+    await (config.replyText ?? replyFeishuMessageText)({ appId: config.appId, appSecret: config.appSecret, messageId: textMessage.messageId }, response.text);
   });
 
   server.listen(config.port);
