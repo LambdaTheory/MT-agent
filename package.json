@@ -12,6 +12,7 @@
     "refresh-product-id-map": "tsx src/cli/refreshProductIdMap.ts",
     "rebuild-latest": "tsx src/cli/rebuildLatestReport.ts",
     "public-traffic-report": "tsx src/cli/publicTrafficReport.ts",
+    "feishu-bot": "tsx src/cli/feishuBot.ts",
     "build": "tsc -p tsconfig.json",
     "test": "vitest run"
   },
