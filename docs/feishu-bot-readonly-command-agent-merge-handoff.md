@@ -14,6 +14,7 @@ This branch implements phase 1 agentization through Feishu server-side APIs:
 - URL verification with Feishu Verification Token.
 - Text intent parsing for help, latest summary, product query, run report, and resend report.
 - Readonly report context query tools.
+- `src/agentData/` deterministic data understanding layer for overview, product, problem products, new product pool, and task pool queries.
 - Feishu message reply API wrapper.
 - `npm run feishu-bot` server entrypoint.
 
@@ -46,12 +47,20 @@ It intentionally does not implement:
 - `src/feishuBot/tools.ts`
 - `src/feishuBot/server.ts`
 - `src/cli/feishuBot.ts`
+- `src/agentData/types.ts`
+- `src/agentData/publicTrafficQueries.ts`
+- `src/agentData/taskPool.ts`
+- `src/agentData/intent.ts`
 - `tests/feishuBotIntent.test.ts`
 - `tests/feishuBotVerify.test.ts`
 - `tests/feishuBotReportStore.test.ts`
 - `tests/feishuBotTools.test.ts`
 - `tests/feishuBotReply.test.ts`
 - `tests/feishuBotServer.test.ts`
+- `tests/agentDataTypesSource.test.ts`
+- `tests/agentDataPublicTrafficQueries.test.ts`
+- `tests/agentDataTaskPool.test.ts`
+- `tests/agentDataIntent.test.ts`
 
 ## Main Files Modified
 
@@ -69,7 +78,7 @@ Recommended merge flow from main session:
 ```powershell
 git fetch . feature/feishu-bot-readonly-command-agent
 git log --oneline master..feature/feishu-bot-readonly-command-agent
-git diff master..feature/feishu-bot-readonly-command-agent -- src/feishuBot src/cli/feishuBot.ts src/notify/feishuApp.ts package.json .env.example TODO.md tests/feishuBot*.test.ts
+git diff master..feature/feishu-bot-readonly-command-agent -- src/feishuBot src/agentData src/cli/feishuBot.ts src/notify/feishuApp.ts package.json .env.example TODO.md tests/feishuBot*.test.ts tests/agentData*.test.ts docs/feishu-bot-readonly-command-agent-merge-handoff.md
 ```
 
 If main has diverged significantly, cherry-pick one commit at a time:
@@ -80,6 +89,15 @@ git cherry-pick 68dcd44
 git cherry-pick 683f454
 git cherry-pick a6414b5
 git cherry-pick ec06a1f
+git cherry-pick 31c7caf
+git cherry-pick 1aaeb59
+git cherry-pick 26a5037
+git cherry-pick a2af5ba
+git cherry-pick e804f3c
+git cherry-pick 37a0c1d
+git cherry-pick 566ca56
+git cherry-pick 5f36d4c
+git cherry-pick 7959e5f
 ```
 
 ## Runtime Setup
@@ -116,6 +134,8 @@ Then expose `http://localhost:8787` through HTTPS and configure the Feishu bot e
 - `生成公域日报 发群`
 - `重发日报`
 - `重发公域日报 发全部`
+- `今天要处理哪些`
+- `转化差的有哪些`
 
 ## Verification
 
@@ -123,6 +143,7 @@ Run after merge:
 
 ```powershell
 npm test -- tests/feishuBotIntent.test.ts tests/feishuBotVerify.test.ts tests/feishuBotReportStore.test.ts tests/feishuBotTools.test.ts tests/feishuBotReply.test.ts tests/feishuBotServer.test.ts
+npm test -- tests/agentDataTypesSource.test.ts tests/agentDataPublicTrafficQueries.test.ts tests/agentDataTaskPool.test.ts tests/agentDataIntent.test.ts
 npm test
 npm run build
 ```
