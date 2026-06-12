@@ -1,12 +1,12 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { basename, isAbsolute, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { loadConfig } from '../config/loadConfig.js';
 import { loadEnv } from '../config/loadEnv.js';
 import { crawlPublicTrafficSources } from '../crawler/publicTrafficCrawler.js';
 import { normalizeRowsForPeriod } from '../extractor/normalizeRows.js';
 import { annotateGoodsExportWorkbookWithInternalId } from '../mapping/annotateGoodsExportWorkbook.js';
-import { loadProductIdMapping } from '../mapping/productIdMapping.js';
+import { loadProductIdMapping, type ProductIdMapping } from '../mapping/productIdMapping.js';
 import { writeProductIdMappingFromExport } from '../mapping/refreshProductIdMapping.js';
 import { sendFeishuCard } from '../notify/feishu.js';
 import { analyzePublicTrafficData } from '../publicTraffic/analyzePublicTrafficData.js';
@@ -18,13 +18,14 @@ import { buildPublicTrafficFeishuText } from '../publicTraffic/buildPublicTraffi
 import { buildPublicTrafficMarkdown } from '../publicTraffic/buildPublicTrafficMarkdown.js';
 import { writePublicTrafficWorkbookBuffer } from '../publicTraffic/buildPublicTrafficWorkbook.js';
 import { fetchRecentGoodsManagerProducts } from '../publicTraffic/goodsManagerNewProducts.js';
+import { filterFirstSeenWithinDays, updateGoodsFirstSeen, type GoodsFirstSeenIndex } from '../publicTraffic/goodsSnapshot.js';
 import { mergePublicTrafficData } from '../publicTraffic/mergePublicTrafficData.js';
 import { buildPublicTrafficPaths } from '../publicTraffic/paths.js';
 import { loadProductNameMap } from '../publicTraffic/productDisplayName.js';
 import { loadRecentExposureDeltas } from '../publicTraffic/recentExposureDeltas.js';
 import type { PeriodProductMetrics, RawTableData } from '../domain/types.js';
 import type { GoodsManagerNewProductPoolItem } from '../publicTraffic/goodsManagerNewProducts.js';
-import type { ExposureCumulativeProduct, PublicTrafficDataReportContext, PublicTrafficDataSummary } from '../publicTraffic/types.js';
+import type { ExposureCumulativeProduct, GoodsSnapshotItem, PublicTrafficDataReportContext, PublicTrafficDataSummary } from '../publicTraffic/types.js';
 import { createRunLog } from '../storage/runLog.js';
 
 const TODAY_DASHBOARD_NOT_UPDATED_NOTE = '今日访问数据支付宝暂未更新，本期访问量板块指标缺失。';
@@ -218,13 +219,57 @@ async function loadGoodsManagerNewProductPool(date: string, log: ReturnType<type
   if (!baseUrl) return [];
 
   try {
-    const products = await fetchRecentGoodsManagerProducts({ baseUrl, days: 7, referenceDate: date });
+    const products = await fetchRecentGoodsManagerProducts({ baseUrl, days: 7, referenceDate: date, requireAlipaySynced: true });
     log.addEvent(`goods-manager 新品池: ${products.length} 个商品`);
     return products;
   } catch (error) {
     log.addEvent(`goods-manager 新品池读取失败: ${error instanceof Error ? error.message : String(error)}`);
     return [];
   }
+}
+
+function goodsSnapshotFromMapping(mapping: ProductIdMapping): GoodsSnapshotItem[] {
+  const seen = new Set<string>();
+  const items: GoodsSnapshotItem[] = [];
+  for (const [platformProductId, internalProductId] of Object.entries(mapping)) {
+    const id = internalProductId.trim();
+    if (!/^\d+$/.test(id) || seen.has(id)) continue;
+    seen.add(id);
+    items.push({ platformProductId, internalProductId: id, productName: '' });
+  }
+  return items;
+}
+
+async function loadGoodsFirstSeenState(path: string): Promise<{ state: GoodsFirstSeenIndex; found: boolean }> {
+  try {
+    const parsed = JSON.parse(await readFile(path, 'utf8')) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { state: {}, found: true };
+    const state: GoodsFirstSeenIndex = {};
+    for (const [internalId, value] of Object.entries(parsed)) {
+      if (!/^\d+$/.test(internalId) || !value || typeof value !== 'object' || Array.isArray(value)) continue;
+      const record = value as Record<string, unknown>;
+      if (typeof record.firstSeenDate !== 'string') continue;
+      state[internalId] = {
+        firstSeenDate: record.firstSeenDate,
+        platformProductId: typeof record.platformProductId === 'string' ? record.platformProductId : '',
+        productName: typeof record.productName === 'string' ? record.productName : '',
+      };
+    }
+    return { state, found: true };
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return { state: {}, found: false };
+    throw error;
+  }
+}
+
+async function saveGoodsFirstSeenState(path: string, state: GoodsFirstSeenIndex): Promise<void> {
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, `${JSON.stringify(state, null, 2)}\n`, 'utf8');
+}
+
+function filterNewLinkPoolByFirstSeen(products: GoodsManagerNewProductPoolItem[], currentGoods: GoodsSnapshotItem[], firstSeen: GoodsFirstSeenIndex, referenceDate: string): GoodsManagerNewProductPoolItem[] {
+  const eligibleIds = new Set(filterFirstSeenWithinDays(currentGoods, firstSeen, referenceDate, 7).map((item) => item.internalProductId));
+  return products.filter((item) => eligibleIds.has(item.productId));
 }
 
 function resolveProductIdMappingPath(config: Awaited<ReturnType<typeof loadConfig>>): string {
@@ -261,6 +306,16 @@ export async function runPublicTrafficReportCli(): Promise<void> {
     const { goodsExportPath, exposure: crawlResult, dashboard: rawTables, orderAnalysis: orderAnalysisCapture } = await crawlPublicTrafficSources(config, paths.goodsExportWorkbook);
     await refreshProductIdMappingForReport(goodsExportPath, mappingPath, paths.productIdMappingSyncLog, log);
     const mapping = await loadMappingSafely(mappingPath, log);
+    const currentGoodsSnapshot = goodsSnapshotFromMapping(mapping);
+    await writeFile(paths.goodsListSnapshot, JSON.stringify(currentGoodsSnapshot, null, 2), 'utf8');
+    const previousFirstSeen = await loadGoodsFirstSeenState(paths.goodsFirstSeenState);
+    const firstSeenState = updateGoodsFirstSeen({
+      currentDate: runDate,
+      previous: previousFirstSeen.state,
+      current: currentGoodsSnapshot,
+      baseline: !previousFirstSeen.found,
+    });
+    await saveGoodsFirstSeenState(paths.goodsFirstSeenState, firstSeenState);
 
     try {
       const annotatedCount = annotateGoodsExportWorkbookWithInternalId(paths.goodsExportWorkbook);
@@ -343,7 +398,11 @@ export async function runPublicTrafficReportCli(): Promise<void> {
       cumulativeProducts: crawlResult.products,
       orderAnalysis,
     });
-    const newProductPoolItems = await loadGoodsManagerNewProductPool(runDate, log);
+    const rawNewProductPoolItems = await loadGoodsManagerNewProductPool(runDate, log);
+    const newProductPoolItems = filterNewLinkPoolByFirstSeen(rawNewProductPoolItems, currentGoodsSnapshot, firstSeenState, runDate);
+    if (rawNewProductPoolItems.length > 0) {
+      log.addEvent(`goods-manager 新链接观察: 原始=${rawNewProductPoolItems.length}, 商品总表近7天首次出现=${newProductPoolItems.length}`);
+    }
     if (newProductPoolItems.length > 0) {
       context.newProductPoolItems = newProductPoolItems;
       context.newProductPoolIds = newProductPoolItems.map((item) => item.productId);

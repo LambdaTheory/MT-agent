@@ -22,7 +22,7 @@ describe('public traffic CLI wiring', () => {
 
   it('loads product mapping and sends a Feishu card', async () => {
     const text = await source('../src/cli/publicTrafficReport.ts');
-    expect(text).toContain("import { loadProductIdMapping } from '../mapping/productIdMapping.js';");
+    expect(text).toContain("import { loadProductIdMapping, type ProductIdMapping } from '../mapping/productIdMapping.js';");
     expect(text).toContain("import { loadProductNameMap } from '../publicTraffic/productDisplayName.js';");
     expect(text).toContain("const productNameMap = await loadProductNameMap('config/product-name-map.json', (message) => log.addEvent(message));");
     expect(text).toContain('buildPublicTrafficCard(context,');

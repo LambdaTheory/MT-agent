@@ -575,8 +575,85 @@ describe('public traffic report outputs', () => {
 
     const cardJson = JSON.stringify(buildPublicTrafficCard(withPool, { markdownPath: 'report.md', workbookPath: 'report.xlsx' }));
     expect(cardJson).toContain('新品池维护 2');
-    expect(cardJson).toContain('新品维护池（2）');
-    expect(cardJson).toContain('商品ID 701：待维护');
+    expect(cardJson).toContain('新链接冷启动（2）');
+    expect(cardJson).toContain('商品ID 701：待观察');
+  });
+
+  it('renders new link cold-start distribution and prioritized link details in Feishu card', () => {
+    const row = (id: string, dashboardVisits: number, shippedOrders: number): PublicTrafficDataReportContext['rows'][number] => ({
+      platformProductId: `P-${id}`,
+      displayProductId: `端内ID ${id}`,
+      productName: `新链接 ${id}`,
+      custodyDays: 1,
+      periods: {
+        '1d': metrics({ dashboardVisits: Math.min(dashboardVisits, 10), shippedOrders: shippedOrders ? 1 : 0 }),
+        '7d': metrics({ dashboardVisits, shippedOrders }),
+        '30d': metrics({ dashboardVisits, shippedOrders }),
+      },
+    });
+    const withPool: PublicTrafficDataReportContext = {
+      ...context,
+      rows: [row('701', 0, 1), row('702', 25, 0), row('703', 14, 0), row('704', 8, 0), row('705', 2, 0), row('706', 0, 0)],
+      newProductPoolItems: [
+        { productId: '701', productName: '成交跑通链接', shortTitle: '', submittedAt: '2026-06-09 00:00:00', merchant: '', alipaySyncStatus: '', alipayCode: '', stock: 1, skuCount: 1, maintenanceStatus: '待维护', note: '' },
+        { productId: '702', productName: '优秀访问链接', shortTitle: '', submittedAt: '2026-06-09 00:00:00', merchant: '', alipaySyncStatus: '', alipayCode: '', stock: 1, skuCount: 1, maintenanceStatus: '待维护', note: '' },
+        { productId: '703', productName: '访问达标链接', shortTitle: '', submittedAt: '2026-06-09 00:00:00', merchant: '', alipaySyncStatus: '', alipayCode: '', stock: 1, skuCount: 1, maintenanceStatus: '待维护', note: '' },
+        { productId: '704', productName: '有苗头链接', shortTitle: '', submittedAt: '2026-06-09 00:00:00', merchant: '', alipaySyncStatus: '', alipayCode: '', stock: 1, skuCount: 1, maintenanceStatus: '待维护', note: '' },
+        { productId: '705', productName: '未启动链接', shortTitle: '', submittedAt: '2026-06-09 00:00:00', merchant: '', alipaySyncStatus: '', alipayCode: '', stock: 1, skuCount: 1, maintenanceStatus: '待维护', note: '' },
+        { productId: '706', productName: '危险链接', shortTitle: '', submittedAt: '2026-06-06 00:00:00', merchant: '', alipaySyncStatus: '', alipayCode: '', stock: 1, skuCount: 1, maintenanceStatus: '待维护', note: '' },
+        { productId: '707', productName: '未匹配链接', shortTitle: '', submittedAt: '2026-06-09 00:00:00', merchant: '', alipaySyncStatus: '', alipayCode: '', stock: 1, skuCount: 1, maintenanceStatus: '待维护', note: '' },
+      ],
+    };
+
+    const cardJson = JSON.stringify(buildPublicTrafficCard(withPool, { markdownPath: 'report.md', workbookPath: 'report.xlsx' }));
+    expect(cardJson).toContain('新链接冷启动（7）');
+    expect(cardJson).toContain('近7天链接');
+    expect(cardJson).toContain('优秀 1｜访问达标 1');
+    expect(cardJson).toContain('认可线 >=6/天');
+    expect(cardJson).toContain('优秀线 >=10/天');
+    expect(cardJson).toContain('强跑通');
+    expect(cardJson).toContain('优秀链接');
+    expect(cardJson).toContain('访问达标');
+    expect(cardJson).toContain('有苗头');
+    expect(cardJson).toContain('未启动');
+    expect(cardJson).toContain('危险');
+    expect(cardJson).toContain('待观察');
+    expect(cardJson).toContain('继续放量');
+    expect(cardJson).toContain('优先重做');
+    expect(cardJson).not.toContain('新品维护池（7）');
+
+    const card = buildPublicTrafficCard(withPool, { markdownPath: 'report.md', workbookPath: 'report.xlsx' });
+    const cardBody = card.body as { elements: Array<{ element_id?: string; elements?: Array<{ tag?: string }> }> };
+    const panel = cardBody.elements.find((element) => element.element_id === 'new_product_pool');
+    expect(panel?.elements?.some((element) => element.tag === 'table')).toBe(false);
+  });
+
+  it('marks links submitted after the report data date as waiting instead of dangerous', () => {
+    const withPool: PublicTrafficDataReportContext = {
+      ...context,
+      date: '2026-06-10',
+      rows: [
+        {
+          platformProductId: 'P-701',
+          displayProductId: '端内ID 701',
+          productName: '今日新同步链接',
+          custodyDays: 0,
+          periods: {
+            '1d': metrics({ dashboardVisits: 0, shippedOrders: 0 }),
+            '7d': metrics({ dashboardVisits: 0, shippedOrders: 0 }),
+            '30d': metrics({ dashboardVisits: 0, shippedOrders: 0 }),
+          },
+        },
+      ],
+      newProductPoolItems: [
+        { productId: '701', productName: '今日新同步链接', shortTitle: '', submittedAt: '2026-06-11 09:00:00', merchant: '', alipaySyncStatus: '已同步', alipayCode: '', stock: 0, skuCount: 0, maintenanceStatus: '待维护', note: '' },
+      ],
+    };
+
+    const cardJson = JSON.stringify(buildPublicTrafficCard(withPool, { markdownPath: 'report.md', workbookPath: 'report.xlsx' }));
+    expect(cardJson).toContain('待观察');
+    expect(cardJson).not.toContain('危险 1');
+    expect(cardJson).not.toContain('优先重做');
   });
 
   it('renders enriched goods-manager new product pool summaries in Feishu text and card', () => {
@@ -606,9 +683,9 @@ describe('public traffic report outputs', () => {
 
     const cardJson = JSON.stringify(buildPublicTrafficCard(withPool, { markdownPath: 'report.md', workbookPath: 'report.xlsx' }));
     expect(cardJson).toContain('新品池维护 11');
-    expect(cardJson).toContain('新品维护池（11）');
-    expect(cardJson).toContain('商品ID 701 新品 Alpha：待维护');
-    expect(cardJson).toContain('商品ID 710 超长商品名称用于验证卡片会做简短展示...：待维护');
+    expect(cardJson).toContain('新链接冷启动（11）');
+    expect(cardJson).toContain('商品ID 701 新品 Alpha：待观察');
+    expect(cardJson).toContain('商品ID 710 超长商品名称用于验证卡片会做简短展示...：待观察');
     expect(cardJson).not.toContain('第十一个不展示');
   });
 
