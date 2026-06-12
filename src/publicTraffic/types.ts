@@ -1,4 +1,5 @@
 import type { PeriodKey } from '../domain/types.js';
+import type { GoodsManagerNewProductPoolItem } from './goodsManagerNewProducts.js';
 import type { OrderAnalysisResult } from './orderAnalysis.js';
 
 export interface ExposureOverviewMetric {
@@ -163,6 +164,7 @@ export interface PublicTrafficDataReportContext {
   summary: Record<PeriodKey, PublicTrafficDataSummary>;
   conclusions: PublicTrafficConclusion[];
   dataQualityNotes?: string[];
+  newProductPoolItems?: GoodsManagerNewProductPoolItem[];
   newProductPoolIds?: string[];
   rows: PublicTrafficProductDataRow[];
   lowExposure: PublicTrafficReportSectionItem[];

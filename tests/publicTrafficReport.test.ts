@@ -517,6 +517,47 @@ describe('public traffic report outputs', () => {
     expect(text).toContain('1. 商品ID 701｜待维护');
   });
 
+  it('writes enriched goods-manager new product pool items into workbook maintenance sheet', () => {
+    const withPool: PublicTrafficDataReportContext = {
+      ...context,
+      newProductPoolItems: [
+        {
+          productId: '701',
+          productName: '新品 Alpha',
+          shortTitle: 'Alpha 短标题',
+          submittedAt: '2026-06-12 09:00:00',
+          merchant: '主商家',
+          alipaySyncStatus: '已同步',
+          alipayCode: 'ALI-701',
+          stock: 8,
+          skuCount: 2,
+          maintenanceStatus: '待维护',
+          note: '',
+        },
+      ],
+    };
+
+    const workbook = XLSX.read(writePublicTrafficWorkbookBuffer(withPool), { type: 'buffer' });
+    expect(workbook.SheetNames).toContain('新品池维护');
+    const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets['新品池维护']);
+    expect(Object.keys(rows[0])).toEqual(['商品ID', '商品名称', '短标题', '最近提交时间', '商家', '同步状态', '支付宝编码', '库存', 'SKU数', '维护状态', '备注']);
+    expect(rows).toEqual([
+      {
+        商品ID: '701',
+        商品名称: '新品 Alpha',
+        短标题: 'Alpha 短标题',
+        最近提交时间: '2026-06-12 09:00:00',
+        商家: '主商家',
+        同步状态: '已同步',
+        支付宝编码: 'ALI-701',
+        库存: 8,
+        SKU数: 2,
+        维护状态: '待维护',
+        备注: '',
+      },
+    ]);
+  });
+
   it('writes explanatory notes for empty workbook sections', () => {
     const empty: PublicTrafficDataReportContext = {
       ...context,
