@@ -43,21 +43,7 @@ It intentionally does not implement:
 
 ## SDK Long Connection Commits
 
-- `788fdf4 文档：规划飞书SDK长连接实现`
-- `e4d8dee 配置：接入飞书Node SDK依赖`
-- `b3e0c5a 修正：飞书SDK依赖版本与脚本时机`
-- `f0337c9 修正：覆盖飞书SDK传递依赖漏洞`
-- `71b6dc2 功能：新增飞书消息统一分发器`
-- `8d951d1 修正：飞书消息去重使用进程级状态`
-- `a368d04 修正：限制飞书消息去重缓存大小`
-- `4e6d4e9 重构：飞书HTTP回调复用消息分发器`
-- `b3ea3d8 测试：稳定飞书HTTP异步回复断言`
-- `ef3bb11 测试：确保跳过消息不会回复`
-- `03e59ac 功能：新增飞书SDK长连接适配器`
-- `38cad3c 修正：飞书SDK回复失败仅记录日志`
-- `e733cd5 功能：新增飞书SDK机器人入口`
-- `9ed675b 修正：飞书SDK机器人入口等待启动`
-- `67a6b82 文档：补充飞书SDK长连接使用说明`
+Use `git log --oneline master..feature/feishu-sdk-long-connection-communication` to inspect the current SDK branch commit range. Do not maintain a copied SHA list in this document; it becomes stale whenever the handoff docs are updated.
 
 ## Main Files Added
 
@@ -107,27 +93,15 @@ Recommended merge flow from main session:
 ```powershell
 git fetch . feature/feishu-sdk-long-connection-communication
 git log --oneline master..feature/feishu-sdk-long-connection-communication
-git diff master..feature/feishu-sdk-long-connection-communication -- src/feishuBot/dispatcher.ts src/feishuBot/sdkClient.ts src/feishuBot/server.ts src/cli/feishuBotSdk.ts src/cli/feishuBot.ts package.json package-lock.json .env.example tests/feishuBotDispatcher.test.ts tests/feishuBotSdkClient.test.ts tests/feishuBotServer.test.ts docs/feishu-bot-readonly-command-agent-merge-handoff.md
+git diff master..feature/feishu-sdk-long-connection-communication -- package.json package-lock.json .env.example src/feishuBot src/cli/feishuBotSdk.ts tests/feishuBot*.test.ts tests/cliLoadEnvSource.test.ts docs/feishu-bot-readonly-command-agent-merge-handoff.md docs/superpowers/plans/2026-06-12-feishu-sdk-long-connection-communication.md
+git merge --no-ff feature/feishu-sdk-long-connection-communication
 ```
 
-If main has diverged significantly, cherry-pick one commit at a time:
+If main has diverged significantly and a merge is not appropriate, inspect the current range and cherry-pick the complete ordered SDK branch range rather than copying a fixed SHA list into this document:
 
 ```powershell
-git cherry-pick 788fdf4
-git cherry-pick e4d8dee
-git cherry-pick b3e0c5a
-git cherry-pick f0337c9
-git cherry-pick 71b6dc2
-git cherry-pick 8d951d1
-git cherry-pick a368d04
-git cherry-pick 4e6d4e9
-git cherry-pick b3ea3d8
-git cherry-pick ef3bb11
-git cherry-pick 03e59ac
-git cherry-pick 38cad3c
-git cherry-pick e733cd5
-git cherry-pick 9ed675b
-git cherry-pick 67a6b82
+git log --reverse --oneline master..feature/feishu-sdk-long-connection-communication
+git cherry-pick <oldest-sdk-commit>^..<newest-sdk-commit>
 ```
 
 ## Runtime Setup
