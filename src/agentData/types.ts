@@ -71,5 +71,6 @@ export type AgentIntent =
   | { type: 'tasks' }
   | { type: 'problem_products'; problemType: AgentProblemType }
   | { type: 'new_product_pool' }
+  | { type: 'removed_links' }
   | { type: 'order_summary' }
   | { type: 'unknown'; text: string };

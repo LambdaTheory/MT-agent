@@ -1,7 +1,7 @@
 import { runPublicTrafficReportCli } from '../cli/publicTrafficReport.js';
 import { sendFeishuCard } from '../notify/feishu.js';
 import { parseAgentDataIntent } from '../agentData/intent.js';
-import { getProblemProducts } from '../agentData/publicTrafficQueries.js';
+import { getProblemProducts, getRemovedLinks } from '../agentData/publicTrafficQueries.js';
 import { buildAgentTaskPool } from '../agentData/taskPool.js';
 import { buildPublicTrafficCard } from '../publicTraffic/buildPublicTrafficCard.js';
 import { buildPublicTrafficFeishuText } from '../publicTraffic/buildPublicTrafficFeishu.js';
@@ -16,6 +16,10 @@ function formatTaskLines(items: Array<{ productId: string; suggestedAction: stri
 
 function formatProblemLines(items: Array<{ productId: string; action: string; reason: string }>): string {
   return items.length > 0 ? items.map((item, index) => `${index + 1}. ${item.productId}：${item.action}。原因：${item.reason}`).join('\n') : '暂无匹配问题商品。';
+}
+
+function formatRemovedLinkLines(items: Array<{ productId: string; productName: string; removedDate: string; reason: string }>): string {
+  return items.length > 0 ? items.map((item, index) => `${index + 1}. ${item.productId}：${item.reason}。下架日期：${item.removedDate}。商品：${item.productName}`).join('\n') : '暂无近7天下架链接。';
 }
 
 export async function handleBotIntent(intent: BotIntent, outputDir = 'output'): Promise<BotResponse> {
@@ -63,6 +67,10 @@ export async function handleBotIntent(intent: BotIntent, outputDir = 'output'): 
     if (dataIntent.type === 'problem_products') {
       const latest = await findLatestReportContext(outputDir);
       return { text: latest ? formatProblemLines(getProblemProducts(latest.context, dataIntent.problemType)) : '还没有找到公域日报上下文。' };
+    }
+    if (dataIntent.type === 'removed_links') {
+      const latest = await findLatestReportContext(outputDir);
+      return { text: latest ? formatRemovedLinkLines(getRemovedLinks(latest.context)) : '还没有找到公域日报上下文。' };
     }
   }
 

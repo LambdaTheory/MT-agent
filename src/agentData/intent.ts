@@ -7,6 +7,7 @@ export function parseAgentDataIntent(input: string): AgentIntent {
   if (product) return { type: 'product', keyword: product[2].trim() };
   if (/(要处理|任务|优先)/.test(text)) return { type: 'tasks' };
   if (/新品池|新品维护/.test(text)) return { type: 'new_product_pool' };
+  if (/下架链接|移除链接|消失链接/.test(text)) return { type: 'removed_links' };
   if (/转化差|提转化|成交少/.test(text)) return { type: 'problem_products', problemType: 'weak_conversion' };
   if (/曝光低|补曝光/.test(text)) return { type: 'problem_products', problemType: 'low_exposure' };
   if (/高潜力|继续放量/.test(text)) return { type: 'problem_products', problemType: 'high_potential' };
