@@ -2,7 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { getLatestOverview, getProductPerformance, getProblemProducts, getNewProductPool } from '../src/agentData/publicTrafficQueries.js';
 import type { PublicTrafficDataReportContext } from '../src/publicTraffic/types.js';
 
-const context = {
+type ExtendedContext = Omit<PublicTrafficDataReportContext, 'newProductPoolItems' | 'newProductPoolIds'> & {
+  newProductPoolItems?: Array<{ productId: string; productName: string; maintenanceStatus?: string } & Record<string, unknown>>;
+  newProductPoolIds?: string[];
+};
+
+const context: ExtendedContext = {
   date: '2026-06-12',
   summary: {
     '1d': { exposure: 100, publicVisits: 10, dashboardVisits: 8, createdOrders: 2, shippedOrders: 1, amount: 99, exposureVisitRate: 0.1, visitCreatedOrderRate: 0.2, visitShipmentRate: 0.1 },
@@ -25,20 +30,22 @@ const context = {
   lifecycleGovernance: [],
   recommendedActions: [],
   emptySectionNotes: { lowExposure: '', weakClick: '', weakConversion: '', highPotential: '', newProductObservation: '', lifecycleGovernance: '', recommendedActions: '' },
-} satisfies PublicTrafficDataReportContext;
+};
+
+const publicContext = context as unknown as PublicTrafficDataReportContext;
 
 describe('agent public traffic queries', () => {
   it('returns overview metrics and quality notes', () => {
-    expect(getLatestOverview(context)).toMatchObject({ date: '2026-06-12', dataQualityNotes: ['后链路数据为空'] });
+    expect(getLatestOverview(publicContext)).toMatchObject({ date: '2026-06-12', dataQualityNotes: ['后链路数据为空'] });
   });
 
   it('finds a product by display id or product name keyword', () => {
-    expect(getProductPerformance(context, '251')?.productName).toBe('佳能 G7X2');
-    expect(getProductPerformance(context, 'G7X2')?.productId).toBe('251');
+    expect(getProductPerformance(publicContext, '251')?.productName).toBe('佳能 G7X2');
+    expect(getProductPerformance(publicContext, 'G7X2')?.productId).toBe('251');
   });
 
   it('returns problem products and new product pool', () => {
-    expect(getProblemProducts(context, 'low_exposure')).toEqual([{ type: 'low_exposure', productId: '251', action: '补曝光', reason: '曝光不足' }]);
-    expect(getNewProductPool(context)).toEqual([{ productId: '701', productName: '新品 Alpha', maintenanceStatus: '待维护' }]);
+    expect(getProblemProducts(publicContext, 'low_exposure')).toEqual([{ type: 'low_exposure', productId: '251', action: '补曝光', reason: '曝光不足' }]);
+    expect(getNewProductPool(publicContext)).toEqual([{ productId: '701', productName: '新品 Alpha', maintenanceStatus: '待维护' }]);
   });
 });

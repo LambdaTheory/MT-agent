@@ -10,16 +10,14 @@ import type {
   AgentProductPeriodMetric,
 } from './types.js';
 
-declare module '../publicTraffic/types.js' {
-  interface PublicTrafficDataReportContext {
-    newProductPoolItems?: Array<{
-      productId: string;
-      productName: string;
-      maintenanceStatus?: string;
-    } & Record<string, unknown>>;
-    newProductPoolIds?: string[];
-  }
-}
+type PublicTrafficContextWithNewProductPool = PublicTrafficDataReportContext & {
+  newProductPoolItems?: Array<{
+    productId: string;
+    productName: string;
+    maintenanceStatus?: string;
+  } & Record<string, unknown>>;
+  newProductPoolIds?: string[];
+};
 
 const PERIODS: PeriodKey[] = ['1d', '7d', '30d'];
 
@@ -106,15 +104,16 @@ export function getProblemProducts(
 }
 
 export function getNewProductPool(context: PublicTrafficDataReportContext): AgentNewProductPoolItem[] {
-  if (context.newProductPoolItems?.length) {
-    return context.newProductPoolItems.map((item) => ({
+  const extended = context as PublicTrafficContextWithNewProductPool;
+  if (extended.newProductPoolItems?.length) {
+    return extended.newProductPoolItems.map((item) => ({
       productId: item.productId,
       productName: item.productName,
       maintenanceStatus: item.maintenanceStatus ?? '待维护',
     }));
   }
 
-  return (context.newProductPoolIds ?? []).map((productId) => ({
+  return (extended.newProductPoolIds ?? []).map((productId) => ({
     productId,
     productName: '',
     maintenanceStatus: '待维护',
