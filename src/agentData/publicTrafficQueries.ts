@@ -8,6 +8,7 @@ import type {
   AgentProblemType,
   AgentProductAnswer,
   AgentProductPeriodMetric,
+  AgentRemovedLinkItem,
 } from './types.js';
 
 type PublicTrafficContextWithNewProductPool = PublicTrafficDataReportContext & {
@@ -117,6 +118,17 @@ export function getNewProductPool(context: PublicTrafficDataReportContext): Agen
     productId,
     productName: '',
     maintenanceStatus: '待维护',
+  }));
+}
+
+export function getRemovedLinks(context: PublicTrafficDataReportContext): AgentRemovedLinkItem[] {
+  return (context.agentData?.removedLinks ?? []).map((item) => ({
+    productId: item.productId,
+    platformProductId: item.platformProductId,
+    productName: item.productName,
+    removedDate: item.removedDate,
+    reason: item.reason,
+    source: item.source,
   }));
 }
 

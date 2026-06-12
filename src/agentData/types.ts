@@ -42,6 +42,15 @@ export interface AgentNewProductPoolItem {
   maintenanceStatus: string;
 }
 
+export interface AgentRemovedLinkItem {
+  productId: string;
+  platformProductId: string;
+  productName: string;
+  removedDate: string;
+  reason: '商品总表缺失';
+  source: 'goods_snapshot_diff';
+}
+
 export interface AgentOrderSummary {
   text: string;
 }
