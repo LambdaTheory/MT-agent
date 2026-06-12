@@ -10,6 +10,7 @@ describe('parseAgentDataIntent', () => {
     expect(parseAgentDataIntent('商品251')).toEqual({ type: 'product', keyword: '251' });
     expect(parseAgentDataIntent('今天要处理哪些')).toEqual({ type: 'tasks' });
     expect(parseAgentDataIntent('新品池有哪些')).toEqual({ type: 'new_product_pool' });
+    expect(parseAgentDataIntent('下架链接有哪些')).toEqual({ type: 'removed_links' });
     expect(parseAgentDataIntent('转化差的有哪些')).toEqual({ type: 'problem_products', problemType: 'weak_conversion' });
     expect(parseAgentDataIntent('曝光低的有哪些')).toEqual({ type: 'problem_products', problemType: 'low_exposure' });
     expect(parseAgentDataIntent('高潜力商品')).toEqual({ type: 'problem_products', problemType: 'high_potential' });

@@ -257,6 +257,7 @@ describe('runPublicTrafficReportCli public traffic sequencing', () => {
     mocks.fetchRecentGoodsManagerProducts.mockResolvedValueOnce([
       { productId: '701', productName: '存量链接', shortTitle: '', submittedAt: '2026-06-10 09:00:00', merchant: '', alipaySyncStatus: '已同步', alipayCode: '', stock: 0, skuCount: 0, maintenanceStatus: '待维护', note: '' },
     ]);
+
     const { runPublicTrafficReportCli } = await import('../src/cli/publicTrafficReport.js');
 
     await runPublicTrafficReportCli();
@@ -265,6 +266,42 @@ describe('runPublicTrafficReportCli public traffic sequencing', () => {
     const context = JSON.parse(await readFile(todayPaths.reportContext, 'utf8')) as PublicTrafficDataReportContext;
     expect(context.newProductPoolItems).toBeUndefined();
     await expect(readFile(todayPaths.log, 'utf8')).resolves.toContain('goods-manager 新链接观察: 原始=1, 商品总表近7天首次出现=0');
+  });
+
+  it('initializes removed-link lifecycle state without reporting removed links on first run', async () => {
+    mocks.loadProductIdMapping.mockResolvedValueOnce({ p701: '701', p702: '702' });
+    const { runPublicTrafficReportCli } = await import('../src/cli/publicTrafficReport.js');
+
+    await runPublicTrafficReportCli();
+
+    const todayPaths = buildPublicTrafficPaths(mocks.outputDir, '2026-06-10');
+    const context = JSON.parse(await readFile(todayPaths.reportContext, 'utf8')) as PublicTrafficDataReportContext;
+    const state = JSON.parse(await readFile(todayPaths.goodsLinkLifecycleState, 'utf8')) as { active: Record<string, unknown>; removedLinks: unknown[] };
+    expect(Object.keys(state.active).sort()).toEqual(['701', '702']);
+    expect(state.removedLinks).toEqual([]);
+    expect(context.agentData?.removedLinks).toEqual([]);
+  });
+
+  it('writes removed links to agent data without adding visible report modules', async () => {
+    mocks.loadProductIdMapping.mockResolvedValueOnce({ p702: '702' });
+    const todayPaths = buildPublicTrafficPaths(mocks.outputDir, '2026-06-10');
+    await mkdir(join(mocks.outputDir, 'state'), { recursive: true });
+    await writeFile(todayPaths.goodsLinkLifecycleState, JSON.stringify({
+      active: {
+        '701': { platformProductId: 'p701', productName: '已下架链接' },
+        '702': { platformProductId: 'p702', productName: '保留链接' },
+      },
+      removedLinks: [],
+    }), 'utf8');
+    const { runPublicTrafficReportCli } = await import('../src/cli/publicTrafficReport.js');
+
+    await runPublicTrafficReportCli();
+
+    const context = JSON.parse(await readFile(todayPaths.reportContext, 'utf8')) as PublicTrafficDataReportContext;
+    expect(context.agentData?.removedLinks).toEqual([
+      { productId: '701', platformProductId: 'p701', productName: '已下架链接', removedDate: '2026-06-10', reason: '商品总表缺失', source: 'goods_snapshot_diff' },
+    ]);
+    await expect(readFile(todayPaths.markdown, 'utf8')).resolves.not.toContain('已下架链接');
   });
 
   it('keeps first-run daily delta empty while historical deltas still feed report summaries and rows', async () => {

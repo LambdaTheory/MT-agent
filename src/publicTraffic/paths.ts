@@ -14,6 +14,7 @@ export interface PublicTrafficPaths {
   newProductObservation: string;
   observationState: string;
   goodsFirstSeenState: string;
+  goodsLinkLifecycleState: string;
   orderAnalysis: string;
   markdown: string;
   workbook: string;
@@ -41,6 +42,7 @@ export function buildPublicTrafficPaths(outputDir: string, date: string): Public
     newProductObservation: `${dir}/new-product-observation.json`,
     observationState: `${dir}/observation-state.json`,
     goodsFirstSeenState: `${outputDir}/state/goods-first-seen.json`,
+    goodsLinkLifecycleState: `${outputDir}/state/goods-link-lifecycle.json`,
     orderAnalysis: `${dir}/订单分析_${date}.json`,
     markdown: `${dir}/公域数据日报_${date}.md`,
     workbook: `${dir}/公域数据日报_${date}.xlsx`,

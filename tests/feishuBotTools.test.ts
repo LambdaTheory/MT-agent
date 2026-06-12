@@ -48,6 +48,7 @@ async function writeContext(): Promise<string> {
     lifecycleGovernance: [],
     recommendedActions: [],
     newProductPoolIds: ['701'],
+    agentData: { removedLinks: [{ productId: '701', platformProductId: 'p701', productName: '已下架链接', removedDate: '2026-06-12', reason: '商品总表缺失', source: 'goods_snapshot_diff' }] },
     emptySectionNotes: {},
   }));
   return dir;
@@ -86,5 +87,13 @@ describe('handleBotIntent', () => {
     expect(response.text).toContain('端内ID 565');
     expect(response.text).toContain('提转化');
     expect(response.text).toContain('访问多成交少');
+  });
+
+  it('answers removed-link questions through agent data understanding', async () => {
+    const outputDir = await writeContext();
+    const response = await handleBotIntent({ type: 'unknown', text: '下架链接有哪些' }, outputDir);
+    expect(response.text).toContain('701');
+    expect(response.text).toContain('商品总表缺失');
+    expect(response.text).toContain('2026-06-12');
   });
 });
