@@ -109,7 +109,7 @@ describe('startFeishuBotServer', () => {
       },
       replyText: async ({ messageId }, text) => {
         replies.push({ messageId, text });
-        return { sent: true, channel: 'app' };
+        throw new Error('replyText should not be called for skipped messages');
       },
     });
     try {
@@ -125,6 +125,7 @@ describe('startFeishuBotServer', () => {
 
       expect(response.status).toBe(200);
       await dispatchCalled;
+      await new Promise<void>((resolve) => setImmediate(resolve));
       expect(replies).toEqual([]);
     } finally {
       server.close();
