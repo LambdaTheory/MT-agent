@@ -315,9 +315,20 @@ export async function collectDashboardPage(config: AgentConfig, page: Page): Pro
   const rawDir = `${config.outputDir}/latest`;
   await mkdir(rawDir, { recursive: true });
 
+  const periods = ['1d', '7d', '30d'] as const;
+  if (await confirmDashboardEmptyState(page)) {
+    const emptyResults = periods.map((period) => emptyDashboardTable(period));
+    for (const table of emptyResults) {
+      const path = `${rawDir}/raw-${table.period}.json`;
+      await writeFile(path, JSON.stringify(table, null, 2), 'utf8');
+      console.log(`[${table.period}] saved ${table.rows.length} rows to ${path}`);
+    }
+    return emptyResults;
+  }
+
   const results: RawTableData[] = [];
 
-  for (const period of ['1d', '7d', '30d'] as const) {
+  for (const period of periods) {
     const table = await collectPeriodWithAdaptivePageSize(page, period, config.preferredPageSize);
     results.push(table);
     const path = `${rawDir}/raw-${period}.json`;
