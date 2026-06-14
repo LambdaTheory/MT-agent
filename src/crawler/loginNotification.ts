@@ -38,16 +38,15 @@ function errorMessage(error: unknown): string {
 }
 
 function personalAppConfig(env: FeishuEnv): FeishuAppConfig | null {
-  const receiveId = env.FEISHU_PERSONAL_RECEIVE_ID ?? env.FEISHU_RECEIVE_ID;
-  if (!env.FEISHU_APP_ID || !env.FEISHU_APP_SECRET || !receiveId) {
+  if (!env.FEISHU_APP_ID || !env.FEISHU_APP_SECRET || !env.FEISHU_PERSONAL_RECEIVE_ID) {
     return null;
   }
 
   return {
     appId: env.FEISHU_APP_ID,
     appSecret: env.FEISHU_APP_SECRET,
-    receiveIdType: env.FEISHU_PERSONAL_RECEIVE_ID_TYPE ?? env.FEISHU_RECEIVE_ID_TYPE ?? 'open_id',
-    receiveId,
+    receiveIdType: env.FEISHU_PERSONAL_RECEIVE_ID_TYPE ?? 'open_id',
+    receiveId: env.FEISHU_PERSONAL_RECEIVE_ID,
   };
 }
 

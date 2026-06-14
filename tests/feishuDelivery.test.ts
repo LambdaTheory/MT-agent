@@ -90,6 +90,8 @@ describe('sendFeishuPersonalImage', () => {
         FEISHU_APP_SECRET: 'secret',
         FEISHU_PERSONAL_RECEIVE_ID_TYPE: 'open_id',
         FEISHU_PERSONAL_RECEIVE_ID: 'ou_personal',
+        FEISHU_RECEIVE_ID_TYPE: 'chat_id',
+        FEISHU_RECEIVE_ID: 'oc_legacy_group',
         FEISHU_GROUP_RECEIVE_ID_TYPE: 'chat_id',
         FEISHU_GROUP_RECEIVE_ID: 'oc_group',
       },
@@ -105,13 +107,16 @@ describe('sendFeishuPersonalImage', () => {
       msg_type: 'image',
     });
     expect(String(messageCall?.init.body)).not.toContain('oc_group');
+    expect(String(messageCall?.init.body)).not.toContain('oc_legacy_group');
   });
 
-  it('returns missing config when personal recipient is missing', async () => {
+  it('returns missing config when explicit personal recipient is missing', async () => {
     const result = await sendFeishuPersonalImage(
       {
         FEISHU_APP_ID: 'cli_test',
         FEISHU_APP_SECRET: 'secret',
+        FEISHU_RECEIVE_ID_TYPE: 'chat_id',
+        FEISHU_RECEIVE_ID: 'oc_legacy_group',
       },
       new Uint8Array([1, 2, 3]),
     );

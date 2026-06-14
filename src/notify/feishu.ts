@@ -45,6 +45,14 @@ function personalRecipient(env: FeishuEnv): Pick<FeishuAppConfig, 'receiveIdType
   };
 }
 
+function explicitPersonalRecipient(env: FeishuEnv): Pick<FeishuAppConfig, 'receiveIdType' | 'receiveId'> | null {
+  if (!env.FEISHU_PERSONAL_RECEIVE_ID) return null;
+  return {
+    receiveIdType: env.FEISHU_PERSONAL_RECEIVE_ID_TYPE ?? 'open_id',
+    receiveId: env.FEISHU_PERSONAL_RECEIVE_ID,
+  };
+}
+
 function groupRecipient(env: FeishuEnv): Pick<FeishuAppConfig, 'receiveIdType' | 'receiveId'> | null {
   if (!env.FEISHU_GROUP_RECEIVE_ID) return null;
   return {
@@ -107,7 +115,7 @@ export async function sendFeishuCard(
 
 export async function sendFeishuPersonalImage(env: FeishuEnv, image: Uint8Array, fetchImpl: typeof fetch = fetch): Promise<FeishuDeliveryResult> {
   const base = baseAppConfig(env);
-  const recipient = personalRecipient(env);
+  const recipient = explicitPersonalRecipient(env);
   if (!base || !recipient) {
     return { sent: false, channel: 'none', reason: 'missing Feishu personal app config' };
   }

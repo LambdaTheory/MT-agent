@@ -36,6 +36,8 @@ describe('notifyLoginRequired', () => {
       FEISHU_APP_SECRET: 'secret',
       FEISHU_PERSONAL_RECEIVE_ID: 'ou_personal',
       FEISHU_WEBHOOK_URL: 'https://example.invalid/webhook',
+      FEISHU_RECEIVE_ID_TYPE: 'chat_id',
+      FEISHU_RECEIVE_ID: 'oc_legacy_group',
       FEISHU_GROUP_RECEIVE_ID_TYPE: 'chat_id',
       FEISHU_GROUP_RECEIVE_ID: 'oc_group',
     };
@@ -54,6 +56,7 @@ describe('notifyLoginRequired', () => {
     expect(messageCalls).toHaveLength(2);
     expect(messageCalls.every((call) => String(call.init.body).includes('ou_personal'))).toBe(true);
     expect(messageCalls.some((call) => String(call.init.body).includes('oc_group'))).toBe(false);
+    expect(messageCalls.some((call) => String(call.init.body).includes('oc_legacy_group'))).toBe(false);
 
     const screenshotDir = join(outputDir, 'state', 'login-screenshots');
     const files = await readdir(screenshotDir);
@@ -84,6 +87,8 @@ describe('notifyLoginRequired', () => {
       outputDir,
       env: {
         FEISHU_WEBHOOK_URL: 'https://example.invalid/webhook',
+        FEISHU_RECEIVE_ID_TYPE: 'chat_id',
+        FEISHU_RECEIVE_ID: 'oc_legacy_group',
         FEISHU_GROUP_RECEIVE_ID_TYPE: 'chat_id',
         FEISHU_GROUP_RECEIVE_ID: 'oc_group',
       },
