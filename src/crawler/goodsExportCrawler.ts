@@ -5,6 +5,7 @@ import type { AgentConfig } from '../domain/types.js';
 import { clearBrowserProfileLocks, prepareDashboardPage } from './browserProfile.js';
 import { selectSubAccountIfNeeded } from './dashboardCrawler.js';
 import { shouldKeepBrowserOpenOnFailure } from './failureHandling.js';
+import { notifyLoginRequired } from './loginNotification.js';
 import { waitForSettledLoginState } from './loginState.js';
 
 const EXPORT_MENU_MATCHERS = [/导出/, /下载/];
@@ -75,6 +76,7 @@ async function prepareGoodsExportPage(config: AgentConfig, browser: BrowserConte
   let loginState = await waitForSettledLoginState(page, { timeoutMs: 60000, intervalMs: 1000 });
   if (loginState === 'login-page') {
     console.log('检测到支付宝登录页，请在打开的浏览器窗口扫码登录；登录成功后程序会自动继续下载商品总表。');
+    await notifyLoginRequired({ page, stage: 'goods-export', outputDir: config.outputDir, log: console.log });
     await page.waitForURL((currentUrl) => !/auth\.alipay\.com|login/i.test(currentUrl.toString()), { timeout: 300000 });
     loginState = await waitForSettledLoginState(page, { timeoutMs: 60000, intervalMs: 1000 });
   }

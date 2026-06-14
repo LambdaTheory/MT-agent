@@ -56,7 +56,7 @@ async function writeContext(): Promise<string> {
 
 describe('handleBotIntent', () => {
   it('returns help text', async () => {
-    await expect(handleBotIntent({ type: 'help' })).resolves.toEqual({ text: '可用命令：今日概况｜查询 565｜跑日报｜重发日报｜帮助' });
+    await expect(handleBotIntent({ type: 'help' })).resolves.toEqual({ text: '可用命令：今日概况｜查询 565｜跑日报｜重发日报｜推送日报到群｜帮助' });
   });
 
   it('answers latest summary from report context', async () => {

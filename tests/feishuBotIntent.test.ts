@@ -17,6 +17,10 @@ describe('parseBotIntent', () => {
     expect(parseBotIntent('重发公域日报 发全部')).toEqual({ type: 'resend_latest_report', sendTo: 'both' });
   });
 
+  it('parses private push latest report to group intent', () => {
+    expect(parseBotIntent('推送日报到群')).toEqual({ type: 'push_latest_report_to_group' });
+  });
+
   it('parses latest summary intent', () => {
     expect(parseBotIntent('今日概况')).toEqual({ type: 'latest_summary' });
     expect(parseBotIntent('今天数据')).toEqual({ type: 'latest_summary' });

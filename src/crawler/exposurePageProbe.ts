@@ -4,6 +4,7 @@ import type { AgentConfig } from '../domain/types.js';
 import { clearBrowserProfileLocks, prepareDashboardPage } from './browserProfile.js';
 import { selectSubAccountIfNeeded } from './dashboardCrawler.js';
 import { shouldKeepBrowserOpenOnFailure } from './failureHandling.js';
+import { notifyLoginRequired } from './loginNotification.js';
 import { waitForSettledLoginState } from './loginState.js';
 
 export interface ExposureProbeTable {
@@ -55,6 +56,7 @@ async function ensureExposurePage(config: AgentConfig, page: Page): Promise<bool
   let loginState = await waitForSettledLoginState(page, { timeoutMs: 60000, intervalMs: 1000 });
   if (loginState === 'login-page') {
     console.log('检测到支付宝登录页，请扫码登录；登录成功后程序会继续探测曝光页面。');
+    await notifyLoginRequired({ page, stage: 'exposure-page-probe', outputDir: config.outputDir, log: console.log });
     await page.waitForURL((currentUrl) => !/auth\.alipay\.com|login/i.test(currentUrl.toString()), { timeout: 300000 });
     loginState = await waitForSettledLoginState(page, { timeoutMs: 60000, intervalMs: 1000 });
   }

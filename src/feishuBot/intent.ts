@@ -16,6 +16,7 @@ export function parseBotIntent(input: string): BotIntent {
   if (!text) return { type: 'help' };
   if (/^(帮助|help|\/help)$/i.test(text)) return { type: 'help' };
   if (/^(跑|生成|执行).*(公域)?日报/.test(text)) return { type: 'run_public_traffic_report', sendTo: sendTo(text) };
+  if (/^推送(日报|公域日报)到群$/.test(text)) return { type: 'push_latest_report_to_group' };
   if (/^重发.*(公域)?日报/.test(text)) return { type: 'resend_latest_report', sendTo: sendTo(text) };
   if (/^(今日|今天|最新).*(概况|数据|日报)?$/.test(text)) return { type: 'latest_summary' };
 

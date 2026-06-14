@@ -4,6 +4,7 @@ export type BotIntent =
   | { type: 'help' }
   | { type: 'run_public_traffic_report'; sendTo?: FeishuSendTo }
   | { type: 'resend_latest_report'; sendTo?: FeishuSendTo }
+  | { type: 'push_latest_report_to_group' }
   | { type: 'latest_summary' }
   | { type: 'query_product'; keyword: string }
   | { type: 'unknown'; text: string };

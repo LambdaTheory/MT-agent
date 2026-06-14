@@ -32,6 +32,7 @@ function canonicalizeIntent(intent: BotIntent): BotIntent {
   switch (intent.type) {
     case 'help':
     case 'latest_summary':
+    case 'push_latest_report_to_group':
       return { type: intent.type };
     case 'run_public_traffic_report':
     case 'resend_latest_report':

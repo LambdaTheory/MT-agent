@@ -24,7 +24,7 @@ function formatRemovedLinkLines(items: Array<{ productId: string; productName: s
 
 export async function handleBotIntent(intent: BotIntent, outputDir = 'output'): Promise<BotResponse> {
   if (intent.type === 'help') {
-    return { text: '可用命令：今日概况｜查询 565｜跑日报｜重发日报｜帮助' };
+    return { text: '可用命令：今日概况｜查询 565｜跑日报｜重发日报｜推送日报到群｜帮助' };
   }
 
   if (intent.type === 'latest_summary') {
@@ -46,6 +46,15 @@ export async function handleBotIntent(intent: BotIntent, outputDir = 'output'): 
     } finally {
       running = false;
     }
+  }
+
+  if (intent.type === 'push_latest_report_to_group') {
+    const latest = await findLatestReportContext(outputDir);
+    if (!latest) return { text: '还没有找到可推送的公域日报。' };
+    const card = buildPublicTrafficCard(latest.context, { markdownPath: '', workbookPath: '' });
+    const fallbackText = buildPublicTrafficFeishuText(latest.context, { markdownPath: '', workbookPath: '' });
+    const result = await sendFeishuCard({ ...process.env, FEISHU_SEND_TO: 'group' }, card, fallbackText);
+    return { text: result.sent ? '最新公域日报已推送到群。' : `公域日报推送到群失败：${result.reason}` };
   }
 
   if (intent.type === 'resend_latest_report') {
@@ -74,5 +83,5 @@ export async function handleBotIntent(intent: BotIntent, outputDir = 'output'): 
     }
   }
 
-  return { text: '暂时只支持：今日概况、查询 商品ID/名称、跑日报、重发日报、帮助。' };
+  return { text: '暂时只支持：今日概况、查询 商品ID/名称、跑日报、重发日报、推送日报到群、帮助。' };
 }

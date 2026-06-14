@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { sendFeishuAppCard, sendFeishuAppText } from '../src/notify/feishuApp.js';
+import { sendFeishuAppCard, sendFeishuAppImage, sendFeishuAppText, uploadFeishuAppImage } from '../src/notify/feishuApp.js';
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -87,5 +87,55 @@ it('sends interactive card message to open_id', async () => {
     receive_id: 'ou_test',
     msg_type: 'interactive',
     content: JSON.stringify(card),
+  });
+});
+
+it('uploads image with tenant token', async () => {
+  const calls: Array<{ url: string; init: RequestInit }> = [];
+  const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
+    calls.push({ url: String(url), init: init ?? {} });
+    if (String(url).includes('/auth/v3/tenant_access_token/internal')) {
+      return jsonResponse({ code: 0, tenant_access_token: 'token-1' });
+    }
+
+    return jsonResponse({ code: 0, data: { image_key: 'img_v3_test' } });
+  };
+
+  const result = await uploadFeishuAppImage(
+    { appId: 'cli_test', appSecret: 'secret' },
+    new Uint8Array([137, 80, 78, 71]),
+    fetchImpl as typeof fetch,
+  );
+
+  expect(result).toEqual({ uploaded: true, imageKey: 'img_v3_test' });
+  expect(calls[1].url).toBe('https://open.feishu.cn/open-apis/im/v1/images');
+  expect(calls[1].init.method).toBe('POST');
+  expect(calls[1].init.headers).toMatchObject({ Authorization: 'Bearer token-1' });
+  expect(calls[1].init.body).toBeInstanceOf(FormData);
+});
+
+it('sends image message to open_id', async () => {
+  const calls: Array<{ url: string; init: RequestInit }> = [];
+  const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
+    calls.push({ url: String(url), init: init ?? {} });
+    if (String(url).includes('/auth/v3/tenant_access_token/internal')) {
+      return jsonResponse({ code: 0, tenant_access_token: 'token-1' });
+    }
+
+    return jsonResponse({ code: 0, data: { message_id: 'msg-1' } });
+  };
+
+  const result = await sendFeishuAppImage(
+    { appId: 'cli_test', appSecret: 'secret', receiveIdType: 'open_id', receiveId: 'ou_test' },
+    'img_v3_test',
+    fetchImpl as typeof fetch,
+  );
+
+  expect(result).toEqual({ sent: true, channel: 'app' });
+  expect(calls[1].url).toBe('https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=open_id');
+  expect(JSON.parse(String(calls[1].init.body))).toEqual({
+    receive_id: 'ou_test',
+    msg_type: 'image',
+    content: JSON.stringify({ image_key: 'img_v3_test' }),
   });
 });

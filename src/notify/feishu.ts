@@ -1,5 +1,5 @@
 import type { DailyReportData } from '../domain/types.js';
-import { sendFeishuAppCard, sendFeishuAppText, type FeishuAppConfig, type FeishuCardPayload } from './feishuApp.js';
+import { sendFeishuAppCard, sendFeishuAppImage, sendFeishuAppText, uploadFeishuAppImage, type FeishuAppConfig, type FeishuCardPayload } from './feishuApp.js';
 import { buildFeishuReportText, buildFeishuTestText, sendFeishuWebhookText, type FeishuReportPaths } from './feishuWebhook.js';
 
 export type FeishuDeliveryResult =
@@ -42,6 +42,14 @@ function personalRecipient(env: FeishuEnv): Pick<FeishuAppConfig, 'receiveIdType
   return {
     receiveIdType: env.FEISHU_PERSONAL_RECEIVE_ID_TYPE ?? env.FEISHU_RECEIVE_ID_TYPE ?? 'open_id',
     receiveId,
+  };
+}
+
+function explicitPersonalRecipient(env: FeishuEnv): Pick<FeishuAppConfig, 'receiveIdType' | 'receiveId'> | null {
+  if (!env.FEISHU_PERSONAL_RECEIVE_ID) return null;
+  return {
+    receiveIdType: env.FEISHU_PERSONAL_RECEIVE_ID_TYPE ?? 'open_id',
+    receiveId: env.FEISHU_PERSONAL_RECEIVE_ID,
   };
 }
 
@@ -103,6 +111,21 @@ export async function sendFeishuCard(
   }
 
   return { sent: false, channel: 'none', reason: 'missing Feishu app config and webhook url' };
+}
+
+export async function sendFeishuPersonalImage(env: FeishuEnv, image: Uint8Array, fetchImpl: typeof fetch = fetch): Promise<FeishuDeliveryResult> {
+  const base = baseAppConfig(env);
+  const recipient = explicitPersonalRecipient(env);
+  if (!base || !recipient) {
+    return { sent: false, channel: 'none', reason: 'missing Feishu personal app config' };
+  }
+
+  const upload = await uploadFeishuAppImage(base, image, fetchImpl);
+  if (!upload.uploaded) {
+    return { sent: false, channel: 'app', reason: upload.reason };
+  }
+
+  return sendFeishuAppImage({ ...base, ...recipient }, upload.imageKey, fetchImpl);
 }
 
 export async function maybeSendFeishuReport(
