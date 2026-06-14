@@ -119,7 +119,7 @@ export async function uploadFeishuAppImage(
 
   const formData = new FormData();
   formData.append('image_type', 'message');
-  formData.append('image', new Blob([image], { type: 'image/png' }), 'login.png');
+  formData.append('image', new Blob([new Uint8Array(image)], { type: 'image/png' }), 'login.png');
 
   const uploadResponse = await fetchImpl('https://open.feishu.cn/open-apis/im/v1/images', {
     method: 'POST',
