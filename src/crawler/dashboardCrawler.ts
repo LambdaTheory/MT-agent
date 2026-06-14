@@ -3,6 +3,7 @@ import { chromium, type Locator, type Page } from 'playwright';
 import type { AgentConfig, RawTableData } from '../domain/types.js';
 import { clearBrowserProfileLocks, prepareDashboardPage } from './browserProfile.js';
 import { shouldKeepBrowserOpenOnFailure } from './failureHandling.js';
+import { notifyLoginRequired } from './loginNotification.js';
 import { waitForDashboardAfterLogin, waitForSettledLoginState } from './loginState.js';
 import { normalizePageSizeCandidates, readCurrentPageSize, setDashboardPageSize } from './pageSizeProbe.js';
 import { dedupeRowsByProductId, isCollectionComplete } from './pagination.js';
@@ -295,6 +296,7 @@ export async function collectDashboardPage(config: AgentConfig, page: Page): Pro
   await page.goto(config.targetUrl, { waitUntil: 'domcontentloaded' });
   const loginState = await waitForSettledLoginState(page, { timeoutMs: 60000, intervalMs: 1000 });
   if (loginState === 'login-page') {
+    await notifyLoginRequired({ page, stage: 'dashboard', outputDir: config.outputDir, log: console.log });
     await waitForDashboardAfterLogin(page);
   }
 
