@@ -42,6 +42,8 @@ interface FeishuSdkModule {
 export interface FeishuSdkBotConfig {
   appId: string;
   appSecret: string;
+  botMentionOpenId?: string;
+  botMentionName?: string;
   outputDir?: string;
   dispatchMessage?: (message: FeishuBotIncomingTextMessage) => Promise<FeishuBotDispatchResult>;
   logError?: (error: unknown, context: { messageId: string; phase: 'reply' | 'dispatch' }) => void;
@@ -93,7 +95,7 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
   const client = new sdk.Client({ appId: config.appId, appSecret: config.appSecret });
   const wsClient = new sdk.WSClient({ appId: config.appId, appSecret: config.appSecret });
   const eventDispatcher = new sdk.EventDispatcher({});
-  const dispatchMessage = config.dispatchMessage ?? createFeishuMessageDispatcher({ outputDir: config.outputDir }).dispatch;
+  const dispatchMessage = config.dispatchMessage ?? createFeishuMessageDispatcher({ outputDir: config.outputDir, botMentionOpenId: config.botMentionOpenId, botMentionName: config.botMentionName }).dispatch;
   const logError = config.logError ?? ((error: unknown, context: { messageId: string; phase: 'reply' | 'dispatch' }) => console.error(`飞书SDK消息处理失败 ${context.phase} ${context.messageId}:`, error));
 
   eventDispatcher.register({

@@ -91,10 +91,22 @@ describe('createFeishuMessageDispatcher', () => {
     expect(handleIntent).not.toHaveBeenCalled();
   });
 
-  it('handles group messages that include a mention', async () => {
+  it('skips group messages with mentions when the bot identity is not configured', async () => {
+    const handleIntent = vi.fn(async () => ({ text: 'handled' }));
+    const dispatcher = createFeishuMessageDispatcher({
+      resolveIntent: () => ({ type: 'latest_summary' }),
+      handleIntent,
+    });
+
+    await expect(dispatcher.dispatch({ messageId: 'mid-group-mention-without-bot-identity', text: '@_user_1 今日概况', source: 'sdk', chatType: 'group', mentions: [{ key: '@_user_1' }] })).resolves.toEqual({ text: '', skipped: true });
+    expect(handleIntent).not.toHaveBeenCalled();
+  });
+
+  it('handles group messages that include the configured bot mention', async () => {
     const texts: string[] = [];
     const handleIntent = vi.fn(async () => ({ text: 'handled' }));
     const dispatcher = createFeishuMessageDispatcher({
+      botMentionName: 'MT Agent',
       resolveIntent: (text) => {
         texts.push(text);
         return { type: 'latest_summary' };
@@ -102,8 +114,52 @@ describe('createFeishuMessageDispatcher', () => {
       handleIntent,
     });
 
-    await expect(dispatcher.dispatch({ messageId: 'mid-group-with-mention', text: '@_user_1 今日概况', source: 'sdk', chatType: 'group', mentions: [{ key: '@_user_1' }] })).resolves.toEqual({ text: 'handled', skipped: false });
+    await expect(dispatcher.dispatch({ messageId: 'mid-group-with-mention', text: '@_user_1 今日概况', source: 'sdk', chatType: 'group', mentions: [{ key: '@_user_1', name: 'MT Agent' }] })).resolves.toEqual({ text: 'handled', skipped: false });
     expect(texts).toEqual(['今日概况']);
+    expect(handleIntent).toHaveBeenCalledTimes(1);
+  });
+
+  it('skips group messages that mention someone other than the configured bot', async () => {
+    const handleIntent = vi.fn(async () => ({ text: 'handled' }));
+    const dispatcher = createFeishuMessageDispatcher({
+      botMentionOpenId: 'ou_bot',
+      resolveIntent: () => ({ type: 'latest_summary' }),
+      handleIntent,
+    });
+
+    await expect(dispatcher.dispatch({
+      messageId: 'mid-group-mentions-human',
+      text: '@_user_1 今日概况',
+      source: 'sdk',
+      chatType: 'group',
+      mentions: [{ key: '@_user_1', id: { open_id: 'ou_human' }, name: '同事' }],
+    })).resolves.toEqual({ text: '', skipped: true });
+    expect(handleIntent).not.toHaveBeenCalled();
+  });
+
+  it('handles group messages that mention the configured bot and strips only bot mention keys', async () => {
+    const texts: string[] = [];
+    const handleIntent = vi.fn(async () => ({ text: 'handled' }));
+    const dispatcher = createFeishuMessageDispatcher({
+      botMentionOpenId: 'ou_bot',
+      resolveIntent: (text) => {
+        texts.push(text);
+        return { type: 'latest_summary' };
+      },
+      handleIntent,
+    });
+
+    await expect(dispatcher.dispatch({
+      messageId: 'mid-group-mentions-bot',
+      text: '@_user_1 @_user_2 今日概况',
+      source: 'sdk',
+      chatType: 'group',
+      mentions: [
+        { key: '@_user_1', id: { open_id: 'ou_human' }, name: '同事' },
+        { key: '@_user_2', id: { open_id: 'ou_bot' }, name: 'MT Agent' },
+      ],
+    })).resolves.toEqual({ text: 'handled', skipped: false });
+    expect(texts).toEqual(['@_user_1 今日概况']);
     expect(handleIntent).toHaveBeenCalledTimes(1);
   });
 });

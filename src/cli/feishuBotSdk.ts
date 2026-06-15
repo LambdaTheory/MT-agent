@@ -9,7 +9,13 @@ export async function main(): Promise<void> {
 
   if (!appId || !appSecret) throw new Error('FEISHU_APP_ID and FEISHU_APP_SECRET are required for feishu-bot:sdk');
 
-  const bot = createFeishuSdkBot({ appId, appSecret, outputDir: process.env.MT_AGENT_OUTPUT_DIR ?? 'output' });
+  const bot = createFeishuSdkBot({
+    appId,
+    appSecret,
+    botMentionOpenId: process.env.FEISHU_BOT_OPEN_ID,
+    botMentionName: process.env.FEISHU_BOT_MENTION_NAME,
+    outputDir: process.env.MT_AGENT_OUTPUT_DIR ?? 'output',
+  });
   await bot.start();
   console.log('Feishu SDK bot long connection started.');
 }

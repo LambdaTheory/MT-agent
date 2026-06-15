@@ -8,6 +8,8 @@ export interface FeishuBotServerConfig {
   port: number;
   appId: string;
   appSecret: string;
+  botMentionOpenId?: string;
+  botMentionName?: string;
   verificationToken?: string;
   encryptKey?: string;
   outputDir?: string;
@@ -44,7 +46,7 @@ export function extractTextMessage(payload: FeishuMessageEvent): Omit<FeishuBotI
 }
 
 export function startFeishuBotServer(config: FeishuBotServerConfig) {
-  const dispatcher = createFeishuMessageDispatcher({ outputDir: config.outputDir, handleIntent: config.handleIntent });
+  const dispatcher = createFeishuMessageDispatcher({ outputDir: config.outputDir, botMentionOpenId: config.botMentionOpenId, botMentionName: config.botMentionName, handleIntent: config.handleIntent });
   const dispatchMessage = config.dispatchMessage ?? dispatcher.dispatch;
 
   const server = createServer(async (req, res) => {

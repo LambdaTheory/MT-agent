@@ -4,6 +4,8 @@ import type { BotIntent, BotIntentResolver, BotResponse, FeishuBotDispatchResult
 
 export interface FeishuMessageDispatcherConfig {
   outputDir?: string;
+  botMentionOpenId?: string;
+  botMentionName?: string;
   resolveIntent?: BotIntentResolver;
   handleIntent?: (intent: BotIntent, outputDir?: string) => Promise<BotResponse>;
   logError?: (error: unknown, message: FeishuBotIncomingTextMessage) => void;
@@ -28,13 +30,33 @@ function formatError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function shouldSkipUnmentionedGroupMessage(message: FeishuBotIncomingTextMessage): boolean {
-  return message.chatType === 'group' && (message.mentions?.length ?? 0) === 0;
+function normalized(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
 }
 
-function textWithoutMentionKeys(message: FeishuBotIncomingTextMessage): string {
+function hasBotMentionIdentity(config: FeishuMessageDispatcherConfig): boolean {
+  return Boolean(normalized(config.botMentionOpenId) || normalized(config.botMentionName));
+}
+
+function mentionMatchesConfiguredBot(mention: NonNullable<FeishuBotIncomingTextMessage['mentions']>[number], config: FeishuMessageDispatcherConfig): boolean {
+  const botOpenId = normalized(config.botMentionOpenId);
+  const botName = normalized(config.botMentionName);
+  return Boolean((botOpenId && mention.id?.open_id === botOpenId) || (botName && mention.name === botName));
+}
+
+function botMentions(message: FeishuBotIncomingTextMessage, config: FeishuMessageDispatcherConfig): NonNullable<FeishuBotIncomingTextMessage['mentions']> {
+  const mentions = message.mentions ?? [];
+  return hasBotMentionIdentity(config) ? mentions.filter((mention) => mentionMatchesConfiguredBot(mention, config)) : [];
+}
+
+function shouldSkipGroupMessage(message: FeishuBotIncomingTextMessage, config: FeishuMessageDispatcherConfig): boolean {
+  return message.chatType === 'group' && botMentions(message, config).length === 0;
+}
+
+function textWithoutMentionKeys(message: FeishuBotIncomingTextMessage, config: FeishuMessageDispatcherConfig): string {
   let text = message.text;
-  for (const mention of message.mentions ?? []) {
+  for (const mention of botMentions(message, config)) {
     if (mention.key) text = text.replaceAll(mention.key, ' ');
   }
   return text.replace(/\s+/g, ' ').trim();
@@ -65,10 +87,10 @@ export function createFeishuMessageDispatcher(config: FeishuMessageDispatcherCon
     async dispatch(message): Promise<FeishuBotDispatchResult> {
       if (seenMessageIds.has(message.messageId)) return { text: '', skipped: true };
       rememberMessageId(message.messageId);
-      if (shouldSkipUnmentionedGroupMessage(message)) return { text: '', skipped: true };
+      if (shouldSkipGroupMessage(message, config)) return { text: '', skipped: true };
 
       try {
-        const intent = canonicalizeIntent(resolveIntent(textWithoutMentionKeys(message), message));
+        const intent = canonicalizeIntent(resolveIntent(textWithoutMentionKeys(message, config), message));
         const response = await handleIntent(intent, config.outputDir);
         return { ...response, skipped: false };
       } catch (error) {
