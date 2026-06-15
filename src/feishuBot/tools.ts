@@ -1,26 +1,15 @@
 import { runPublicTrafficReportCli } from '../cli/publicTrafficReport.js';
 import { sendFeishuCard } from '../notify/feishu.js';
 import { parseAgentDataIntent } from '../agentData/intent.js';
-import { getProblemProducts, getRemovedLinks } from '../agentData/publicTrafficQueries.js';
-import { buildAgentTaskPool } from '../agentData/taskPool.js';
 import { buildPublicTrafficCard } from '../publicTraffic/buildPublicTrafficCard.js';
 import { buildPublicTrafficFeishuText } from '../publicTraffic/buildPublicTrafficFeishu.js';
 import { findLatestReportContext, formatLatestSummary, formatProductRows, queryProductRows } from './reportStore.js';
+import { findReadOnlyTool } from './readOnlyToolRegistry.js';
 import type { BotIntent, BotResponse } from './types.js';
 
 let running = false;
 
-function formatTaskLines(items: Array<{ productId: string; suggestedAction: string; reason: string }>): string {
-  return items.length > 0 ? items.map((item, index) => `${index + 1}. ${item.productId}：${item.suggestedAction}。原因：${item.reason}`).join('\n') : '暂无待处理任务。';
-}
-
-function formatProblemLines(items: Array<{ productId: string; action: string; reason: string }>): string {
-  return items.length > 0 ? items.map((item, index) => `${index + 1}. ${item.productId}：${item.action}。原因：${item.reason}`).join('\n') : '暂无匹配问题商品。';
-}
-
-function formatRemovedLinkLines(items: Array<{ productId: string; productName: string; removedDate: string; reason: string }>): string {
-  return items.length > 0 ? items.map((item, index) => `${index + 1}. ${item.productId}：${item.reason}。下架日期：${item.removedDate}。商品：${item.productName}`).join('\n') : '暂无近7天下架链接。';
-}
+const UNKNOWN_GUIDANCE = '我现在可以查：今日概况、商品、新链接池、待处理任务、转化差、曝光低、高潜力、下架链接、订单情况。你可以问“新链接池怎么样”或“查一下721”。';
 
 export async function handleBotIntent(intent: BotIntent, outputDir = 'output'): Promise<BotResponse> {
   if (intent.type === 'help') {
@@ -69,19 +58,12 @@ export async function handleBotIntent(intent: BotIntent, outputDir = 'output'): 
 
   if (intent.type === 'unknown') {
     const dataIntent = parseAgentDataIntent(intent.text);
-    if (dataIntent.type === 'tasks') {
-      const latest = await findLatestReportContext(outputDir);
-      return { text: latest ? formatTaskLines(buildAgentTaskPool(latest.context)) : '还没有找到公域日报上下文。' };
-    }
-    if (dataIntent.type === 'problem_products') {
-      const latest = await findLatestReportContext(outputDir);
-      return { text: latest ? formatProblemLines(getProblemProducts(latest.context, dataIntent.problemType)) : '还没有找到公域日报上下文。' };
-    }
-    if (dataIntent.type === 'removed_links') {
-      const latest = await findLatestReportContext(outputDir);
-      return { text: latest ? formatRemovedLinkLines(getRemovedLinks(latest.context)) : '还没有找到公域日报上下文。' };
-    }
+    const tool = findReadOnlyTool(dataIntent);
+    if (!tool) return { text: UNKNOWN_GUIDANCE };
+
+    const latest = await findLatestReportContext(outputDir);
+    return latest ? tool.run(latest.context, dataIntent) : { text: '还没有找到公域日报上下文。' };
   }
 
-  return { text: '暂时只支持：今日概况、查询 商品ID/名称、跑日报、重发日报、推送日报到群、帮助。' };
+  return { text: UNKNOWN_GUIDANCE };
 }

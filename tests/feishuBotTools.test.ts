@@ -39,7 +39,10 @@ async function writeContext(): Promise<string> {
     date: '2026-06-11',
     summary: { '1d': summary, '7d': summary, '30d': summary },
     conclusions: [],
-    rows: [{ productName: 'iPhone 15', platformProductId: '2000000000000000000001', displayProductId: '端内ID 565', custodyDays: 10, periods: { '1d': metric, '7d': metric, '30d': metric } }],
+    rows: [
+      { productName: 'iPhone 15', platformProductId: '2000000000000000000001', displayProductId: '端内ID 565', custodyDays: 10, periods: { '1d': metric, '7d': metric, '30d': metric } },
+      { productName: '大疆 Pocket 3', platformProductId: 'p701', displayProductId: '端内ID 701', custodyDays: 1, periods: { '1d': metric, '7d': metric, '30d': metric } },
+    ],
     lowExposure: [{ identifier: '端内ID 565', action: '补曝光', reason: '曝光不足' }],
     weakClick: [],
     weakConversion: [{ identifier: '端内ID 565', action: '提转化', reason: '访问多成交少' }],
@@ -48,6 +51,8 @@ async function writeContext(): Promise<string> {
     lifecycleGovernance: [],
     recommendedActions: [],
     newProductPoolIds: ['701'],
+    newProductPoolItems: [{ productId: '701', productName: '大疆 Pocket 3', shortTitle: '', submittedAt: '2026-06-11 09:00:00', merchant: '', alipaySyncStatus: '已同步', alipayCode: '', stock: 0, skuCount: 0, maintenanceStatus: '待维护', note: '' }],
+    orderAnalysis: { runDate: '2026-06-11', pages: { overview: { label: '订单概览', dataDate: '2026-06-10', indicators: [{ label: '发货订单', value: '12' }] } } },
     agentData: { removedLinks: [{ productId: '701', platformProductId: 'p701', productName: '已下架链接', removedDate: '2026-06-12', reason: '商品总表缺失', source: 'goods_snapshot_diff' }] },
     emptySectionNotes: {},
   }));
@@ -89,11 +94,26 @@ describe('handleBotIntent', () => {
     expect(response.text).toContain('访问多成交少');
   });
 
+  it('answers all registry-backed read-only agent data questions', async () => {
+    const outputDir = await writeContext();
+    await expect(handleBotIntent({ type: 'unknown', text: '今天怎么样' }, outputDir)).resolves.toMatchObject({ text: expect.stringContaining('公域日报 2026-06-11') });
+    await expect(handleBotIntent({ type: 'unknown', text: '查701' }, outputDir)).resolves.toMatchObject({ text: expect.stringContaining('端内ID 701') });
+    await expect(handleBotIntent({ type: 'unknown', text: '新品池有哪些' }, outputDir)).resolves.toMatchObject({ text: expect.stringContaining('大疆 Pocket 3') });
+    await expect(handleBotIntent({ type: 'unknown', text: '订单情况' }, outputDir)).resolves.toMatchObject({ text: expect.stringContaining('发货订单：12') });
+  });
+
   it('answers removed-link questions through agent data understanding', async () => {
     const outputDir = await writeContext();
     const response = await handleBotIntent({ type: 'unknown', text: '下架链接有哪些' }, outputDir);
     expect(response.text).toContain('701');
     expect(response.text).toContain('商品总表缺失');
     expect(response.text).toContain('2026-06-12');
+  });
+
+  it('returns read-only guidance for unsupported unknown questions', async () => {
+    const outputDir = await writeContext();
+    await expect(handleBotIntent({ type: 'unknown', text: '随便聊聊' }, outputDir)).resolves.toEqual({
+      text: '我现在可以查：今日概况、商品、新链接池、待处理任务、转化差、曝光低、高潜力、下架链接、订单情况。你可以问“新链接池怎么样”或“查一下721”。',
+    });
   });
 });
