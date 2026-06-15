@@ -18,10 +18,11 @@ export function parseBotIntent(input: string): BotIntent {
   if (/^(跑|生成|执行).*(公域)?日报/.test(text)) return { type: 'run_public_traffic_report', sendTo: sendTo(text) };
   if (/^推送(日报|公域日报)到群$/.test(text)) return { type: 'push_latest_report_to_group' };
   if (/^重发.*(公域)?日报/.test(text)) return { type: 'resend_latest_report', sendTo: sendTo(text) };
-  if (/^(今日|今天|最新).*(概况|数据|日报)?$/.test(text)) return { type: 'latest_summary' };
+  if (/(今日|今天|现在|公域).*(咋样|怎么样|概况|数据|日报|看下|看看)/.test(text) || /日报/.test(text)) return { type: 'latest_summary' };
 
-  const query = /^(查询|商品)\s+(.+)$/.exec(text);
-  if (query) return { type: 'query_product', keyword: query[2].trim() };
+  const query = /^(?:查询商品|查商品|查询|商品)\s+(.+)$/.exec(text)
+    ?? /^这个商品\s+(.+?)\s*(?:数据如何|怎么样|如何)?$/.exec(text);
+  if (query) return { type: 'query_product', keyword: query[1].trim() };
 
   return { type: 'unknown', text };
 }

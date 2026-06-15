@@ -17,4 +17,18 @@ describe('parseAgentDataIntent', () => {
     expect(parseAgentDataIntent('订单情况')).toEqual({ type: 'order_summary' });
     expect(parseAgentDataIntent('随便问问')).toEqual({ type: 'unknown', text: '随便问问' });
   });
+
+  it('maps natural read-only questions to agent data intents', () => {
+    expect(parseAgentDataIntent('新链接池怎么样')).toEqual({ type: 'new_product_pool' });
+    expect(parseAgentDataIntent('新链有哪些')).toEqual({ type: 'new_product_pool' });
+    expect(parseAgentDataIntent('冷启动链接情况')).toEqual({ type: 'new_product_pool' });
+    expect(parseAgentDataIntent('有哪些要处理')).toEqual({ type: 'tasks' });
+    expect(parseAgentDataIntent('今天优先处理什么')).toEqual({ type: 'tasks' });
+    expect(parseAgentDataIntent('哪些链接不健康')).toEqual({ type: 'tasks' });
+    expect(parseAgentDataIntent('成交少的有哪些')).toEqual({ type: 'problem_products', problemType: 'weak_conversion' });
+    expect(parseAgentDataIntent('曝光低的链接')).toEqual({ type: 'problem_products', problemType: 'low_exposure' });
+    expect(parseAgentDataIntent('哪些可以继续放量')).toEqual({ type: 'problem_products', problemType: 'high_potential' });
+    expect(parseAgentDataIntent('最近下架了哪些')).toEqual({ type: 'removed_links' });
+    expect(parseAgentDataIntent('履约情况')).toEqual({ type: 'order_summary' });
+  });
 });

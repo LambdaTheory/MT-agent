@@ -24,11 +24,41 @@ describe('parseBotIntent', () => {
   it('parses latest summary intent', () => {
     expect(parseBotIntent('今日概况')).toEqual({ type: 'latest_summary' });
     expect(parseBotIntent('今天数据')).toEqual({ type: 'latest_summary' });
+    expect(parseBotIntent('查今天数据')).toEqual({ type: 'latest_summary' });
+    expect(parseBotIntent('查看日报')).toEqual({ type: 'latest_summary' });
+    expect(parseBotIntent('看下 今天数据')).toEqual({ type: 'latest_summary' });
+    expect(parseBotIntent('看下 公域日报')).toEqual({ type: 'latest_summary' });
+  });
+
+  it('parses natural read-only summary questions without triggering actions', () => {
+    expect(parseBotIntent('今天咋样')).toEqual({ type: 'latest_summary' });
+    expect(parseBotIntent('现在公域怎么样')).toEqual({ type: 'latest_summary' });
+    expect(parseBotIntent('日报概况')).toEqual({ type: 'latest_summary' });
+    expect(parseBotIntent('能不能看下今天数据')).toEqual({ type: 'latest_summary' });
   });
 
   it('parses product query intent', () => {
     expect(parseBotIntent('查询 565')).toEqual({ type: 'query_product', keyword: '565' });
+    expect(parseBotIntent('查询商品 721')).toEqual({ type: 'query_product', keyword: '721' });
+    expect(parseBotIntent('查商品 721')).toEqual({ type: 'query_product', keyword: '721' });
     expect(parseBotIntent('商品 iPhone')).toEqual({ type: 'query_product', keyword: 'iPhone' });
+  });
+
+  it('parses explicit product lookup questions', () => {
+    expect(parseBotIntent('这个商品 721 数据如何')).toEqual({ type: 'query_product', keyword: '721' });
+  });
+
+  it('leaves vague natural lookup questions for fallback handling', () => {
+    expect(parseBotIntent('查 721')).toEqual({ type: 'unknown', text: '查 721' });
+    expect(parseBotIntent('721怎么样')).toEqual({ type: 'unknown', text: '721怎么样' });
+    expect(parseBotIntent('查一下721')).toEqual({ type: 'unknown', text: '查一下721' });
+    expect(parseBotIntent('帮我看下 Pocket 3')).toEqual({ type: 'unknown', text: '帮我看下 Pocket 3' });
+  });
+
+  it('does not trigger side-effect actions from vague natural language', () => {
+    expect(parseBotIntent('帮我看看日报')).toEqual({ type: 'latest_summary' });
+    expect(parseBotIntent('要不要发群里看看')).toEqual({ type: 'unknown', text: '要不要发群里看看' });
+    expect(parseBotIntent('可以重新看下日报吗')).toEqual({ type: 'latest_summary' });
   });
 
   it('falls back to unknown intent', () => {
