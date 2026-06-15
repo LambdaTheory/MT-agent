@@ -111,15 +111,21 @@ function isAlipaySynced(item: GoodsManagerGoodsItem): boolean {
   return normalizeText(item.是否同步支付宝) === '已同步';
 }
 
-function sortProductIds(ids: string[]): string[] {
-  return [...ids].sort((a, b) => {
+function compareProductIds(a: string, b: string): number {
     const aNumber = /^\d+$/.test(a) ? Number(a) : null;
     const bNumber = /^\d+$/.test(b) ? Number(b) : null;
     if (aNumber !== null && bNumber !== null) return aNumber - bNumber;
     if (aNumber !== null) return -1;
     if (bNumber !== null) return 1;
     return a.localeCompare(b);
-  });
+}
+
+function submittedTime(item: GoodsManagerNewProductPoolItem): number {
+  return parseSubmittedAt(item.submittedAt)?.getTime() ?? Number.NEGATIVE_INFINITY;
+}
+
+function sortProductsBySubmittedAt(items: GoodsManagerNewProductPoolItem[]): GoodsManagerNewProductPoolItem[] {
+  return [...items].sort((a, b) => submittedTime(b) - submittedTime(a) || compareProductIds(a.productId, b.productId));
 }
 
 async function fetchGoodsPage(fetchImpl: typeof fetch, url: string): Promise<GoodsManagerGoodsResponse> {
@@ -151,5 +157,5 @@ export async function fetchRecentGoodsManagerProducts(options: FetchRecentGoodsM
     }
   }
 
-  return sortProductIds([...products.keys()]).map((id) => products.get(id)!);
+  return sortProductsBySubmittedAt([...products.values()]);
 }

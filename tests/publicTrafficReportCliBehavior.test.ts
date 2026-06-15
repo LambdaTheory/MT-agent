@@ -195,10 +195,10 @@ describe('runPublicTrafficReportCli public traffic sequencing', () => {
     });
     const todayPaths = buildPublicTrafficPaths(mocks.outputDir, '2026-06-10');
     const context = JSON.parse(await readFile(todayPaths.reportContext, 'utf8')) as PublicTrafficDataReportContext;
-    expect(context.newProductPoolIds).toEqual(['701', '702']);
+    expect(context.newProductPoolIds).toEqual(['702', '701']);
     expect(context.newProductPoolItems).toEqual([
-      expect.objectContaining({ productId: '701', productName: '新品 Alpha', stock: 8, skuCount: 2 }),
       expect.objectContaining({ productId: '702', productName: '新品 Beta', stock: 0, skuCount: 0 }),
+      expect.objectContaining({ productId: '701', productName: '新品 Alpha', stock: 8, skuCount: 2 }),
     ]);
     await expect(readFile(todayPaths.log, 'utf8')).resolves.toContain('goods-manager 新品池: 2 个商品');
   });

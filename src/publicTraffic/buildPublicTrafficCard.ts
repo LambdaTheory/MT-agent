@@ -267,6 +267,7 @@ type ColdStartStatus = '强跑通' | '优秀链接' | '访问达标' | '有苗�
 interface NewLinkColdStartRow {
   product: string;
   id: string;
+  submittedTime: number;
   liveDays: string;
   dailyVisits: number;
   visits: number;
@@ -317,8 +318,25 @@ function coldStartStatusOrder(status: ColdStartStatus): number {
   return ['危险', '未启动', '有苗头', '访问达标', '优秀链接', '强跑通', '待观察'].indexOf(status);
 }
 
+function submittedTime(value: string): number {
+  return parseSubmittedAt(value)?.getTime() ?? Number.NEGATIVE_INFINITY;
+}
+
+function compareProductIds(a: string, b: string): number {
+  const aNumber = /^\d+$/.test(a) ? Number(a) : null;
+  const bNumber = /^\d+$/.test(b) ? Number(b) : null;
+  if (aNumber !== null && bNumber !== null) return aNumber - bNumber;
+  if (aNumber !== null) return -1;
+  if (bNumber !== null) return 1;
+  return a.localeCompare(b);
+}
+
+function sortNewProductPoolItems(items: NonNullable<PublicTrafficDataReportContext['newProductPoolItems']>): NonNullable<PublicTrafficDataReportContext['newProductPoolItems']> {
+  return [...items].sort((a, b) => submittedTime(b.submittedAt) - submittedTime(a.submittedAt) || compareProductIds(a.productId, b.productId));
+}
+
 function newLinkColdStartRows(context: PublicTrafficDataReportContext): NewLinkColdStartRow[] {
-  return (context.newProductPoolItems ?? []).map((item) => {
+  return sortNewProductPoolItems(context.newProductPoolItems ?? []).map((item) => {
     const row = findRowByIdentifier(context, item.productId);
     const seven = row?.periods['7d'];
     const live = coldStartLiveDays(item.submittedAt, context.date);
@@ -328,13 +346,14 @@ function newLinkColdStartRows(context: PublicTrafficDataReportContext): NewLinkC
     return {
       product: `商品ID ${item.productId} ${shortNewProductName(item.productName)}`.trim(),
       id: item.productId,
+      submittedTime: submittedTime(item.submittedAt),
       liveDays: live.label,
       dailyVisits,
       visits: totalVisits,
       deals,
       status: classifyColdStart(dailyVisits, totalVisits, deals, live.hours, Boolean(row), live.afterReportDate),
     };
-  }).sort((a, b) => coldStartStatusOrder(a.status) - coldStartStatusOrder(b.status) || a.dailyVisits - b.dailyVisits || a.id.localeCompare(b.id));
+  }).sort((a, b) => b.submittedTime - a.submittedTime || coldStartStatusOrder(a.status) - coldStartStatusOrder(b.status) || a.dailyVisits - b.dailyVisits || compareProductIds(a.id, b.id));
 }
 
 function averageDailyVisits(rows: NewLinkColdStartRow[]): string {
@@ -378,7 +397,7 @@ function newProductPoolPanel(context: PublicTrafficDataReportContext): Record<st
   const count = newProductPoolCount(context);
   const coldStartRows = newLinkColdStartRows(context);
   const fallbackPreview = context.newProductPoolItems?.length
-    ? context.newProductPoolItems.slice(0, 10).map((item) => `- 商品ID ${item.productId} ${shortNewProductName(item.productName)}：待观察`).join('\n')
+    ? sortNewProductPoolItems(context.newProductPoolItems).slice(0, 10).map((item) => `- 商品ID ${item.productId} ${shortNewProductName(item.productName)}：待观察`).join('\n')
     : context.newProductPoolIds?.length
       ? context.newProductPoolIds.slice(0, 10).map((id) => `- 商品ID ${id}：待观察`).join('\n')
       : context.newProductObservation.slice(0, 10).map((item) => `- ${item.identifier}：${item.reason}`).join('\n');

@@ -679,6 +679,21 @@ describe('public traffic report outputs', () => {
     expect(cardJson).not.toContain('优先重做');
   });
 
+  it('shows newer new-link pool items before older item IDs in the Feishu card', () => {
+    const withPool: PublicTrafficDataReportContext = {
+      ...context,
+      date: '2026-06-12',
+      rows: [],
+      newProductPoolItems: [
+        { productId: '703', productName: '较早链接', shortTitle: '', submittedAt: '2026-06-12 09:00:00', merchant: '', alipaySyncStatus: '已同步', alipayCode: '', stock: 0, skuCount: 0, maintenanceStatus: '待维护', note: '' },
+        { productId: '900', productName: '最新链接', shortTitle: '', submittedAt: '2026-06-12 12:00:00', merchant: '', alipaySyncStatus: '已同步', alipayCode: '', stock: 0, skuCount: 0, maintenanceStatus: '待维护', note: '' },
+      ],
+    };
+
+    const cardJson = JSON.stringify(buildPublicTrafficCard(withPool, { markdownPath: 'report.md', workbookPath: 'report.xlsx' }));
+    expect(cardJson.indexOf('商品ID 900 最新链接')).toBeLessThan(cardJson.indexOf('商品ID 703 较早链接'));
+  });
+
   it('renders enriched goods-manager new product pool summaries in Feishu text and card', () => {
     const longName = '超长商品名称用于验证卡片会做简短展示避免过宽';
     const withPool: PublicTrafficDataReportContext = {

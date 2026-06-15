@@ -312,7 +312,26 @@ async function saveGoodsLinkLifecycleState(path: string, state: GoodsLinkLifecyc
 
 function filterNewLinkPoolByFirstSeen(products: GoodsManagerNewProductPoolItem[], currentGoods: GoodsSnapshotItem[], firstSeen: GoodsFirstSeenIndex, referenceDate: string): GoodsManagerNewProductPoolItem[] {
   const eligibleIds = new Set(filterFirstSeenWithinDays(currentGoods, firstSeen, referenceDate, 7).map((item) => item.internalProductId));
-  return products.filter((item) => eligibleIds.has(item.productId));
+  return sortNewLinkPoolBySubmittedAt(products.filter((item) => eligibleIds.has(item.productId)));
+}
+
+function parseSubmittedAtTime(value: string): number {
+  if (!value.trim()) return Number.NEGATIVE_INFINITY;
+  const date = new Date(value.trim().replace(' ', 'T'));
+  return Number.isNaN(date.getTime()) ? Number.NEGATIVE_INFINITY : date.getTime();
+}
+
+function compareProductIds(a: string, b: string): number {
+  const aNumber = /^\d+$/.test(a) ? Number(a) : null;
+  const bNumber = /^\d+$/.test(b) ? Number(b) : null;
+  if (aNumber !== null && bNumber !== null) return aNumber - bNumber;
+  if (aNumber !== null) return -1;
+  if (bNumber !== null) return 1;
+  return a.localeCompare(b);
+}
+
+function sortNewLinkPoolBySubmittedAt(items: GoodsManagerNewProductPoolItem[]): GoodsManagerNewProductPoolItem[] {
+  return [...items].sort((a, b) => parseSubmittedAtTime(b.submittedAt) - parseSubmittedAtTime(a.submittedAt) || compareProductIds(a.productId, b.productId));
 }
 
 function resolveProductIdMappingPath(config: Awaited<ReturnType<typeof loadConfig>>): string {

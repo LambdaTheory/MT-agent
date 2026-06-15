@@ -123,6 +123,18 @@ describe('fetchRecentGoodsManagerProductIds', () => {
     expect(requestedUrls[0]).toBe('http://goods.local:3010/api/goods?page=1&limit=500&sort_by=%E6%9C%80%E8%BF%91%E6%8F%90%E4%BA%A4%E6%97%B6%E9%97%B4&sort_desc=true');
   });
 
+  it('returns newer submitted products before older product IDs', async () => {
+    const fetchImpl: typeof fetch = async () => new Response(JSON.stringify({
+      data: [
+        { ID: '703', 商品名称: '较早链接', 最近提交时间: '2026-06-12 09:00:00' },
+        { ID: '900', 商品名称: '最新链接', 最近提交时间: '2026-06-12 12:00:00' },
+      ],
+      total_pages: 1,
+    }), { status: 200, headers: { 'content-type': 'application/json' } });
+
+    await expect(fetchRecentGoodsManagerProductIds({ baseUrl: 'http://goods.local:3010', days: 7, referenceDate: '2026-06-12', fetchImpl })).resolves.toEqual(['900', '703']);
+  });
+
   it('can require goods-manager products to be synced to Alipay', async () => {
     const fetchImpl: typeof fetch = async () => new Response(JSON.stringify({
       data: [
