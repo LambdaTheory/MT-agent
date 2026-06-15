@@ -10,7 +10,7 @@ export interface ReadOnlyTool {
   name: ReadOnlyAgentIntent['type'];
   description: string;
   intentType: ReadOnlyAgentIntent['type'];
-  run(context: PublicTrafficDataReportContext, intent: ReadOnlyAgentIntent): Promise<BotResponse>;
+  run(context: PublicTrafficDataReportContext, intent: AgentIntent): Promise<BotResponse>;
 }
 
 function formatTaskLines(items: Array<{ productId: string; suggestedAction: string; reason: string }>): string {
