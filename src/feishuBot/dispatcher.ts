@@ -28,6 +28,18 @@ function formatError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function shouldSkipUnmentionedGroupMessage(message: FeishuBotIncomingTextMessage): boolean {
+  return message.chatType === 'group' && (message.mentions?.length ?? 0) === 0;
+}
+
+function textWithoutMentionKeys(message: FeishuBotIncomingTextMessage): string {
+  let text = message.text;
+  for (const mention of message.mentions ?? []) {
+    if (mention.key) text = text.replaceAll(mention.key, ' ');
+  }
+  return text.replace(/\s+/g, ' ').trim();
+}
+
 function canonicalizeIntent(intent: BotIntent): BotIntent {
   switch (intent.type) {
     case 'help':
@@ -53,9 +65,10 @@ export function createFeishuMessageDispatcher(config: FeishuMessageDispatcherCon
     async dispatch(message): Promise<FeishuBotDispatchResult> {
       if (seenMessageIds.has(message.messageId)) return { text: '', skipped: true };
       rememberMessageId(message.messageId);
+      if (shouldSkipUnmentionedGroupMessage(message)) return { text: '', skipped: true };
 
       try {
-        const intent = canonicalizeIntent(resolveIntent(message.text, message));
+        const intent = canonicalizeIntent(resolveIntent(textWithoutMentionKeys(message), message));
         const response = await handleIntent(intent, config.outputDir);
         return { ...response, skipped: false };
       } catch (error) {

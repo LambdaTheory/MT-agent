@@ -6,15 +6,17 @@ describe('extractSdkTextMessage', () => {
   it('extracts text messages from SDK event data', () => {
     expect(
       extractSdkTextMessage({
-        message: { message_id: 'mid-sdk-extract', chat_id: 'chat', message_type: 'text', content: JSON.stringify({ text: '帮助' }) },
+        message: { message_id: 'mid-sdk-extract', chat_id: 'chat', chat_type: 'group', message_type: 'text', content: JSON.stringify({ text: '@_user_1 帮助' }), mentions: [{ key: '@_user_1' }] },
         sender: { sender_id: { open_id: 'ou_1' } },
       }),
     ).toEqual({
       messageId: 'mid-sdk-extract',
-      text: '帮助',
+      text: '@_user_1 帮助',
       source: 'sdk',
       chatId: 'chat',
+      chatType: 'group',
       senderOpenId: 'ou_1',
+      mentions: [{ key: '@_user_1' }],
     });
   });
 

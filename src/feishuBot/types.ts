@@ -23,6 +23,7 @@ export interface FeishuMessageEvent {
       chat_type?: string;
       content?: string;
       message_type?: string;
+      mentions?: FeishuBotMessageMention[];
     };
     sender?: {
       sender_id?: { open_id?: string; user_id?: string };
@@ -43,7 +44,15 @@ export interface FeishuBotIncomingTextMessage {
   text: string;
   source: FeishuBotMessageSource;
   chatId?: string;
+  chatType?: string;
   senderOpenId?: string;
+  mentions?: FeishuBotMessageMention[];
+}
+
+export interface FeishuBotMessageMention {
+  key?: string;
+  id?: Record<string, string>;
+  name?: string;
 }
 
 export interface FeishuBotDispatchResult extends BotResponse {

@@ -79,4 +79,31 @@ describe('createFeishuMessageDispatcher', () => {
 
     await expect(dispatcher.dispatch({ messageId: 'mid-default-resolver', text: '查询 565', source: 'sdk' })).resolves.toEqual({ text: 'query_product', skipped: false });
   });
+
+  it('skips group messages that do not mention the bot', async () => {
+    const handleIntent = vi.fn(async () => ({ text: 'handled' }));
+    const dispatcher = createFeishuMessageDispatcher({
+      resolveIntent: () => ({ type: 'latest_summary' }),
+      handleIntent,
+    });
+
+    await expect(dispatcher.dispatch({ messageId: 'mid-group-no-mention', text: '今日概况', source: 'sdk', chatType: 'group', mentions: [] })).resolves.toEqual({ text: '', skipped: true });
+    expect(handleIntent).not.toHaveBeenCalled();
+  });
+
+  it('handles group messages that include a mention', async () => {
+    const texts: string[] = [];
+    const handleIntent = vi.fn(async () => ({ text: 'handled' }));
+    const dispatcher = createFeishuMessageDispatcher({
+      resolveIntent: (text) => {
+        texts.push(text);
+        return { type: 'latest_summary' };
+      },
+      handleIntent,
+    });
+
+    await expect(dispatcher.dispatch({ messageId: 'mid-group-with-mention', text: '@_user_1 今日概况', source: 'sdk', chatType: 'group', mentions: [{ key: '@_user_1' }] })).resolves.toEqual({ text: 'handled', skipped: false });
+    expect(texts).toEqual(['今日概况']);
+    expect(handleIntent).toHaveBeenCalledTimes(1);
+  });
 });

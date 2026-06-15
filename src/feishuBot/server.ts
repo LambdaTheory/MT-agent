@@ -27,11 +27,20 @@ function writeJson(res: ServerResponse, status: number, value: unknown): void {
   res.end(JSON.stringify(value));
 }
 
-export function extractTextMessage(payload: FeishuMessageEvent): { messageId: string; text: string; chatId?: string; senderOpenId?: string } | null {
+export function extractTextMessage(payload: FeishuMessageEvent): Omit<FeishuBotIncomingTextMessage, 'source'> | null {
   const message = payload.event?.message;
   if (!message?.message_id || message.message_type !== 'text' || !message.content) return null;
   const content = JSON.parse(message.content) as { text?: string };
-  return content.text ? { messageId: message.message_id, text: content.text, chatId: message.chat_id, senderOpenId: payload.event?.sender?.sender_id?.open_id } : null;
+  return content.text
+    ? {
+        messageId: message.message_id,
+        text: content.text,
+        ...(message.chat_id ? { chatId: message.chat_id } : {}),
+        ...(message.chat_type ? { chatType: message.chat_type } : {}),
+        ...(payload.event?.sender?.sender_id?.open_id ? { senderOpenId: payload.event.sender.sender_id.open_id } : {}),
+        ...(message.mentions ? { mentions: message.mentions } : {}),
+      }
+    : null;
 }
 
 export function startFeishuBotServer(config: FeishuBotServerConfig) {

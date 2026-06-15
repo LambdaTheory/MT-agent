@@ -6,8 +6,10 @@ interface SdkMessageData {
   message?: {
     message_id?: unknown;
     chat_id?: unknown;
+    chat_type?: unknown;
     message_type?: unknown;
     content?: unknown;
+    mentions?: unknown;
   };
   sender?: {
     sender_id?: { open_id?: unknown };
@@ -76,8 +78,10 @@ export function extractSdkTextMessage(data: unknown): FeishuBotIncomingTextMessa
       messageId: message.message_id,
       text: content.text,
       source: 'sdk',
-      chatId: typeof message.chat_id === 'string' ? message.chat_id : undefined,
-      senderOpenId: typeof data.sender?.sender_id?.open_id === 'string' ? data.sender.sender_id.open_id : undefined,
+      ...(typeof message.chat_id === 'string' ? { chatId: message.chat_id } : {}),
+      ...(typeof message.chat_type === 'string' ? { chatType: message.chat_type } : {}),
+      ...(typeof data.sender?.sender_id?.open_id === 'string' ? { senderOpenId: data.sender.sender_id.open_id } : {}),
+      ...(Array.isArray(message.mentions) ? { mentions: message.mentions } : {}),
     };
   } catch {
     return null;
