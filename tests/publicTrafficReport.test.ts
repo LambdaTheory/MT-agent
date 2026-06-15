@@ -214,7 +214,7 @@ describe('public traffic report outputs', () => {
   });
 
   it('builds medium-density Feishu text', () => {
-    const text = buildPublicTrafficFeishuText(context, { markdownPath: 'report.md', workbookPath: 'report.xlsx' });
+    const text = buildPublicTrafficFeishuText(contextWithOrderAnalysis, { markdownPath: 'report.md', workbookPath: 'report.xlsx' });
     expect(text).toContain('公域数据日报 2026-06-10');
     expect(text).toContain('经营结论');
     expect(text).toContain('建议操作');
@@ -225,7 +225,10 @@ describe('public traffic report outputs', () => {
     expect(text).toContain('3. 转化弱｜端内ID 900｜点击有但转化弱｜访问有发货弱');
     expect(text).toContain('1. 检查价格/押金/库存/风控/履约链路｜端内ID 900｜访问有发货弱');
     expect(text).toContain('曝光 1000｜公域访问 50｜商品页访问 40｜订单 4｜发货 2｜金额 ¥300.00');
-    expect(text).toContain('曝光到访问率 5.00%｜访问到发货率 5.00%');
+    expect(text).toContain('发货率');
+    expect(text).toContain('关单率');
+    expect(text).toContain('客单价');
+    expect(text).not.toContain('审出订单');
     expect(text).toContain('曝光不足 1｜点击弱 1｜转化弱 1｜高潜力 1｜新品观察 1｜生命周期治理 1｜建议操作 1');
     expect(text).not.toContain('转化弱 Top5');
     expect(text).not.toContain('高潜力 Top5');
@@ -873,8 +876,10 @@ describe('public traffic report outputs', () => {
   it('Markdown 1日总览输出三行', () => {
     const markdown = buildPublicTrafficMarkdown(contextWithOrderAnalysis);
     expect(markdown).toContain('公域（');
-    expect(markdown).toContain('订单（06-10）：创建订单 194｜签约订单 103｜审出订单 -｜发货订单 64｜签约金额 3,977');
+    expect(markdown).toContain('订单经营（06-10）：创建订单 194｜签约订单 103｜发货订单 64｜签约金额 3,977');
+    expect(markdown).not.toContain('审出订单');
     expect(markdown).toContain('履约（发货06-10｜归还未知｜关单06-10）：待发货 168｜归还 15｜逾期 5｜关单 90');
+    expect(markdown).toContain('经营指标：发货率 32.99%｜关单率 46.39%（目标<=35%，风险）｜客单价 ¥38.61');
   });
 
   it('renders fulfillment as rates', () => {
@@ -893,11 +898,11 @@ describe('public traffic report outputs', () => {
     expect(cardJson).not.toContain('暂无昨日履约率对比');
 
     const markdown = buildPublicTrafficMarkdown(reportContext);
-    expect(markdown.indexOf('## 履约比率')).toBeGreaterThan(markdown.indexOf('## 1日总览'));
-    expect(markdown).toContain('签约/创建 50.00%');
-    expect(markdown).toContain('审出/签约 50.00%');
-    expect(markdown).toContain('发货/审出 40.00%');
-    expect(markdown).toContain('暂无昨日履约率对比');
+    expect(markdown).not.toContain('## 履约比率');
+    expect(markdown).not.toContain('签约/创建 50.00%');
+    expect(markdown).not.toContain('审出/签约 50.00%');
+    expect(markdown).not.toContain('发货/审出 40.00%');
+    expect(markdown).not.toContain('暂无昨日履约率对比');
   });
 
   it('renders fulfillment rates from comma and unit indicator values', () => {
@@ -914,8 +919,8 @@ describe('public traffic report outputs', () => {
     expect(cardJson).toContain('经营指标');
     expect(cardJson).not.toContain('签约/创建 50.00%');
     expect(cardJson).not.toContain('发货/审出 0.00%');
-    expect(markdown).toContain('签约/创建 50.00%');
-    expect(markdown).toContain('发货/审出 0.00%');
+    expect(markdown).not.toContain('签约/创建 50.00%');
+    expect(markdown).not.toContain('发货/审出 0.00%');
   });
 
   it('renders missing fulfillment rates for zero and negative denominators', () => {
@@ -933,9 +938,9 @@ describe('public traffic report outputs', () => {
     expect(cardJson).not.toContain('签约/创建 -');
     expect(cardJson).not.toContain('审出/签约 -');
     expect(cardJson).not.toContain('发货/审出 0.00%');
-    expect(markdown).toContain('签约/创建 -');
-    expect(markdown).toContain('审出/签约 -');
-    expect(markdown).toContain('发货/审出 0.00%');
+    expect(markdown).not.toContain('签约/创建 -');
+    expect(markdown).not.toContain('审出/签约 -');
+    expect(markdown).not.toContain('发货/审出 0.00%');
   });
 
   it('renders missing fulfillment rates for non-numeric indicators', () => {
@@ -951,7 +956,7 @@ describe('public traffic report outputs', () => {
 
     expect(cardJson).toContain('经营指标');
     expect(cardJson).not.toContain('签约/创建 -');
-    expect(markdown).toContain('签约/创建 -');
+    expect(markdown).not.toContain('签约/创建 -');
   });
 
   it('omits fulfillment rate section without order analysis', () => {
