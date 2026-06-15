@@ -15,6 +15,11 @@
     "capture-dashboard": "tsx src/cli/captureDashboard.ts",
     "feishu-bot": "tsx src/cli/feishuBot.ts",
     "feishu-bot:sdk": "tsx src/cli/feishuBotSdk.ts",
+    "feishu-bot:pm2:start": "pm2 start ecosystem.config.cjs --only mt-feishu-bot",
+    "feishu-bot:pm2:restart": "pm2 restart mt-feishu-bot --update-env",
+    "feishu-bot:pm2:stop": "pm2 stop mt-feishu-bot",
+    "feishu-bot:pm2:status": "pm2 status mt-feishu-bot",
+    "feishu-bot:pm2:logs": "pm2 logs mt-feishu-bot --lines 80",
     "build": "tsc -p tsconfig.json",
     "test": "vitest run"
   },
