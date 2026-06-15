@@ -110,5 +110,5 @@ export async function rebuildPublicTrafficReport(input: RebuildPublicTrafficRepo
   const card = buildPublicTrafficCard(context, { markdownPath: paths.markdown, workbookPath: paths.workbook });
   const fallbackText = buildPublicTrafficFeishuText(context, { markdownPath: paths.markdown, workbookPath: paths.workbook });
   const result = await sendFeishuCard(env, card, fallbackText);
-  return { context, markdownPath: paths.markdown, workbookPath: paths.workbook, sent: result.sent, sendReason: result.reason };
+  return { context, markdownPath: paths.markdown, workbookPath: paths.workbook, sent: result.sent, sendReason: result.sent ? undefined : result.reason };
 }
