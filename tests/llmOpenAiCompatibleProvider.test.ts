@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createOpenAiCompatibleProviderFromEnv, OpenAiCompatibleLlmProvider } from '../src/llm/openAiCompatibleProvider.js';
+import { createLlmProviderFromEnv, createOpenAiCompatibleProviderFromEnv, OpenAiCompatibleLlmProvider } from '../src/llm/openAiCompatibleProvider.js';
 
 function jsonResponse(value: unknown, status = 200): Response {
   return new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
@@ -42,8 +42,33 @@ describe('OpenAiCompatibleLlmProvider', () => {
     await expect(provider.generateJson({ messages: [{ role: 'user', content: 'x' }] })).rejects.toThrow('LLM provider response missing message content');
   });
 
-  it('creates provider from complete env and returns null when config is missing', () => {
+  it('creates provider from legacy env and returns null when config is missing', () => {
     expect(createOpenAiCompatibleProviderFromEnv({ LLM_BASE_URL: 'https://llm.example/v1', LLM_API_KEY: 'secret', LLM_MODEL: 'test-model' })).toBeInstanceOf(OpenAiCompatibleLlmProvider);
     expect(createOpenAiCompatibleProviderFromEnv({ LLM_BASE_URL: 'https://llm.example/v1', LLM_API_KEY: '', LLM_MODEL: 'test-model' })).toBeNull();
+  });
+
+  it('creates the MVP provider from MT_AGENT_LLM_* env and an injectable fetch implementation', async () => {
+    const requests: Array<{ url: string; init: RequestInit }> = [];
+    const fetchImpl: typeof fetch = async (url, init) => {
+      requests.push({ url: String(url), init: init ?? {} });
+      return jsonResponse({ choices: [{ message: { content: '{"tool":"get_latest_summary"}' } }], model: 'demo-model' });
+    };
+
+    const provider = createLlmProviderFromEnv({ MT_AGENT_LLM_BASE_URL: 'https://llm.example/v1', MT_AGENT_LLM_API_KEY: 'secret', MT_AGENT_LLM_MODEL: 'demo-model' }, fetchImpl);
+
+    await expect(provider?.generateJson({ messages: [{ role: 'user', content: 'select tool' }], temperature: 0 })).resolves.toMatchObject({ text: '{"tool":"get_latest_summary"}', json: { tool: 'get_latest_summary' }, model: 'demo-model' });
+    expect(requests).toHaveLength(1);
+    expect(requests[0].url).toBe('https://llm.example/v1/chat/completions');
+    expect(requests[0].init.method).toBe('POST');
+    expect((requests[0].init.headers as Record<string, string>).Authorization).toBe('Bearer secret');
+    expect(JSON.parse(String(requests[0].init.body))).toMatchObject({ model: 'demo-model', temperature: 0, messages: [{ role: 'user', content: 'select tool' }] });
+  });
+
+  it('returns null when required MVP LLM configuration is missing', () => {
+    expect(createLlmProviderFromEnv({})).toBeNull();
+  });
+
+  it('keeps the MVP provider disabled when LLM_PROVIDER is disabled', () => {
+    expect(createLlmProviderFromEnv({ LLM_PROVIDER: 'disabled', LLM_BASE_URL: 'https://llm.example/v1', LLM_MODEL: 'test-model' })).toBeNull();
   });
 });
