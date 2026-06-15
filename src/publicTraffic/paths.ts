@@ -19,6 +19,7 @@ export interface PublicTrafficPaths {
   markdown: string;
   workbook: string;
   reportContext: string;
+  publicTrafficRunState: string;
   log: string;
 }
 
@@ -47,6 +48,7 @@ export function buildPublicTrafficPaths(outputDir: string, date: string): Public
     markdown: `${dir}/公域数据日报_${date}.md`,
     workbook: `${dir}/公域数据日报_${date}.xlsx`,
     reportContext: `${dir}/公域数据上下文_${date}.json`,
+    publicTrafficRunState: `${dir}/public-traffic-run-state.json`,
     log: `${dir}/公域数据运行日志_${date}.log`,
   };
 }

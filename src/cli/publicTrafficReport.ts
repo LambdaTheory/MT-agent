@@ -11,6 +11,7 @@ import { writeProductIdMappingFromExport } from '../mapping/refreshProductIdMapp
 import { sendFeishuCard } from '../notify/feishu.js';
 import { analyzePublicTrafficData } from '../publicTraffic/analyzePublicTrafficData.js';
 import { buildPublicTrafficCard } from '../publicTraffic/buildPublicTrafficCard.js';
+import { assessDashboardQuality } from '../publicTraffic/dashboardQuality.js';
 import { aggregateExposureDeltas } from '../publicTraffic/exposureAggregate.js';
 import { computeExposureDailyDelta } from '../publicTraffic/exposureDelta.js';
 import { resolveFallbackProductId } from '../publicTraffic/extractProductIdFromInfo.js';
@@ -23,6 +24,7 @@ import { filterFirstSeenWithinDays, updateGoodsFirstSeen, type GoodsFirstSeenInd
 import { mergePublicTrafficData } from '../publicTraffic/mergePublicTrafficData.js';
 import { buildPublicTrafficPaths } from '../publicTraffic/paths.js';
 import { loadProductNameMap } from '../publicTraffic/productDisplayName.js';
+import { savePublicTrafficRunState } from '../publicTraffic/publicTrafficRunState.js';
 import { loadRecentExposureDeltas } from '../publicTraffic/recentExposureDeltas.js';
 import type { PeriodProductMetrics, RawTableData } from '../domain/types.js';
 import type { GoodsManagerNewProductPoolItem } from '../publicTraffic/goodsManagerNewProducts.js';
@@ -499,7 +501,15 @@ export async function runPublicTrafficReportCli(): Promise<void> {
       workbookPath: paths.workbook,
     });
 
-    await sendFeishuCardSafely(card, fallbackText, log);
+    const firstReportSent = await sendFeishuCardSafely(card, fallbackText, log);
+    await savePublicTrafficRunState(paths.publicTrafficRunState, {
+      date: runDate,
+      firstReportSent,
+      firstReportGeneratedAt: new Date().toISOString(),
+      firstDashboardQuality: assessDashboardQuality(rawTables, context.dataQualityNotes),
+      dashboardRefreshResent: false,
+    });
+    log.addEvent(`首版日报运行状态已记录: ${paths.publicTrafficRunState}`);
 
     console.log(fallbackText);
 
@@ -512,14 +522,16 @@ export async function runPublicTrafficReportCli(): Promise<void> {
   }
 }
 
-async function sendFeishuCardSafely(card: Record<string, unknown>, fallbackText: string, log: ReturnType<typeof createRunLog>): Promise<void> {
+async function sendFeishuCardSafely(card: Record<string, unknown>, fallbackText: string, log: ReturnType<typeof createRunLog>): Promise<boolean> {
   try {
     const sendTo = parseFeishuSendToArg(process.argv);
     const env = sendTo ? { ...process.env, FEISHU_SEND_TO: sendTo } : process.env;
     const feishuResult = await sendFeishuCard(env, card, fallbackText);
     log.addEvent(feishuResult.sent ? '飞书通知已发送' : `飞书通知跳过: ${feishuResult.reason}`);
+    return feishuResult.sent;
   } catch (error) {
     log.addEvent(`飞书通知失败: ${error instanceof Error ? error.message : String(error)}`);
+    return false;
   }
 }
 

@@ -26,6 +26,7 @@ describe('buildPublicTrafficPaths', () => {
       markdown: 'output/2026-06-09/公域数据日报_2026-06-09.md',
       workbook: 'output/2026-06-09/公域数据日报_2026-06-09.xlsx',
       reportContext: 'output/2026-06-09/公域数据上下文_2026-06-09.json',
+      publicTrafficRunState: 'output/2026-06-09/public-traffic-run-state.json',
       log: 'output/2026-06-09/公域数据运行日志_2026-06-09.log',
     });
   });
