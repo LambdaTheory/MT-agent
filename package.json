@@ -12,6 +12,7 @@
     "refresh-product-id-map": "tsx src/cli/refreshProductIdMap.ts",
     "rebuild-latest": "tsx src/cli/rebuildLatestReport.ts",
     "public-traffic-report": "tsx src/cli/publicTrafficReport.ts",
+    "operations-learning-loop:preview": "tsx src/cli/operationsLearningLoopPreview.ts",
     "capture-dashboard": "tsx src/cli/captureDashboard.ts",
     "feishu-bot": "tsx src/cli/feishuBot.ts",
     "feishu-bot:sdk": "tsx src/cli/feishuBotSdk.ts",
