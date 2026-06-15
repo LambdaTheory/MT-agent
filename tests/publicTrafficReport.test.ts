@@ -821,12 +821,45 @@ describe('public traffic report outputs', () => {
     const json = JSON.stringify(card);
     expect(json).not.toContain('今日漏斗');
     expect(json).not.toContain('公域（');
-    expect(json).toContain('订单（06-10）');
+    expect(json).toContain('订单经营（06-10）');
+    expect(json).toContain('经营指标');
+    expect(json).toContain('发货率');
+    expect(json).toContain('关单率');
+    expect(json).toContain('目标<=35%，风险');
+    expect(json).toContain('客单价');
+    expect(json).not.toContain('审出订单');
     expect(json).toContain('履约（发货06-10｜归还未知｜关单06-10）');
     expect(json).toContain('创建订单');
     expect(json).toContain('签约金额');
     expect(json).toContain('待发货');
     expect(json).toContain('关单');
+  });
+
+  it('卡片关单率低于等于35%时显示达标', () => {
+    const healthy = {
+      ...contextWithOrderAnalysis,
+      orderAnalysis: {
+        ...contextWithOrderAnalysis.orderAnalysis!,
+        pages: {
+          ...contextWithOrderAnalysis.orderAnalysis!.pages,
+          overview: {
+            ...contextWithOrderAnalysis.orderAnalysis!.pages.overview,
+            indicators: [
+              { label: '创建订单数', value: '200', delta: '' },
+              { label: '签约订单数', value: '100', delta: '' },
+              { label: '发货订单数', value: '80', delta: '' },
+              { label: '签约完成金额（元）', value: '4,000', delta: '' },
+            ],
+          },
+          customs: { key: 'customs' as const, label: '关单分析', dataDate: '2026-06-10', indicators: [{ label: '关单数', value: '70', delta: '' }] },
+        },
+      },
+    };
+
+    const json = JSON.stringify(buildPublicTrafficCard(healthy, { markdownPath: 'report.md', workbookPath: 'report.xlsx' }));
+    expect(json).toContain('关单率');
+    expect(json).toContain('35.00%');
+    expect(json).toContain('目标<=35%，达标');
   });
 
   it('无订单分析时卡片漏斗保持单行旧版', () => {
@@ -855,10 +888,9 @@ describe('public traffic report outputs', () => {
 
     const cardJson = JSON.stringify(buildPublicTrafficCard(reportContext, { markdownPath: 'report.md', workbookPath: 'report.xlsx' }));
 
-    expect(cardJson).toContain('签约/创建 50.00%');
-    expect(cardJson).toContain('审出/签约 50.00%');
-    expect(cardJson).toContain('发货/审出 40.00%');
-    expect(cardJson).toContain('暂无昨日履约率对比');
+    expect(cardJson).toContain('经营指标');
+    expect(cardJson).not.toContain('审出/签约 50.00%');
+    expect(cardJson).not.toContain('暂无昨日履约率对比');
 
     const markdown = buildPublicTrafficMarkdown(reportContext);
     expect(markdown.indexOf('## 履约比率')).toBeGreaterThan(markdown.indexOf('## 1日总览'));
@@ -879,8 +911,9 @@ describe('public traffic report outputs', () => {
     const cardJson = JSON.stringify(buildPublicTrafficCard(reportContext, { markdownPath: 'report.md', workbookPath: 'report.xlsx' }));
     const markdown = buildPublicTrafficMarkdown(reportContext);
 
-    expect(cardJson).toContain('签约/创建 50.00%');
-    expect(cardJson).toContain('发货/审出 0.00%');
+    expect(cardJson).toContain('经营指标');
+    expect(cardJson).not.toContain('签约/创建 50.00%');
+    expect(cardJson).not.toContain('发货/审出 0.00%');
     expect(markdown).toContain('签约/创建 50.00%');
     expect(markdown).toContain('发货/审出 0.00%');
   });
@@ -896,9 +929,10 @@ describe('public traffic report outputs', () => {
     const cardJson = JSON.stringify(buildPublicTrafficCard(reportContext, { markdownPath: 'report.md', workbookPath: 'report.xlsx' }));
     const markdown = buildPublicTrafficMarkdown(reportContext);
 
-    expect(cardJson).toContain('签约/创建 -');
-    expect(cardJson).toContain('审出/签约 -');
-    expect(cardJson).toContain('发货/审出 0.00%');
+    expect(cardJson).toContain('经营指标');
+    expect(cardJson).not.toContain('签约/创建 -');
+    expect(cardJson).not.toContain('审出/签约 -');
+    expect(cardJson).not.toContain('发货/审出 0.00%');
     expect(markdown).toContain('签约/创建 -');
     expect(markdown).toContain('审出/签约 -');
     expect(markdown).toContain('发货/审出 0.00%');
@@ -915,7 +949,8 @@ describe('public traffic report outputs', () => {
     const cardJson = JSON.stringify(buildPublicTrafficCard(reportContext, { markdownPath: 'report.md', workbookPath: 'report.xlsx' }));
     const markdown = buildPublicTrafficMarkdown(reportContext);
 
-    expect(cardJson).toContain('签约/创建 -');
+    expect(cardJson).toContain('经营指标');
+    expect(cardJson).not.toContain('签约/创建 -');
     expect(markdown).toContain('签约/创建 -');
   });
 
