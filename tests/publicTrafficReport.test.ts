@@ -843,6 +843,17 @@ describe('public traffic report outputs', () => {
     expect(json).toContain('关单');
   });
 
+  it('卡片履约指标在同一行展示', () => {
+    const card = buildPublicTrafficCard(contextWithOrderAnalysis, { markdownPath: 'report.md', workbookPath: 'report.xlsx' }) as { body: { elements: Array<Record<string, unknown>> } };
+    const fulfillment = card.body.elements.find((element) => element.element_id === 'funnel_fulfillment') as { columns: Array<{ elements: Array<Record<string, unknown>> }> } | undefined;
+
+    expect(fulfillment).toBeDefined();
+    const metricRows = fulfillment!.columns[0].elements.filter((element) => element.tag === 'column_set') as Array<{ columns: Array<{ elements: Array<{ content?: string }> }> }>;
+    expect(metricRows).toHaveLength(1);
+    expect(metricRows[0].columns).toHaveLength(4);
+    expect(metricRows[0].columns.map((column) => column.elements[0].content?.split('\n')[0])).toEqual(['待发货', '归还', '逾期', '关单']);
+  });
+
   it('卡片关单率低于等于35%时显示达标', () => {
     const healthy = {
       ...contextWithOrderAnalysis,

@@ -90,13 +90,13 @@ function chunkMetrics(metrics: FunnelMetric[], size = 3): FunnelMetric[][] {
   return chunks;
 }
 
-function nestedMetricColumn(title: string | null, metrics: FunnelMetric[]): Record<string, unknown> {
+function nestedMetricColumn(title: string | null, metrics: FunnelMetric[], chunkSize = 3): Record<string, unknown> {
   return {
     tag: 'column',
     width: 'weighted',
     weight: 1,
     vertical_align: 'top',
-    elements: [...(title ? [{ tag: 'markdown', content: `**${title}**` }] : []), ...chunkMetrics(metrics).map((chunk) => metricCardRow(chunk))],
+    elements: [...(title ? [{ tag: 'markdown', content: `**${title}**` }] : []), ...chunkMetrics(metrics, chunkSize).map((chunk) => metricCardRow(chunk))],
   };
 }
 
@@ -107,13 +107,13 @@ function orderMetric(page: Parameters<typeof findOrderAnalysisIndicator>[0], lab
   return [label, value, delta];
 }
 
-function nestedFunnelColumnSet(groups: Array<{ title: string | null; metrics: FunnelMetric[] }>, elementId = 'funnel_summary'): Record<string, unknown> {
+function nestedFunnelColumnSet(groups: Array<{ title: string | null; metrics: FunnelMetric[]; chunkSize?: number }>, elementId = 'funnel_summary'): Record<string, unknown> {
   return {
     tag: 'column_set',
     element_id: elementId,
     flex_mode: 'stretch',
     horizontal_spacing: '8px',
-    columns: groups.map((group) => nestedMetricColumn(group.title, group.metrics)),
+    columns: groups.map((group) => nestedMetricColumn(group.title, group.metrics, group.chunkSize)),
   };
 }
 
@@ -147,7 +147,7 @@ function funnelElements(context: PublicTrafficDataReportContext): Record<string,
       { title: '金额', metrics: [orderMetric(overview, '签约金额', ['签约完成金额（元）', '签约完成金额']), ['公域金额', `¥${one.amount.toFixed(2)}`]] },
     ], 'funnel_order'),
     nestedFunnelColumnSet([
-      { title: `履约（发货${shortDataDate(delivery?.dataDate)}｜归还${shortDataDate(returns?.dataDate)}｜关单${shortDataDate(customs?.dataDate)}）`, metrics: [orderMetric(delivery, '待发货', ['待发货订单数']), orderMetric(returns, '归还', ['归还订单数']), orderMetric(returns, '逾期', ['逾期订单数']), orderMetric(customs, '关单', ['关单数'])] },
+      { title: `履约（发货${shortDataDate(delivery?.dataDate)}｜归还${shortDataDate(returns?.dataDate)}｜关单${shortDataDate(customs?.dataDate)}）`, metrics: [orderMetric(delivery, '待发货', ['待发货订单数']), orderMetric(returns, '归还', ['归还订单数']), orderMetric(returns, '逾期', ['逾期订单数']), orderMetric(customs, '关单', ['关单数'])], chunkSize: 4 },
     ], 'funnel_fulfillment'),
   ];
 }
