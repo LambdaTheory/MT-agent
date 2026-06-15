@@ -114,7 +114,7 @@ export function derivedOrderBusinessMetrics(overview: OrderAnalysisPageData | un
 export function businessMetricLines(overview: OrderAnalysisPageData | undefined, customs: OrderAnalysisPageData | undefined): string[] {
   if (!overview && !customs) return [];
   const metrics = derivedOrderBusinessMetrics(overview, customs);
-  const statusText = metrics.closeRateStatus === '-' ? '目标<=35%' : `目标<=35%，${metrics.closeRateStatus}`;
+  const statusText = `目标<=35%，${metrics.closeRateStatus}`;
   return [`发货率 ${metrics.shipmentRate}｜关单率 ${metrics.closeRate}（${statusText}）｜客单价 ${metrics.averageOrderValue}`];
 }
 

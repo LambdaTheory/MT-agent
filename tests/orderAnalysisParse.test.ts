@@ -132,4 +132,21 @@ describe('derived order business metrics', () => {
       averageOrderValue: '-',
     });
   });
+
+  it('formats unavailable close rate status in business metric lines', () => {
+    expect(businessMetricLines(undefined, undefined)).toEqual([]);
+    const noCreated = {
+      key: 'overview' as const,
+      label: '标准订单分析',
+      dataDate: '2026-06-10',
+      indicators: [
+        { label: '创建订单数', value: '0', delta: '' },
+        { label: '签约订单数', value: '0', delta: '' },
+        { label: '发货订单数', value: '0', delta: '' },
+        { label: '签约完成金额（元）', value: '0', delta: '' },
+      ],
+    };
+
+    expect(businessMetricLines(noCreated, undefined)).toEqual(['发货率 -｜关单率 -（目标<=35%，-）｜客单价 -']);
+  });
 });
