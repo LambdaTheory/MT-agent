@@ -1,5 +1,5 @@
 import type { FeishuCardPayload } from '../notify/feishuApp.js';
-import { findOrderAnalysisIndicator, fulfillmentRateLines, shortDataDate } from './orderAnalysis.js';
+import { businessMetricLines, findOrderAnalysisIndicator, shortDataDate } from './orderAnalysis.js';
 import { resolveProductDisplayName, type ProductNameMap } from './productDisplayName.js';
 import type { PublicTrafficDataReportContext, PublicTrafficProductDataRow, PublicTrafficReportPaths } from './types.js';
 
@@ -23,9 +23,9 @@ function shortId(row: PublicTrafficProductDataRow): string {
   return row.displayProductId.replace(/^端内ID\s*/, '') || row.displayProductId;
 }
 
-function fulfillmentRateText(context: PublicTrafficDataReportContext): string | null {
-  const lines = fulfillmentRateLines(context.orderAnalysis?.pages.overview);
-  return lines.length > 0 ? ['**履约比率**', ...lines].join('\n') : null;
+function businessMetricText(context: PublicTrafficDataReportContext): string | null {
+  const lines = businessMetricLines(context.orderAnalysis?.pages.overview, context.orderAnalysis?.pages.customs);
+  return lines.length > 0 ? ['**经营指标**', ...lines].join('\n') : null;
 }
 
 function moduleCounts(context: PublicTrafficDataReportContext): Array<[string, number]> {
@@ -90,13 +90,13 @@ function chunkMetrics(metrics: FunnelMetric[], size = 3): FunnelMetric[][] {
   return chunks;
 }
 
-function nestedMetricColumn(title: string | null, metrics: FunnelMetric[]): Record<string, unknown> {
+function nestedMetricColumn(title: string | null, metrics: FunnelMetric[], chunkSize = 3): Record<string, unknown> {
   return {
     tag: 'column',
     width: 'weighted',
     weight: 1,
     vertical_align: 'top',
-    elements: [...(title ? [{ tag: 'markdown', content: `**${title}**` }] : []), ...chunkMetrics(metrics).map((chunk) => metricCardRow(chunk))],
+    elements: [...(title ? [{ tag: 'markdown', content: `**${title}**` }] : []), ...chunkMetrics(metrics, chunkSize).map((chunk) => metricCardRow(chunk))],
   };
 }
 
@@ -107,13 +107,13 @@ function orderMetric(page: Parameters<typeof findOrderAnalysisIndicator>[0], lab
   return [label, value, delta];
 }
 
-function nestedFunnelColumnSet(groups: Array<{ title: string | null; metrics: FunnelMetric[] }>, elementId = 'funnel_summary'): Record<string, unknown> {
+function nestedFunnelColumnSet(groups: Array<{ title: string | null; metrics: FunnelMetric[]; chunkSize?: number }>, elementId = 'funnel_summary'): Record<string, unknown> {
   return {
     tag: 'column_set',
     element_id: elementId,
     flex_mode: 'stretch',
     horizontal_spacing: '8px',
-    columns: groups.map((group) => nestedMetricColumn(group.title, group.metrics)),
+    columns: groups.map((group) => nestedMetricColumn(group.title, group.metrics, group.chunkSize)),
   };
 }
 
@@ -143,11 +143,11 @@ function funnelElements(context: PublicTrafficDataReportContext): Record<string,
       { title: null, metrics: [['曝光', String(one.exposure)], ['公域访问', String(one.publicVisits)], ['商品页访问', String(one.dashboardVisits)]] },
     ], 'funnel_public'),
     nestedFunnelColumnSet([
-      { title: `订单（${shortDataDate(overview?.dataDate)}）`, metrics: [orderMetric(overview, '创建订单', ['创建订单数']), orderMetric(overview, '签约订单', ['签约订单数']), orderMetric(overview, '审出订单', ['审出订单数'])] },
-      { title: '订单补充', metrics: [orderMetric(overview, '发货订单', ['发货订单数']), orderMetric(overview, '签约金额', ['签约完成金额（元）', '签约完成金额']), ['公域金额', `¥${one.amount.toFixed(2)}`]] },
+      { title: `订单经营（${shortDataDate(overview?.dataDate)}）`, metrics: [orderMetric(overview, '创建订单', ['创建订单数']), orderMetric(overview, '签约订单', ['签约订单数']), orderMetric(overview, '发货订单', ['发货订单数'])] },
+      { title: '金额', metrics: [orderMetric(overview, '签约金额', ['签约完成金额（元）', '签约完成金额']), ['公域金额', `¥${one.amount.toFixed(2)}`]] },
     ], 'funnel_order'),
     nestedFunnelColumnSet([
-      { title: `履约（发货${shortDataDate(delivery?.dataDate)}｜归还${shortDataDate(returns?.dataDate)}｜关单${shortDataDate(customs?.dataDate)}）`, metrics: [orderMetric(delivery, '待发货', ['待发货订单数']), orderMetric(returns, '归还', ['归还订单数']), orderMetric(returns, '逾期', ['逾期订单数']), orderMetric(customs, '关单', ['关单数'])] },
+      { title: `履约（发货${shortDataDate(delivery?.dataDate)}｜归还${shortDataDate(returns?.dataDate)}｜关单${shortDataDate(customs?.dataDate)}）`, metrics: [orderMetric(delivery, '待发货', ['待发货订单数']), orderMetric(returns, '归还', ['归还订单数']), orderMetric(returns, '逾期', ['逾期订单数']), orderMetric(customs, '关单', ['关单数'])], chunkSize: 4 },
     ], 'funnel_fulfillment'),
   ];
 }
@@ -432,7 +432,7 @@ export function buildPublicTrafficCard(context: PublicTrafficDataReportContext, 
       elements: [
         ...funnelElements(context),
         { tag: 'markdown', content: rateText(one) },
-        ...markdownElement(fulfillmentRateText(context)),
+        ...markdownElement(businessMetricText(context)),
         ...markdownElement(dataQualityText(context)),
         ...optionalElement(moduleColumnSet(context)),
         { tag: 'hr' },

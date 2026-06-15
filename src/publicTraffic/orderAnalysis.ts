@@ -72,9 +72,50 @@ export function findOrderAnalysisNumber(page: OrderAnalysisPageData | undefined,
   return parseOrderAnalysisNumber(findOrderAnalysisIndicator(page, labels));
 }
 
-function formatFulfillmentRate(numerator: number | null, denominator: number | null): string {
+function formatRate(numerator: number | null, denominator: number | null): string {
   if (numerator === null || denominator === null || denominator <= 0) return '-';
   return `${((numerator / denominator) * 100).toFixed(2)}%`;
+}
+
+function formatCurrency(numerator: number | null, denominator: number | null): string {
+  if (numerator === null || denominator === null || denominator <= 0) return '-';
+  return `¥${(numerator / denominator).toFixed(2)}`;
+}
+
+function closeRateStatus(closeRate: string): '达标' | '风险' | '-' {
+  if (closeRate === '-') return '-';
+  const value = Number(closeRate.replace('%', ''));
+  if (!Number.isFinite(value)) return '-';
+  return value <= 35 ? '达标' : '风险';
+}
+
+export interface DerivedOrderBusinessMetrics {
+  shipmentRate: string;
+  closeRate: string;
+  closeRateStatus: '达标' | '风险' | '-';
+  averageOrderValue: string;
+}
+
+export function derivedOrderBusinessMetrics(overview: OrderAnalysisPageData | undefined, customs: OrderAnalysisPageData | undefined): DerivedOrderBusinessMetrics {
+  const created = findOrderAnalysisNumber(overview, ['创建订单数']);
+  const signed = findOrderAnalysisNumber(overview, ['签约订单数']);
+  const shipped = findOrderAnalysisNumber(overview, ['发货订单数']);
+  const signedAmount = findOrderAnalysisNumber(overview, ['签约完成金额（元）', '签约完成金额']);
+  const closed = findOrderAnalysisNumber(customs, ['关单数']);
+  const closeRate = formatRate(closed, created);
+  return {
+    shipmentRate: formatRate(shipped, created),
+    closeRate,
+    closeRateStatus: closeRateStatus(closeRate),
+    averageOrderValue: formatCurrency(signedAmount, signed),
+  };
+}
+
+export function businessMetricLines(overview: OrderAnalysisPageData | undefined, customs: OrderAnalysisPageData | undefined): string[] {
+  if (!overview && !customs) return [];
+  const metrics = derivedOrderBusinessMetrics(overview, customs);
+  const statusText = metrics.closeRateStatus === '-' ? '目标<=35%' : `目标<=35%，${metrics.closeRateStatus}`;
+  return [`发货率 ${metrics.shipmentRate}｜关单率 ${metrics.closeRate}（${statusText}）｜客单价 ${metrics.averageOrderValue}`];
 }
 
 export function fulfillmentRateLines(overview: OrderAnalysisPageData | undefined): string[] {
@@ -84,7 +125,7 @@ export function fulfillmentRateLines(overview: OrderAnalysisPageData | undefined
   const reviewed = findOrderAnalysisNumber(overview, ['审出订单数']);
   const shipped = findOrderAnalysisNumber(overview, ['发货订单数']);
   return [
-    `签约/创建 ${formatFulfillmentRate(signed, created)}｜审出/签约 ${formatFulfillmentRate(reviewed, signed)}｜发货/审出 ${formatFulfillmentRate(shipped, reviewed)}`,
+    `签约/创建 ${formatRate(signed, created)}｜审出/签约 ${formatRate(reviewed, signed)}｜发货/审出 ${formatRate(shipped, reviewed)}`,
     '暂无昨日履约率对比',
   ];
 }

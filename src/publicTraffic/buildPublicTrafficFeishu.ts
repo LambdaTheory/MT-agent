@@ -1,4 +1,5 @@
 import { flattenDiagnosticItems, sortedActions } from './diagnosticItems.js';
+import { businessMetricLines, findOrderAnalysisIndicator } from './orderAnalysis.js';
 import type {
   ExposureOverviewMetric,
   PublicTrafficDataReportContext,
@@ -79,10 +80,23 @@ function topExposureLines(rows: PublicTrafficProductDataRow[]): string[] {
   return items.map(productLine);
 }
 
-function funnelLines(summary: PublicTrafficDataSummary): string[] {
+function orderBusinessLine(context: PublicTrafficDataReportContext): string[] {
+  const orderAnalysis = context.orderAnalysis;
+  if (!orderAnalysis) return [];
+  const overview = orderAnalysis.pages.overview;
+  const customs = orderAnalysis.pages.customs;
+  return [
+    `订单经营：创建订单 ${findOrderAnalysisIndicator(overview, ['创建订单数'])}｜签约订单 ${findOrderAnalysisIndicator(overview, ['签约订单数'])}｜发货订单 ${findOrderAnalysisIndicator(overview, ['发货订单数'])}｜关单 ${findOrderAnalysisIndicator(customs, ['关单数'])}`,
+  ];
+}
+
+function funnelLines(context: PublicTrafficDataReportContext): string[] {
+  const summary = context.summary['1d'];
+  const business = businessMetricLines(context.orderAnalysis?.pages.overview, context.orderAnalysis?.pages.customs);
   return [
     `曝光 ${summary.exposure}｜公域访问 ${summary.publicVisits}｜商品页访问 ${summary.dashboardVisits}｜订单 ${summary.createdOrders}｜发货 ${summary.shippedOrders}｜金额 ¥${summary.amount.toFixed(2)}`,
-    `曝光到访问率 ${percent(summary.exposureVisitRate)}｜访问到发货率 ${percent(summary.visitShipmentRate)}`,
+    ...orderBusinessLine(context),
+    ...(business.length ? business : [`曝光到访问率 ${percent(summary.exposureVisitRate)}｜访问到发货率 ${percent(summary.visitShipmentRate)}`]),
   ];
 }
 
@@ -107,7 +121,6 @@ function appendSection(lines: string[], title: string, items: string[]): void {
 
 export function buildPublicTrafficFeishuText(input: PublicTrafficDataReportContext | PublicTrafficReportContext, _paths: PublicTrafficReportPaths): string {
   const context = toDataContext(input);
-  const one = context.summary['1d'];
   const lines = [
     `公域数据日报 ${context.date}`,
     '',
@@ -115,7 +128,7 @@ export function buildPublicTrafficFeishuText(input: PublicTrafficDataReportConte
     ...context.conclusions.map((item) => `${item.label}：${item.text}`),
     '',
     '今日漏斗',
-    ...funnelLines(one),
+    ...funnelLines(context),
   ];
   const moduleLine = moduleCountLine(context);
   if (context.dataQualityNotes?.length) lines.push('', '数据提示', ...context.dataQualityNotes);
