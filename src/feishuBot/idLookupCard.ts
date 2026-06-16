@@ -5,7 +5,7 @@ export interface IdLookupCardPayload extends FeishuCardPayload {
   body: { elements: Record<string, unknown>[] };
 }
 
-export function buildIdLookupCard(options: { defaultValue?: string } = {}): IdLookupCardPayload {
+export function buildIdLookupCard(options: { defaultValue?: string; resultText?: string } = {}): IdLookupCardPayload {
   const input: Record<string, unknown> = {
     tag: 'input',
     element_id: 'id_lookup_query',
@@ -18,58 +18,35 @@ export function buildIdLookupCard(options: { defaultValue?: string } = {}): IdLo
   };
   if (options.defaultValue !== undefined) input.default_value = options.defaultValue;
 
+  const elements: Record<string, unknown>[] = [
+    {
+      tag: 'markdown',
+      content: '这是常驻商品ID互查卡，可保留在会话里反复查询端内ID与平台商品ID。',
+    },
+    {
+      tag: 'form',
+      name: 'id_lookup_form',
+      elements: [
+        input,
+        {
+          tag: 'button',
+          text: { tag: 'plain_text', content: '查询' },
+          type: 'primary',
+          form_action_type: 'submit',
+          name: 'id_lookup_submit',
+          behaviors: [{ type: 'callback', value: { action: 'id_lookup' } }],
+        },
+      ],
+    },
+  ];
+  if (options.resultText) {
+    elements.push({ tag: 'hr' }, { tag: 'markdown', content: `**查询结果**\n\n${options.resultText}` });
+  }
+
   return {
     schema: '2.0',
     config: { wide_screen_mode: true },
     header: { title: { tag: 'plain_text', content: '商品ID互查' }, template: 'blue' },
-    body: {
-      elements: [
-        {
-          tag: 'form',
-          name: 'id_lookup_form',
-          elements: [
-            input,
-            {
-              tag: 'column_set',
-              flex_mode: 'none',
-              background_style: 'default',
-              horizontal_spacing: 'default',
-              columns: [
-                {
-                  tag: 'column',
-                  width: 'auto',
-                  vertical_align: 'top',
-                  elements: [
-                    {
-                      tag: 'button',
-                      text: { tag: 'plain_text', content: '查询' },
-                      type: 'primary',
-                      action_type: 'form_submit',
-                      name: 'id_lookup_submit',
-                      behaviors: [{ type: 'callback', value: { action: 'id_lookup' } }],
-                    },
-                  ],
-                },
-                {
-                  tag: 'column',
-                  width: 'auto',
-                  vertical_align: 'top',
-                  elements: [
-                    {
-                      tag: 'button',
-                      text: { tag: 'plain_text', content: '清空' },
-                      type: 'default',
-                      action_type: 'form_reset',
-                      name: 'id_lookup_reset',
-                    },
-                  ],
-                },
-              ],
-              margin: '0px',
-            },
-          ],
-        },
-      ],
-    },
+    body: { elements },
   };
 }

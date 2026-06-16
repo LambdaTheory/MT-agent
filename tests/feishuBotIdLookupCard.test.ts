@@ -26,6 +26,8 @@ describe('buildIdLookupCard', () => {
     expect(card.schema).toBe('2.0');
     const form = findElement(card, (entry) => entry.tag === 'form');
     expect(form).toMatchObject({ tag: 'form', name: 'id_lookup_form' });
+    expect(JSON.stringify(card)).toContain('常驻');
+    expect(JSON.stringify(card)).toContain('反复查询');
   });
 
   it('contains the lookup input', () => {
@@ -35,17 +37,28 @@ describe('buildIdLookupCard', () => {
 
   it('contains a submit button that callbacks id_lookup', () => {
     const button = findElement(buildIdLookupCard(), (entry) => entry.tag === 'button' && entry.name === 'id_lookup_submit');
-    expect(button).toMatchObject({ tag: 'button', action_type: 'form_submit' });
+    expect(button).toMatchObject({ tag: 'button', form_action_type: 'submit' });
     expect(button?.behaviors).toEqual([{ type: 'callback', value: { action: 'id_lookup' } }]);
   });
 
-  it('contains a reset button', () => {
+  it('keeps the submit button as a direct form element so Feishu accepts the form', () => {
+    const form = buildIdLookupCard().body.elements.find((entry) => entry.tag === 'form') as { elements?: Array<Record<string, unknown>> } | undefined;
+    expect(form?.elements?.some((entry) => entry.tag === 'button' && entry.form_action_type === 'submit')).toBe(true);
+  });
+
+  it('does not contain a reset button', () => {
     const button = findElement(buildIdLookupCard(), (entry) => entry.tag === 'button' && entry.name === 'id_lookup_reset');
-    expect(button).toMatchObject({ tag: 'button', action_type: 'form_reset' });
+    expect(button).toBeUndefined();
   });
 
   it('sets a default lookup value', () => {
     const input = findElement(buildIdLookupCard({ defaultValue: '565' }), (entry) => entry.tag === 'input' && entry.name === 'lookup_query');
     expect(input?.default_value).toBe('565');
+  });
+
+  it('renders lookup result inside the card', () => {
+    const card = buildIdLookupCard({ defaultValue: '565', resultText: '端内ID 565 对应平台商品ID 2000000000000000000001' });
+    expect(JSON.stringify(card)).toContain('查询结果');
+    expect(JSON.stringify(card)).toContain('端内ID 565 对应平台商品ID');
   });
 });
