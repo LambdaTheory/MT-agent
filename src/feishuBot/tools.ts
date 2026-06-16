@@ -3,6 +3,9 @@ import { sendFeishuCard } from '../notify/feishu.js';
 import { parseAgentDataIntent } from '../agentData/intent.js';
 import { buildPublicTrafficCard } from '../publicTraffic/buildPublicTrafficCard.js';
 import { buildPublicTrafficFeishuText } from '../publicTraffic/buildPublicTrafficFeishu.js';
+import { buildOperationsLearningQuestionCard, selectOperationsLearningQuizItems } from '../operationsLearningLoop/quiz.js';
+import { formatIdLookupResult, lookupProductId } from './idLookup.js';
+import { buildIdLookupCard } from './idLookupCard.js';
 import { findLatestReportContext, formatLatestSummary, formatProductRows, queryProductRows } from './reportStore.js';
 import { parseLlmToolSelection, type LlmToolSelectionProvider } from './llmProvider.js';
 import { runReadOnlyToolSelection } from './llmReadOnlyToolAdapter.js';
@@ -20,7 +23,7 @@ export interface HandleBotIntentOptions {
 
 export async function handleBotIntent(intent: BotIntent, outputDir = 'output', options: HandleBotIntentOptions = {}): Promise<BotResponse> {
   if (intent.type === 'help') {
-    return { text: '可用命令：今日概况｜查询 565｜跑日报｜重发日报｜推送日报到群｜帮助' };
+    return { text: '可用命令：今日概况｜查询 565｜查ID 565｜商品ID互查｜运营学习｜跑日报｜重发日报｜推送日报到群｜帮助' };
   }
 
   if (intent.type === 'latest_summary') {
@@ -31,6 +34,26 @@ export async function handleBotIntent(intent: BotIntent, outputDir = 'output', o
   if (intent.type === 'query_product') {
     const latest = await findLatestReportContext(outputDir);
     return { text: latest ? formatProductRows(queryProductRows(latest.context, intent.keyword)) : '还没有找到公域日报上下文。' };
+  }
+
+  if (intent.type === 'lookup_product_id') {
+    const latest = await findLatestReportContext(outputDir);
+    return { text: latest ? formatIdLookupResult(lookupProductId(latest.context, intent.query)) : '还没有找到公域日报上下文。' };
+  }
+
+  if (intent.type === 'lookup_product_id_card') {
+    return { text: '请输入端内ID或平台商品ID进行互查。', card: buildIdLookupCard() };
+  }
+
+  if (intent.type === 'operations_learning_quiz') {
+    const latest = await findLatestReportContext(outputDir);
+    if (!latest) return { text: '还没有找到公域日报上下文。' };
+    const items = selectOperationsLearningQuizItems(latest.context);
+    if (items.length === 0) return { text: '今日暂无可用于学习的运营候选。' };
+    return {
+      text: `运营学习 loop 测验 ${latest.context.date}（第 1/${items.length} 题）`,
+      card: buildOperationsLearningQuestionCard(latest.context.date, items[0], { index: 1, total: items.length }),
+    };
   }
 
   if (intent.type === 'run_public_traffic_report') {

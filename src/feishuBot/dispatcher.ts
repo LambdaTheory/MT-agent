@@ -68,6 +68,8 @@ function canonicalizeIntent(intent: BotIntent): BotIntent {
   switch (intent.type) {
     case 'help':
     case 'latest_summary':
+    case 'operations_learning_quiz':
+    case 'lookup_product_id_card':
     case 'push_latest_report_to_group':
       return { type: intent.type };
     case 'run_public_traffic_report':
@@ -75,6 +77,8 @@ function canonicalizeIntent(intent: BotIntent): BotIntent {
       return { type: intent.type, sendTo: intent.sendTo };
     case 'query_product':
       return { type: intent.type, keyword: intent.keyword };
+    case 'lookup_product_id':
+      return { type: intent.type, query: intent.query };
     case 'unknown':
       return { type: intent.type, text: intent.text };
   }

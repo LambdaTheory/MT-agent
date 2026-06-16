@@ -62,7 +62,17 @@ async function writeContext(): Promise<string> {
 
 describe('handleBotIntent', () => {
   it('returns help text', async () => {
-    await expect(handleBotIntent({ type: 'help' })).resolves.toEqual({ text: '可用命令：今日概况｜查询 565｜跑日报｜重发日报｜推送日报到群｜帮助' });
+    await expect(handleBotIntent({ type: 'help' })).resolves.toEqual({ text: '可用命令：今日概况｜查询 565｜查ID 565｜商品ID互查｜运营学习｜跑日报｜重发日报｜推送日报到群｜帮助' });
+  });
+
+  it('returns the product ID lookup input card', async () => {
+    const response = await handleBotIntent({ type: 'lookup_product_id_card' });
+    expect(response.text).toContain('请输入端内ID或平台商品ID');
+    expect(response.card).toBeDefined();
+    expect(response.card?.schema).toBe('2.0');
+    expect(JSON.stringify(response.card)).toContain('id_lookup_form');
+    expect(JSON.stringify(response.card)).toContain('lookup_query');
+    expect(JSON.stringify(response.card)).toContain('id_lookup');
   });
 
   it('answers latest summary from report context', async () => {
@@ -77,6 +87,20 @@ describe('handleBotIntent', () => {
     const response = await handleBotIntent({ type: 'query_product', keyword: '565' }, outputDir);
     expect(response.text).toContain('端内ID 565 iPhone 15');
     expect(response.text).toContain('1日：曝光 10');
+  });
+
+  it('returns an operations learning question card', async () => {
+    const outputDir = await writeContext();
+    const response = await handleBotIntent({ type: 'operations_learning_quiz' }, outputDir);
+    expect(response.text).toContain('运营学习 loop 测验');
+    expect(response.card).toBeDefined();
+    expect(response.card?.header).toMatchObject({ title: { content: expect.stringContaining('运营学习 loop 测验') } });
+    expect(JSON.stringify(response.card)).toContain('suggested_action');
+  });
+
+  it('returns missing context text for operations learning quiz', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-bot-tools-empty-'));
+    await expect(handleBotIntent({ type: 'operations_learning_quiz' }, outputDir)).resolves.toEqual({ text: '还没有找到公域日报上下文。' });
   });
 
   it('answers task pool questions through agent data understanding', async () => {
