@@ -84,6 +84,7 @@ export interface PublicTrafficReportSectionItem {
   identifier: string;
   action: string;
   reason: string;
+  priority?: 'high' | 'medium' | 'low';
 }
 
 export interface PublicTrafficReportContext {
