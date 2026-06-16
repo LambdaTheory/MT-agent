@@ -200,3 +200,28 @@ export async function replyFeishuMessageText(config: FeishuReplyConfig, text: st
   if (parsed.code !== 0) return { sent: false, channel: 'app', reason: `message reply failed: ${body}` };
   return { sent: true, channel: 'app' };
 }
+
+export async function replyFeishuMessageCard(config: FeishuReplyConfig, card: FeishuCardPayload, fetchImpl: typeof fetch = fetch): Promise<FeishuAppSendResult> {
+  const token = await getTenantAccessToken(config, fetchImpl);
+  if ('reason' in token) {
+    return { sent: false, channel: 'app', reason: token.reason };
+  }
+
+  const response = await fetchImpl(`https://open.feishu.cn/open-apis/im/v1/messages/${encodeURIComponent(config.messageId)}/reply`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token.token}`,
+    },
+    body: JSON.stringify({
+      msg_type: 'interactive',
+      content: JSON.stringify(card),
+    }),
+  });
+
+  const body = await response.text();
+  if (!response.ok) return { sent: false, channel: 'app', reason: `message reply failed: http ${response.status}: ${body}` };
+  const parsed = JSON.parse(body) as { code?: number };
+  if (parsed.code !== 0) return { sent: false, channel: 'app', reason: `message reply failed: ${body}` };
+  return { sent: true, channel: 'app' };
+}
