@@ -12,7 +12,7 @@ const controls: ActivityControlSummary[] = [
 
 describe('analyzeDifferentialPricingScout', () => {
   it('marks required form signals present and counts mutating controls', () => {
-    const analysis = analyzeDifferentialPricingScout({ controls, bodyText: '差异化定价 活动名称 选择商品 优惠金额 活动时间', detectedWorkarounds: ['modal-scroll'] });
+    const analysis = analyzeDifferentialPricingScout({ controls, bodyText: '差异化定价 活动名称 选择商品 优惠金额 活动时间', detectedWorkarounds: ['modal-scroll'], selectedProductRows: [] });
 
     expect(analysis.requiredSignals.every((signal) => signal.present)).toBe(true);
     expect(analysis.mutatingControlCount).toBe(1);
@@ -22,7 +22,7 @@ describe('analyzeDifferentialPricingScout', () => {
   });
 
   it('returns deterministic missing signals for empty scout input', () => {
-    const analysis = analyzeDifferentialPricingScout({ controls: [], bodyText: '', detectedWorkarounds: [] });
+    const analysis = analyzeDifferentialPricingScout({ controls: [], bodyText: '', detectedWorkarounds: [], selectedProductRows: [] });
 
     expect(analysis.requiredSignals.map((signal) => ({ key: signal.key, present: signal.present }))).toEqual([
       { key: 'activity_name', present: false },
@@ -34,29 +34,21 @@ describe('analyzeDifferentialPricingScout', () => {
     expect(analysis.nextSteps[0]).toContain('缺少页面信号');
   });
 
-  it('records selected merchant product ids from the configured activity table', () => {
+  it('records selected product ids from DOM data-row-key extraction', () => {
     const analysis = analyzeDifferentialPricingScout({
       controls,
-      bodyText: [
-        '已选3个商品',
-        '预览',
-        '索尼Sony ZV1 4K视频v....',
-        'ID:平台202603...1337商家81665859-505-03311656',
-        '8.68~90.00元/日',
-        '移除',
-        '预览',
-        '佳能CCD IXUS130 卡片....',
-        'ID:平台202604...3387商家81665859-584-04141147',
-        '4.89~66.90元/日',
-        '移除',
-      ].join('\n'),
+      bodyText: '已选2个商品',
       detectedWorkarounds: [],
+      selectedProductRows: [
+        { rowKey: '2026061522000833579766', name: '影石insta360 Ace P....', merchantProductId: '商家81665859-870-06151612' },
+        { rowKey: '2026061522000333557499', name: '大疆Osmo pocket4 一....', merchantProductId: '商家81665859-853-06151449' },
+      ],
     });
 
-    expect(analysis.selectedProductCount).toBe(3);
+    expect(analysis.selectedProductCount).toBe(2);
     expect(analysis.selectedProducts).toEqual([
-      { name: '索尼Sony ZV1 4K视频v....', platformIdFragment: '平台202603...1337', merchantProductId: '商家81665859-505-03311656' },
-      { name: '佳能CCD IXUS130 卡片....', platformIdFragment: '平台202604...3387', merchantProductId: '商家81665859-584-04141147' },
+      { rowKey: '2026061522000833579766', name: '影石insta360 Ace P....', merchantProductId: '商家81665859-870-06151612' },
+      { rowKey: '2026061522000333557499', name: '大疆Osmo pocket4 一....', merchantProductId: '商家81665859-853-06151449' },
     ]);
   });
 });

@@ -10,8 +10,8 @@ export interface DifferentialPricingScoutSignal {
 }
 
 export interface DifferentialPricingSelectedProduct {
+  rowKey: string;
   name: string;
-  platformIdFragment?: string;
   merchantProductId: string;
 }
 
@@ -30,6 +30,7 @@ export interface DifferentialPricingScoutAnalysisInput {
   controls: ActivityControlSummary[];
   bodyText: string;
   detectedWorkarounds: string[];
+  selectedProductRows: DifferentialPricingSelectedProduct[];
 }
 
 const signalDefinitions: Array<{ key: DifferentialPricingSignalKey; label: string; patterns: RegExp[] }> = [
@@ -62,26 +63,12 @@ function selectedProductCountFrom(bodyText: string): number {
   return match ? Number(match[1]) : 0;
 }
 
-function selectedProductsFrom(bodyText: string): DifferentialPricingSelectedProduct[] {
-  const lines = bodyText.split(/\r?\n/).map(normalized).filter(Boolean);
-  const products: DifferentialPricingSelectedProduct[] = [];
-  for (let index = 0; index < lines.length; index += 1) {
-    const merchantProductId = lines[index].match(/商家\d+(?:-\d+)+/)?.[0];
-    if (!merchantProductId) continue;
-
-    const platformIdFragment = lines[index].match(/平台[^\s]+?(?=商家)/)?.[0];
-    const name = lines.slice(Math.max(0, index - 3), index).reverse().find((line) => line !== '预览' && !line.startsWith('ID:')) ?? '';
-    products.push({ name, ...(platformIdFragment ? { platformIdFragment } : {}), merchantProductId });
-  }
-  return products;
-}
-
 export function analyzeDifferentialPricingScout(input: DifferentialPricingScoutAnalysisInput): DifferentialPricingScoutAnalysis {
   const requiredSignals = signalDefinitions.map((definition) => {
     const evidence = evidenceFor(definition.patterns, input.controls, input.bodyText);
     return { key: definition.key, label: definition.label, present: evidence.length > 0, evidence };
   });
-  const selectedProducts = selectedProductsFrom(input.bodyText);
+  const selectedProducts = input.selectedProductRows;
   const mutatingControls = input.controls.filter((control) => control.mutating).map((control) => normalized(control.text)).filter(Boolean);
   const missingLabels = requiredSignals.filter((signal) => !signal.present).map((signal) => signal.label);
 

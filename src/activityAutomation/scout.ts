@@ -4,7 +4,7 @@ import type { Page } from 'playwright';
 import { activityAutomationOutputDir, type ActivityAutomationConfig } from './config.js';
 import { collectVisibleActivityControls, type ActivityControlSummary } from './pageModel.js';
 import { createEmptyActivityRecordingDraft } from './recording.js';
-import { analyzeDifferentialPricingScout, type DifferentialPricingScoutAnalysis } from './scoutAnalysis.js';
+import { analyzeDifferentialPricingScout, type DifferentialPricingScoutAnalysis, type DifferentialPricingSelectedProduct } from './scoutAnalysis.js';
 import { detectActivityFormWorkarounds } from './workarounds.js';
 
 export interface ActivityScoutResult {
@@ -25,6 +25,20 @@ async function safeBodyText(page: Page): Promise<string> {
   return (await page.locator('body').innerText({ timeout: 10000 }).catch(() => '')).replace(/\r\n/g, '\n');
 }
 
+async function extractSelectedProductRows(page: Page): Promise<DifferentialPricingSelectedProduct[]> {
+  return page.evaluate(() => {
+    const rows = document.querySelectorAll('.ant-table-tbody tr[data-row-key]');
+    return Array.from(rows).map((row) => {
+      const rowKey = row.getAttribute('data-row-key') ?? '';
+      const text = (row.textContent ?? '').replace(/\s+/g, ' ').trim();
+      const merchantProductId = text.match(/商家\d+(?:-\d+)+/)?.[0] ?? '';
+      const nameEl = row.querySelector('.goodsTitle___oa1fI span');
+      const name = nameEl ? (nameEl.textContent ?? '').replace(/\s+/g, ' ').trim() : '';
+      return { rowKey, name, merchantProductId };
+    }).filter((product) => product.rowKey && product.merchantProductId);
+  });
+}
+
 export async function scoutActivityFormPage(page: Page, config: ActivityAutomationConfig): Promise<ActivityScoutResult> {
   const outputDir = activityAutomationOutputDir(config);
   await mkdir(outputDir, { recursive: true });
@@ -39,7 +53,8 @@ export async function scoutActivityFormPage(page: Page, config: ActivityAutomati
   const controls = await collectVisibleActivityControls(page);
   const detectedWorkarounds = await detectActivityFormWorkarounds(page);
   const bodyText = await safeBodyText(page);
-  const analysis = analyzeDifferentialPricingScout({ controls, bodyText, detectedWorkarounds });
+  const selectedProductRows = await extractSelectedProductRows(page);
+  const analysis = analyzeDifferentialPricingScout({ controls, bodyText, detectedWorkarounds, selectedProductRows });
 
   await page.screenshot({ path: screenshotPath, fullPage: true });
   await writeFile(controlsPath, `${JSON.stringify(controls, null, 2)}\n`, 'utf8');
