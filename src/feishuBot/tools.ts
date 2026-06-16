@@ -6,6 +6,7 @@ import { buildPublicTrafficFeishuText } from '../publicTraffic/buildPublicTraffi
 import { buildOperationsLearningQuestionCard, selectOperationsLearningQuizItems } from '../operationsLearningLoop/quiz.js';
 import { formatIdLookupResult, lookupProductId } from './idLookup.js';
 import { buildIdLookupCard } from './idLookupCard.js';
+import { buildRentalPricePreviewCard, createRentalPriceSkillClient, type RentalPriceSkillClient } from './rentalPrice.js';
 import { findLatestReportContext, formatLatestSummary, formatProductRows, queryProductRows } from './reportStore.js';
 import { parseLlmToolSelection, type LlmToolSelectionProvider } from './llmProvider.js';
 import { runReadOnlyToolSelection } from './llmReadOnlyToolAdapter.js';
@@ -19,6 +20,7 @@ const UNKNOWN_GUIDANCE = '我现在可以查：今日概况、商品、新链接
 
 export interface HandleBotIntentOptions {
   llmToolSelector?: LlmToolSelectionProvider;
+  rentalPriceClient?: RentalPriceSkillClient;
 }
 
 export async function handleBotIntent(intent: BotIntent, outputDir = 'output', options: HandleBotIntentOptions = {}): Promise<BotResponse> {
@@ -43,6 +45,12 @@ export async function handleBotIntent(intent: BotIntent, outputDir = 'output', o
 
   if (intent.type === 'lookup_product_id_card') {
     return { text: '已打开常驻商品ID互查卡，可保留在会话里反复查询。', card: buildIdLookupCard() };
+  }
+
+  if (intent.type === 'rental_price_change') {
+    const rentalPriceClient = options.rentalPriceClient ?? createRentalPriceSkillClient();
+    const preview = await rentalPriceClient.preview(intent.request);
+    return { text: `请确认商品 ${intent.productId} 改价`, card: buildRentalPricePreviewCard(preview) };
   }
 
   if (intent.type === 'operations_learning_quiz') {

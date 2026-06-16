@@ -1,6 +1,7 @@
 import { parseBotIntent } from './intent.js';
 import { handleBotIntent } from './tools.js';
 import type { LlmToolSelectionProvider } from './llmProvider.js';
+import type { RentalPriceSkillClient } from './rentalPrice.js';
 import type { BotIntent, BotIntentResolver, BotResponse, FeishuBotDispatchResult, FeishuBotIncomingTextMessage } from './types.js';
 
 export interface FeishuMessageDispatcherConfig {
@@ -10,6 +11,7 @@ export interface FeishuMessageDispatcherConfig {
   resolveIntent?: BotIntentResolver;
   handleIntent?: (intent: BotIntent, outputDir?: string) => Promise<BotResponse>;
   llmToolSelector?: LlmToolSelectionProvider;
+  rentalPriceClient?: RentalPriceSkillClient;
   logError?: (error: unknown, message: FeishuBotIncomingTextMessage) => void;
 }
 
@@ -79,6 +81,8 @@ function canonicalizeIntent(intent: BotIntent): BotIntent {
       return { type: intent.type, keyword: intent.keyword };
     case 'lookup_product_id':
       return { type: intent.type, query: intent.query };
+    case 'rental_price_change':
+      return { type: intent.type, productId: intent.productId, request: intent.request };
     case 'unknown':
       return { type: intent.type, text: intent.text };
   }
@@ -86,7 +90,7 @@ function canonicalizeIntent(intent: BotIntent): BotIntent {
 
 export function createFeishuMessageDispatcher(config: FeishuMessageDispatcherConfig = {}): FeishuMessageDispatcher {
   const resolveIntent = config.resolveIntent ?? ((text: string) => parseBotIntent(text));
-  const handleIntent = config.handleIntent ?? ((intent, outputDir) => handleBotIntent(intent, outputDir, { llmToolSelector: config.llmToolSelector }));
+  const handleIntent = config.handleIntent ?? ((intent, outputDir) => handleBotIntent(intent, outputDir, { llmToolSelector: config.llmToolSelector, rentalPriceClient: config.rentalPriceClient }));
   const logError = config.logError ?? ((error, message) => console.error(`飞书消息处理失败 ${message.messageId}:`, error));
 
   return {
