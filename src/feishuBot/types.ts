@@ -1,3 +1,5 @@
+import type { FeishuCardPayload } from '../notify/feishuApp.js';
+
 export type FeishuSendTo = 'personal' | 'group' | 'both';
 
 export type BotIntent =
@@ -6,11 +8,15 @@ export type BotIntent =
   | { type: 'resend_latest_report'; sendTo?: FeishuSendTo }
   | { type: 'push_latest_report_to_group' }
   | { type: 'latest_summary' }
+  | { type: 'operations_learning_quiz' }
   | { type: 'query_product'; keyword: string }
+  | { type: 'lookup_product_id_card' }
+  | { type: 'lookup_product_id'; query: string }
   | { type: 'unknown'; text: string };
 
 export interface BotResponse {
   text: string;
+  card?: FeishuCardPayload;
 }
 
 export interface FeishuMessageEvent {

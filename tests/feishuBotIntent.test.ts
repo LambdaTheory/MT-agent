@@ -21,6 +21,11 @@ describe('parseBotIntent', () => {
     expect(parseBotIntent('推送日报到群')).toEqual({ type: 'push_latest_report_to_group' });
   });
 
+  it('parses operations learning quiz intent', () => {
+    expect(parseBotIntent('运营学习')).toEqual({ type: 'operations_learning_quiz' });
+    expect(parseBotIntent('loop测验')).toEqual({ type: 'operations_learning_quiz' });
+  });
+
   it('parses latest summary intent', () => {
     expect(parseBotIntent('今日概况')).toEqual({ type: 'latest_summary' });
     expect(parseBotIntent('今天数据')).toEqual({ type: 'latest_summary' });
@@ -42,6 +47,16 @@ describe('parseBotIntent', () => {
     expect(parseBotIntent('查询商品 721')).toEqual({ type: 'query_product', keyword: '721' });
     expect(parseBotIntent('查商品 721')).toEqual({ type: 'query_product', keyword: '721' });
     expect(parseBotIntent('商品 iPhone')).toEqual({ type: 'query_product', keyword: 'iPhone' });
+  });
+
+  it('keeps explicit ID lookup intent distinct from operations learning', () => {
+    expect(parseBotIntent('查ID 565')).toEqual({ type: 'lookup_product_id', query: '565' });
+  });
+
+  it('parses ID lookup card intent without a query', () => {
+    expect(parseBotIntent('商品ID互查')).toEqual({ type: 'lookup_product_id_card' });
+    expect(parseBotIntent('ID查询')).toEqual({ type: 'lookup_product_id_card' });
+    expect(parseBotIntent('查ID')).toEqual({ type: 'lookup_product_id_card' });
   });
 
   it('parses explicit product lookup questions', () => {
