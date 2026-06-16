@@ -13,6 +13,7 @@ export async function runActivityAutomationCli(): Promise<void> {
     `输出目录: ${result.outputDir}`,
     `截图: ${result.screenshotPath}`,
     `控件清单: ${result.controlsPath}`,
+    `侦察分析: ${result.analysisPath}`,
     `录制草稿: ${result.recordingDraftPath}`,
     `疑似可提交/保存控件数量: ${result.controls.filter((control) => control.mutating).length}`,
   ].join('\n'));
