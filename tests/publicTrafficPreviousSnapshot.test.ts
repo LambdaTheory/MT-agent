@@ -106,10 +106,6 @@ describe('normalizeDashboardRowsForReport', () => {
         signedOrders: 1,
         reviewedOrders: 1,
         shippedOrders: 1,
-        createdOrderAmount: 0,
-        signedOrderAmount: 0,
-        reviewedOrderAmount: 0,
-        shippedOrderAmount: 0,
       },
     ]);
     expect(log.toText()).toContain('后链路数据跳过 7d: Missing required headers for 7d');
