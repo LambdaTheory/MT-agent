@@ -1,4 +1,5 @@
 import type { FeishuCardPayload } from '../notify/feishuApp.js';
+import type { RentalPriceChangeRequest } from './rentalPrice.js';
 
 export type FeishuSendTo = 'personal' | 'group' | 'both';
 
@@ -12,6 +13,7 @@ export type BotIntent =
   | { type: 'query_product'; keyword: string }
   | { type: 'lookup_product_id_card' }
   | { type: 'lookup_product_id'; query: string }
+  | { type: 'rental_price_change'; productId: string; request: RentalPriceChangeRequest }
   | { type: 'unknown'; text: string };
 
 export interface BotResponse {
