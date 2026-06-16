@@ -42,7 +42,7 @@ export async function handleBotIntent(intent: BotIntent, outputDir = 'output', o
   }
 
   if (intent.type === 'lookup_product_id_card') {
-    return { text: '请输入端内ID或平台商品ID进行互查。', card: buildIdLookupCard() };
+    return { text: '已打开常驻商品ID互查卡，可保留在会话里反复查询。', card: buildIdLookupCard() };
   }
 
   if (intent.type === 'operations_learning_quiz') {

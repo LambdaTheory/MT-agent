@@ -67,7 +67,7 @@ describe('handleBotIntent', () => {
 
   it('returns the product ID lookup input card', async () => {
     const response = await handleBotIntent({ type: 'lookup_product_id_card' });
-    expect(response.text).toContain('请输入端内ID或平台商品ID');
+    expect(response.text).toContain('常驻商品ID互查卡');
     expect(response.card).toBeDefined();
     expect(response.card?.schema).toBe('2.0');
     expect(JSON.stringify(response.card)).toContain('id_lookup_form');
