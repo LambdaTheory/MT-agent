@@ -3,6 +3,7 @@ import { replyFeishuMessageCard, replyFeishuMessageText, type FeishuAppSendResul
 import { findLatestReportContext } from './reportStore.js';
 import { formatIdLookupResult, lookupProductId } from './idLookup.js';
 import { createFeishuMessageDispatcher } from './dispatcher.js';
+import { createRentalPriceSkillClient, parseRentalPriceConfirmRequest, type RentalPriceSkillClient } from './rentalPrice.js';
 import type { BotIntent, BotResponse, FeishuBotDispatchResult, FeishuBotIncomingTextMessage, FeishuMessageEvent } from './types.js';
 import { handleUrlVerification } from './verify.js';
 
@@ -19,6 +20,7 @@ export interface FeishuBotServerConfig {
   dispatchMessage?: (message: FeishuBotIncomingTextMessage) => Promise<FeishuBotDispatchResult>;
   replyText?: (config: FeishuReplyConfig, text: string) => Promise<FeishuAppSendResult>;
   replyCard?: (config: FeishuReplyConfig, card: FeishuCardPayload) => Promise<FeishuAppSendResult>;
+  rentalPriceClient?: RentalPriceSkillClient;
 }
 
 interface FeishuCardActionEvent {
@@ -120,6 +122,17 @@ async function handleCardActionTrigger(payload: FeishuCardActionEvent, config: F
     return;
   }
 
+  if (actionName === 'rental_price_confirm') {
+    const request = parseRentalPriceConfirmRequest(value);
+    if (!request) {
+      await replyText(replyConfig, '改价确认参数无效，请重新发起改价。');
+      return;
+    }
+    const result = await (config.rentalPriceClient ?? createRentalPriceSkillClient()).execute(request);
+    await replyText(replyConfig, `${result.ok ? '改价执行成功' : '改价执行失败'}：商品 ${result.productId}\n${result.lines.join('\n')}`);
+    return;
+  }
+
   if (actionName === 'id_lookup') {
     const query = readActionFormValue(payload.event?.action, 'lookup_query') ?? readString(value?.query);
     if (!query) {
@@ -132,7 +145,7 @@ async function handleCardActionTrigger(payload: FeishuCardActionEvent, config: F
 }
 
 export function startFeishuBotServer(config: FeishuBotServerConfig) {
-  const dispatcher = createFeishuMessageDispatcher({ outputDir: config.outputDir, botMentionOpenId: config.botMentionOpenId, botMentionName: config.botMentionName, handleIntent: config.handleIntent });
+  const dispatcher = createFeishuMessageDispatcher({ outputDir: config.outputDir, botMentionOpenId: config.botMentionOpenId, botMentionName: config.botMentionName, handleIntent: config.handleIntent, rentalPriceClient: config.rentalPriceClient });
   const dispatchMessage = config.dispatchMessage ?? dispatcher.dispatch;
 
   const server = createServer(async (req, res) => {
