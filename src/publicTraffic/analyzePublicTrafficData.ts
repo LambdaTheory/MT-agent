@@ -5,11 +5,13 @@ import type {
   PublicTrafficDataReportContext,
   PublicTrafficDataSummary,
   PublicTrafficEmptySectionNotes,
+  PublicTrafficPeriodMetrics,
   PublicTrafficProductDataRow,
   PublicTrafficReportSectionItem,
 } from './types.js';
 
 const PERIODS: PeriodKey[] = ['1d', '7d', '30d'];
+const PRIORITY_RANK: Record<NonNullable<PublicTrafficReportSectionItem['priority']>, number> = { high: 0, medium: 1, low: 2 };
 
 function emptySummary(): PublicTrafficDataSummary {
   return {
@@ -106,15 +108,8 @@ function applyOverview(summary: PublicTrafficDataSummary, overview: ExposureOver
   };
 }
 
-function item(row: PublicTrafficProductDataRow, action: string, reason: string): PublicTrafficReportSectionItem {
-  return { identifier: row.displayProductId, action, reason };
-}
-
-function internalIdNumber(row: PublicTrafficProductDataRow): number | null {
-  const match = /^端内ID\s+(\d+)$/.exec(row.displayProductId.trim());
-  if (!match) return null;
-  const parsed = Number.parseInt(match[1], 10);
-  return Number.isFinite(parsed) ? parsed : null;
+function item(row: PublicTrafficProductDataRow, action: string, reason: string, priority?: PublicTrafficReportSectionItem['priority']): PublicTrafficReportSectionItem {
+  return { identifier: row.displayProductId, action, reason, priority };
 }
 
 function monitoringReason(row: PublicTrafficProductDataRow): string {
@@ -143,14 +138,66 @@ function buildRecommendedActions(sections: {
   newProductObservation: PublicTrafficReportSectionItem[];
   lowExposure: PublicTrafficReportSectionItem[];
 }): PublicTrafficReportSectionItem[] {
+  const seen = new Set<string>();
   return [
     ...sections.weakConversion,
     ...sections.weakClick,
     ...sections.lifecycleGovernance,
+    ...sections.lowExposure,
     ...sections.highPotential,
     ...sections.newProductObservation,
-    ...sections.lowExposure,
-  ];
+  ]
+    .filter((entry) => {
+      if (seen.has(entry.identifier)) return false;
+      seen.add(entry.identifier);
+      return true;
+    })
+    .sort((a, b) => PRIORITY_RANK[a.priority ?? 'low'] - PRIORITY_RANK[b.priority ?? 'low']);
+}
+
+function isHealthy(row: PublicTrafficProductDataRow): boolean {
+  const one = row.periods['1d'];
+  const seven = row.periods['7d'];
+  const hasCreatedOrder = (period: PublicTrafficPeriodMetrics) => period.createdOrderAmount !== undefined ? period.createdOrderAmount > 0 : period.createdOrders > 0;
+  return hasCreatedOrder(one) || hasCreatedOrder(seven);
+}
+
+function matchesLowExposure(row: PublicTrafficProductDataRow): boolean {
+  const one = row.periods['1d'];
+  const seven = row.periods['7d'];
+  const thirty = row.periods['30d'];
+  const custodyLowExposure = typeof row.custodyDays === 'number' && row.custodyDays > 5 && one.hasExposureData && one.exposure < 100;
+  const exposureHistoryLow = one.hasExposureData && seven.hasExposureData && one.exposure <= 50 && seven.exposure <= 300;
+  const hasVisitEvidence = one.publicVisits > 0 || seven.publicVisits > 0 || thirty.publicVisits > 0;
+  const visitEvidenceLow = (seven.hasExposureData || seven.hasDashboardData || thirty.hasDashboardData) && hasVisitEvidence && seven.publicVisits <= 3 && thirty.publicVisits <= 10;
+  return (custodyLowExposure || exposureHistoryLow || visitEvidenceLow) && one.shippedOrders === 0 && seven.shippedOrders === 0;
+}
+
+function matchesWeakClick(row: PublicTrafficProductDataRow): boolean {
+  const one = row.periods['1d'];
+  const seven = row.periods['7d'];
+  return (one.hasExposureData || seven.hasExposureData) && (one.exposure >= 1000 || seven.exposure >= 3000) && ((one.exposure >= 1000 && one.exposureVisitRate < 0.01) || (seven.exposure >= 3000 && seven.exposureVisitRate < 0.015));
+}
+
+function matchesWeakConversion(row: PublicTrafficProductDataRow): boolean {
+  const one = row.periods['1d'];
+  const seven = row.periods['7d'];
+  return (one.hasDashboardData || seven.hasDashboardData) && (one.dashboardVisits >= 50 || seven.dashboardVisits >= 100) && ((one.dashboardVisits >= 50 && one.shippedOrders === 0) || (seven.dashboardVisits >= 100 && seven.visitShipmentRate < 0.01));
+}
+
+function matchesLifecycleGovernance(row: PublicTrafficProductDataRow, input: PublicTrafficDataAnalysisInput): boolean {
+  const thirty = row.periods['30d'];
+  return typeof row.custodyDays === 'number' && row.custodyDays >= 30 && thirty.hasExposureData && hasReliableThirtyDaySummary(input.thirtyDaySummary, row.platformProductId) && thirty.exposure <= 100 && thirty.publicVisits <= 3 && thirty.amount <= 1;
+}
+
+function matchesHighPotential(row: PublicTrafficProductDataRow): boolean {
+  const one = row.periods['1d'];
+  const seven = row.periods['7d'];
+  return (one.hasExposureData || seven.hasExposureData) && one.shippedOrders === 0 && seven.shippedOrders === 0 && (one.publicVisits >= 100 || seven.publicVisits >= 300 || seven.createdOrders >= 3);
+}
+
+function lifecyclePriority(row: PublicTrafficProductDataRow): PublicTrafficReportSectionItem['priority'] {
+  return (row.custodyDays ?? 0) >= 60 || row.periods['30d'].exposure <= 20 ? 'high' : 'medium';
 }
 
 export function analyzePublicTrafficData(input: PublicTrafficDataAnalysisInput): PublicTrafficDataReportContext {
@@ -165,78 +212,69 @@ export function analyzePublicTrafficData(input: PublicTrafficDataAnalysisInput):
   const rowsById = byPlatformId(rows);
   const dailyDelta = input.dailyDelta ?? [];
 
-  const lowExposure = rows
-    .filter((row) => {
-      const custodyLowExposure = typeof row.custodyDays === 'number' && row.custodyDays > 5 && one(row).hasExposureData && one(row).exposure < 100;
-      const exposureHistoryLow = one(row).hasExposureData && seven(row).hasExposureData && one(row).exposure <= 50 && seven(row).exposure <= 300;
-      const hasVisitEvidence = one(row).publicVisits > 0 || seven(row).publicVisits > 0 || thirty(row).publicVisits > 0;
-      const visitEvidenceLow = (seven(row).hasExposureData || seven(row).hasDashboardData || thirty(row).hasDashboardData) && hasVisitEvidence && seven(row).publicVisits <= 3 && thirty(row).publicVisits <= 10;
-      return custodyLowExposure || exposureHistoryLow || visitEvidenceLow;
-    })
-    .filter((row) => one(row).shippedOrders === 0 && seven(row).shippedOrders === 0)
+  const newProductIds = new Set(dailyDelta.filter((row) => row.flags.includes('new_product')).map((row) => row.platformProductId));
+  const lowExposureRows: PublicTrafficProductDataRow[] = [];
+  const weakClickRows: PublicTrafficProductDataRow[] = [];
+  const weakConversionRows: PublicTrafficProductDataRow[] = [];
+  const highPotentialRows: PublicTrafficProductDataRow[] = [];
+  const newProductObservationRows: PublicTrafficProductDataRow[] = [];
+  const lifecycleGovernanceRows: PublicTrafficProductDataRow[] = [];
+
+  for (const row of rows) {
+    if (isHealthy(row)) continue;
+    if (matchesWeakConversion(row)) {
+      weakConversionRows.push(row);
+    } else if (matchesWeakClick(row)) {
+      weakClickRows.push(row);
+    } else if (matchesLifecycleGovernance(row, input)) {
+      lifecycleGovernanceRows.push(row);
+    } else if (matchesLowExposure(row)) {
+      lowExposureRows.push(row);
+    } else if (matchesHighPotential(row)) {
+      highPotentialRows.push(row);
+    } else if (newProductIds.has(row.platformProductId)) {
+      newProductObservationRows.push(row);
+    }
+  }
+
+  const lowExposure = lowExposureRows
     .sort((a, b) => seven(a).exposure - seven(b).exposure || one(a).exposure - one(b).exposure)
-    .map((row) =>
-      item(row, '检查托管状态、标题、主图、类目和是否继续投放', `已托管 ${row.custodyDays ?? '未知'} 天，1日曝光 ${one(row).exposure}，7日曝光 ${seven(row).exposure}，7日访问 ${seven(row).publicVisits}`),
-    );
+    .map((row) => item(row, '检查托管状态、标题、主图、类目和是否继续投放', `已托管 ${row.custodyDays ?? '未知'} 天，1日曝光 ${one(row).exposure}，7日曝光 ${seven(row).exposure}，7日访问 ${seven(row).publicVisits}`, 'medium'));
 
-  const weakClick = rows
-    .filter((row) => (one(row).hasExposureData || seven(row).hasExposureData) && (one(row).exposure >= 1000 || seven(row).exposure >= 3000))
-    .filter((row) => (one(row).exposure >= 1000 && one(row).exposureVisitRate < 0.01) || (seven(row).exposure >= 3000 && seven(row).exposureVisitRate < 0.015))
+  const weakClick = weakClickRows
     .sort((a, b) => seven(a).exposureVisitRate - seven(b).exposureVisitRate || one(a).exposureVisitRate - one(b).exposureVisitRate || seven(b).exposure - seven(a).exposure)
-    .map((row) =>
-      item(
-        row,
-        '优化主图、标题、价格露出和首屏卖点',
-        `1日曝光 ${one(row).exposure}，1日访问率 ${percent(one(row).exposureVisitRate)}，7日曝光 ${seven(row).exposure}，7日访问率 ${percent(seven(row).exposureVisitRate)}`,
-      ),
-    );
+    .map((row) => item(row, '优化主图、标题、价格露出和首屏卖点', `1日曝光 ${one(row).exposure}，1日访问率 ${percent(one(row).exposureVisitRate)}，7日曝光 ${seven(row).exposure}，7日访问率 ${percent(seven(row).exposureVisitRate)}`, 'high'));
 
-  const weakConversion = rows
-    .filter((row) => (one(row).hasDashboardData || seven(row).hasDashboardData) && (one(row).dashboardVisits >= 50 || seven(row).dashboardVisits >= 100))
-    .filter((row) => (one(row).dashboardVisits >= 50 && one(row).shippedOrders === 0) || (seven(row).dashboardVisits >= 100 && seven(row).visitShipmentRate < 0.01))
+  const weakConversion = weakConversionRows
     .sort((a, b) => one(b).dashboardVisits - one(a).dashboardVisits || seven(b).dashboardVisits - seven(a).dashboardVisits)
-    .map((row) =>
-      item(
-        row,
-        '检查价格/押金/库存/风控/履约链路',
-        `1日后链路访问 ${one(row).dashboardVisits}，1日发货 ${one(row).shippedOrders}，7日后链路访问 ${seven(row).dashboardVisits}，7日发货 ${seven(row).shippedOrders}`,
-      ),
-    );
+    .map((row) => item(row, '检查价格/押金/库存/风控/履约链路', `1日后链路访问 ${one(row).dashboardVisits}，1日发货 ${one(row).shippedOrders}，7日后链路访问 ${seven(row).dashboardVisits}，7日发货 ${seven(row).shippedOrders}`, 'high'));
 
-  const highPotential = rows
-    .filter((row) => (one(row).hasExposureData || seven(row).hasExposureData) && (one(row).shippedOrders > 0 || seven(row).shippedOrders >= 3 || seven(row).amount >= 500))
-    .filter((row) => one(row).publicVisits >= 100 || seven(row).publicVisits >= 300 || seven(row).amount >= 500)
-    .sort((a, b) => seven(b).amount - seven(a).amount || seven(b).shippedOrders - seven(a).shippedOrders || one(b).publicVisits - one(a).publicVisits)
-    .map((row) =>
-      item(
-        row,
-        '继续放量，并复制标题/图片/价格结构到同类商品',
-        `7日曝光 ${seven(row).exposure}，7日访问 ${seven(row).publicVisits}，7日发货 ${seven(row).shippedOrders}，7日金额 ${seven(row).amount.toFixed(2)}`,
-      ),
-    );
+  const highPotential = highPotentialRows
+    .sort((a, b) => seven(b).publicVisits - seven(a).publicVisits || seven(b).createdOrders - seven(a).createdOrders || one(b).publicVisits - one(a).publicVisits)
+    .map((row) => item(row, '继续放量，并复制标题/图片/价格结构到同类商品', `7日曝光 ${seven(row).exposure}，7日访问 ${seven(row).publicVisits}，7日发货 ${seven(row).shippedOrders}，7日金额 ${seven(row).amount.toFixed(2)}`, seven(row).publicVisits >= 300 ? 'medium' : 'low'));
+
+  const newProductObservation = newProductObservationRows
+    .sort((a, b) => one(a).exposure - one(b).exposure || one(a).publicVisits - one(b).publicVisits)
+    .map((row) => item(row, '新品数据监控', monitoringReason(row), 'low'));
 
   const newProductObservationFromDelta = dailyDelta
     .filter((row) => row.flags.includes('new_product'))
     .map((delta) => ({ delta, row: rowsById.get(delta.platformProductId) }))
-    .filter((entry): entry is { delta: (typeof dailyDelta)[number]; row: PublicTrafficProductDataRow } => Boolean(entry.row))
+    .filter((entry): entry is { delta: (typeof dailyDelta)[number]; row: PublicTrafficProductDataRow } => {
+      if (!entry.row) return false;
+      return !isHealthy(entry.row);
+    })
+    .filter((entry) => !weakConversionRows.includes(entry.row) && !weakClickRows.includes(entry.row) && !lifecycleGovernanceRows.includes(entry.row) && !lowExposureRows.includes(entry.row) && !highPotentialRows.includes(entry.row))
     .sort((a, b) => a.delta.exposure - b.delta.exposure || a.delta.visits - b.delta.visits)
-    .map(({ row }) => item(row, '新品数据监控', monitoringReason(row)));
+    .map(({ row }) => item(row, '新品数据监控', monitoringReason(row), 'low'));
 
-  const newProductObservation = [
-    ...rows
-      .filter((row) => (internalIdNumber(row) ?? 0) > 700)
-      .sort((a, b) => (internalIdNumber(a) ?? 0) - (internalIdNumber(b) ?? 0))
-      .map((row) => item(row, '新品数据监控', monitoringReason(row))),
-    ...newProductObservationFromDelta,
-  ].filter((entry, index, all) => all.findIndex((candidate) => candidate.identifier === entry.identifier) === index);
+  for (const deltaItem of newProductObservationFromDelta) {
+    if (!newProductObservation.some((entry) => entry.identifier === deltaItem.identifier)) newProductObservation.push(deltaItem);
+  }
 
-  const lifecycleGovernance = rows
-    .filter((row) => typeof row.custodyDays === 'number' && row.custodyDays >= 30)
-    .filter((row) => thirty(row).hasExposureData)
-    .filter((row) => hasReliableThirtyDaySummary(input.thirtyDaySummary, row.platformProductId))
-    .filter((row) => thirty(row).exposure <= 100 && thirty(row).publicVisits <= 3 && thirty(row).amount <= 1)
+  const lifecycleGovernance = lifecycleGovernanceRows
     .sort((a, b) => (b.custodyDays ?? 0) - (a.custodyDays ?? 0) || thirty(a).exposure - thirty(b).exposure)
-    .map((row) => item(row, '下架、替换或重做素材', `已托管 ${row.custodyDays} 天，30日曝光 ${thirty(row).exposure}，访问 ${thirty(row).publicVisits}，金额 ${thirty(row).amount.toFixed(2)}`));
+    .map((row) => item(row, '下架、替换或重做素材', `已托管 ${row.custodyDays} 天，30日曝光 ${thirty(row).exposure}，访问 ${thirty(row).publicVisits}，金额 ${thirty(row).amount.toFixed(2)}`, lifecyclePriority(row)));
 
   const recommendedActions = buildRecommendedActions({ weakConversion, weakClick, lifecycleGovernance, highPotential, newProductObservation, lowExposure });
 

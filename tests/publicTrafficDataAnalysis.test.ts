@@ -37,19 +37,19 @@ function row(overrides: Partial<PublicTrafficProductDataRow>): PublicTrafficProd
 }
 
 describe('public traffic data analysis rules', () => {
-  it('treats mapped internal ids greater than 700 as new product observations', () => {
+  it('treats only daily new_product deltas as new product observations', () => {
     const context = analyzePublicTrafficData({
       date: '2026-06-10',
       rows: [
-        row({ platformProductId: 'p-701', displayProductId: '端内ID 701' }),
-        row({ platformProductId: 'p-700', displayProductId: '端内ID 700' }),
+        row({ platformProductId: 'p-701', displayProductId: '端内ID 701', periods: { '1d': metrics({ exposure: 500, publicVisits: 20, hasExposureData: true }), '7d': metrics({ exposure: 500, publicVisits: 20, hasExposureData: true }), '30d': metrics({ exposure: 500, publicVisits: 20, hasExposureData: true }) } }),
+        row({ platformProductId: 'p-700', displayProductId: '端内ID 700', periods: { '1d': metrics({ exposure: 500, publicVisits: 20, hasExposureData: true }), '7d': metrics({ exposure: 500, publicVisits: 20, hasExposureData: true }), '30d': metrics({ exposure: 500, publicVisits: 20, hasExposureData: true }) } }),
       ],
-      dailyDelta: [],
+      dailyDelta: [{ date: '2026-06-10', productName: '商品', platformProductId: 'p-700', exposure: 500, visits: 20, amount: 0, custodyDays: null, flags: ['new_product'] }],
     });
 
-    expect(context.newProductObservation.map((item) => item.identifier)).toEqual(['端内ID 701']);
+    expect(context.newProductObservation.map((item) => item.identifier)).toEqual(['端内ID 700']);
     expect(context.newProductObservation[0]?.action).toBe('新品数据监控');
-    expect(context.newProductObservation[0]?.reason).toContain('1日曝光 0，访问 0，发货 0，金额 0.00');
+    expect(context.newProductObservation[0]?.reason).toContain('1日曝光 500，访问 20，发货 0，金额 0.00');
   });
 
   it('flags low-exposure warnings from custody and sparse one-day exposure data', () => {
