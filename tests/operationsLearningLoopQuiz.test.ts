@@ -46,7 +46,7 @@ const context: PublicTrafficDataReportContext = {
   highPotential: rows.slice(5, 10).map((item) => ({ identifier: item.displayProductId, action: '继续放量', reason: '高潜力' })),
   newProductObservation: rows.slice(8, 12).map((item) => ({ identifier: item.displayProductId, action: '新品监控', reason: '新进入公域' })),
   lifecycleGovernance: [],
-  recommendedActions: rows.slice(1, 11).map((item) => ({ identifier: item.displayProductId, action: '检查运营动作', reason: '建议操作池' })),
+  recommendedActions: rows.slice(1, 11).map((item, index) => ({ identifier: item.displayProductId, action: '检查运营动作', reason: '建议操作池', priority: index < 3 ? 'high' : index < 7 ? 'medium' : 'low' })),
   newProductPoolItems: rows.slice(9, 12).map((item) => ({ productId: item.displayProductId.replace(/^端内ID\s*/, ''), productName: item.productName, shortTitle: '', submittedAt: '2026-06-15 09:00:00', merchant: '', alipaySyncStatus: '已同步', alipayCode: '', stock: 0, skuCount: 0, maintenanceStatus: '待维护', note: '' })),
   agentData: { removedLinks: [] },
   emptySectionNotes: { lowExposure: '', weakClick: '', weakConversion: '', highPotential: '', newProductObservation: '', lifecycleGovernance: '', recommendedActions: '' },
@@ -60,6 +60,7 @@ describe('operations learning loop quiz preview', () => {
     expect(new Set(items.map((item) => item.productId)).size).toBe(10);
     expect(items.map((item) => item.productId)).toContain('702');
     expect(items.find((item) => item.productId === '702')?.productName).toBe('短名 702');
+    expect(items.find((item) => item.productId === '703')?.sourceModules).toEqual(['建议操作']);
     expect(items[0]).toMatchObject({ productId: expect.any(String), productName: expect.any(String), recommendedOperation: expect.any(String) });
     expect(items[0].metrics['1d']).toMatchObject({ exposure: expect.any(Number), publicVisits: expect.any(Number), shippedOrders: expect.any(Number) });
     expect(items[0].feedbackOptions).toContain('not_representative');

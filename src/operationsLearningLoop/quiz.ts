@@ -28,6 +28,7 @@ export interface OperationsLearningQuestionCardPayload extends FeishuCardPayload
 }
 
 const FEEDBACK_OPTIONS: OperationsLearningFeedbackOption[] = ['reasonable', 'unreasonable', 'suggested_action', 'not_representative'];
+const PRIORITY_SCORE: Record<NonNullable<PublicTrafficReportSectionItem['priority']>, number> = { high: 110, medium: 80, low: 55 };
 
 function shortId(row: PublicTrafficProductDataRow): string {
   return row.displayProductId.replace(/^端内ID\s*/, '') || row.displayProductId;
@@ -94,13 +95,10 @@ function addNewProductPool(candidates: Map<string, OperationsLearningQuizItem>, 
 
 export function selectOperationsLearningQuizItems(context: PublicTrafficDataReportContext, limit = 10, productNameMap: ProductNameMap = {}): OperationsLearningQuizItem[] {
   const candidates = new Map<string, OperationsLearningQuizItem>();
-  addSection(candidates, context, '建议操作', context.recommendedActions, 110, productNameMap);
-  addSection(candidates, context, '转化弱', context.weakConversion, 95, productNameMap);
-  addSection(candidates, context, '高潜力', context.highPotential, 85, productNameMap);
+  for (const item of context.recommendedActions) {
+    addSection(candidates, context, '建议操作', [item], PRIORITY_SCORE[item.priority ?? 'low'], productNameMap);
+  }
   addNewProductPool(candidates, context, productNameMap);
-  addSection(candidates, context, '曝光不足', context.lowExposure, 60, productNameMap);
-  addSection(candidates, context, '新品观察', context.newProductObservation, 55, productNameMap);
-  addSection(candidates, context, '点击弱', context.weakClick, 50, productNameMap);
 
   return Array.from(candidates.values())
     .sort((a, b) => b.score - a.score || b.metrics['7d'].publicVisits - a.metrics['7d'].publicVisits || a.productId.localeCompare(b.productId))
