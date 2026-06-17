@@ -515,7 +515,7 @@ describe('runPublicTrafficReportCli public traffic sequencing', () => {
     const todayPaths = buildPublicTrafficPaths(mocks.outputDir, '2026-06-10');
     const context = JSON.parse(await readFile(todayPaths.reportContext, 'utf8')) as PublicTrafficDataReportContext;
     expect(context.dataQualityNotes).toEqual(['今日访问数据支付宝暂未更新，本期访问量板块指标缺失。']);
-    await expect(readFile(todayPaths.markdown, 'utf8')).resolves.toContain('今日访问数据支付宝暂未更新，本期访问量板块指标缺失。');
+    await expect(readFile(todayPaths.markdown, 'utf8')).resolves.not.toContain('今日访问数据支付宝暂未更新，本期访问量板块指标缺失。');
     await expect(readFile(todayPaths.log, 'utf8')).resolves.toContain('今日访问数据支付宝暂未更新，本期访问量板块指标缺失。');
   });
 

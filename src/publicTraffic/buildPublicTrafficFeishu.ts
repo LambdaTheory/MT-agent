@@ -53,6 +53,10 @@ function percent(value: number): string {
   return `${(value * 100).toFixed(2)}%`;
 }
 
+function amountPerThousandExposure(summary: PublicTrafficDataSummary): string {
+  return (summary.exposure > 0 ? (summary.amount / summary.exposure) * 1000 : 0).toFixed(2);
+}
+
 function itemLines<T>(items: T[], formatter: (item: T) => string): string[] {
   return items.map((item, index) => `${index + 1}. ${formatter(item)}`);
 }
@@ -70,12 +74,11 @@ function newProductPoolLines(context: PublicTrafficDataReportContext): string[] 
 
 function productLine(row: PublicTrafficProductDataRow, index: number): string {
   const one = row.periods['1d'];
-  const visits = one.publicVisits || one.dashboardVisits;
-  return `${index + 1}. ${row.displayProductId}｜${row.productName || 'Unknown'}｜曝光 ${one.exposure}｜访问 ${visits}｜金额 ¥${one.amount.toFixed(2)}`;
+  return `${index + 1}. ${row.displayProductId}｜${row.productName || 'Unknown'}｜曝光 ${one.exposure}｜公域访问 ${one.publicVisits}｜金额 ¥${one.amount.toFixed(2)}`;
 }
 
 function topExposureLines(rows: PublicTrafficProductDataRow[]): string[] {
-  const score = (row: PublicTrafficProductDataRow) => row.periods['1d'].exposure || row.periods['1d'].publicVisits || row.periods['1d'].dashboardVisits;
+  const score = (row: PublicTrafficProductDataRow) => row.periods['1d'].exposure || row.periods['1d'].publicVisits;
   const items = [...rows].sort((a, b) => score(b) - score(a)).slice(0, 10);
   return items.map(productLine);
 }
@@ -94,9 +97,9 @@ function funnelLines(context: PublicTrafficDataReportContext): string[] {
   const summary = context.summary['1d'];
   const business = businessMetricLines(context.orderAnalysis?.pages.overview, context.orderAnalysis?.pages.customs);
   return [
-    `曝光 ${summary.exposure}｜公域访问 ${summary.publicVisits}｜商品页访问 ${summary.dashboardVisits}｜订单 ${summary.createdOrders}｜发货 ${summary.shippedOrders}｜金额 ¥${summary.amount.toFixed(2)}`,
+    `曝光 ${summary.exposure}｜公域访问 ${summary.publicVisits}｜金额 ¥${summary.amount.toFixed(2)}｜千次曝光金额 ¥${amountPerThousandExposure(summary)}`,
     ...orderBusinessLine(context),
-    ...(business.length ? business : [`曝光到访问率 ${percent(summary.exposureVisitRate)}｜访问到发货率 ${percent(summary.visitShipmentRate)}`]),
+    ...(business.length ? business : [`曝光到访问率 ${percent(summary.exposureVisitRate)}`]),
   ];
 }
 
@@ -131,7 +134,6 @@ export function buildPublicTrafficFeishuText(input: PublicTrafficDataReportConte
     ...funnelLines(context),
   ];
   const moduleLine = moduleCountLine(context);
-  if (context.dataQualityNotes?.length) lines.push('', '数据提示', ...context.dataQualityNotes);
   if (moduleLine) lines.push('', '模块数量', moduleLine);
   appendSection(lines, '今日曝光 Top10', topExposureLines(context.rows));
   appendSection(lines, '诊断问题', itemLines(flattenDiagnosticItems(context), (diag) => `${diag.type}｜${diag.item.identifier}｜${diag.item.action}｜${diag.item.reason}`));
