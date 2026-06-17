@@ -36,7 +36,7 @@ describe('public traffic CLI wiring', () => {
     expect(text).toContain('const dailyDelta = previous.found ? computeExposureDailyDelta(dataDate, previous.products, crawlResult.products, mapping) : [];');
     expect(text).toContain('if (!previous.found) {');
     expect(text).toContain("log.addEvent('商品级曝光历史不足: 跳过商品级日差分');");
-    expect(text).toContain("'1d': dailyDelta.map((row) => ({");
+    expect(text).toContain("'1d': crawlResult.products.map((row) => ({");
     expect(text).toContain("'7d': sevenDaySummary");
     expect(text).toContain("'30d': thirtyDaySummary");
     expect(text).not.toContain('const hasReliableExposureHistory = previousProducts.length > 0;');

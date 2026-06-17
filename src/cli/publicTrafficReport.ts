@@ -441,7 +441,7 @@ export async function runPublicTrafficReportCli(): Promise<void> {
     const merged = mergePublicTrafficData({
       dashboardRows,
       exposureByPeriod: {
-        '1d': dailyDelta.map((row) => ({
+        '1d': crawlResult.products.map((row) => ({
           productName: row.productName,
           platformProductId: row.platformProductId,
           exposure: row.exposure,
@@ -449,7 +449,7 @@ export async function runPublicTrafficReportCli(): Promise<void> {
           amount: row.amount,
           visitRate: row.exposure > 0 ? row.visits / row.exposure : 0,
           days: 1,
-          flags: row.flags,
+          flags: [],
         })),
         '7d': sevenDaySummary,
         '30d': thirtyDaySummary,
