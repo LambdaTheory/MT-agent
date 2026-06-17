@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { handleBotIntent } from '../src/feishuBot/tools.js';
 import type { LlmToolSelectionProvider } from '../src/feishuBot/llmProvider.js';
+import type { LlmIntentProposalProvider } from '../src/feishuBot/llmIntentProposal.js';
+import type { RentalPriceSkillClient } from '../src/feishuBot/rentalPrice.js';
 
 const summary = {
   exposure: 1000,
@@ -62,7 +64,35 @@ async function writeContext(): Promise<string> {
 
 describe('handleBotIntent', () => {
   it('returns help text', async () => {
-    await expect(handleBotIntent({ type: 'help' })).resolves.toEqual({ text: '可用命令：今日概况｜查询 565｜查ID 565｜商品ID互查｜运营学习｜跑日报｜重发日报｜推送日报到群｜帮助' });
+    await expect(handleBotIntent({ type: 'help' })).resolves.toEqual({ text: `📋 数据查询
+  今日概况 — 查看今日公域流量概况
+  查询 565 — 按关键词查询商品
+  查ID 565 — 端内ID与平台商品ID互查
+  商品ID互查 — 打开常驻ID互查卡片
+  查看规格 761 — 查看商品规格维度与项目
+
+📊 报表操作
+  跑日报 — 生成公域流量日报
+  重发日报 — 重新发送最新日报
+  推送日报到群 — 推送日报到指定群
+
+🎓 运营学习
+  运营学习 — 开始运营学习测验
+
+💰 租赁改价
+  改价 761 1天22 10天55 — 指定租期改价（格式：改价 ID 租期1价格1 租期2价格2 ...）
+  改价 761 全局改价 0.9 — 全局折扣（所有租金字段 ×0.9）
+  改价 761 全部租金九折 — 全部租金九折
+  改价 761 所有价格 *0.9 — 所有价格乘法（含押金、成本等）
+
+🔧 商品操作
+  复制商品 761 — 复制商品
+  下架商品 761 — 下架商品
+  设置租期 761 1,10,30 — 设置租期天数
+  添加规格 761 128G — 添加规格项
+
+❓ 帮助
+  帮助 — 显示此帮助信息` });
   });
 
   it('returns the product ID lookup input card', async () => {
@@ -155,5 +185,60 @@ describe('handleBotIntent', () => {
     const response = await handleBotIntent({ type: 'unknown', text: '帮我看看苹果手机' }, outputDir, { llmToolSelector: selector });
 
     expect(response.text).toContain('端内ID 565 iPhone 15');
+  });
+
+  it('returns a confirmation card for LLM-proposed rental delist without executing the daemon', async () => {
+    const proposalProvider: LlmIntentProposalProvider = {
+      async proposeIntent(request) {
+        expect(request.message).toBe('帮我把 761 下架');
+        expect(request.intents.map((intent) => intent.name)).toContain('rental_delist');
+        return JSON.stringify({ intent: 'rental_delist', arguments: { productId: '761' }, confidence: 0.94, reason: '用户要求下架商品 761' });
+      },
+    };
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run for delist proposal'); },
+      async execute() { throw new Error('execute should not run for delist proposal'); },
+      async copy() { throw new Error('copy should not run before confirmation'); },
+      async delist() { throw new Error('delist should not run before confirmation'); },
+      async tenancySet() { throw new Error('tenancySet should not run before confirmation'); },
+      async specDiscover() { throw new Error('specDiscover should not run before confirmation'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run before confirmation'); },
+    };
+
+    const response = await handleBotIntent({ type: 'unknown', text: '帮我把 761 下架' }, 'output', { llmIntentProposalProvider: proposalProvider, rentalPriceClient });
+
+    expect(response.text).toContain('请确认租赁商品操作：761');
+    expect(response.card).toBeDefined();
+    expect(JSON.stringify(response.card)).toContain('rental_operation_confirm');
+    expect(JSON.stringify(response.card)).toContain('delist');
+    expect(JSON.stringify(response.card)).toContain('761');
+  });
+
+  it('returns a rental price preview card for LLM-proposed price changes without executing', async () => {
+    const proposalProvider: LlmIntentProposalProvider = {
+      async proposeIntent() {
+        return JSON.stringify({ intent: 'rental_price_change', arguments: { productId: '761', fields: { rent1day: 22, rent10day: '55' } }, confidence: 0.96, reason: '用户要求改 1 天和 10 天租金' });
+      },
+    };
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview(request) {
+        expect(request).toEqual({ mode: 'explicit_fields', productId: '761', fields: { rent1day: '22.00', rent10day: '55.00' } });
+        if (request.mode !== 'explicit_fields') throw new Error('expected explicit fields preview');
+        return { productId: '761', fields: request.fields, lines: ['rent1day -> 22.00', 'rent10day -> 55.00'], warnings: [] };
+      },
+      async execute() { throw new Error('execute should not run before confirmation'); },
+      async copy() { throw new Error('copy should not run'); },
+      async delist() { throw new Error('delist should not run'); },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+
+    const response = await handleBotIntent({ type: 'unknown', text: '把 761 的 1 天租金改成 22，10 天改成 55' }, 'output', { llmIntentProposalProvider: proposalProvider, rentalPriceClient });
+
+    expect(response.text).toContain('请确认商品 761 改价');
+    expect(JSON.stringify(response.card)).toContain('rental_price_confirm');
+    expect(JSON.stringify(response.card)).toContain('rent1day');
+    expect(JSON.stringify(response.card)).toContain('22.00');
   });
 });

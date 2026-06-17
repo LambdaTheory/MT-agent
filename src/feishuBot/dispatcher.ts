@@ -1,6 +1,7 @@
 import { parseBotIntent } from './intent.js';
 import { handleBotIntent } from './tools.js';
 import type { LlmToolSelectionProvider } from './llmProvider.js';
+import type { LlmIntentProposalProvider } from './llmIntentProposal.js';
 import type { RentalPriceSkillClient } from './rentalPrice.js';
 import type { BotIntent, BotIntentResolver, BotResponse, FeishuBotDispatchResult, FeishuBotIncomingTextMessage } from './types.js';
 
@@ -11,6 +12,7 @@ export interface FeishuMessageDispatcherConfig {
   resolveIntent?: BotIntentResolver;
   handleIntent?: (intent: BotIntent, outputDir?: string) => Promise<BotResponse>;
   llmToolSelector?: LlmToolSelectionProvider;
+  llmIntentProposalProvider?: LlmIntentProposalProvider;
   rentalPriceClient?: RentalPriceSkillClient;
   logError?: (error: unknown, message: FeishuBotIncomingTextMessage) => void;
 }
@@ -83,6 +85,16 @@ function canonicalizeIntent(intent: BotIntent): BotIntent {
       return { type: intent.type, query: intent.query };
     case 'rental_price_change':
       return { type: intent.type, productId: intent.productId, request: intent.request };
+    case 'rental_copy':
+      return { type: intent.type, productId: intent.productId };
+    case 'rental_delist':
+      return { type: intent.type, productId: intent.productId };
+    case 'rental_tenancy_set':
+      return { type: intent.type, productId: intent.productId, days: intent.days };
+    case 'rental_spec_discover':
+      return { type: intent.type, productId: intent.productId };
+    case 'rental_spec_add':
+      return { type: intent.type, productId: intent.productId, itemTitle: intent.itemTitle };
     case 'unknown':
       return { type: intent.type, text: intent.text };
   }
@@ -90,7 +102,7 @@ function canonicalizeIntent(intent: BotIntent): BotIntent {
 
 export function createFeishuMessageDispatcher(config: FeishuMessageDispatcherConfig = {}): FeishuMessageDispatcher {
   const resolveIntent = config.resolveIntent ?? ((text: string) => parseBotIntent(text));
-  const handleIntent = config.handleIntent ?? ((intent, outputDir) => handleBotIntent(intent, outputDir, { llmToolSelector: config.llmToolSelector, rentalPriceClient: config.rentalPriceClient }));
+  const handleIntent = config.handleIntent ?? ((intent, outputDir) => handleBotIntent(intent, outputDir, { llmToolSelector: config.llmToolSelector, llmIntentProposalProvider: config.llmIntentProposalProvider, rentalPriceClient: config.rentalPriceClient }));
   const logError = config.logError ?? ((error, message) => console.error(`飞书消息处理失败 ${message.messageId}:`, error));
 
   return {
