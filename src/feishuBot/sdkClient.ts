@@ -4,8 +4,9 @@ import { createFeishuMessageDispatcher } from './dispatcher.js';
 import { buildIdLookupCard } from './idLookupCard.js';
 import { formatIdLookupResult, lookupProductId } from './idLookup.js';
 import { buildOperationsLearningQuestionCard, selectOperationsLearningQuizItems } from '../operationsLearningLoop/quiz.js';
-import { createRentalPriceSkillClient, parseRentalPriceConfirmRequest, type RentalPriceSkillClient } from './rentalPrice.js';
+import { createRentalPriceSkillClient, executeRentalOperationConfirmRequest, parseRentalOperationConfirmRequest, parseRentalPriceConfirmRequest, type RentalPriceSkillClient } from './rentalPrice.js';
 import type { LlmToolSelectionProvider } from './llmProvider.js';
+import type { LlmIntentProposalProvider } from './llmIntentProposal.js';
 import type { FeishuCardPayload } from '../notify/feishuApp.js';
 import type { FeishuBotDispatchResult, FeishuBotIncomingTextMessage } from './types.js';
 
@@ -79,6 +80,7 @@ export interface FeishuSdkBotConfig {
   botMentionName?: string;
   outputDir?: string;
   llmToolSelector?: LlmToolSelectionProvider;
+  llmIntentProposalProvider?: LlmIntentProposalProvider;
   dispatchMessage?: (message: FeishuBotIncomingTextMessage) => Promise<FeishuBotDispatchResult>;
   logError?: (error: unknown, context: { messageId: string; phase: 'reply' | 'dispatch' }) => void;
   rentalPriceClient?: RentalPriceSkillClient;
@@ -208,7 +210,7 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
   const client = new sdk.Client({ appId: config.appId, appSecret: config.appSecret });
   const wsClient = new sdk.WSClient({ appId: config.appId, appSecret: config.appSecret });
   const eventDispatcher = new sdk.EventDispatcher({});
-  const dispatchMessage = config.dispatchMessage ?? createFeishuMessageDispatcher({ outputDir: config.outputDir, botMentionOpenId: config.botMentionOpenId, botMentionName: config.botMentionName, llmToolSelector: config.llmToolSelector, rentalPriceClient: config.rentalPriceClient }).dispatch;
+  const dispatchMessage = config.dispatchMessage ?? createFeishuMessageDispatcher({ outputDir: config.outputDir, botMentionOpenId: config.botMentionOpenId, botMentionName: config.botMentionName, llmToolSelector: config.llmToolSelector, llmIntentProposalProvider: config.llmIntentProposalProvider, rentalPriceClient: config.rentalPriceClient }).dispatch;
   const logError = config.logError ?? ((error: unknown, context: { messageId: string; phase: 'reply' | 'dispatch' }) => console.error(`飞书SDK消息处理失败 ${context.phase} ${context.messageId}:`, error));
   const rentalPriceClient = config.rentalPriceClient ?? createRentalPriceSkillClient();
 
@@ -256,6 +258,29 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
           }
           const result = await rentalPriceClient.execute(request);
           await replyText(client, messageId, `${result.ok ? '改价执行成功' : '改价执行失败'}：商品 ${result.productId}\n${result.lines.join('\n')}`);
+          return;
+        }
+
+        if (actionName === 'rental_price_cancel') {
+          const productId = readString(value?.productId) ?? '未知';
+          await replyText(client, messageId, `已取消改价：商品 ${productId}`);
+          return;
+        }
+
+        if (actionName === 'rental_operation_confirm') {
+          const request = parseRentalOperationConfirmRequest(value);
+          if (!request) {
+            await replyText(client, messageId, '租赁商品操作确认参数无效，请重新发起。');
+            return;
+          }
+          const result = await executeRentalOperationConfirmRequest(rentalPriceClient, request);
+          await replyText(client, messageId, result.text);
+          return;
+        }
+
+        if (actionName === 'rental_operation_cancel') {
+          const productId = readString(value?.productId) ?? '未知';
+          await replyText(client, messageId, `已取消租赁商品操作：商品 ${productId}`);
           return;
         }
 

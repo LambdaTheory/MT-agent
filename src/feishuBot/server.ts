@@ -5,7 +5,8 @@ import { buildIdLookupCard } from './idLookupCard.js';
 import { formatIdLookupResult, lookupProductId } from './idLookup.js';
 import { buildOperationsLearningQuestionCard, selectOperationsLearningQuizItems } from '../operationsLearningLoop/quiz.js';
 import { createFeishuMessageDispatcher } from './dispatcher.js';
-import { createRentalPriceSkillClient, parseRentalPriceConfirmRequest, type RentalPriceSkillClient } from './rentalPrice.js';
+import { createRentalPriceSkillClient, executeRentalOperationConfirmRequest, parseRentalOperationConfirmRequest, parseRentalPriceConfirmRequest, type RentalPriceSkillClient } from './rentalPrice.js';
+import type { LlmIntentProposalProvider } from './llmIntentProposal.js';
 import type { BotIntent, BotResponse, FeishuBotDispatchResult, FeishuBotIncomingTextMessage, FeishuMessageEvent } from './types.js';
 import { handleUrlVerification } from './verify.js';
 
@@ -23,6 +24,7 @@ export interface FeishuBotServerConfig {
   replyText?: (config: FeishuReplyConfig, text: string) => Promise<FeishuAppSendResult>;
   replyCard?: (config: FeishuReplyConfig, card: FeishuCardPayload) => Promise<FeishuAppSendResult>;
   rentalPriceClient?: RentalPriceSkillClient;
+  llmIntentProposalProvider?: LlmIntentProposalProvider;
 }
 
 interface FeishuCardActionEvent {
@@ -161,6 +163,29 @@ async function handleCardActionTrigger(payload: FeishuCardActionEvent, config: F
     return;
   }
 
+  if (actionName === 'rental_price_cancel') {
+    const productId = readString(value?.productId) ?? '未知';
+    await replyText(replyConfig, `已取消改价：商品 ${productId}`);
+    return;
+  }
+
+  if (actionName === 'rental_operation_confirm') {
+    const request = parseRentalOperationConfirmRequest(value);
+    if (!request) {
+      await replyText(replyConfig, '租赁商品操作确认参数无效，请重新发起。');
+      return;
+    }
+    const result = await executeRentalOperationConfirmRequest(config.rentalPriceClient ?? createRentalPriceSkillClient(), request);
+    await replyText(replyConfig, result.text);
+    return;
+  }
+
+  if (actionName === 'rental_operation_cancel') {
+    const productId = readString(value?.productId) ?? '未知';
+    await replyText(replyConfig, `已取消租赁商品操作：商品 ${productId}`);
+    return;
+  }
+
   if (actionName === 'id_lookup') {
     const query = readActionFormValue(payload.event?.action, 'lookup_query') ?? readString(value?.query);
     if (!query) {
@@ -173,7 +198,7 @@ async function handleCardActionTrigger(payload: FeishuCardActionEvent, config: F
 }
 
 export function startFeishuBotServer(config: FeishuBotServerConfig) {
-  const dispatcher = createFeishuMessageDispatcher({ outputDir: config.outputDir, botMentionOpenId: config.botMentionOpenId, botMentionName: config.botMentionName, handleIntent: config.handleIntent, rentalPriceClient: config.rentalPriceClient });
+  const dispatcher = createFeishuMessageDispatcher({ outputDir: config.outputDir, botMentionOpenId: config.botMentionOpenId, botMentionName: config.botMentionName, handleIntent: config.handleIntent, rentalPriceClient: config.rentalPriceClient, llmIntentProposalProvider: config.llmIntentProposalProvider });
   const dispatchMessage = config.dispatchMessage ?? dispatcher.dispatch;
 
   const server = createServer(async (req, res) => {
