@@ -11,12 +11,12 @@ function percent(value: number): string {
   return `${(value * 100).toFixed(2)}%`;
 }
 
-function dataQualityText(context: PublicTrafficDataReportContext): string | null {
-  return context.dataQualityNotes?.length ? `**数据提示**\n${context.dataQualityNotes.join('\n')}` : null;
+function rateText(one: PublicTrafficDataReportContext['summary']['1d']): string {
+  return `**转化率**\n曝光到访问率 ${percent(one.exposureVisitRate)}｜千次曝光金额 ¥${amountPerThousandExposure(one)}`;
 }
 
-function rateText(one: PublicTrafficDataReportContext['summary']['1d']): string {
-  return `**转化率**\n曝光到访问率 ${percent(one.exposureVisitRate)}｜访问到发货率 ${percent(one.visitShipmentRate)}`;
+function amountPerThousandExposure(one: PublicTrafficDataReportContext['summary']['1d']): string {
+  return (one.exposure > 0 ? (one.amount / one.exposure) * 1000 : 0).toFixed(2);
 }
 
 function shortId(row: PublicTrafficProductDataRow): string {
@@ -123,8 +123,7 @@ function optionalElement(element: Record<string, unknown> | null): Record<string
 
 function funnelColumnSet(one: PublicTrafficDataReportContext['summary']['1d']): Record<string, unknown> {
   return { tag: 'column_set', element_id: 'funnel_summary', flex_mode: 'stretch', horizontal_spacing: '8px', columns: [
-    nestedMetricColumn(null, [['曝光', String(one.exposure)], ['访问', String(one.publicVisits)], ['金额', `¥${one.amount.toFixed(2)}`]]),
-    nestedMetricColumn('订单', [['创建', String(one.createdOrders)], ['发货', String(one.shippedOrders)]]),
+    nestedMetricColumn(null, [['曝光', String(one.exposure)], ['公域访问', String(one.publicVisits)], ['金额', `¥${one.amount.toFixed(2)}`]]),
   ] };
 }
 
@@ -140,7 +139,7 @@ function funnelElements(context: PublicTrafficDataReportContext): Record<string,
   const customs = oa.pages.customs;
   return [
     nestedFunnelColumnSet([
-      { title: null, metrics: [['曝光', String(one.exposure)], ['公域访问', String(one.publicVisits)], ['商品页访问', String(one.dashboardVisits)]] },
+      { title: null, metrics: [['曝光', String(one.exposure)], ['公域访问', String(one.publicVisits)], ['公域金额', `¥${one.amount.toFixed(2)}`]] },
     ], 'funnel_public'),
     nestedFunnelColumnSet([
       { title: `订单经营（${shortDataDate(overview?.dataDate)}）`, metrics: [orderMetric(overview, '创建订单', ['创建订单数']), orderMetric(overview, '签约订单', ['签约订单数']), orderMetric(overview, '发货订单', ['发货订单数'])] },
@@ -162,7 +161,7 @@ function markdownElement(content: string | null): { tag: 'markdown'; content: st
   return content ? [{ tag: 'markdown', content }] : [];
 }
 
-type TableColumnKey = 'product' | 'id' | 'exposure' | 'visits' | 'deals' | 'custodyDays' | 'rate' | 'status' | 'criteria' | 'action' | 'liveDays' | 'dailyVisits';
+type TableColumnKey = 'product' | 'id' | 'exposure' | 'visits' | 'amount' | 'deals' | 'custodyDays' | 'rate' | 'status' | 'criteria' | 'action' | 'liveDays' | 'dailyVisits';
 
 interface FeishuTableColumn {
   name: TableColumnKey;
@@ -213,8 +212,7 @@ function rowScore(row: PublicTrafficProductDataRow): number {
 }
 
 function visits(row: PublicTrafficProductDataRow): number {
-  const one = row.periods['1d'];
-  return one.publicVisits || one.dashboardVisits;
+  return row.periods['1d'].publicVisits;
 }
 
 function shortProductName(row: PublicTrafficProductDataRow, productNameMap: ProductNameMap = {}): string {
@@ -233,7 +231,7 @@ function findRowByIdentifier(context: PublicTrafficDataReportContext, identifier
 function exposureTopRows(context: PublicTrafficDataReportContext, productNameMap: ProductNameMap): FeishuTableRow[] {
   return [...context.rows].sort((a, b) => rowScore(b) - rowScore(a)).slice(0, 10).map((row) => {
     const one = row.periods['1d'];
-    return { product: shortProductName(row, productNameMap), id: shortId(row), exposure: one.exposure, visits: visits(row), deals: one.shippedOrders };
+    return { product: shortProductName(row, productNameMap), id: shortId(row), exposure: one.exposure, visits: visits(row), amount: Number(one.amount.toFixed(2)) };
   });
 }
 
@@ -248,14 +246,14 @@ function conversionRows(context: PublicTrafficDataReportContext, productNameMap:
   return context.weakConversion
     .map((item) => findRowByIdentifier(context, item.identifier))
     .filter((row): row is PublicTrafficProductDataRow => Boolean(row))
-    .map((row) => ({ product: shortProductName(row, productNameMap), id: shortId(row), visits: visits(row), deals: row.periods['1d'].shippedOrders, rate: percent(row.periods['1d'].visitShipmentRate) }));
+    .map((row) => ({ product: shortProductName(row, productNameMap), id: shortId(row), visits: visits(row), amount: Number(row.periods['1d'].amount.toFixed(2)), rate: percent(row.periods['1d'].exposureVisitRate) }));
 }
 
 function scaleRows(context: PublicTrafficDataReportContext, productNameMap: ProductNameMap): FeishuTableRow[] {
   return context.highPotential
     .map((item) => findRowByIdentifier(context, item.identifier))
     .filter((row): row is PublicTrafficProductDataRow => Boolean(row))
-    .map((row) => ({ product: shortProductName(row, productNameMap), id: shortId(row), exposure: row.periods['1d'].exposure, visits: visits(row), deals: row.periods['1d'].shippedOrders }));
+    .map((row) => ({ product: shortProductName(row, productNameMap), id: shortId(row), exposure: row.periods['1d'].exposure, visits: visits(row), amount: Number(row.periods['1d'].amount.toFixed(2)) }));
 }
 
 function newProductPoolCount(context: PublicTrafficDataReportContext): number {
@@ -271,12 +269,12 @@ interface NewLinkColdStartRow {
   liveDays: string;
   dailyVisits: number;
   visits: number;
-  deals: number;
+  amount: number;
   status: ColdStartStatus;
 }
 
 const coldStartStatusMeta: Array<{ status: ColdStartStatus; criteria: string; action: string }> = [
-  { status: '强跑通', criteria: '7天成交 >=1', action: '继续放量' },
+  { status: '强跑通', criteria: '7天金额 >0', action: '继续放量' },
   { status: '优秀链接', criteria: '日均访问 >=10', action: '放量观察' },
   { status: '访问达标', criteria: '日均访问 >=6', action: '看转化' },
   { status: '有苗头', criteria: '日均访问 3-5.9', action: '优化图/价/标题' },
@@ -304,9 +302,9 @@ function coldStartLiveDays(submittedAt: string, reportDate: string): { label: st
   return { label: `${days.toFixed(1)}天`, days, hours, afterReportDate: submitted.getTime() > reportEndTime };
 }
 
-function classifyColdStart(dailyVisits: number, visits: number, deals: number, liveHours: number, matched: boolean, afterReportDate = false): ColdStartStatus {
+function classifyColdStart(dailyVisits: number, visits: number, amount: number, liveHours: number, matched: boolean, afterReportDate = false): ColdStartStatus {
   if (!matched || afterReportDate) return '待观察';
-  if (deals >= 1) return '强跑通';
+  if (amount > 0) return '强跑通';
   if ((liveHours >= 72 && visits === 0) || dailyVisits < 1) return '危险';
   if (dailyVisits >= 10) return '优秀链接';
   if (dailyVisits >= 6) return '访问达标';
@@ -340,8 +338,8 @@ function newLinkColdStartRows(context: PublicTrafficDataReportContext): NewLinkC
     const row = findRowByIdentifier(context, item.productId);
     const seven = row?.periods['7d'];
     const live = coldStartLiveDays(item.submittedAt, context.date);
-    const totalVisits = seven?.dashboardVisits ?? 0;
-    const deals = seven?.shippedOrders ?? 0;
+    const totalVisits = seven?.publicVisits ?? 0;
+    const amount = seven?.amount ?? 0;
     const dailyVisits = Number((totalVisits / live.days).toFixed(1));
     return {
       product: `商品ID ${item.productId} ${shortNewProductName(item.productName)}`.trim(),
@@ -350,8 +348,8 @@ function newLinkColdStartRows(context: PublicTrafficDataReportContext): NewLinkC
       liveDays: live.label,
       dailyVisits,
       visits: totalVisits,
-      deals,
-      status: classifyColdStart(dailyVisits, totalVisits, deals, live.hours, Boolean(row), live.afterReportDate),
+      amount,
+      status: classifyColdStart(dailyVisits, totalVisits, amount, live.hours, Boolean(row), live.afterReportDate),
     };
   }).sort((a, b) => b.submittedTime - a.submittedTime || coldStartStatusOrder(a.status) - coldStartStatusOrder(b.status) || a.dailyVisits - b.dailyVisits || compareProductIds(a.id, b.id));
 }
@@ -367,7 +365,7 @@ function coldStartMarkdown(rows: NewLinkColdStartRow[], count: number, fallbackP
     .map((meta) => ({ ...meta, count: statusCounts(meta.status) }))
     .filter((item) => item.count > 0)
     .map((item) => `- ${item.status} ${item.count} 条｜${item.criteria}｜${item.action}`);
-  const detailLines = rows.slice(0, 10).map((row, index) => `${index + 1}. ${row.product}｜上线 ${row.liveDays}｜日均访问 ${row.dailyVisits}/天｜访问 ${row.visits}｜成交 ${row.deals}｜${row.status}`);
+  const detailLines = rows.slice(0, 10).map((row, index) => `${index + 1}. ${row.product}｜上线 ${row.liveDays}｜日均公域访问 ${row.dailyVisits}/天｜公域访问 ${row.visits}｜金额 ¥${row.amount.toFixed(2)}｜${row.status}`);
   return [
     `近7天链接 ${count} 条`,
     `强跑通 ${statusCounts('强跑通')}｜优秀 ${statusCounts('优秀链接')}｜访问达标 ${statusCounts('访问达标')}｜有苗头 ${statusCounts('有苗头')}｜未启动 ${statusCounts('未启动')}｜危险 ${statusCounts('危险')}`,
@@ -388,7 +386,7 @@ function analysisSummary(context: PublicTrafficDataReportContext, boostRows: Fei
     '**分析与建议**',
     ...conclusionLines,
     `- **动作聚焦**：补曝光 ${boostRows.length} 个；提转化 ${conversionRowsData.length} 个；继续放量 ${scaleRowsData.length} 个。`,
-    `- **建议**：优先排查成交/转化弱商品，再处理托管超过 7 天且曝光 0-50 的商品；新品 ${newProductPoolCount(context)} 个先进入维护池观察。`,
+    `- **建议**：优先排查公域金额转化弱商品，再处理托管超过 7 天且曝光 0-50 的商品；新品 ${newProductPoolCount(context)} 个先进入维护池观察。`,
   ];
   return { tag: 'markdown', content: lines.join('\n') };
 }
@@ -426,12 +424,12 @@ function metricTables(context: PublicTrafficDataReportContext, productNameMap: P
     analysisSummary(context, boostRows, conversionRowsData, scaleRowsData),
     { tag: 'hr' },
     { tag: 'markdown', content: '**曝光 Top10**' },
-    tableElement('exposure_top_table', [tableColumn('product', '商品'), tableColumn('id', 'ID'), tableColumn('exposure', '曝光', 'number'), tableColumn('visits', '访问', 'number'), tableColumn('deals', '成交', 'number')], exposureTopRows(context, productNameMap)),
+    tableElement('exposure_top_table', [tableColumn('product', '商品'), tableColumn('id', 'ID'), tableColumn('exposure', '曝光', 'number'), tableColumn('visits', '公域访问', 'number'), tableColumn('amount', '金额', 'number')], exposureTopRows(context, productNameMap)),
     { tag: 'hr' },
     { tag: 'markdown', content: '**待优化**' },
     tableElement('boost_table', [tableColumn('product', `补曝光（${boostRows.length}）`), tableColumn('id', 'ID'), tableColumn('exposure', '曝光', 'number'), tableColumn('visits', '访问', 'number'), tableColumn('custodyDays', '托管天')], boostRows),
-    tableElement('conversion_table', [tableColumn('product', `提转化（${conversionRowsData.length}）`), tableColumn('id', 'ID'), tableColumn('visits', '访问', 'number'), tableColumn('deals', '成交', 'number'), tableColumn('rate', '转化率')], conversionRowsData),
-    tableElement('scale_table', [tableColumn('product', `继续放量（${scaleRowsData.length}）`), tableColumn('id', 'ID'), tableColumn('exposure', '曝光', 'number'), tableColumn('visits', '访问', 'number'), tableColumn('deals', '成交', 'number')], scaleRowsData),
+    tableElement('conversion_table', [tableColumn('product', `提转化（${conversionRowsData.length}）`), tableColumn('id', 'ID'), tableColumn('visits', '公域访问', 'number'), tableColumn('amount', '金额', 'number'), tableColumn('rate', '访问率')], conversionRowsData),
+    tableElement('scale_table', [tableColumn('product', `继续放量（${scaleRowsData.length}）`), tableColumn('id', 'ID'), tableColumn('exposure', '曝光', 'number'), tableColumn('visits', '公域访问', 'number'), tableColumn('amount', '金额', 'number')], scaleRowsData),
     { tag: 'hr' },
     newProductPoolPanel(context),
   ];
@@ -452,7 +450,6 @@ export function buildPublicTrafficCard(context: PublicTrafficDataReportContext, 
         ...funnelElements(context),
         { tag: 'markdown', content: rateText(one) },
         ...markdownElement(businessMetricText(context)),
-        ...markdownElement(dataQualityText(context)),
         ...optionalElement(moduleColumnSet(context)),
         { tag: 'hr' },
         ...metricTables(context, productNameMap),

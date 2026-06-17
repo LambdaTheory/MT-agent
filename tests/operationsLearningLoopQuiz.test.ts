@@ -85,8 +85,13 @@ describe('operations learning loop quiz preview', () => {
     const serialized = JSON.stringify(card);
 
     expect(card.header.title.content).toBe('运营学习 loop 测验 1/10');
+    expect(card.schema).toBe('2.0');
+    expect(JSON.stringify(card)).toContain('tag":"form');
     expect(serialized).toContain('tag":"input');
     expect(serialized).toContain('name":"suggested_action');
+    expect(serialized).toContain('input_type":"text');
+    expect(serialized).toContain('action_type":"form_submit');
+    expect(serialized).toContain('behaviors');
     expect(serialized).toContain('tag":"button');
     expect(serialized).toContain('tag":"column_set');
     expect(serialized).toContain('operations_learning_period_metric_matrix');
@@ -112,6 +117,7 @@ describe('operations learning loop quiz preview', () => {
     expect(serialized).toContain('访问到发货');
     expect(serialized).toContain('feedback":"reasonable');
     expect(serialized).toContain('feedback":"unreasonable');
+    expect(serialized).toContain('feedback":"suggested_action');
     expect(serialized).toContain('feedback":"not_representative');
     expect(serialized).toContain('"behaviors":[{"type":"callback","value":{"action":"operations_learning_feedback"');
     expect(serialized).toContain(item.productId);

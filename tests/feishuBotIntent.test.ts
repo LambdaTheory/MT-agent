@@ -26,6 +26,16 @@ describe('parseBotIntent', () => {
     expect(parseBotIntent('loop测验')).toEqual({ type: 'operations_learning_quiz' });
   });
 
+  it('parses operations learning summary intent', () => {
+    expect(parseBotIntent('运营学习汇总')).toEqual({ type: 'operations_learning_summary' });
+    expect(parseBotIntent('学习反馈总结')).toEqual({ type: 'operations_learning_summary' });
+  });
+
+  it('parses operations learning history intent', () => {
+    expect(parseBotIntent('运营学习历史')).toEqual({ type: 'operations_learning_history' });
+    expect(parseBotIntent('学习反馈历史')).toEqual({ type: 'operations_learning_history' });
+  });
+
   it('parses latest summary intent', () => {
     expect(parseBotIntent('今日概况')).toEqual({ type: 'latest_summary' });
     expect(parseBotIntent('今天数据')).toEqual({ type: 'latest_summary' });

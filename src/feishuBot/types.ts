@@ -10,6 +10,8 @@ export type BotIntent =
   | { type: 'push_latest_report_to_group' }
   | { type: 'latest_summary' }
   | { type: 'operations_learning_quiz' }
+  | { type: 'operations_learning_summary' }
+  | { type: 'operations_learning_history' }
   | { type: 'query_product'; keyword: string }
   | { type: 'lookup_product_id_card' }
   | { type: 'lookup_product_id'; query: string }

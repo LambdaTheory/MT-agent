@@ -1,9 +1,9 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { replyFeishuMessageCard, replyFeishuMessageText, type FeishuAppSendResult, type FeishuCardPayload, type FeishuReplyConfig } from '../notify/feishuApp.js';
+import { handleOperationsLearningFeedback } from '../operationsLearningLoop/session.js';
 import { findLatestReportContext } from './reportStore.js';
 import { buildIdLookupCard } from './idLookupCard.js';
 import { formatIdLookupResult, lookupProductId } from './idLookup.js';
-import { buildOperationsLearningQuestionCard, selectOperationsLearningQuizItems } from '../operationsLearningLoop/quiz.js';
 import { createFeishuMessageDispatcher } from './dispatcher.js';
 import { createRentalPriceSkillClient, executeRentalOperationConfirmRequest, parseRentalOperationConfirmRequest, parseRentalPriceConfirmRequest, type RentalPriceSkillClient } from './rentalPrice.js';
 import type { LlmIntentProposalProvider } from './llmIntentProposal.js';
@@ -32,6 +32,7 @@ interface FeishuCardActionEvent {
   event?: {
     open_message_id?: unknown;
     context?: { open_message_id?: unknown };
+    operator?: { open_id?: unknown; user_id?: unknown };
     action?: {
       name?: unknown;
       input_value?: unknown;
@@ -118,17 +119,15 @@ function extractCardMessageId(payload: FeishuCardActionEvent): string | undefine
   return readString(payload.event?.context?.open_message_id) ?? readString(payload.event?.open_message_id);
 }
 
+function extractCardReviewerId(payload: FeishuCardActionEvent): string | undefined {
+  return readString(payload.event?.operator?.open_id) ?? readString(payload.event?.operator?.user_id);
+}
+
 function isCardActionTrigger(payload: unknown): payload is FeishuCardActionEvent {
   if (!isRecord(payload)) return false;
   const header = isRecord(payload.header) ? payload.header : undefined;
   const event = isRecord(payload.event) ? payload.event : undefined;
   return header?.event_type === 'card.action.trigger' || Boolean(event?.action);
-}
-
-function formatOperationsLearningFeedback(value: Record<string, unknown>, suggestion: string | undefined): string {
-  const productId = readString(value.productId) ?? '未知商品';
-  const feedback = readString(value.feedback) ?? 'unknown';
-  return `已收到运营学习反馈：${productId} ${feedback}${suggestion ? `。建议：${suggestion}` : ''}`;
 }
 
 async function handleCardActionTrigger(payload: FeishuCardActionEvent, config: FeishuBotServerConfig): Promise<FeishuCardPayload | undefined> {
@@ -138,18 +137,28 @@ async function handleCardActionTrigger(payload: FeishuCardActionEvent, config: F
   if (!messageId || !actionName) return undefined;
 
   const replyText = config.replyText ?? replyFeishuMessageText;
+  const replyCard = config.replyCard ?? replyFeishuMessageCard;
   const replyConfig = { appId: config.appId, appSecret: config.appSecret, messageId };
 
   if (actionName === 'operations_learning_feedback') {
-    const latest = await findLatestReportContext(config.outputDir);
-    const currentIndex = readNumber(value?.questionIndex);
-    const items = latest ? selectOperationsLearningQuizItems(latest.context) : [];
-    const nextItem = currentIndex ? items[currentIndex] : undefined;
-    if (latest && nextItem && currentIndex) {
-      return buildOperationsLearningQuestionCard(latest.context.date, nextItem, { index: currentIndex + 1, total: items.length });
+    const productId = readString(value?.productId);
+    const feedback = readString(value?.feedback);
+    const questionIndex = readNumber(value?.questionIndex);
+    if (!productId || !feedback || !questionIndex) {
+      await replyText(replyConfig, '运营学习反馈回调缺少必要字段。');
+      return;
     }
-    await replyText(replyConfig, formatOperationsLearningFeedback(value ?? {}, readActionFormValue(payload.event?.action, 'suggested_action')));
-    return undefined;
+    const response = await handleOperationsLearningFeedback(config.outputDir ?? 'output', {
+      date: readString(value?.date),
+      productId,
+      feedback,
+      questionIndex,
+      suggestion: readActionFormValue(payload.event?.action, 'suggested_action'),
+      reviewerId: extractCardReviewerId(payload),
+    });
+    if (response.card) await replyCard(replyConfig, response.card);
+    else await replyText(replyConfig, response.text);
+    return;
   }
 
   if (actionName === 'rental_price_confirm') {

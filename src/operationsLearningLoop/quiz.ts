@@ -23,8 +23,9 @@ export interface OperationsLearningQuizCardPayload extends FeishuCardPayload {
 }
 
 export interface OperationsLearningQuestionCardPayload extends FeishuCardPayload {
+  schema: '2.0';
   header: { title: { tag: 'plain_text'; content: string }; template: string };
-  elements: Record<string, unknown>[];
+  body: { elements: Record<string, unknown>[] };
 }
 
 const FEEDBACK_OPTIONS: OperationsLearningFeedbackOption[] = ['reasonable', 'unreasonable', 'suggested_action', 'not_representative'];
@@ -154,7 +155,8 @@ function feedbackButton(label: string, feedback: OperationsLearningFeedbackOptio
     tag: 'button',
     text: { tag: 'plain_text', content: label },
     type: feedback === 'reasonable' ? 'primary' : 'default',
-    value,
+    action_type: 'form_submit',
+    name: `operations_learning_${feedback}`,
     behaviors: [{ type: 'callback', value }],
   };
 }
@@ -198,32 +200,49 @@ function reasonsPanel(item: OperationsLearningQuizItem): Record<string, unknown>
 
 export function buildOperationsLearningQuestionCard(date: string, item: OperationsLearningQuizItem, options: { index: number; total: number }): OperationsLearningQuestionCardPayload {
   return {
+    schema: '2.0',
     config: { wide_screen_mode: true },
     header: { title: { tag: 'plain_text', content: `运营学习 loop 测验 ${options.index}/${options.total}` }, template: 'blue' },
-    elements: [
-      markdown(`**请判断：这个运营建议是否值得学习？**\n<text_tag color='blue'>${date}</text_tag> <text_tag color='grey'>每日 10 题中的第 ${options.index} 题</text_tag>`),
-      markdown(`**商品**\n${item.productName}\n<text_tag color='grey'>端内ID ${item.productId}｜平台商品ID ${item.platformProductId}</text_tag>`),
-      markdown(`**Agent 建议操作**\n<text_tag color='green'>${item.recommendedOperation}</text_tag>`),
-      { tag: 'hr' },
-      markdown('**1 / 7 / 30 日详细数据**'),
-      periodMetricMatrix(item),
-      reasonsPanel(item),
-      {
-        tag: 'input',
-        name: 'suggested_action',
-        label: { tag: 'plain_text', content: '你的改写建议（可选）' },
-        placeholder: { tag: 'plain_text', content: '如果不认可，请输入你建议的运营动作或原因' },
-      },
-      {
-        tag: 'action',
-        actions: [
-          feedbackButton('合理', 'reasonable', date, item, options.index),
-          feedbackButton('不合理', 'unreasonable', date, item, options.index),
-          feedbackButton('提交改写建议', 'suggested_action', date, item, options.index),
-          feedbackButton('不具代表性', 'not_representative', date, item, options.index),
-        ],
-      },
-    ],
+    body: {
+      elements: [
+        {
+          tag: 'form',
+          name: 'operations_learning_feedback_form',
+          elements: [
+            markdown(`**请判断：这个运营建议是否值得学习？**\n<text_tag color='blue'>${date}</text_tag> <text_tag color='grey'>每日 10 题中的第 ${options.index} 题</text_tag>`),
+            markdown(`**商品**\n${item.productName}\n<text_tag color='grey'>端内ID ${item.productId}｜平台商品ID ${item.platformProductId}</text_tag>`),
+            markdown(`**Agent 建议操作**\n<text_tag color='green'>${item.recommendedOperation}</text_tag>`),
+            { tag: 'hr' },
+            markdown('**1 / 7 / 30 日详细数据**'),
+            periodMetricMatrix(item),
+            reasonsPanel(item),
+            {
+              tag: 'input',
+              element_id: 'operations_learning_suggested_action',
+              name: 'suggested_action',
+              label: { tag: 'plain_text', content: '你的改写建议（可选）' },
+              label_position: 'top',
+              placeholder: { tag: 'plain_text', content: '如果不认可，请输入你建议的运营动作或原因' },
+              input_type: 'text',
+              max_length: 500,
+            },
+            {
+              tag: 'column_set',
+              flex_mode: 'none',
+              background_style: 'default',
+              horizontal_spacing: 'default',
+              columns: [
+                { tag: 'column', width: 'auto', vertical_align: 'top', elements: [feedbackButton('合理', 'reasonable', date, item, options.index)] },
+                { tag: 'column', width: 'auto', vertical_align: 'top', elements: [feedbackButton('不合理', 'unreasonable', date, item, options.index)] },
+                { tag: 'column', width: 'auto', vertical_align: 'top', elements: [feedbackButton('提交改写建议', 'suggested_action', date, item, options.index)] },
+                { tag: 'column', width: 'auto', vertical_align: 'top', elements: [feedbackButton('不具代表性', 'not_representative', date, item, options.index)] },
+              ],
+              margin: '0px',
+            },
+          ],
+        },
+      ],
+    },
   };
 }
 

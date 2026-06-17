@@ -60,12 +60,23 @@ function pointChangeText(label: string, current: number, previous: number): stri
   return `${label} ${percent(current)}，较昨日持平 0.00 个百分点`;
 }
 
+function amountPerThousandExposure(summary: PublicTrafficDataSummary): number {
+  return summary.exposure > 0 ? (summary.amount / summary.exposure) * 1000 : 0;
+}
+
+function amountExposureText(current: PublicTrafficDataSummary, previous?: PublicTrafficDataSummary): string {
+  const currentRate = amountPerThousandExposure(current);
+  if (!previous) return `千次曝光金额 ¥${currentRate.toFixed(2)}。`;
+  const previousRate = amountPerThousandExposure(previous);
+  return changeText('千次曝光金额', currentRate, previousRate, '元');
+}
+
 function buildConclusions(summary: PublicTrafficDataSummary, previous?: PublicTrafficDataSummary) {
   if (!previous) {
     return [
       {
         label: '基准',
-        text: `暂无昨日公域数据上下文，今日仅展示基准值：曝光 ${summary.exposure}，公域访问 ${summary.publicVisits}，发货 ${summary.shippedOrders}，金额 ¥${summary.amount.toFixed(2)}。`,
+        text: `暂无昨日公域数据上下文，今日仅展示基准值：曝光 ${summary.exposure}，公域访问 ${summary.publicVisits}，金额 ¥${summary.amount.toFixed(2)}，${amountExposureText(summary)}`,
       },
     ];
   }
@@ -74,9 +85,8 @@ function buildConclusions(summary: PublicTrafficDataSummary, previous?: PublicTr
     { label: '曝光', text: changeText('曝光', summary.exposure, previous.exposure) },
     { label: '公域访问', text: changeText('公域访问', summary.publicVisits, previous.publicVisits) },
     { label: '金额', text: changeText('金额', summary.amount, previous.amount, '元') },
-    { label: '发货', text: changeText('发货', summary.shippedOrders, previous.shippedOrders) },
     { label: '曝光到访问率', text: pointChangeText('曝光到访问率', summary.exposureVisitRate, previous.exposureVisitRate) },
-    { label: '访问到发货率', text: pointChangeText('访问到发货率', summary.visitShipmentRate, previous.visitShipmentRate) },
+    { label: '曝光金额转化率', text: amountExposureText(summary, previous) },
   ];
 }
 
@@ -115,9 +125,7 @@ function item(row: PublicTrafficProductDataRow, action: string, reason: string, 
 function monitoringReason(row: PublicTrafficProductDataRow): string {
   const one = row.periods['1d'];
   const seven = row.periods['7d'];
-  const oneVisits = one.publicVisits || one.dashboardVisits;
-  const sevenVisits = seven.publicVisits || seven.dashboardVisits;
-  return `1日曝光 ${one.exposure}，访问 ${oneVisits}，发货 ${one.shippedOrders}，金额 ${one.amount.toFixed(2)}；7日曝光 ${seven.exposure}，访问 ${sevenVisits}，发货 ${seven.shippedOrders}，金额 ${seven.amount.toFixed(2)}`;
+  return `1日曝光 ${one.exposure}，公域访问 ${one.publicVisits}，金额 ${one.amount.toFixed(2)}；7日曝光 ${seven.exposure}，公域访问 ${seven.publicVisits}，金额 ${seven.amount.toFixed(2)}`;
 }
 
 function byPlatformId(rows: PublicTrafficProductDataRow[]): Map<string, PublicTrafficProductDataRow> {
@@ -158,8 +166,7 @@ function buildRecommendedActions(sections: {
 function isHealthy(row: PublicTrafficProductDataRow): boolean {
   const one = row.periods['1d'];
   const seven = row.periods['7d'];
-  const hasCreatedOrder = (period: PublicTrafficPeriodMetrics) => period.createdOrderAmount !== undefined ? period.createdOrderAmount > 0 : period.createdOrders > 0;
-  return hasCreatedOrder(one) || hasCreatedOrder(seven);
+  return one.amount > 0 || seven.amount > 0;
 }
 
 function matchesLowExposure(row: PublicTrafficProductDataRow): boolean {
@@ -170,7 +177,7 @@ function matchesLowExposure(row: PublicTrafficProductDataRow): boolean {
   const exposureHistoryLow = one.hasExposureData && seven.hasExposureData && one.exposure <= 50 && seven.exposure <= 300;
   const hasVisitEvidence = one.publicVisits > 0 || seven.publicVisits > 0 || thirty.publicVisits > 0;
   const visitEvidenceLow = (seven.hasExposureData || seven.hasDashboardData || thirty.hasDashboardData) && hasVisitEvidence && seven.publicVisits <= 3 && thirty.publicVisits <= 10;
-  return (custodyLowExposure || exposureHistoryLow || visitEvidenceLow) && one.shippedOrders === 0 && seven.shippedOrders === 0;
+  return (custodyLowExposure || exposureHistoryLow || visitEvidenceLow) && one.amount <= 0 && seven.amount <= 0;
 }
 
 function matchesWeakClick(row: PublicTrafficProductDataRow): boolean {
@@ -180,9 +187,7 @@ function matchesWeakClick(row: PublicTrafficProductDataRow): boolean {
 }
 
 function matchesWeakConversion(row: PublicTrafficProductDataRow): boolean {
-  const one = row.periods['1d'];
-  const seven = row.periods['7d'];
-  return (one.hasDashboardData || seven.hasDashboardData) && (one.dashboardVisits >= 50 || seven.dashboardVisits >= 100) && ((one.dashboardVisits >= 50 && one.shippedOrders === 0) || (seven.dashboardVisits >= 100 && seven.visitShipmentRate < 0.01));
+  return false;
 }
 
 function matchesLifecycleGovernance(row: PublicTrafficProductDataRow, input: PublicTrafficDataAnalysisInput): boolean {
@@ -193,7 +198,7 @@ function matchesLifecycleGovernance(row: PublicTrafficProductDataRow, input: Pub
 function matchesHighPotential(row: PublicTrafficProductDataRow): boolean {
   const one = row.periods['1d'];
   const seven = row.periods['7d'];
-  return (one.hasExposureData || seven.hasExposureData) && one.shippedOrders === 0 && seven.shippedOrders === 0 && (one.publicVisits >= 100 || seven.publicVisits >= 300 || seven.createdOrders >= 3);
+  return (one.hasExposureData || seven.hasExposureData) && one.amount <= 0 && seven.amount <= 0 && (one.publicVisits >= 100 || seven.publicVisits >= 300);
 }
 
 function lifecyclePriority(row: PublicTrafficProductDataRow): PublicTrafficReportSectionItem['priority'] {
@@ -247,11 +252,11 @@ export function analyzePublicTrafficData(input: PublicTrafficDataAnalysisInput):
 
   const weakConversion = weakConversionRows
     .sort((a, b) => one(b).dashboardVisits - one(a).dashboardVisits || seven(b).dashboardVisits - seven(a).dashboardVisits)
-    .map((row) => item(row, '检查价格/押金/库存/风控/履约链路', `1日后链路访问 ${one(row).dashboardVisits}，1日发货 ${one(row).shippedOrders}，7日后链路访问 ${seven(row).dashboardVisits}，7日发货 ${seven(row).shippedOrders}`, 'high'));
+    .map((row) => item(row, '检查价格/押金/库存/风控/履约链路', `1日公域访问 ${one(row).publicVisits}，1日金额 ${one(row).amount.toFixed(2)}，7日公域访问 ${seven(row).publicVisits}，7日金额 ${seven(row).amount.toFixed(2)}`, 'high'));
 
   const highPotential = highPotentialRows
-    .sort((a, b) => seven(b).publicVisits - seven(a).publicVisits || seven(b).createdOrders - seven(a).createdOrders || one(b).publicVisits - one(a).publicVisits)
-    .map((row) => item(row, '继续放量，并复制标题/图片/价格结构到同类商品', `7日曝光 ${seven(row).exposure}，7日访问 ${seven(row).publicVisits}，7日发货 ${seven(row).shippedOrders}，7日金额 ${seven(row).amount.toFixed(2)}`, seven(row).publicVisits >= 300 ? 'medium' : 'low'));
+    .sort((a, b) => seven(b).publicVisits - seven(a).publicVisits || one(b).publicVisits - one(a).publicVisits)
+    .map((row) => item(row, '继续放量，并复制标题/图片/价格结构到同类商品', `7日曝光 ${seven(row).exposure}，7日公域访问 ${seven(row).publicVisits}，7日金额 ${seven(row).amount.toFixed(2)}`, seven(row).publicVisits >= 300 ? 'medium' : 'low'));
 
   const newProductObservation = newProductObservationRows
     .sort((a, b) => one(a).exposure - one(b).exposure || one(a).publicVisits - one(b).publicVisits)

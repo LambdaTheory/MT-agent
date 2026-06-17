@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -52,7 +52,10 @@ async function writeContext(): Promise<string> {
     highPotential: [{ identifier: '端内ID 566', action: '继续放量', reason: '高潜力' }],
     newProductObservation: [],
     lifecycleGovernance: [],
-    recommendedActions: [],
+    recommendedActions: [
+      { identifier: '端内ID 565', action: '补曝光', reason: '曝光不足', priority: 'high' },
+      { identifier: '端内ID 701', action: '新品维护', reason: '新链接池维护', priority: 'medium' },
+    ],
     newProductPoolIds: ['701'],
     newProductPoolItems: [{ productId: '701', productName: '大疆 Pocket 3', shortTitle: '', submittedAt: '2026-06-11 09:00:00', merchant: '', alipaySyncStatus: '已同步', alipayCode: '', stock: 0, skuCount: 0, maintenanceStatus: '待维护', note: '' }],
     orderAnalysis: { runDate: '2026-06-11', pages: { overview: { label: '订单概览', dataDate: '2026-06-10', indicators: [{ label: '发货订单', value: '12' }] } } },
@@ -126,6 +129,27 @@ describe('handleBotIntent', () => {
     expect(response.card).toBeDefined();
     expect(response.card?.header).toMatchObject({ title: { content: expect.stringContaining('运营学习 loop 测验') } });
     expect(JSON.stringify(response.card)).toContain('suggested_action');
+    await expect(readFile(join(outputDir, '2026-06-11', 'operations-learning-session.json'), 'utf8')).resolves.toContain('565');
+  });
+
+  it('returns an operations learning feedback summary', async () => {
+    const outputDir = await writeContext();
+    await handleBotIntent({ type: 'operations_learning_quiz' }, outputDir);
+    const response = await handleBotIntent({ type: 'operations_learning_summary' }, outputDir);
+
+    expect(response.text).toContain('运营学习反馈汇总 2026-06-11');
+    expect(response.text).toContain('已答 0/2');
+  });
+
+  it('returns operations learning history stats', async () => {
+    const outputDir = await writeContext();
+    await handleBotIntent({ type: 'operations_learning_quiz' }, outputDir);
+
+    const response = await handleBotIntent({ type: 'operations_learning_history' }, outputDir);
+
+    expect(response.text).toContain('运营学习历史汇总');
+    expect(response.text).toContain('会话 1');
+    expect(response.text).toContain('已答 0/2');
   });
 
   it('returns missing context text for operations learning quiz', async () => {
