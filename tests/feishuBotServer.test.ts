@@ -1,9 +1,52 @@
-import { mkdtemp } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { extractTextMessage, startFeishuBotServer } from '../src/feishuBot/server.js';
 import type { FeishuBotIncomingTextMessage } from '../src/feishuBot/types.js';
+
+const metric = {
+  exposure: 10,
+  publicVisits: 2,
+  dashboardVisits: 2,
+  createdOrders: 0,
+  signedOrders: 0,
+  reviewedOrders: 0,
+  shippedOrders: 0,
+  amount: 0,
+  exposureVisitRate: 0.2,
+  visitCreatedOrderRate: 0,
+  visitShipmentRate: 0,
+  hasExposureData: true,
+  hasDashboardData: true,
+};
+
+async function writeLearningContext(): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), 'mt-agent-bot-http-learning-'));
+  await mkdir(join(dir, '2026-06-11'), { recursive: true });
+  await writeFile(join(dir, '2026-06-11', 'report-context.json'), JSON.stringify({
+    date: '2026-06-11',
+    summary: { '1d': metric, '7d': metric, '30d': metric },
+    conclusions: [],
+    rows: [
+      { productName: 'iPhone 15', platformProductId: 'p565', displayProductId: '端内ID 565', custodyDays: 10, periods: { '1d': metric, '7d': metric, '30d': metric } },
+      { productName: 'Pocket 3', platformProductId: 'p566', displayProductId: '端内ID 566', custodyDays: 1, periods: { '1d': metric, '7d': metric, '30d': metric } },
+    ],
+    recommendedActions: [
+      { identifier: '端内ID 565', action: '补曝光', reason: '曝光不足', priority: 'high' },
+      { identifier: '端内ID 566', action: '提转化', reason: '访问多成交少', priority: 'high' },
+    ],
+    lowExposure: [],
+    weakClick: [],
+    weakConversion: [],
+    highPotential: [],
+    newProductObservation: [],
+    lifecycleGovernance: [],
+    agentData: { removedLinks: [] },
+    emptySectionNotes: {},
+  }));
+  return dir;
+}
 
 describe('extractTextMessage', () => {
   it('extracts Feishu text content', () => {
@@ -178,7 +221,73 @@ describe('startFeishuBotServer', () => {
     }
   });
 
-  it('routes HTTP operations learning feedback callbacks', async () => {
+  it('routes HTTP operations learning feedback callbacks to the next question and persists feedback', async () => {
+    const replies: Array<{ messageId: string; text: string }> = [];
+    const cards: Array<{ messageId: string; card: Record<string, unknown> }> = [];
+    let resolveReplySent!: () => void;
+    const replySent = new Promise<void>((resolve) => {
+      resolveReplySent = resolve;
+    });
+    const outputDir = await writeLearningContext();
+    const server = startFeishuBotServer({
+      port: 0,
+      appId: 'app',
+      appSecret: 'secret',
+      outputDir,
+      replyText: async ({ messageId }, text) => {
+        replies.push({ messageId, text });
+        resolveReplySent();
+        return { sent: true, channel: 'app' };
+      },
+      replyCard: async ({ messageId }, card) => {
+        cards.push({ messageId, card });
+        resolveReplySent();
+        return { sent: true, channel: 'app' };
+      },
+    });
+    try {
+      await new Promise<void>((resolve) => server.once('listening', resolve));
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+
+      await fetch(`http://127.0.0.1:${address.port}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ event: { message: { message_id: 'mid-start-learning', message_type: 'text', content: JSON.stringify({ text: '运营学习' }) } } }),
+      });
+      await replySent;
+
+      let resolveFeedbackSent!: () => void;
+      const feedbackSent = new Promise<void>((resolve) => {
+        resolveFeedbackSent = resolve;
+        resolveReplySent = resolveFeedbackSent;
+      });
+      const response = await fetch(`http://127.0.0.1:${address.port}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          header: { event_type: 'card.action.trigger' },
+          event: {
+            context: { open_message_id: 'mid-http-loop-card' },
+            operator: { open_id: 'ou_http_reviewer' },
+            action: { value: { action: 'operations_learning_feedback', date: '2026-06-11', productId: '565', feedback: 'suggested_action', questionIndex: 1 }, form_value: { suggested_action: '继续放量' } },
+          },
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      await feedbackSent;
+      expect(replies).toEqual([]);
+      expect(cards).toHaveLength(2);
+      expect(JSON.stringify(cards[1].card)).toContain('运营学习 loop 测验 2/2');
+      await expect(readFile(join(outputDir, '2026-06-11', 'operations-learning-session.json'), 'utf8')).resolves.toContain('继续放量');
+      await expect(readFile(join(outputDir, '2026-06-11', 'operations-learning-session.json'), 'utf8')).resolves.toContain('ou_http_reviewer');
+    } finally {
+      server.close();
+    }
+  });
+
+  it('rejects malformed HTTP operations learning feedback callbacks', async () => {
     const replies: Array<{ messageId: string; text: string }> = [];
     let resolveReplySent!: () => void;
     const replySent = new Promise<void>((resolve) => {
@@ -205,15 +314,15 @@ describe('startFeishuBotServer', () => {
         body: JSON.stringify({
           header: { event_type: 'card.action.trigger' },
           event: {
-            context: { open_message_id: 'mid-http-loop-card' },
-            action: { value: { action: 'operations_learning_feedback', productId: '565', feedback: 'good' }, form_value: { suggested_action: '继续放量' } },
+            context: { open_message_id: 'mid-http-loop-malformed' },
+            action: { value: { action: 'operations_learning_feedback', productId: '565', feedback: 'reasonable' } },
           },
         }),
       });
 
       expect(response.status).toBe(200);
       await replySent;
-      expect(replies).toEqual([{ messageId: 'mid-http-loop-card', text: '已收到运营学习反馈：565 good。建议：继续放量' }]);
+      expect(replies).toEqual([{ messageId: 'mid-http-loop-malformed', text: '运营学习反馈回调缺少必要字段。' }]);
     } finally {
       server.close();
     }

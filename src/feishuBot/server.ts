@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { replyFeishuMessageCard, replyFeishuMessageText, type FeishuAppSendResult, type FeishuCardPayload, type FeishuReplyConfig } from '../notify/feishuApp.js';
+import { handleOperationsLearningFeedback } from '../operationsLearningLoop/session.js';
 import { findLatestReportContext } from './reportStore.js';
 import { formatIdLookupResult, lookupProductId } from './idLookup.js';
 import { createFeishuMessageDispatcher } from './dispatcher.js';
@@ -26,6 +27,7 @@ interface FeishuCardActionEvent {
   event?: {
     open_message_id?: unknown;
     context?: { open_message_id?: unknown };
+    operator?: { open_id?: unknown; user_id?: unknown };
     action?: {
       input_value?: unknown;
       value?: unknown;
@@ -93,6 +95,10 @@ function extractCardMessageId(payload: FeishuCardActionEvent): string | undefine
   return readString(payload.event?.context?.open_message_id) ?? readString(payload.event?.open_message_id);
 }
 
+function extractCardReviewerId(payload: FeishuCardActionEvent): string | undefined {
+  return readString(payload.event?.operator?.open_id) ?? readString(payload.event?.operator?.user_id);
+}
+
 function isCardActionTrigger(payload: unknown): payload is FeishuCardActionEvent {
   if (!isRecord(payload)) return false;
   const header = isRecord(payload.header) ? payload.header : undefined;
@@ -100,10 +106,13 @@ function isCardActionTrigger(payload: unknown): payload is FeishuCardActionEvent
   return header?.event_type === 'card.action.trigger' || Boolean(event?.action);
 }
 
-function formatOperationsLearningFeedback(value: Record<string, unknown>, suggestion: string | undefined): string {
-  const productId = readString(value.productId) ?? '未知商品';
-  const feedback = readString(value.feedback) ?? 'unknown';
-  return `已收到运营学习反馈：${productId} ${feedback}${suggestion ? `。建议：${suggestion}` : ''}`;
+function readNumber(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
 }
 
 async function handleCardActionTrigger(payload: FeishuCardActionEvent, config: FeishuBotServerConfig): Promise<void> {
@@ -113,10 +122,27 @@ async function handleCardActionTrigger(payload: FeishuCardActionEvent, config: F
   if (!messageId || !actionName) return;
 
   const replyText = config.replyText ?? replyFeishuMessageText;
+  const replyCard = config.replyCard ?? replyFeishuMessageCard;
   const replyConfig = { appId: config.appId, appSecret: config.appSecret, messageId };
 
   if (actionName === 'operations_learning_feedback') {
-    await replyText(replyConfig, formatOperationsLearningFeedback(value ?? {}, readActionFormValue(payload.event?.action, 'suggested_action')));
+    const productId = readString(value?.productId);
+    const feedback = readString(value?.feedback);
+    const questionIndex = readNumber(value?.questionIndex);
+    if (!productId || !feedback || !questionIndex) {
+      await replyText(replyConfig, '运营学习反馈回调缺少必要字段。');
+      return;
+    }
+    const response = await handleOperationsLearningFeedback(config.outputDir ?? 'output', {
+      date: readString(value?.date),
+      productId,
+      feedback,
+      questionIndex,
+      suggestion: readActionFormValue(payload.event?.action, 'suggested_action'),
+      reviewerId: extractCardReviewerId(payload),
+    });
+    if (response.card) await replyCard(replyConfig, response.card);
+    else await replyText(replyConfig, response.text);
     return;
   }
 
