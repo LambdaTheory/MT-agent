@@ -69,6 +69,8 @@ function canonicalizeIntent(intent: BotIntent): BotIntent {
     case 'help':
     case 'latest_summary':
     case 'operations_learning_quiz':
+    case 'operations_learning_summary':
+    case 'operations_learning_history':
     case 'lookup_product_id_card':
     case 'push_latest_report_to_group':
       return { type: intent.type };

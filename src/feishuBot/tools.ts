@@ -3,7 +3,7 @@ import { sendFeishuCard } from '../notify/feishu.js';
 import { parseAgentDataIntent } from '../agentData/intent.js';
 import { buildPublicTrafficCard } from '../publicTraffic/buildPublicTrafficCard.js';
 import { buildPublicTrafficFeishuText } from '../publicTraffic/buildPublicTrafficFeishu.js';
-import { buildOperationsLearningQuestionCard, selectOperationsLearningQuizItems } from '../operationsLearningLoop/quiz.js';
+import { startOperationsLearningSession, summarizeOperationsLearningHistory, summarizeOperationsLearningSession } from '../operationsLearningLoop/session.js';
 import { formatIdLookupResult, lookupProductId } from './idLookup.js';
 import { buildIdLookupCard } from './idLookupCard.js';
 import { findLatestReportContext, formatLatestSummary, formatProductRows, queryProductRows } from './reportStore.js';
@@ -48,12 +48,17 @@ export async function handleBotIntent(intent: BotIntent, outputDir = 'output', o
   if (intent.type === 'operations_learning_quiz') {
     const latest = await findLatestReportContext(outputDir);
     if (!latest) return { text: '还没有找到公域日报上下文。' };
-    const items = selectOperationsLearningQuizItems(latest.context);
-    if (items.length === 0) return { text: '今日暂无可用于学习的运营候选。' };
-    return {
-      text: `运营学习 loop 测验 ${latest.context.date}（第 1/${items.length} 题）`,
-      card: buildOperationsLearningQuestionCard(latest.context.date, items[0], { index: 1, total: items.length }),
-    };
+    return startOperationsLearningSession(outputDir, latest.context);
+  }
+
+  if (intent.type === 'operations_learning_summary') {
+    const latest = await findLatestReportContext(outputDir);
+    if (!latest) return { text: '还没有找到公域日报上下文。' };
+    return { text: await summarizeOperationsLearningSession(outputDir, latest.context.date) };
+  }
+
+  if (intent.type === 'operations_learning_history') {
+    return { text: await summarizeOperationsLearningHistory(outputDir) };
   }
 
   if (intent.type === 'run_public_traffic_report') {
