@@ -1,4 +1,5 @@
 import * as lark from '@larksuiteoapi/node-sdk';
+import { handleOperationsLearningFeedback } from '../operationsLearningLoop/session.js';
 import { findLatestReportContext } from './reportStore.js';
 import { createFeishuMessageDispatcher } from './dispatcher.js';
 import { formatIdLookupResult, lookupProductId } from './idLookup.js';
@@ -33,6 +34,7 @@ interface SdkCardActionData {
   event?: {
     open_message_id?: unknown;
     context?: { open_message_id?: unknown };
+    operator?: { open_id?: unknown; user_id?: unknown };
     action?: SdkCardAction;
   };
 }
@@ -109,15 +111,23 @@ function extractCardMessageId(data: unknown): string | undefined {
   return readString(data.event?.context?.open_message_id) ?? readString(data.event?.open_message_id);
 }
 
+function extractCardReviewerId(data: unknown): string | undefined {
+  if (!isSdkCardActionData(data)) return undefined;
+  return readString(data.event?.operator?.open_id) ?? readString(data.event?.operator?.user_id);
+}
+
 function cardActionValue(data: unknown): Record<string, unknown> | undefined {
   if (!isSdkCardActionData(data)) return undefined;
   return isRecord(data.event?.action?.value) ? data.event.action.value : undefined;
 }
 
-function formatOperationsLearningFeedback(value: Record<string, unknown>, suggestion: string | undefined): string {
-  const productId = readString(value.productId) ?? '未知商品';
-  const feedback = readString(value.feedback) ?? 'unknown';
-  return `已收到运营学习反馈：${productId} ${feedback}${suggestion ? `。建议：${suggestion}` : ''}`;
+function readNumber(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
 }
 
 async function replyText(client: FeishuSdkClient, messageId: string, text: string): Promise<void> {
@@ -191,7 +201,23 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
 
       try {
         if (actionName === 'operations_learning_feedback') {
-          await replyText(client, messageId, formatOperationsLearningFeedback(value ?? {}, readActionFormValue(action, 'suggested_action')));
+          const productId = readString(value?.productId);
+          const feedback = readString(value?.feedback);
+          const questionIndex = readNumber(value?.questionIndex);
+          if (!productId || !feedback || !questionIndex) {
+            await replyText(client, messageId, '运营学习反馈回调缺少必要字段。');
+            return;
+          }
+          const response = await handleOperationsLearningFeedback(config.outputDir ?? 'output', {
+            date: readString(value?.date),
+            productId,
+            feedback,
+            questionIndex,
+            suggestion: readActionFormValue(action, 'suggested_action'),
+            reviewerId: extractCardReviewerId(data),
+          });
+          if (response.card) await replyCard(client, messageId, response.card);
+          else await replyText(client, messageId, response.text);
           return;
         }
 
