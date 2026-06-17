@@ -60,23 +60,12 @@ function pointChangeText(label: string, current: number, previous: number): stri
   return `${label} ${percent(current)}，较昨日持平 0.00 个百分点`;
 }
 
-function amountPerThousandExposure(summary: PublicTrafficDataSummary): number {
-  return summary.exposure > 0 ? (summary.amount / summary.exposure) * 1000 : 0;
-}
-
-function amountExposureText(current: PublicTrafficDataSummary, previous?: PublicTrafficDataSummary): string {
-  const currentRate = amountPerThousandExposure(current);
-  if (!previous) return `千次曝光金额 ¥${currentRate.toFixed(2)}。`;
-  const previousRate = amountPerThousandExposure(previous);
-  return changeText('千次曝光金额', currentRate, previousRate, '元');
-}
-
 function buildConclusions(summary: PublicTrafficDataSummary, previous?: PublicTrafficDataSummary) {
   if (!previous) {
     return [
       {
         label: '基准',
-        text: `暂无昨日公域数据上下文，今日仅展示基准值：曝光 ${summary.exposure}，公域访问 ${summary.publicVisits}，金额 ¥${summary.amount.toFixed(2)}，${amountExposureText(summary)}`,
+        text: `暂无昨日公域数据上下文，今日仅展示基准值：曝光 ${summary.exposure}，公域访问 ${summary.publicVisits}，公域金额 ¥${summary.amount.toFixed(2)}，转化率 ${percent(summary.exposureVisitRate)}。`,
       },
     ];
   }
@@ -84,9 +73,8 @@ function buildConclusions(summary: PublicTrafficDataSummary, previous?: PublicTr
   return [
     { label: '曝光', text: changeText('曝光', summary.exposure, previous.exposure) },
     { label: '公域访问', text: changeText('公域访问', summary.publicVisits, previous.publicVisits) },
-    { label: '金额', text: changeText('金额', summary.amount, previous.amount, '元') },
-    { label: '曝光到访问率', text: pointChangeText('曝光到访问率', summary.exposureVisitRate, previous.exposureVisitRate) },
-    { label: '曝光金额转化率', text: amountExposureText(summary, previous) },
+    { label: '公域金额', text: changeText('公域金额', summary.amount, previous.amount, '元') },
+    { label: '转化率', text: pointChangeText('转化率', summary.exposureVisitRate, previous.exposureVisitRate) },
   ];
 }
 
@@ -187,7 +175,8 @@ function matchesWeakClick(row: PublicTrafficProductDataRow): boolean {
 }
 
 function matchesWeakConversion(row: PublicTrafficProductDataRow): boolean {
-  return false;
+  const one = row.periods['1d'];
+  return one.hasExposureData && one.amount <= 0 && one.publicVisits >= 100;
 }
 
 function matchesLifecycleGovernance(row: PublicTrafficProductDataRow, input: PublicTrafficDataAnalysisInput): boolean {
@@ -197,8 +186,7 @@ function matchesLifecycleGovernance(row: PublicTrafficProductDataRow, input: Pub
 
 function matchesHighPotential(row: PublicTrafficProductDataRow): boolean {
   const one = row.periods['1d'];
-  const seven = row.periods['7d'];
-  return (one.hasExposureData || seven.hasExposureData) && one.amount <= 0 && seven.amount <= 0 && (one.publicVisits >= 100 || seven.publicVisits >= 300);
+  return one.hasExposureData && one.amount > 0 && (one.publicVisits >= 10 || one.exposure >= 100);
 }
 
 function lifecyclePriority(row: PublicTrafficProductDataRow): PublicTrafficReportSectionItem['priority'] {
@@ -226,7 +214,10 @@ export function analyzePublicTrafficData(input: PublicTrafficDataAnalysisInput):
   const lifecycleGovernanceRows: PublicTrafficProductDataRow[] = [];
 
   for (const row of rows) {
-    if (isHealthy(row)) continue;
+    if (isHealthy(row)) {
+      if (matchesHighPotential(row)) highPotentialRows.push(row);
+      continue;
+    }
     if (matchesWeakConversion(row)) {
       weakConversionRows.push(row);
     } else if (matchesWeakClick(row)) {
@@ -251,12 +242,12 @@ export function analyzePublicTrafficData(input: PublicTrafficDataAnalysisInput):
     .map((row) => item(row, '优化主图、标题、价格露出和首屏卖点', `1日曝光 ${one(row).exposure}，1日访问率 ${percent(one(row).exposureVisitRate)}，7日曝光 ${seven(row).exposure}，7日访问率 ${percent(seven(row).exposureVisitRate)}`, 'high'));
 
   const weakConversion = weakConversionRows
-    .sort((a, b) => one(b).dashboardVisits - one(a).dashboardVisits || seven(b).dashboardVisits - seven(a).dashboardVisits)
-    .map((row) => item(row, '检查价格/押金/库存/风控/履约链路', `1日公域访问 ${one(row).publicVisits}，1日金额 ${one(row).amount.toFixed(2)}，7日公域访问 ${seven(row).publicVisits}，7日金额 ${seven(row).amount.toFixed(2)}`, 'high'));
+    .sort((a, b) => one(b).publicVisits - one(a).publicVisits || one(b).exposure - one(a).exposure)
+    .map((row) => item(row, '检查价格/押金/库存/风控/履约链路', `提转化标准：1日公域访问 >=100 且公域金额为 0；当前1日公域访问 ${one(row).publicVisits}，公域金额 ${one(row).amount.toFixed(2)}`, 'high'));
 
   const highPotential = highPotentialRows
-    .sort((a, b) => seven(b).publicVisits - seven(a).publicVisits || one(b).publicVisits - one(a).publicVisits)
-    .map((row) => item(row, '继续放量，并复制标题/图片/价格结构到同类商品', `7日曝光 ${seven(row).exposure}，7日公域访问 ${seven(row).publicVisits}，7日金额 ${seven(row).amount.toFixed(2)}`, seven(row).publicVisits >= 300 ? 'medium' : 'low'));
+    .sort((a, b) => one(b).amount - one(a).amount || one(b).publicVisits - one(a).publicVisits)
+    .map((row) => item(row, '继续放量，并复制标题/图片/价格结构到同类商品', `放量标准：单品1日公域金额 >0，且公域访问 >=10 或曝光 >=100；当前1日曝光 ${one(row).exposure}，公域访问 ${one(row).publicVisits}，公域金额 ${one(row).amount.toFixed(2)}`, one(row).amount >= 100 || one(row).publicVisits >= 50 ? 'medium' : 'low'));
 
   const newProductObservation = newProductObservationRows
     .sort((a, b) => one(a).exposure - one(b).exposure || one(a).publicVisits - one(b).publicVisits)

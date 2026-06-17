@@ -84,7 +84,7 @@ describe('analyzePublicTrafficData', () => {
       rows: [
         row('端内ID low', metric(10, 0, 0, 0)),
         row('端内ID click-weak', metric(2000, 5, 4, 0)),
-        row('端内ID potential', metric(1500, 180, 10, 0)),
+        row('端内ID potential', metric(1500, 180, 10, 1)),
       ],
     });
 
@@ -228,11 +228,10 @@ describe('analyzePublicTrafficData', () => {
       },
     });
 
-    expect(report.conclusions.map((item) => item.label)).toEqual(['曝光', '公域访问', '金额', '曝光到访问率', '曝光金额转化率']);
+    expect(report.conclusions.map((item) => item.label)).toEqual(['曝光', '公域访问', '公域金额', '转化率']);
     expect(report.conclusions[0].text).toContain('较昨日上升 200');
     expect(report.conclusions[1].text).toContain('较昨日上升 30');
     expect(report.conclusions[3].text).toContain('百分点');
-    expect(report.conclusions[4].text).toContain('千次曝光金额');
   });
 
   it('builds baseline conclusions when yesterday summary is missing', () => {
@@ -295,15 +294,16 @@ describe('analyzePublicTrafficData', () => {
       rows: [
         row('端内ID conversion', metric(1000, 120, 100, 0)),
         row('端内ID click', metric(2000, 5, 5, 0), metric(5000, 20, 20, 0)),
-        row('端内ID potential', metric(1500, 160, 20, 0), metric(3000, 320, 40, 0)),
+        row('端内ID potential', metric(1500, 160, 20, 1), metric(3000, 320, 40, 1)),
       ],
     });
 
     expect(report.recommendedActions[0]).toMatchObject({
-      identifier: '端内ID click',
-      action: '优化主图、标题、价格露出和首屏卖点',
+      identifier: '端内ID conversion',
+      action: '检查价格/押金/库存/风控/履约链路',
       priority: 'high',
     });
+    expect(report.recommendedActions.map((item) => item.action).join('\n')).toContain('检查价格/押金/库存/风控/履约链路');
     expect(report.recommendedActions.map((item) => item.action).join('\n')).toContain('优化主图、标题、价格露出和首屏卖点');
     expect(report.recommendedActions.map((item) => item.action).join('\n')).toContain('继续放量');
   });

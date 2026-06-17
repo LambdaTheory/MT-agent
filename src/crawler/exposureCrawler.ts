@@ -20,8 +20,6 @@ export interface ExposureCrawlResult {
 const EXPOSURE_URL = 'https://b.alipay.com/page/self-operation-center/custody?custodyChannel=public';
 const PERIOD_LABELS: Array<{ label: string; period: ExposureOverviewMetric['period'] }> = [
   { label: '1日', period: '1d' },
-  { label: '7日', period: '7d' },
-  { label: '30日', period: '30d' },
 ];
 
 function normalizeText(value: unknown): string {
