@@ -1,5 +1,5 @@
 import type { FeishuCardPayload } from '../notify/feishuApp.js';
-import { businessMetricLines, findOrderAnalysisIndicator, shortDataDate } from './orderAnalysis.js';
+import { derivedOrderBusinessMetrics, findOrderAnalysisIndicator, shortDataDate } from './orderAnalysis.js';
 import { resolveProductDisplayName, type ProductNameMap } from './productDisplayName.js';
 import type { PublicTrafficDataReportContext, PublicTrafficProductDataRow, PublicTrafficReportPaths } from './types.js';
 
@@ -12,20 +12,11 @@ function percent(value: number): string {
 }
 
 function rateText(one: PublicTrafficDataReportContext['summary']['1d']): string {
-  return `**转化率**\n曝光到访问率 ${percent(one.exposureVisitRate)}｜千次曝光金额 ¥${amountPerThousandExposure(one)}`;
-}
-
-function amountPerThousandExposure(one: PublicTrafficDataReportContext['summary']['1d']): string {
-  return (one.exposure > 0 ? (one.amount / one.exposure) * 1000 : 0).toFixed(2);
+  return percent(one.exposureVisitRate);
 }
 
 function shortId(row: PublicTrafficProductDataRow): string {
   return row.displayProductId.replace(/^端内ID\s*/, '') || row.displayProductId;
-}
-
-function businessMetricText(context: PublicTrafficDataReportContext): string | null {
-  const lines = businessMetricLines(context.orderAnalysis?.pages.overview, context.orderAnalysis?.pages.customs);
-  return lines.length > 0 ? ['**经营指标**', ...lines].join('\n') : null;
 }
 
 function moduleCounts(context: PublicTrafficDataReportContext): Array<[string, number]> {
@@ -123,7 +114,7 @@ function optionalElement(element: Record<string, unknown> | null): Record<string
 
 function funnelColumnSet(one: PublicTrafficDataReportContext['summary']['1d']): Record<string, unknown> {
   return { tag: 'column_set', element_id: 'funnel_summary', flex_mode: 'stretch', horizontal_spacing: '8px', columns: [
-    nestedMetricColumn(null, [['曝光', String(one.exposure)], ['公域访问', String(one.publicVisits)], ['金额', `¥${one.amount.toFixed(2)}`]]),
+    nestedMetricColumn(null, [['曝光', String(one.exposure)], ['公域访问', String(one.publicVisits)], ['公域金额', `¥${one.amount.toFixed(2)}`], ['转化率', rateText(one)]], 4),
   ] };
 }
 
@@ -137,13 +128,13 @@ function funnelElements(context: PublicTrafficDataReportContext): Record<string,
   const delivery = oa.pages.delivery;
   const returns = oa.pages.return;
   const customs = oa.pages.customs;
+  const business = derivedOrderBusinessMetrics(overview, customs);
   return [
     nestedFunnelColumnSet([
-      { title: null, metrics: [['曝光', String(one.exposure)], ['公域访问', String(one.publicVisits)], ['公域金额', `¥${one.amount.toFixed(2)}`]] },
+      { title: '公域 1日', metrics: [['曝光', String(one.exposure)], ['公域访问', String(one.publicVisits)], ['公域金额', `¥${one.amount.toFixed(2)}`], ['转化率', rateText(one)]], chunkSize: 4 },
     ], 'funnel_public'),
     nestedFunnelColumnSet([
-      { title: `订单经营（${shortDataDate(overview?.dataDate)}）`, metrics: [orderMetric(overview, '创建订单', ['创建订单数']), orderMetric(overview, '签约订单', ['签约订单数']), orderMetric(overview, '发货订单', ['发货订单数'])] },
-      { title: '金额', metrics: [orderMetric(overview, '签约金额', ['签约完成金额（元）', '签约完成金额']), ['公域金额', `¥${one.amount.toFixed(2)}`]] },
+      { title: `订单经营（${shortDataDate(overview?.dataDate)}）`, metrics: [orderMetric(overview, '创建订单', ['创建订单数']), orderMetric(overview, '签约订单', ['签约订单数']), orderMetric(overview, '发货订单', ['发货订单数']), ['发货率', business.shipmentRate]], chunkSize: 4 },
     ], 'funnel_order'),
     nestedFunnelColumnSet([
       { title: `履约（发货${shortDataDate(delivery?.dataDate)}｜归还${shortDataDate(returns?.dataDate)}｜关单${shortDataDate(customs?.dataDate)}）`, metrics: [orderMetric(delivery, '待发货', ['待发货订单数']), orderMetric(returns, '归还', ['归还订单数']), orderMetric(returns, '逾期', ['逾期订单数']), orderMetric(customs, '关单', ['关单数'])], chunkSize: 4 },
@@ -386,7 +377,7 @@ function analysisSummary(context: PublicTrafficDataReportContext, boostRows: Fei
     '**分析与建议**',
     ...conclusionLines,
     `- **动作聚焦**：补曝光 ${boostRows.length} 个；提转化 ${conversionRowsData.length} 个；继续放量 ${scaleRowsData.length} 个。`,
-    `- **建议**：优先排查公域金额转化弱商品，再处理托管超过 7 天且曝光 0-50 的商品；新品 ${newProductPoolCount(context)} 个先进入维护池观察。`,
+    `- **建议**：提转化仅看单品1日有访问无公域金额；继续放量仅看单品1日已产生公域金额；新品 ${newProductPoolCount(context)} 个先进入维护池观察。`,
   ];
   return { tag: 'markdown', content: lines.join('\n') };
 }
@@ -420,16 +411,16 @@ function metricTables(context: PublicTrafficDataReportContext, productNameMap: P
   const boostRows = exposureBoostRows(context, productNameMap);
   const conversionRowsData = conversionRows(context, productNameMap);
   const scaleRowsData = scaleRows(context, productNameMap);
+  const optimizationTables: Record<string, unknown>[] = [];
+  if (boostRows.length > 0) optimizationTables.push(tableElement('boost_table', [tableColumn('product', `补曝光（${boostRows.length}）`), tableColumn('id', 'ID'), tableColumn('exposure', '曝光', 'number'), tableColumn('visits', '访问', 'number'), tableColumn('custodyDays', '托管天')], boostRows));
+  if (conversionRowsData.length > 0) optimizationTables.push(tableElement('conversion_table', [tableColumn('product', `提转化（${conversionRowsData.length}）`), tableColumn('id', 'ID'), tableColumn('visits', '公域访问', 'number'), tableColumn('amount', '公域金额', 'number'), tableColumn('rate', '转化率')], conversionRowsData));
+  if (scaleRowsData.length > 0) optimizationTables.push(tableElement('scale_table', [tableColumn('product', `继续放量（${scaleRowsData.length}）`), tableColumn('id', 'ID'), tableColumn('exposure', '曝光', 'number'), tableColumn('visits', '公域访问', 'number'), tableColumn('amount', '公域金额', 'number')], scaleRowsData));
   return [
     analysisSummary(context, boostRows, conversionRowsData, scaleRowsData),
     { tag: 'hr' },
     { tag: 'markdown', content: '**曝光 Top10**' },
-    tableElement('exposure_top_table', [tableColumn('product', '商品'), tableColumn('id', 'ID'), tableColumn('exposure', '曝光', 'number'), tableColumn('visits', '公域访问', 'number'), tableColumn('amount', '金额', 'number')], exposureTopRows(context, productNameMap)),
-    { tag: 'hr' },
-    { tag: 'markdown', content: '**待优化**' },
-    tableElement('boost_table', [tableColumn('product', `补曝光（${boostRows.length}）`), tableColumn('id', 'ID'), tableColumn('exposure', '曝光', 'number'), tableColumn('visits', '访问', 'number'), tableColumn('custodyDays', '托管天')], boostRows),
-    tableElement('conversion_table', [tableColumn('product', `提转化（${conversionRowsData.length}）`), tableColumn('id', 'ID'), tableColumn('visits', '公域访问', 'number'), tableColumn('amount', '金额', 'number'), tableColumn('rate', '访问率')], conversionRowsData),
-    tableElement('scale_table', [tableColumn('product', `继续放量（${scaleRowsData.length}）`), tableColumn('id', 'ID'), tableColumn('exposure', '曝光', 'number'), tableColumn('visits', '公域访问', 'number'), tableColumn('amount', '金额', 'number')], scaleRowsData),
+    tableElement('exposure_top_table', [tableColumn('product', '商品'), tableColumn('id', 'ID'), tableColumn('exposure', '曝光', 'number'), tableColumn('visits', '公域访问', 'number'), tableColumn('amount', '公域金额', 'number')], exposureTopRows(context, productNameMap)),
+    ...(optimizationTables.length > 0 ? [{ tag: 'hr' }, { tag: 'markdown', content: '**待优化**' }, ...optimizationTables] : []),
     { tag: 'hr' },
     newProductPoolPanel(context),
   ];
@@ -448,9 +439,6 @@ export function buildPublicTrafficCard(context: PublicTrafficDataReportContext, 
     body: {
       elements: [
         ...funnelElements(context),
-        { tag: 'markdown', content: rateText(one) },
-        ...markdownElement(businessMetricText(context)),
-        ...optionalElement(moduleColumnSet(context)),
         { tag: 'hr' },
         ...metricTables(context, productNameMap),
       ],
