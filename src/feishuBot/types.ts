@@ -14,6 +14,11 @@ export type BotIntent =
   | { type: 'lookup_product_id_card' }
   | { type: 'lookup_product_id'; query: string }
   | { type: 'rental_price_change'; productId: string; request: RentalPriceChangeRequest }
+  | { type: 'rental_copy'; productId: string }
+  | { type: 'rental_delist'; productId: string }
+  | { type: 'rental_tenancy_set'; productId: string; days: string }
+  | { type: 'rental_spec_discover'; productId: string }
+  | { type: 'rental_spec_add'; productId: string; itemTitle: string }
   | { type: 'unknown'; text: string };
 
 export interface BotResponse {
