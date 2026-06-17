@@ -49,7 +49,7 @@ describe('public traffic data analysis rules', () => {
 
     expect(context.newProductObservation.map((item) => item.identifier)).toEqual(['端内ID 700']);
     expect(context.newProductObservation[0]?.action).toBe('新品数据监控');
-    expect(context.newProductObservation[0]?.reason).toContain('1日曝光 500，访问 20，发货 0，金额 0.00');
+    expect(context.newProductObservation[0]?.reason).toContain('1日曝光 500，公域访问 20，金额 0.00');
   });
 
   it('flags low-exposure warnings from custody and sparse one-day exposure data', () => {

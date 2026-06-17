@@ -84,20 +84,19 @@ describe('analyzePublicTrafficData', () => {
       rows: [
         row('端内ID low', metric(10, 0, 0, 0)),
         row('端内ID click-weak', metric(2000, 5, 4, 0)),
-        row('端内ID conversion-weak', metric(1500, 120, 100, 0)),
         row('端内ID potential', metric(1500, 180, 10, 0)),
       ],
     });
 
     expect(report.lowExposure[0].identifier).toBe('端内ID low');
     expect(report.weakClick[0].identifier).toBe('端内ID click-weak');
-    expect(report.weakConversion[0].identifier).toBe('端内ID conversion-weak');
+    expect(report.weakConversion).toHaveLength(0);
     expect(report.highPotential[0].identifier).toBe('端内ID potential');
   });
 
-  it('excludes healthy rows with created order amount from every operation bucket and action', () => {
+  it('excludes healthy rows with public amount from every operation bucket and action', () => {
     const healthyOne = metric(20, 0, 0, 0);
-    const healthySeven = { ...metric(20, 0, 0, 0), createdOrders: 1, createdOrderAmount: 120 };
+    const healthySeven = metric(20, 0, 0, 1);
     const report = analyzePublicTrafficData({
       date: '2026-06-10',
       rows: [row('端内ID healthy', healthyOne, healthySeven)],
@@ -111,8 +110,8 @@ describe('analyzePublicTrafficData', () => {
     expect(report.recommendedActions).toHaveLength(0);
   });
 
-  it('falls back to created order count when created amount fields are absent', () => {
-    const oneDay = { ...metric(20, 0, 10, 0), createdOrders: 1 };
+  it('uses public amount instead of created order count for healthy detection', () => {
+    const oneDay = { ...metric(20, 0, 10, 1), createdOrders: 1 };
     const sevenDay = { ...metric(20, 0, 10, 0), createdOrders: 0 };
     const report = analyzePublicTrafficData({
       date: '2026-06-10',
@@ -124,9 +123,9 @@ describe('analyzePublicTrafficData', () => {
     expect(report.lowExposure).toHaveLength(0);
   });
 
-  it('falls back per period when only one created amount field is absent', () => {
-    const oneDay = { ...metric(20, 0, 10, 0), createdOrders: 0, createdOrderAmount: 0 };
-    const sevenDay = { ...metric(20, 0, 10, 0), createdOrders: 1 };
+  it('uses public amount per period for healthy detection', () => {
+    const oneDay = { ...metric(20, 0, 10, 1), createdOrders: 0, createdOrderAmount: 0 };
+    const sevenDay = { ...metric(20, 0, 10, 1), createdOrders: 1 };
     const report = analyzePublicTrafficData({
       date: '2026-06-10',
       rows: [row('端内ID mixed-created', oneDay, sevenDay)],
@@ -143,11 +142,11 @@ describe('analyzePublicTrafficData', () => {
       rows: [row('端内ID overlap', metric(80, 2, 60, 0), metric(200, 2, 120, 0), metric(200, 2, 120, 0), 6)],
     });
 
-    expect(report.weakConversion).toHaveLength(1);
-    expect(report.weakConversion[0]).toMatchObject({ identifier: '端内ID overlap', priority: 'high' });
-    expect(report.lowExposure).toHaveLength(0);
+    expect(report.weakConversion).toHaveLength(0);
+    expect(report.lowExposure).toHaveLength(1);
+    expect(report.lowExposure[0]).toMatchObject({ identifier: '端内ID overlap', priority: 'medium' });
     expect(report.recommendedActions).toHaveLength(1);
-    expect(report.recommendedActions[0]).toMatchObject({ identifier: '端内ID overlap', priority: 'high' });
+    expect(report.recommendedActions[0]).toMatchObject({ identifier: '端内ID overlap', priority: 'medium' });
   });
 
   it('does not classify rows when required one-day source data is missing', () => {
@@ -229,11 +228,11 @@ describe('analyzePublicTrafficData', () => {
       },
     });
 
-    expect(report.conclusions.map((item) => item.label)).toEqual(['曝光', '公域访问', '金额', '发货', '曝光到访问率', '访问到发货率']);
+    expect(report.conclusions.map((item) => item.label)).toEqual(['曝光', '公域访问', '金额', '曝光到访问率', '曝光金额转化率']);
     expect(report.conclusions[0].text).toContain('较昨日上升 200');
     expect(report.conclusions[1].text).toContain('较昨日上升 30');
-    expect(report.conclusions[3].text).toContain('较昨日上升 3');
-    expect(report.conclusions[4].text).toContain('百分点');
+    expect(report.conclusions[3].text).toContain('百分点');
+    expect(report.conclusions[4].text).toContain('千次曝光金额');
   });
 
   it('builds baseline conclusions when yesterday summary is missing', () => {
@@ -265,7 +264,7 @@ describe('analyzePublicTrafficData', () => {
       identifier: '端内ID 888',
       action: '新品数据监控',
     });
-    expect(report.newProductObservation[0]?.reason).toContain('1日曝光 500，访问 20，发货 0，金额 0.00');
+    expect(report.newProductObservation[0]?.reason).toContain('1日曝光 500，公域访问 20，金额 0.00');
   });
 
   it('does not classify high internal ids as new products without a daily new_product delta', () => {
@@ -301,8 +300,8 @@ describe('analyzePublicTrafficData', () => {
     });
 
     expect(report.recommendedActions[0]).toMatchObject({
-      identifier: '端内ID conversion',
-      action: '检查价格/押金/库存/风控/履约链路',
+      identifier: '端内ID click',
+      action: '优化主图、标题、价格露出和首屏卖点',
       priority: 'high',
     });
     expect(report.recommendedActions.map((item) => item.action).join('\n')).toContain('优化主图、标题、价格露出和首屏卖点');
