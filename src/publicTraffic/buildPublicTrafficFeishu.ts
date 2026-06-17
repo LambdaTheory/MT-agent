@@ -53,10 +53,6 @@ function percent(value: number): string {
   return `${(value * 100).toFixed(2)}%`;
 }
 
-function amountPerThousandExposure(summary: PublicTrafficDataSummary): string {
-  return (summary.exposure > 0 ? (summary.amount / summary.exposure) * 1000 : 0).toFixed(2);
-}
-
 function itemLines<T>(items: T[], formatter: (item: T) => string): string[] {
   return items.map((item, index) => `${index + 1}. ${formatter(item)}`);
 }
@@ -74,7 +70,7 @@ function newProductPoolLines(context: PublicTrafficDataReportContext): string[] 
 
 function productLine(row: PublicTrafficProductDataRow, index: number): string {
   const one = row.periods['1d'];
-  return `${index + 1}. ${row.displayProductId}｜${row.productName || 'Unknown'}｜曝光 ${one.exposure}｜公域访问 ${one.publicVisits}｜金额 ¥${one.amount.toFixed(2)}`;
+  return `${index + 1}. ${row.displayProductId}｜${row.productName || 'Unknown'}｜曝光 ${one.exposure}｜公域访问 ${one.publicVisits}｜公域金额 ¥${one.amount.toFixed(2)}`;
 }
 
 function topExposureLines(rows: PublicTrafficProductDataRow[]): string[] {
@@ -97,9 +93,9 @@ function funnelLines(context: PublicTrafficDataReportContext): string[] {
   const summary = context.summary['1d'];
   const business = businessMetricLines(context.orderAnalysis?.pages.overview, context.orderAnalysis?.pages.customs);
   return [
-    `曝光 ${summary.exposure}｜公域访问 ${summary.publicVisits}｜金额 ¥${summary.amount.toFixed(2)}｜千次曝光金额 ¥${amountPerThousandExposure(summary)}`,
+    `曝光 ${summary.exposure}｜公域访问 ${summary.publicVisits}｜公域金额 ¥${summary.amount.toFixed(2)}｜转化率 ${percent(summary.exposureVisitRate)}`,
     ...orderBusinessLine(context),
-    ...(business.length ? business : [`曝光到访问率 ${percent(summary.exposureVisitRate)}`]),
+    ...(business.length ? business : []),
   ];
 }
 

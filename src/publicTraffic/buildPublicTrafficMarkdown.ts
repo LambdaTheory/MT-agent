@@ -49,13 +49,9 @@ function toDataContext(context: PublicTrafficDataReportContext | PublicTrafficRe
 
 function overviewLines(summary: PublicTrafficDataSummary): string[] {
   return [
-    `曝光 ${summary.exposure}｜公域访问 ${summary.publicVisits}｜金额 ¥${summary.amount.toFixed(2)}`,
-    `曝光到访问率 ${(summary.exposureVisitRate * 100).toFixed(2)}%｜千次曝光金额 ¥${amountPerThousandExposure(summary)}`,
+    `曝光 ${summary.exposure}｜公域访问 ${summary.publicVisits}｜公域金额 ¥${summary.amount.toFixed(2)}`,
+    `转化率 ${(summary.exposureVisitRate * 100).toFixed(2)}%`,
   ];
-}
-
-function amountPerThousandExposure(summary: PublicTrafficDataSummary): string {
-  return (summary.exposure > 0 ? (summary.amount / summary.exposure) * 1000 : 0).toFixed(2);
 }
 
 function oneDayOverviewLines(context: PublicTrafficDataReportContext): string[] {
@@ -67,17 +63,16 @@ function oneDayOverviewLines(context: PublicTrafficDataReportContext): string[] 
   const returns = oa.pages.return;
   const customs = oa.pages.customs;
   return [
-    `公域（${context.date}）：曝光 ${summary.exposure}｜公域访问 ${summary.publicVisits}｜金额 ¥${summary.amount.toFixed(2)}｜千次曝光金额 ¥${amountPerThousandExposure(summary)}`,
-    `订单经营（${shortDataDate(overview?.dataDate)}）：创建订单 ${findOrderAnalysisIndicator(overview, ['创建订单数'])}｜签约订单 ${findOrderAnalysisIndicator(overview, ['签约订单数'])}｜发货订单 ${findOrderAnalysisIndicator(overview, ['发货订单数'])}｜签约金额 ${findOrderAnalysisIndicator(overview, ['签约完成金额（元）', '签约完成金额'])}`,
+    `公域（${context.date}）：曝光 ${summary.exposure}｜公域访问 ${summary.publicVisits}｜公域金额 ¥${summary.amount.toFixed(2)}｜转化率 ${(summary.exposureVisitRate * 100).toFixed(2)}%`,
+    `订单经营（${shortDataDate(overview?.dataDate)}）：创建订单 ${findOrderAnalysisIndicator(overview, ['创建订单数'])}｜签约订单 ${findOrderAnalysisIndicator(overview, ['签约订单数'])}｜发货订单 ${findOrderAnalysisIndicator(overview, ['发货订单数'])}`,
     `履约（发货${shortDataDate(delivery?.dataDate)}｜归还${shortDataDate(returns?.dataDate)}｜关单${shortDataDate(customs?.dataDate)}）：待发货 ${findOrderAnalysisIndicator(delivery, ['待发货订单数'])}｜归还 ${findOrderAnalysisIndicator(returns, ['归还订单数'])}｜逾期 ${findOrderAnalysisIndicator(returns, ['逾期订单数'])}｜关单 ${findOrderAnalysisIndicator(customs, ['关单数'])}`,
     `经营指标：${businessMetricLines(overview, customs).join('') || '发货率 -｜关单率 -（目标<=35%）｜客单价 -'}`,
-    `曝光到访问率 ${(summary.exposureVisitRate * 100).toFixed(2)}%`,
   ];
 }
 
 function productLine(row: PublicTrafficProductDataRow, index: number): string {
   const one = row.periods['1d'];
-  return `${index + 1}. ${row.displayProductId}｜${row.productName || 'Unknown'}｜曝光 ${one.exposure}｜公域访问 ${one.publicVisits}｜金额 ¥${one.amount.toFixed(2)}`;
+  return `${index + 1}. ${row.displayProductId}｜${row.productName || 'Unknown'}｜曝光 ${one.exposure}｜公域访问 ${one.publicVisits}｜公域金额 ¥${one.amount.toFixed(2)}`;
 }
 
 function topExposureLines(rows: PublicTrafficProductDataRow[]): string[] {
@@ -116,15 +111,7 @@ export function buildPublicTrafficMarkdown(input: PublicTrafficDataReportContext
     '## 1日总览',
     ...oneDayOverviewLines(context),
   ];
-  lines.push(
-    '',
-    '## 7日总览',
-    ...overviewLines(context.summary['7d']),
-    '',
-    '## 30日总览',
-    ...overviewLines(context.summary['30d']),
-    '',
-  );
+  lines.push('');
   appendMarkdownSection(lines, '今日曝光 Top10', topExposureLines(context.rows));
   appendMarkdownTable(lines, '诊断问题', ['类型', '商品', '操作', '原因'], diagnosticRows(context));
   appendMarkdownTable(lines, '建议操作', ['操作', '商品', '原因'], sortedActions(context.recommendedActions).map((item) => [item.action, item.identifier, item.reason]));
