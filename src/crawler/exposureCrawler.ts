@@ -1,15 +1,13 @@
-import { chromium, type Page } from 'playwright';
+import type { Page } from 'playwright';
 import type { AgentConfig } from '../domain/types.js';
 import { loadProductIdMapping, type ProductIdMapping } from '../mapping/productIdMapping.js';
 import type { ExposureCumulativeProduct, ExposureOverviewMetric } from '../publicTraffic/types.js';
 import { extractOverviewFromText } from '../publicTraffic/extractOverviewFromText.js';
 import { extractProductIdFromInfo, resolveFallbackProductId } from '../publicTraffic/extractProductIdFromInfo.js';
 import { parseMoney, parseNumberText } from '../publicTraffic/exposureNormalize.js';
-import { clearBrowserProfileLocks, prepareDashboardPage } from './browserProfile.js';
-import { selectSubAccountIfNeeded } from './dashboardCrawler.js';
+import { selectSubAccountIfNeeded } from './subAccount.js';
 import { shouldKeepBrowserOpenOnFailure } from './failureHandling.js';
-import { notifyLoginRequired } from './loginNotification.js';
-import { waitForSettledLoginState } from './loginState.js';
+import { ensureAuthenticatedMerchantSession } from './merchantSession.js';
 
 export interface ExposureCrawlResult {
   overview: ExposureOverviewMetric[];
@@ -67,24 +65,9 @@ function custodyDaysFromText(value: string): number | null {
 
 async function ensureExposurePage(config: AgentConfig, page: Page): Promise<void> {
   const url = config.exposureUrl ?? EXPOSURE_URL;
-  await page.goto(config.targetUrl, { waitUntil: 'domcontentloaded' });
-
-  let loginState = await waitForSettledLoginState(page, { timeoutMs: 60000, intervalMs: 1000 });
-  if (loginState === 'login-page') {
-    console.log('检测到支付宝登录页，请扫码登录；登录成功后程序会继续抓取曝光数据。');
-    await notifyLoginRequired({ page, stage: 'exposure', outputDir: config.outputDir, log: console.log });
-    await page.waitForURL((currentUrl) => !/auth\.alipay\.com|login/i.test(currentUrl.toString()), { timeout: 300000 });
-    loginState = await waitForSettledLoginState(page, { timeoutMs: 60000, intervalMs: 1000 });
-  }
-
-  if (loginState === 'select-identity' || page.url().includes('select-identity')) {
-    await selectSubAccountIfNeeded(page);
-  }
-
   await page.goto(url, { waitUntil: 'domcontentloaded' });
-  loginState = await waitForSettledLoginState(page, { timeoutMs: 60000, intervalMs: 1000 });
 
-  if (loginState === 'select-identity' || page.url().includes('select-identity')) {
+  if (page.url().includes('select-identity')) {
     await selectSubAccountIfNeeded(page);
     await page.goto(url, { waitUntil: 'domcontentloaded' });
   }
@@ -445,9 +428,7 @@ export async function collectExposurePage(config: AgentConfig, page: Page): Prom
 }
 
 export async function crawlExposurePage(config: AgentConfig): Promise<ExposureCrawlResult> {
-  await clearBrowserProfileLocks(config.browserProfileDir);
-  const browser = await chromium.launchPersistentContext(config.browserProfileDir, { headless: false, viewport: { width: 1920, height: 1080 } });
-  const page = await prepareDashboardPage(browser.pages(), () => browser.newPage());
+  const { browser, page } = await ensureAuthenticatedMerchantSession(config, { acceptDownloads: false, stage: 'exposure' });
   let completed = false;
 
   try {

@@ -82,9 +82,10 @@ describe('public traffic crawler orchestration', () => {
     const source = await readFile(new URL('../src/crawler/publicTrafficCrawler.ts', import.meta.url), 'utf8');
 
     expect(source).toContain('export async function crawlPublicTrafficSources(');
+    expect(source).toContain('ensureAuthenticatedMerchantSession(config, { acceptDownloads: true, stage: \'public-traffic-full\' });');
     expect(source).toContain('await collectExposurePage(config, page);');
     expect(source).toContain('await collectDashboardPage(config, page);');
-    expect(source).toContain('chromium.launchPersistentContext');
+    expect(source).not.toContain('chromium.launchPersistentContext');
   });
 
   it('downloads goods export in the same persistent browser context before traffic pages', async () => {
