@@ -13,6 +13,7 @@ describe('agent runtime tool registry', () => {
       'productId.lookup',
       'operationsLearning.startQuiz',
       'publicTraffic.runReport',
+      'publicTraffic.crawlSources',
       'rental.pricePreview',
       'rental.operationConfirmRequest',
     ]);
@@ -24,7 +25,7 @@ describe('agent runtime tool registry', () => {
 
     const tools = listAgentTools();
     tools.pop();
-    expect(listAgentTools()).toHaveLength(7);
+    expect(listAgentTools()).toHaveLength(8);
   });
 
   it('returns defensive copies of tool metadata', () => {
@@ -66,6 +67,7 @@ describe('agent runtime tool registry', () => {
   it('makes risk and confirmation metadata explicit', () => {
     expect(findAgentTool('publicTraffic.latestSummary')).toMatchObject({ risk: 'read', requiresConfirmation: false });
     expect(findAgentTool('publicTraffic.runReport')).toMatchObject({ risk: 'write', requiresConfirmation: true });
+    expect(findAgentTool('publicTraffic.crawlSources')).toMatchObject({ risk: 'write', requiresConfirmation: true });
     expect(findAgentTool('rental.pricePreview')).toMatchObject({ risk: 'high', requiresConfirmation: true });
     expect(findAgentTool('rental.operationConfirmRequest')).toMatchObject({ risk: 'high', requiresConfirmation: true });
   });

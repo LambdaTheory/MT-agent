@@ -3,6 +3,7 @@ import type { AgentToolDefinition } from './tool.js';
 const noArgumentsSchema = { type: 'object', additionalProperties: false };
 const keywordArgumentsSchema = { type: 'object', properties: { keyword: { type: 'string' } }, required: ['keyword'], additionalProperties: false };
 const productIdArgumentsSchema = { type: 'object', properties: { productId: { type: 'string' } }, required: ['productId'], additionalProperties: false };
+const goodsExportPathArgumentsSchema = { type: 'object', properties: { goodsExportPath: { type: 'string' } }, required: ['goodsExportPath'], additionalProperties: false };
 
 const agentTools: AgentToolDefinition[] = [
   {
@@ -39,6 +40,13 @@ const agentTools: AgentToolDefinition[] = [
     risk: 'write',
     requiresConfirmation: true,
     inputSchema: noArgumentsSchema,
+  },
+  {
+    name: 'publicTraffic.crawlSources',
+    description: '抓取公域日报所需的商品总表、曝光、后链路与订单分析原始数据',
+    risk: 'write',
+    requiresConfirmation: true,
+    inputSchema: goodsExportPathArgumentsSchema,
   },
   {
     name: 'rental.pricePreview',
