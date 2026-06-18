@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentConfig, PeriodProductMetrics, RawTableData } from '../src/domain/types.js';
+import { parsePublicTrafficArtifactManifest } from '../src/publicTraffic/artifacts.js';
 import { buildPublicTrafficPaths } from '../src/publicTraffic/paths.js';
 import type { ExposureDailyDelta, PublicTrafficDataReportContext } from '../src/publicTraffic/types.js';
 
@@ -333,6 +334,18 @@ describe('runPublicTrafficReportCli public traffic sequencing', () => {
     const latestOrderAnalysis = JSON.parse(await readFile(join(mocks.outputDir, 'latest', 'order-analysis.json'), 'utf8')) as { runDate: string };
     expect(latestOrderAnalysis.runDate).toBe('2026-06-10');
     expect(context.orderAnalysis?.pages?.overview?.label).toBe('标准订单分析');
+
+    const manifests = {
+      goodsExport: parsePublicTrafficArtifactManifest(await readFile(todayPaths.artifactManifests['goods-export'], 'utf8')),
+      exposure: parsePublicTrafficArtifactManifest(await readFile(todayPaths.artifactManifests.exposure, 'utf8')),
+      dashboard: parsePublicTrafficArtifactManifest(await readFile(todayPaths.artifactManifests.dashboard, 'utf8')),
+      orderAnalysis: parsePublicTrafficArtifactManifest(await readFile(todayPaths.artifactManifests['order-analysis'], 'utf8')),
+    };
+    expect(manifests.goodsExport).toMatchObject({ stage: 'goods-export', sourceUrl: 'https://b.alipay.com/page/commerce/goods/list?itemSubType=RENT&itemType=NORMAL_ITEM', files: { goodsExportWorkbook: todayPaths.goodsExportWorkbook } });
+    expect(manifests.exposure.files).toEqual({ exposureCumulativeProducts: todayPaths.exposureCumulativeProducts, exposureOverview: todayPaths.exposureOverview });
+    expect(manifests.dashboard).toMatchObject({ stage: 'dashboard', freshness: 'fresh', files: { '1d': todayPaths.publicVisitRaw['1d'], '7d': todayPaths.publicVisitRaw['7d'], '30d': todayPaths.publicVisitRaw['30d'] } });
+    expect(manifests.dashboard).not.toHaveProperty('notes');
+    expect(manifests.orderAnalysis).toMatchObject({ stage: 'order-analysis', capturedAt: '2026-06-10T12:00:00Z', dataDate: '2026-06-09', files: { orderAnalysis: todayPaths.orderAnalysis } });
   });
 
   it('uses the source data date in the report title while keeping output paths on the run date', async () => {
@@ -515,6 +528,9 @@ describe('runPublicTrafficReportCli public traffic sequencing', () => {
     const todayPaths = buildPublicTrafficPaths(mocks.outputDir, '2026-06-10');
     const context = JSON.parse(await readFile(todayPaths.reportContext, 'utf8')) as PublicTrafficDataReportContext;
     expect(context.dataQualityNotes).toEqual(['今日访问数据支付宝暂未更新，本期访问量板块指标缺失。']);
+    const dashboardManifest = parsePublicTrafficArtifactManifest(await readFile(todayPaths.artifactManifests.dashboard, 'utf8'));
+    expect(dashboardManifest.freshness).toBe('not_updated');
+    expect(dashboardManifest.notes).toEqual(['今日访问数据支付宝暂未更新，本期访问量板块指标缺失。']);
     await expect(readFile(todayPaths.markdown, 'utf8')).resolves.not.toContain('今日访问数据支付宝暂未更新，本期访问量板块指标缺失。');
     await expect(readFile(todayPaths.log, 'utf8')).resolves.toContain('今日访问数据支付宝暂未更新，本期访问量板块指标缺失。');
   });

@@ -12,6 +12,7 @@ import { sendFeishuCard } from '../notify/feishu.js';
 import { analyzePublicTrafficData } from '../publicTraffic/analyzePublicTrafficData.js';
 import { buildPublicTrafficCard } from '../publicTraffic/buildPublicTrafficCard.js';
 import { assessDashboardQuality } from '../publicTraffic/dashboardQuality.js';
+import { buildPublicTrafficArtifactManifest, savePublicTrafficArtifactManifest, type PublicTrafficArtifactManifest } from '../publicTraffic/artifacts.js';
 import { aggregateExposureDeltas } from '../publicTraffic/exposureAggregate.js';
 import { computeExposureDailyDelta } from '../publicTraffic/exposureDelta.js';
 import { resolveFallbackProductId } from '../publicTraffic/extractProductIdFromInfo.js';
@@ -32,6 +33,9 @@ import type { ExposureCumulativeProduct, GoodsSnapshotItem, PublicTrafficDataRep
 import { createRunLog } from '../storage/runLog.js';
 
 const TODAY_DASHBOARD_NOT_UPDATED_NOTE = '今日访问数据支付宝暂未更新，本期访问量板块指标缺失。';
+const GOODS_EXPORT_SOURCE_URL = 'https://b.alipay.com/page/commerce/goods/list?itemSubType=RENT&itemType=NORMAL_ITEM';
+const EXPOSURE_SOURCE_URL = 'https://b.alipay.com/page/self-operation-center/custody?custodyChannel=public';
+const ORDER_ANALYSIS_SOURCE_URL = 'https://b.alipay.com/page/recycle-im/app/assistant-data-analysis/index/order/';
 type FeishuSendTo = 'personal' | 'group' | 'both';
 
 export function parseFeishuSendToArg(argv: string[]): FeishuSendTo | undefined {
@@ -381,6 +385,15 @@ function dashboardDataQualityNotes(rawTables: RawTableData[]): string[] {
   return rawTables.some((table) => table.period === '1d' && isEmptyDashboardTable(table)) ? [TODAY_DASHBOARD_NOT_UPDATED_NOTE] : [];
 }
 
+async function saveArtifactManifestSafely(path: string, manifest: PublicTrafficArtifactManifest, log: ReturnType<typeof createRunLog>): Promise<void> {
+  try {
+    await savePublicTrafficArtifactManifest(path, manifest);
+    log.addEvent(`产物清单已保存: ${path}`);
+  } catch (error) {
+    log.addEvent(`产物清单保存失败: ${path}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 export async function runPublicTrafficReportCli(): Promise<void> {
   await loadEnv();
   const config = await loadConfig();
@@ -422,6 +435,12 @@ export async function runPublicTrafficReportCli(): Promise<void> {
     } catch (error) {
       log.addEvent(`商品总表端内ID列注入失败: ${error instanceof Error ? error.message : String(error)}`);
     }
+    await saveArtifactManifestSafely(paths.artifactManifests['goods-export'], buildPublicTrafficArtifactManifest({
+      runDate,
+      stage: 'goods-export',
+      sourceUrl: config.goodsExportUrl ?? GOODS_EXPORT_SOURCE_URL,
+      files: { goodsExportWorkbook: paths.goodsExportWorkbook },
+    }), log);
 
     const previous = await loadPreviousCumulative(config.outputDir, runDate, mapping);
     assertExposureSnapshotCoverage(crawlResult.products.length, previous.products.length, log);
@@ -439,11 +458,31 @@ export async function runPublicTrafficReportCli(): Promise<void> {
     await mkdir(latestDir, { recursive: true });
     await writeFile(`${latestDir}/order-analysis.json`, JSON.stringify(orderAnalysis, null, 2), 'utf8');
     log.addEvent(`订单分析: ${Object.values(orderAnalysis.pages).map((page) => `${page.label}=${page.indicators.length}条(${page.dataDate ?? '未知'})`).join(', ')}`);
+    await saveArtifactManifestSafely(paths.artifactManifests['order-analysis'], buildPublicTrafficArtifactManifest({
+      runDate,
+      capturedAt: orderAnalysisCapture.capturedAt,
+      stage: 'order-analysis',
+      sourceUrl: ORDER_ANALYSIS_SOURCE_URL,
+      dataDate: orderAnalysisCapture.pages.overview.dataDate ?? undefined,
+      files: { orderAnalysis: paths.orderAnalysis },
+    }), log);
 
+    let exposureOverviewWritten = false;
     if (crawlResult.overview.length > 0) {
       await writeFile(paths.exposureOverview, JSON.stringify(crawlResult.overview, null, 2), 'utf8');
+      exposureOverviewWritten = true;
       log.addEvent(`保存总体概况: ${crawlResult.overview.length} 个周期`);
     }
+    await saveArtifactManifestSafely(paths.artifactManifests.exposure, buildPublicTrafficArtifactManifest({
+      runDate,
+      stage: 'exposure',
+      sourceUrl: crawlResult.url ?? config.exposureUrl ?? EXPOSURE_SOURCE_URL,
+      dataDate,
+      files: {
+        exposureCumulativeProducts: paths.exposureCumulativeProducts,
+        ...(exposureOverviewWritten ? { exposureOverview: paths.exposureOverview } : {}),
+      },
+    }), log);
 
     if (!previous.found) {
       log.addEvent('商品级曝光历史不足: 跳过商品级日差分');
@@ -466,6 +505,20 @@ export async function runPublicTrafficReportCli(): Promise<void> {
       await writeFile(paths.publicVisitRaw[table.period], JSON.stringify(table, null, 2), 'utf8');
       log.addPeriodStats(table.collection);
     }
+    const oneDayDashboardNotUpdated = rawTables.some((table) => table.period === '1d' && isEmptyDashboardTable(table));
+    await saveArtifactManifestSafely(paths.artifactManifests.dashboard, buildPublicTrafficArtifactManifest({
+      runDate,
+      stage: 'dashboard',
+      sourceUrl: config.targetUrl,
+      dataDate,
+      freshness: oneDayDashboardNotUpdated ? 'not_updated' : 'fresh',
+      notes: oneDayDashboardNotUpdated ? [TODAY_DASHBOARD_NOT_UPDATED_NOTE] : [],
+      files: {
+        '1d': paths.publicVisitRaw['1d'],
+        '7d': paths.publicVisitRaw['7d'],
+        '30d': paths.publicVisitRaw['30d'],
+      },
+    }), log);
     const dashboardRows = normalizeDashboardRowsForReport(rawTables, log);
     const dataQualityNotes = dashboardDataQualityNotes(rawTables);
     for (const note of dataQualityNotes) log.addEvent(note);
