@@ -79,6 +79,26 @@ interface PreviousCumulativeSnapshot {
   found: boolean;
 }
 
+interface ExposurePaginationStatsLike {
+  pageRowCounts: number[];
+  uniquePageSignatures: string[];
+  duplicatePageSignatures: number;
+  maxRepeatedSignatureAttempts: number;
+  duplicateProductRows: number;
+  skippedProductIdRows: number;
+}
+
+function exposurePaginationStatsOrEmpty(stats: Partial<ExposurePaginationStatsLike> | undefined): ExposurePaginationStatsLike {
+  return {
+    pageRowCounts: stats?.pageRowCounts ?? [],
+    uniquePageSignatures: stats?.uniquePageSignatures ?? [],
+    duplicatePageSignatures: stats?.duplicatePageSignatures ?? 0,
+    maxRepeatedSignatureAttempts: stats?.maxRepeatedSignatureAttempts ?? 0,
+    duplicateProductRows: stats?.duplicateProductRows ?? 0,
+    skippedProductIdRows: stats?.skippedProductIdRows ?? 0,
+  };
+}
+
 export function parsePreviousCumulativeSnapshot(text: string): ExposureCumulativeProduct[] {
   const parsed: unknown = JSON.parse(text);
   if (!Array.isArray(parsed) || !parsed.every(isExposureCumulativeProduct)) {
@@ -106,19 +126,16 @@ export function mergePreviousCumulativeSnapshots(snapshots: ExposureCumulativePr
 }
 
 async function loadPreviousCumulative(outputDir: string, date: string, mapping: Record<string, string>): Promise<PreviousCumulativeSnapshot> {
-  const snapshots: ExposureCumulativeProduct[][] = [];
-  for (let days = 1; days <= 7; days += 1) {
-    const snapshotDate = daysBefore(date, days);
-    const exposurePath = buildPublicTrafficPaths(outputDir, snapshotDate).exposureCumulativeProducts;
-    try {
-      snapshots.push(parsePreviousCumulativeSnapshot(await readFile(exposurePath, 'utf8')));
-    } catch (error) {
-      if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') continue;
-      throw error;
+  const snapshotDate = daysBefore(date, 1);
+  const exposurePath = buildPublicTrafficPaths(outputDir, snapshotDate).exposureCumulativeProducts;
+  try {
+    return { products: mergePreviousCumulativeSnapshots([parsePreviousCumulativeSnapshot(await readFile(exposurePath, 'utf8'))], mapping), found: true };
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
+      return { products: [], found: false };
     }
+    throw error;
   }
-  if (snapshots.length > 0) return { products: mergePreviousCumulativeSnapshots(snapshots, mapping), found: true };
-  return { products: [], found: false };
 }
 
 export function previousReportContextCandidatePaths(outputDir: string, date: string, cwd = process.cwd()): string[] {
@@ -178,6 +195,16 @@ function isPublicTrafficDataSummary(value: unknown): value is PublicTrafficDataS
     Number.isFinite(summary.visitCreatedOrderRate) &&
     Number.isFinite(summary.visitShipmentRate)
   );
+}
+
+function assertExposureSnapshotCoverage(currentCount: number, previousCount: number, log: ReturnType<typeof createRunLog>): void {
+  if (previousCount <= 0) return;
+  const coverage = currentCount / previousCount;
+  if (coverage >= 0.75) return;
+
+  const message = `曝光商品快照覆盖不足: 当前=${currentCount}, 昨日=${previousCount}, 覆盖率=${(coverage * 100).toFixed(1)}%`;
+  log.addEvent(message);
+  throw new Error(message);
 }
 
 export function normalizeDashboardRowsForReport(rawTables: RawTableData[], log: ReturnType<typeof createRunLog>): PeriodProductMetrics[] {
@@ -396,8 +423,15 @@ export async function runPublicTrafficReportCli(): Promise<void> {
       log.addEvent(`商品总表端内ID列注入失败: ${error instanceof Error ? error.message : String(error)}`);
     }
 
+    const previous = await loadPreviousCumulative(config.outputDir, runDate, mapping);
+    assertExposureSnapshotCoverage(crawlResult.products.length, previous.products.length, log);
+
     await writeFile(paths.exposureCumulativeProducts, JSON.stringify(crawlResult.products, null, 2), 'utf8');
     log.addEvent(`保存累计快照: ${crawlResult.products.length} 条商品`);
+    const paginationStats = exposurePaginationStatsOrEmpty(crawlResult.paginationStats);
+    log.addEvent(
+      `曝光商品分页: 页数=${paginationStats.pageRowCounts.length}, 每页=${paginationStats.pageRowCounts.join('/')}, 唯一页=${paginationStats.uniquePageSignatures.length}, 重复页签名=${paginationStats.duplicatePageSignatures}, 最大连续重复=${paginationStats.maxRepeatedSignatureAttempts}, 重复商品行=${paginationStats.duplicateProductRows}, 跳过无ID行=${paginationStats.skippedProductIdRows}`,
+    );
 
     const orderAnalysis = { ...orderAnalysisCapture, runDate };
     await writeFile(paths.orderAnalysis, JSON.stringify(orderAnalysis, null, 2), 'utf8');
@@ -411,7 +445,6 @@ export async function runPublicTrafficReportCli(): Promise<void> {
       log.addEvent(`保存总体概况: ${crawlResult.overview.length} 个周期`);
     }
 
-    const previous = await loadPreviousCumulative(config.outputDir, runDate, mapping);
     if (!previous.found) {
       log.addEvent('商品级曝光历史不足: 跳过商品级日差分');
     }

@@ -33,6 +33,8 @@ describe('public traffic CLI wiring', () => {
 
   it('passes overview to analyzer and only skips same-day product exposure delta when the previous snapshot is missing', async () => {
     const text = await source('../src/cli/publicTrafficReport.ts');
+    expect(text).toContain('const snapshotDate = daysBefore(date, 1);');
+    expect(text).not.toContain('days <= 7');
     expect(text).toContain('const dailyDelta = previous.found ? computeExposureDailyDelta(dataDate, previous.products, crawlResult.products, mapping) : [];');
     expect(text).toContain('if (!previous.found) {');
     expect(text).toContain("log.addEvent('商品级曝光历史不足: 跳过商品级日差分');");
@@ -69,6 +71,14 @@ describe('public traffic CLI wiring', () => {
     const text = await source('../src/cli/publicTrafficReport.ts');
     expect(text).toContain('annotateGoodsExportWorkbookWithInternalId');
     expect(text).toContain('商品总表端内ID列注入失败');
+  });
+
+  it('CLI writes exposure pagination diagnostics into the run log', async () => {
+    const text = await source('../src/cli/publicTrafficReport.ts');
+    expect(text).toContain('crawlResult.paginationStats');
+    expect(text).toContain('曝光商品分页');
+    expect(text).toContain('pageRowCounts');
+    expect(text).toContain('duplicateProductRows');
   });
 
   it('paths 定义订单分析中文路径', async () => {
