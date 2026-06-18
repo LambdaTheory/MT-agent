@@ -15,6 +15,7 @@
     "operations-learning-loop:preview": "tsx src/cli/operationsLearningLoopPreview.ts",
     "activity-automation:scout": "tsx src/cli/activityAutomation.ts",
     "capture-dashboard": "tsx src/cli/captureDashboard.ts",
+    "agent:dry-run": "tsx src/cli/agentDryRun.ts",
     "feishu-bot": "tsx src/cli/feishuBot.ts",
     "feishu-bot:sdk": "tsx src/cli/feishuBotSdk.ts",
     "feishu-bot:pm2:start": "pm2 start ecosystem.config.cjs --only mt-feishu-bot",
