@@ -1,11 +1,9 @@
-import { mkdir } from 'node:fs/promises';
-import { chromium } from 'playwright';
 import type { AgentConfig, RawTableData } from '../domain/types.js';
-import { clearBrowserProfileLocks, prepareDashboardPage } from './browserProfile.js';
 import { collectDashboardPage } from './dashboardCrawler.js';
 import { collectExposurePage, type ExposureCrawlResult } from './exposureCrawler.js';
 import { shouldKeepBrowserOpenOnFailure } from './failureHandling.js';
 import { collectGoodsExportPage } from './goodsExportCrawler.js';
+import { ensureAuthenticatedMerchantSession } from './merchantSession.js';
 import { collectOrderAnalysisPages } from './orderAnalysisCrawler.js';
 import type { OrderAnalysisCapture } from '../publicTraffic/orderAnalysis.js';
 
@@ -17,10 +15,7 @@ export interface PublicTrafficSourcesCrawlResult {
 }
 
 export async function crawlPublicTrafficSources(config: AgentConfig, goodsExportPath: string): Promise<PublicTrafficSourcesCrawlResult> {
-  await mkdir(config.browserProfileDir, { recursive: true });
-  await clearBrowserProfileLocks(config.browserProfileDir);
-  const browser = await chromium.launchPersistentContext(config.browserProfileDir, { acceptDownloads: true, headless: false, viewport: { width: 1920, height: 1080 } });
-  const page = await prepareDashboardPage(browser.pages(), () => browser.newPage());
+  const { browser, page } = await ensureAuthenticatedMerchantSession(config, { acceptDownloads: true, stage: 'public-traffic-full' });
   let completed = false;
 
   try {
