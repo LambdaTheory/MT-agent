@@ -10,7 +10,7 @@ import {
   type OrderAnalysisPageData,
   type OrderAnalysisPageKey,
 } from '../publicTraffic/orderAnalysis.js';
-import { selectSubAccountIfNeeded } from './dashboardCrawler.js';
+import { selectSubAccountIfNeeded } from './subAccount.js';
 
 const ORDER_ANALYSIS_BASE_URL = 'https://b.alipay.com/page/recycle-im/app/assistant-data-analysis/index/order/';
 const APP_ID = '2021005181665859';

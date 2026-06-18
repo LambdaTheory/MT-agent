@@ -1,8 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises';
-import { chromium } from 'playwright';
-import { clearBrowserProfileLocks, prepareDashboardPage } from '../crawler/browserProfile.js';
 import { collectDashboardPage } from '../crawler/dashboardCrawler.js';
 import { shouldKeepBrowserOpenOnFailure } from '../crawler/failureHandling.js';
+import { ensureAuthenticatedMerchantSession } from '../crawler/merchantSession.js';
 import type { AgentConfig, RawTableData } from '../domain/types.js';
 import { assessDashboardQuality, formatDashboardQuality, type DashboardQualitySummary } from './dashboardQuality.js';
 import { buildPublicTrafficPaths } from './paths.js';
@@ -34,10 +33,7 @@ export function decideDashboardRefreshAction(input: { firstQuality: DashboardQua
 }
 
 export async function captureDashboardRawTables(config: AgentConfig): Promise<RawTableData[]> {
-  await mkdir(config.browserProfileDir, { recursive: true });
-  await clearBrowserProfileLocks(config.browserProfileDir);
-  const browser = await chromium.launchPersistentContext(config.browserProfileDir, { acceptDownloads: true, headless: false, viewport: { width: 1920, height: 1080 } });
-  const page = await prepareDashboardPage(browser.pages(), () => browser.newPage());
+  const { browser, page } = await ensureAuthenticatedMerchantSession(config, { acceptDownloads: true, stage: 'dashboard-refresh' });
   let completed = false;
 
   try {

@@ -1,12 +1,11 @@
 import { mkdir, writeFile } from 'node:fs/promises';
-import { chromium, type Locator, type Page } from 'playwright';
+import type { Page } from 'playwright';
 import type { AgentConfig, RawTableData } from '../domain/types.js';
-import { clearBrowserProfileLocks, prepareDashboardPage } from './browserProfile.js';
+import { ensureAuthenticatedMerchantSession } from './merchantSession.js';
 import { shouldKeepBrowserOpenOnFailure } from './failureHandling.js';
-import { notifyLoginRequired } from './loginNotification.js';
-import { waitForDashboardAfterLogin, waitForSettledLoginState } from './loginState.js';
 import { normalizePageSizeCandidates, readCurrentPageSize, setDashboardPageSize } from './pageSizeProbe.js';
 import { dedupeRowsByProductId, isCollectionComplete } from './pagination.js';
+import { selectSubAccountIfNeeded } from './subAccount.js';
 
 const PERIOD_LABELS = {
   '1d': '1日',
@@ -252,67 +251,10 @@ async function collectPeriodWithAdaptivePageSize(page: Page, period: keyof typeo
   throw lastError ?? new Error(`[${period}] all page size candidates failed`);
 }
 
-export async function selectSubAccountIfNeeded(page: Page): Promise<void> {
-  if (!page.url().includes('select-identity')) {
-    return;
-  }
-
-  const matchers = [/深圳.*米奇/, /米奇.*租赁/];
-  const fallbackMatchers = [/米奇/];
-  const accountRows = page.locator('.ant-table-tbody tr');
-
-  try {
-    await accountRows.first().waitFor({ state: 'visible', timeout: 30000 });
-  } catch {
-    const bodyText = normalize(await page.locator('body').textContent().catch(() => ''));
-    throw new Error(`Reached the account selection page, but account rows did not appear. Visible text: ${bodyText.slice(0, 1000)}`);
-  }
-
-  const count = await accountRows.count();
-
-  async function clickAndNavigate(row: Locator): Promise<boolean> {
-    await row.locator('h3').first().click();
-    await page.waitForTimeout(2000);
-
-    try {
-      await page.waitForURL((url) => !url.toString().includes('select-identity'), { timeout: 30000 });
-      await page.waitForTimeout(2000);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  for (let index = 0; index < count; index += 1) {
-    const row = accountRows.nth(index);
-    const text = normalize(await row.textContent());
-    if (matchers.some((matcher) => matcher.test(text)) || fallbackMatchers.some((matcher) => matcher.test(text))) {
-      if (await clickAndNavigate(row)) {
-        return;
-      }
-
-      await row.click();
-      try {
-        await page.waitForSelector('.ant-table table', { timeout: 10000 });
-        return;
-      } catch {
-        // continue to error
-      }
-    }
-  }
-
-  const visibleAccounts = await accountRows.evaluateAll((rows) => rows.map((row) => String(row.textContent ?? '').replace(/\s+/g, ' ').trim()).filter(Boolean));
-  throw new Error(`Reached the account selection page, but could not find the 深圳市米奇租赁有限责任公司 sub-account. Visible accounts: ${visibleAccounts.join(' | ')}`);
-}
+export { selectSubAccountIfNeeded } from './subAccount.js';
 
 export async function collectDashboardPage(config: AgentConfig, page: Page): Promise<RawTableData[]> {
   await page.goto(config.targetUrl, { waitUntil: 'domcontentloaded' });
-  const loginState = await waitForSettledLoginState(page, { timeoutMs: 60000, intervalMs: 1000 });
-  if (loginState === 'login-page') {
-    await notifyLoginRequired({ page, stage: 'dashboard', outputDir: config.outputDir, log: console.log });
-    await waitForDashboardAfterLogin(page);
-  }
-
   await selectSubAccountIfNeeded(page);
 
   if (page.url().includes('select-identity')) {
@@ -355,10 +297,7 @@ export async function collectDashboardPage(config: AgentConfig, page: Page): Pro
 }
 
 export async function crawlDashboard(config: AgentConfig): Promise<RawTableData[]> {
-  await mkdir(config.browserProfileDir, { recursive: true });
-  await clearBrowserProfileLocks(config.browserProfileDir);
-  const browser = await chromium.launchPersistentContext(config.browserProfileDir, { headless: false });
-  const page = await prepareDashboardPage(browser.pages(), () => browser.newPage());
+  const { browser, page } = await ensureAuthenticatedMerchantSession(config, { acceptDownloads: false, stage: 'dashboard' });
   let completed = false;
 
   try {
