@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { AgentRequest } from '../src/agentRuntime/types.js';
 import { createFeishuMessageDispatcher, MAX_SEEN_MESSAGE_IDS } from '../src/feishuBot/dispatcher.js';
 import type { BotIntent } from '../src/feishuBot/types.js';
 
@@ -15,6 +16,33 @@ describe('createFeishuMessageDispatcher', () => {
 
     await expect(dispatcher.dispatch({ messageId: 'mid-help', text: '帮助', source: 'sdk' })).resolves.toEqual({ text: 'handled:help', skipped: false });
     expect(intents).toEqual([{ type: 'help' }]);
+  });
+
+  it('maps a Feishu message to a runtime request', async () => {
+    const requests: AgentRequest[] = [];
+    const dispatcher = createFeishuMessageDispatcher({
+      botMentionOpenId: 'ou_bot',
+      runtime: {
+        async handle(request) {
+          requests.push(request);
+          return { text: `runtime:${request.text}` };
+        },
+      },
+    });
+
+    await expect(dispatcher.dispatch({
+      messageId: 'mid-runtime-request',
+      text: '@_user_1 @_user_2 今日概况',
+      source: 'sdk',
+      chatId: 'oc_group',
+      chatType: 'group',
+      senderOpenId: 'ou_sender',
+      mentions: [
+        { key: '@_user_1', id: { open_id: 'ou_human' }, name: '同事' },
+        { key: '@_user_2', id: { open_id: 'ou_bot' }, name: 'MT Agent' },
+      ],
+    })).resolves.toEqual({ text: 'runtime:@_user_1 今日概况', skipped: false });
+    expect(requests).toEqual([{ source: 'feishu', text: '@_user_1 今日概况', actor: { id: 'ou_sender' }, channel: { id: 'oc_group', type: 'group' }, metadata: { messageId: 'mid-runtime-request', transport: 'sdk' } }]);
   });
 
   it('skips duplicate message ids in the current process', async () => {

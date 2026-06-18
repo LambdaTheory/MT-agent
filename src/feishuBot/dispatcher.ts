@@ -1,3 +1,5 @@
+import { createAgentRuntime, type AgentRuntime } from '../agentRuntime/runtime.js';
+import type { AgentRequest, AgentResponse } from '../agentRuntime/types.js';
 import { parseBotIntent } from './intent.js';
 import { handleBotIntent } from './tools.js';
 import type { LlmToolSelectionProvider } from './llmProvider.js';
@@ -9,6 +11,7 @@ export interface FeishuMessageDispatcherConfig {
   outputDir?: string;
   botMentionOpenId?: string;
   botMentionName?: string;
+  runtime?: AgentRuntime;
   resolveIntent?: BotIntentResolver;
   handleIntent?: (intent: BotIntent, outputDir?: string) => Promise<BotResponse>;
   llmToolSelector?: LlmToolSelectionProvider;
@@ -102,6 +105,29 @@ function canonicalizeIntent(intent: BotIntent): BotIntent {
   }
 }
 
+function toAgentRequest(message: FeishuBotIncomingTextMessage, text: string): AgentRequest {
+  return {
+    source: 'feishu',
+    text,
+    actor: message.senderOpenId ? { id: message.senderOpenId } : undefined,
+    channel: {
+      id: message.chatId,
+      type: message.chatType === 'group' ? 'group' : message.chatType === 'p2p' ? 'direct' : 'unknown',
+    },
+    metadata: { messageId: message.messageId, transport: message.source },
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function toBotResponse(response: AgentResponse): BotResponse {
+  if (response.card === undefined) return { text: response.text };
+  if (isRecord(response.card)) return { text: response.text, card: response.card };
+  return { text: response.text };
+}
+
 export function createFeishuMessageDispatcher(config: FeishuMessageDispatcherConfig = {}): FeishuMessageDispatcher {
   const resolveIntent = config.resolveIntent ?? ((text: string) => parseBotIntent(text));
   const handleIntent = config.handleIntent ?? ((intent, outputDir) => handleBotIntent(intent, outputDir, { llmToolSelector: config.llmToolSelector, llmIntentProposalProvider: config.llmIntentProposalProvider, rentalPriceClient: config.rentalPriceClient }));
@@ -114,8 +140,16 @@ export function createFeishuMessageDispatcher(config: FeishuMessageDispatcherCon
       if (shouldSkipGroupMessage(message, config)) return { text: '', skipped: true };
 
       try {
-        const intent = canonicalizeIntent(resolveIntent(textWithoutMentionKeys(message, config), message));
-        const response = await handleIntent(intent, config.outputDir);
+        const text = textWithoutMentionKeys(message, config);
+        const runtime = config.runtime ?? createAgentRuntime({
+          outputDir: config.outputDir,
+          resolveIntent: (input) => canonicalizeIntent(resolveIntent(input, message)),
+          handleIntent,
+          llmToolSelector: config.llmToolSelector,
+          llmIntentProposalProvider: config.llmIntentProposalProvider,
+          rentalPriceClient: config.rentalPriceClient,
+        });
+        const response = toBotResponse(await runtime.handle(toAgentRequest(message, text)));
         return { ...response, skipped: false };
       } catch (error) {
         logError(error, message);
