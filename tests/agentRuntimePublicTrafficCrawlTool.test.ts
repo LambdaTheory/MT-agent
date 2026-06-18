@@ -18,7 +18,19 @@ function config(): AgentConfig {
 function crawlResult(goodsExportPath: string): PublicTrafficSourcesCrawlResult {
   return {
     goodsExportPath,
-    exposure: { overview: [], products: [], url: 'https://example.test/exposure' },
+    exposure: {
+      overview: [],
+      products: [],
+      paginationStats: {
+        pageRowCounts: [],
+        uniquePageSignatures: [],
+        duplicatePageSignatures: 0,
+        maxRepeatedSignatureAttempts: 0,
+        duplicateProductRows: 0,
+        skippedProductIdRows: 0,
+      },
+      url: 'https://example.test/exposure',
+    },
     dashboard: [] satisfies RawTableData[],
     orderAnalysis: {
       capturedAt: '2026-06-18T00:00:00.000Z',
