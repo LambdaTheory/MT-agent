@@ -1,4 +1,5 @@
 import type { PeriodKey } from '../domain/types.js';
+import { buildPublicTrafficArtifactManifestPath, type PublicTrafficArtifactStage } from './artifacts.js';
 
 export interface PublicTrafficPaths {
   dir: string;
@@ -16,6 +17,7 @@ export interface PublicTrafficPaths {
   goodsFirstSeenState: string;
   goodsLinkLifecycleState: string;
   orderAnalysis: string;
+  artifactManifests: Record<PublicTrafficArtifactStage, string>;
   markdown: string;
   workbook: string;
   reportContext: string;
@@ -45,6 +47,12 @@ export function buildPublicTrafficPaths(outputDir: string, date: string): Public
     goodsFirstSeenState: `${outputDir}/state/goods-first-seen.json`,
     goodsLinkLifecycleState: `${outputDir}/state/goods-link-lifecycle.json`,
     orderAnalysis: `${dir}/订单分析_${date}.json`,
+    artifactManifests: {
+      'goods-export': buildPublicTrafficArtifactManifestPath(outputDir, date, 'goods-export'),
+      exposure: buildPublicTrafficArtifactManifestPath(outputDir, date, 'exposure'),
+      dashboard: buildPublicTrafficArtifactManifestPath(outputDir, date, 'dashboard'),
+      'order-analysis': buildPublicTrafficArtifactManifestPath(outputDir, date, 'order-analysis'),
+    },
     markdown: `${dir}/公域数据日报_${date}.md`,
     workbook: `${dir}/公域数据日报_${date}.xlsx`,
     reportContext: `${dir}/公域数据上下文_${date}.json`,
