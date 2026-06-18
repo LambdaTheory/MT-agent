@@ -24,7 +24,10 @@ export function isDashboardEmptyStateText(text: string | null | undefined): bool
 }
 
 async function isDashboardEmptyStateVisible(page: Page): Promise<boolean> {
-  const emptyText = page.locator('.emptyTxt-LkXGcaGA').filter({ hasText: '未查询到相关数据' }).first();
+  const visibleTable = page.locator('.ant-table table').first();
+  if ((await visibleTable.count().catch(() => 0)) > 0 && (await visibleTable.isVisible().catch(() => false))) return false;
+
+  const emptyText = page.locator('.emptyTxt-LkXGcaGA').filter({ hasText: /未查询到相关数据|暂无数据/ }).first();
   if ((await emptyText.count().catch(() => 0)) > 0 && (await emptyText.isVisible().catch(() => false))) return true;
   const text = await page.locator('body').textContent().catch(() => '');
   return isDashboardEmptyStateText(text);
@@ -32,7 +35,7 @@ async function isDashboardEmptyStateVisible(page: Page): Promise<boolean> {
 
 async function confirmDashboardEmptyState(page: Page): Promise<boolean> {
   if (!(await isDashboardEmptyStateVisible(page))) return false;
-  await page.waitForTimeout(10000);
+  await page.waitForTimeout(3000);
   return isDashboardEmptyStateVisible(page);
 }
 
@@ -58,7 +61,17 @@ async function waitForTableOrEmptyState(page: Page, timeout: number): Promise<vo
   await Promise.race([
     page.waitForSelector('.ant-table table', { timeout }),
     page.waitForFunction(
-      () => Boolean(document.querySelector('.emptyTxt-LkXGcaGA')) || String(document.body?.innerText ?? '').replace(/\s+/g, ' ').trim().includes('未查询到相关数据') || String(document.body?.innerText ?? '').replace(/\s+/g, ' ').trim().includes('暂无数据'),
+      () => {
+        const isVisible = (element: Element) => {
+          const rect = element.getBoundingClientRect();
+          const style = window.getComputedStyle(element);
+          return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+        };
+        const hasVisibleTable = Array.from(document.querySelectorAll('.ant-table table')).some((element) => isVisible(element));
+        if (hasVisibleTable) return false;
+        const emptyElements = Array.from(document.querySelectorAll('.emptyTxt-LkXGcaGA'));
+        return emptyElements.some((element) => isVisible(element) && /未查询到相关数据|暂无数据/.test(String(element.textContent ?? '')));
+      },
       undefined,
       { timeout },
     ),
