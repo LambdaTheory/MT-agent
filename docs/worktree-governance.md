@@ -152,3 +152,83 @@ npm test -- --exclude ".worktrees/**"
 3. 对 4 条未合入分支逐条出评估：保留、重放、废弃或仅留文档。
 4. 对已合入/落后 worktree 做归档候选清单，确认后再删除。
 5. 更新项目主索引，让 `docs/worktree-governance.md` 成为新 session 的必读入口之一。
+
+## Master 脏变更初步归类
+
+以下为 2026-06-22 只读归类结果。不要直接 `reset`、`checkout`、`stash --all` 或跨 worktree 搬运这些文件；每一类都要先确认归属。
+
+### A. 关单反馈开发相关
+
+这些变更和 `feature/closed-order-feedback` 当前开发方向一致，但主 worktree 与该 feature worktree 并不完全相同，应由关单反馈开发线自己收口。
+
+```text
+.env.example
+package.json
+src/closedOrderFeedback/feedback.ts
+src/closedOrderFeedback/types.ts
+src/closedOrderFeedback/apiProvider.ts
+src/cli/closedOrderFeedbackPreview.ts
+src/linkRegistry/buildRegistry.ts
+src/publicTraffic/productDisplayName.ts
+tests/closedOrderFeedback.test.ts
+tests/closedOrderApiProvider.test.ts
+tests/closedOrderFeedbackPreviewCli.test.ts
+tests/linkRegistryBuild.test.ts
+```
+
+观察到的意图：
+
+- 增加关单备注 API provider 与 `closed-order-feedback:preview` CLI。
+- 增加 `orderNo`、`merchant`、近期反馈 provider 类型。
+- 解析商户备注时忽略后缀风控模板文本，避免把模板误判成真实商户原因。
+- 通过商品名 hint 推断 `sameSkuGroupId`，服务关单反馈置信度。
+
+处理建议：
+
+- 不在 `master` 继续改这组文件。
+- 由 `feature/closed-order-feedback` 开发线决定是否吸收这些变更。
+- 该线当前另有 `src/closedOrderFeedback/ingest.ts` 和 `tests/closedOrderFeedbackIngest.test.ts`，主 worktree 没有这两个文件，说明两边已经出现开发现场分叉。
+
+### B. 公域抓取可靠性相关
+
+这些变更不属于关单反馈，像是一次未固化的抓取可靠性修复。
+
+```text
+src/cli/publicTrafficReport.ts
+src/crawler/dashboardCrawler.ts
+src/crawler/exposureCrawler.ts
+src/crawler/pageSizeProbe.ts
+src/publicTraffic/paths.ts
+tests/dashboardCrawlerSource.test.ts
+tests/exposureCrawlerSource.test.ts
+tests/publicTrafficCliSource.test.ts
+```
+
+观察到的意图：
+
+- 访问页 crawler 支持 iframe/frame 中的表格，并在超时时输出 url/title/body/frame 上下文。
+- 曝光 crawler 等待当前表格 spinner 结束；最后一次仍不可靠时直接报错。
+- 日报 CLI 拒绝使用过小的昨日曝光快照计算日增量。
+- 增加 latest 运行日志路径 `output/latest/公域数据运行日志_latest.log`。
+
+处理建议：
+
+- 应拆到独立 worktree，例如 `codex/public-traffic-reliability-followup`。
+- 和 `closed-order-feedback` 解耦验证，避免两个主题混在同一个 master 脏现场。
+- 需要至少跑 publicTraffic/crawler 相关 source tests 和 `npm run build`。
+
+### C. 治理底稿相关
+
+```text
+.omo/plans/project-overview.md
+.omo/plans/integration-manager.md
+```
+
+观察到的意图：
+
+- 这两份是跨 session 统筹与集成底稿，但内容基线已落后于当前 `master @ 1b2c8a6`。
+
+处理建议：
+
+- 不直接把旧内容当作权威。
+- 后续应以本文件为新治理入口，再决定是否把 `.omo` 底稿更新或替换。
