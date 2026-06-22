@@ -309,6 +309,18 @@ describe('handleBotIntent', () => {
     await expect(handleBotIntent({ type: 'unknown', text: '订单情况' }, outputDir)).resolves.toMatchObject({ text: expect.stringContaining('发货订单：12') });
   });
 
+  it('does not misroute new-link write intents to the read-only new product pool when LLM is unavailable', async () => {
+    const outputDir = await writeContext();
+
+    const response = await handleBotIntent({ type: 'unknown', text: '帮我铺十条 pocket3 的新链' }, outputDir);
+
+    expect(response.text).toContain('LLM Agent planner');
+    expect(response.text).toContain('不会执行');
+    expect(response.text).toContain('不会把它当作新链接池查询');
+    expect(response.text).not.toContain('大疆 Pocket 3');
+    expect(response.card).toBeUndefined();
+  });
+
   it('answers removed-link questions through agent data understanding', async () => {
     const outputDir = await writeContext();
     const response = await handleBotIntent({ type: 'unknown', text: '下架链接有哪些' }, outputDir);
@@ -433,6 +445,24 @@ describe('handleBotIntent', () => {
     expect(response.card).toBeDefined();
     expect(JSON.stringify(response.card)).toContain('new_link_batch_confirm');
     expect(JSON.stringify(response.card)).toContain('733');
+  });
+
+  it('does not fall through to read-only new product pool when the LLM planner fails a new-link write plan', async () => {
+    const outputDir = await writeContext();
+    const planner: AgentPlannerProvider = {
+      async proposePlan() {
+        return '{"goal":"bad","selectedWorkflow":"rental.newLinkBatch","arguments":{"keyword":"pocket3","count":"10"},"confidence":0.9,"reason":"bad"}';
+      },
+    };
+
+    const response = await handleBotIntent({ type: 'unknown', text: '帮我铺十条 pocket3 的新链' }, outputDir, {
+      agentPlannerProvider: planner,
+    });
+
+    expect(response.text).toContain('Agent planner 没有生成有效');
+    expect(response.text).toContain('本次不执行');
+    expect(response.text).not.toContain('大疆 Pocket 3');
+    expect(response.card).toBeUndefined();
   });
 
   it('returns a confirmation card for LLM-proposed rental delist without executing the daemon', async () => {
