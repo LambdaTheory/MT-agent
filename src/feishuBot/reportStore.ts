@@ -29,6 +29,22 @@ function percent(value: number): string {
   return `${(value * 100).toFixed(2)}%`;
 }
 
+function normalizeProductIdentifier(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function extractInternalProductId(displayProductId: string): string | null {
+  return /^端内id\s*(\d+)$/i.exec(displayProductId.trim())?.[1] ?? null;
+}
+
+function matchesExactNumericProductId(row: PublicTrafficProductDataRow, normalizedKeyword: string): boolean {
+  return (
+    extractInternalProductId(row.displayProductId) === normalizedKeyword ||
+    normalizeProductIdentifier(row.displayProductId) === normalizedKeyword ||
+    normalizeProductIdentifier(row.platformProductId) === normalizedKeyword
+  );
+}
+
 export function formatLatestSummary(context: PublicTrafficDataReportContext): string {
   const one = context.summary['1d'];
   return [
@@ -41,7 +57,12 @@ export function formatLatestSummary(context: PublicTrafficDataReportContext): st
 }
 
 export function queryProductRows(context: PublicTrafficDataReportContext, keyword: string): PublicTrafficProductDataRow[] {
-  const normalized = keyword.trim().toLowerCase();
+  const normalized = normalizeProductIdentifier(keyword);
+  if (!normalized) return [];
+  if (/^\d+$/.test(normalized)) {
+    return context.rows.filter((row) => matchesExactNumericProductId(row, normalized)).slice(0, 5);
+  }
+
   return context.rows
     .filter(
       (row) =>

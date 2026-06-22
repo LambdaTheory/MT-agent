@@ -34,6 +34,20 @@ const context: ExtendedContext = {
 
 const publicContext = context as unknown as PublicTrafficDataReportContext;
 
+function productRow(displayProductId: string, productName: string, platformProductId: string) {
+  return {
+    productName,
+    platformProductId,
+    displayProductId,
+    custodyDays: 3,
+    periods: {
+      '1d': { exposure: 50, publicVisits: 5, dashboardVisits: 4, createdOrders: 1, signedOrders: 0, reviewedOrders: 0, shippedOrders: 1, amount: 49, exposureVisitRate: 0.1, visitCreatedOrderRate: 0.2, visitShipmentRate: 0.2, hasExposureData: true, hasDashboardData: true },
+      '7d': { exposure: 200, publicVisits: 20, dashboardVisits: 18, createdOrders: 3, signedOrders: 0, reviewedOrders: 0, shippedOrders: 2, amount: 149, exposureVisitRate: 0.1, visitCreatedOrderRate: 0.15, visitShipmentRate: 0.1, hasExposureData: true, hasDashboardData: true },
+      '30d': { exposure: 1000, publicVisits: 100, dashboardVisits: 80, createdOrders: 10, signedOrders: 0, reviewedOrders: 0, shippedOrders: 5, amount: 499, exposureVisitRate: 0.1, visitCreatedOrderRate: 0.1, visitShipmentRate: 0.05, hasExposureData: true, hasDashboardData: true },
+    },
+  };
+}
+
 describe('agent public traffic queries', () => {
   it('returns overview metrics and quality notes', () => {
     expect(getLatestOverview(publicContext)).toMatchObject({ date: '2026-06-12', dataQualityNotes: ['后链路数据为空'] });
@@ -42,6 +56,19 @@ describe('agent public traffic queries', () => {
   it('finds a product by display id or product name keyword', () => {
     expect(getProductPerformance(publicContext, '251')?.productName).toBe('佳能 G7X2');
     expect(getProductPerformance(publicContext, 'G7X2')?.productId).toBe('251');
+  });
+
+  it('treats a bare numeric product query as exact id matching', () => {
+    const collisionContext = {
+      ...context,
+      rows: [
+        productRow('端内ID 649', 'vivo X300Ultra 733 长焦演唱会神器', '2000000000000000000733'),
+        productRow('端内ID 841', '佳能R50微单相机', 'p-841-733'),
+        productRow('端内ID 733', '大疆DJI Pocket3云台相机128G', 'p-733-target'),
+      ],
+    } as unknown as PublicTrafficDataReportContext;
+
+    expect(getProductPerformance(collisionContext, '733')?.productId).toBe('端内ID 733');
   });
 
   it('returns problem products and new product pool', () => {

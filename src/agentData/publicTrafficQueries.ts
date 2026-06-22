@@ -22,6 +22,14 @@ type PublicTrafficContextWithNewProductPool = PublicTrafficDataReportContext & {
 
 const PERIODS: PeriodKey[] = ['1d', '7d', '30d'];
 
+function normalizeProductIdentifier(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function extractInternalProductId(displayProductId: string): string | null {
+  return /^端内id\s*(\d+)$/i.exec(displayProductId.trim())?.[1] ?? null;
+}
+
 export function getLatestOverview(context: PublicTrafficDataReportContext): AgentOverviewAnswer {
   return {
     date: context.date,
@@ -44,23 +52,33 @@ export function getLatestOverview(context: PublicTrafficDataReportContext): Agen
 }
 
 export function getProductPerformance(context: PublicTrafficDataReportContext, keyword: string): AgentProductAnswer | null {
-  const normalizedKeyword = keyword.trim().toLowerCase();
+  const normalizedKeyword = normalizeProductIdentifier(keyword);
   if (!normalizedKeyword) {
     return null;
   }
 
+  const isNumericKeyword = /^\d+$/.test(normalizedKeyword);
+  if (isNumericKeyword) {
+    const numericRow = context.rows.find((item) => (
+      extractInternalProductId(item.displayProductId) === normalizedKeyword ||
+      normalizeProductIdentifier(item.displayProductId) === normalizedKeyword ||
+      normalizeProductIdentifier(item.platformProductId) === normalizedKeyword
+    ));
+    return numericRow ? formatProductAnswerRow(numericRow) : null;
+  }
+
   const row = context.rows.find((item) => {
     return (
-      item.displayProductId.toLowerCase() === normalizedKeyword ||
-      item.platformProductId.toLowerCase() === normalizedKeyword ||
+      normalizeProductIdentifier(item.displayProductId) === normalizedKeyword ||
+      normalizeProductIdentifier(item.platformProductId) === normalizedKeyword ||
       item.productName.toLowerCase().includes(normalizedKeyword)
     );
   });
 
-  if (!row) {
-    return null;
-  }
+  return row ? formatProductAnswerRow(row) : null;
+}
 
+function formatProductAnswerRow(row: PublicTrafficDataReportContext['rows'][number]): AgentProductAnswer {
   return {
     productId: row.displayProductId,
     productName: row.productName,

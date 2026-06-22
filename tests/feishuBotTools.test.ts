@@ -45,6 +45,9 @@ async function writeContext(): Promise<string> {
     rows: [
       { productName: 'iPhone 15', platformProductId: '2000000000000000000001', displayProductId: '端内ID 565', custodyDays: 10, periods: { '1d': metric, '7d': metric, '30d': metric } },
       { productName: '大疆 Pocket 3', platformProductId: 'p701', displayProductId: '端内ID 701', custodyDays: 1, periods: { '1d': metric, '7d': metric, '30d': metric } },
+      { productName: 'vivo X300Ultra 733 长焦演唱会神器', platformProductId: '2000000000000000000733', displayProductId: '端内ID 649', custodyDays: 1, periods: { '1d': metric, '7d': metric, '30d': metric } },
+      { productName: '佳能R50微单相机', platformProductId: 'p-841-733', displayProductId: '端内ID 841', custodyDays: 1, periods: { '1d': metric, '7d': metric, '30d': metric } },
+      { productName: '大疆DJI Pocket3云台相机128G', platformProductId: 'p-733-target', displayProductId: '端内ID 733', custodyDays: 1, periods: { '1d': metric, '7d': metric, '30d': metric } },
     ],
     lowExposure: [{ identifier: '端内ID 565', action: '补曝光', reason: '曝光不足' }],
     weakClick: [],
@@ -120,6 +123,14 @@ describe('handleBotIntent', () => {
     const response = await handleBotIntent({ type: 'query_product', keyword: '565' }, outputDir);
     expect(response.text).toContain('端内ID 565 iPhone 15');
     expect(response.text).toContain('1日：曝光 10');
+  });
+
+  it('answers numeric product query with only the exact product id', async () => {
+    const outputDir = await writeContext();
+    const response = await handleBotIntent({ type: 'query_product', keyword: '733' }, outputDir);
+    expect(response.text).toContain('端内ID 733 大疆DJI Pocket3云台相机128G');
+    expect(response.text).not.toContain('端内ID 649');
+    expect(response.text).not.toContain('端内ID 841');
   });
 
   it('returns an operations learning question card', async () => {
