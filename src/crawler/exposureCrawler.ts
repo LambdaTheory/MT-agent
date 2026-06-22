@@ -172,6 +172,26 @@ async function tryWaitForTableSignatureChange(page: Page, previousSignature: str
   return false;
 }
 
+async function waitForCurrentTableToSettle(page: Page): Promise<void> {
+  await page.waitForTimeout(800);
+  await page
+    .waitForFunction(
+      `(() => {
+        const visible = (element) => {
+          const rect = element.getBoundingClientRect();
+          const style = window.getComputedStyle(element);
+          return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+        };
+        const activeSpinners = Array.from(document.querySelectorAll('.ant-spin-spinning, .ant-spin-dot-spin'));
+        return !activeSpinners.some((element) => visible(element));
+      })()`,
+      undefined,
+      { timeout: 10000 },
+    )
+    .catch(() => undefined);
+  await page.waitForTimeout(500);
+}
+
 async function clickCurrentTableNext(page: Page): Promise<boolean> {
   return page.evaluate(`(() => {
     const clean = (value) => String(value ?? '').replace(/\s+/g, ' ').trim();
@@ -293,7 +313,10 @@ async function advanceCurrentTable(page: Page, previousSignature: string): Promi
 
   for (const attempt of attempts) {
     if (!(await attempt())) continue;
-    if (await tryWaitForTableSignatureChange(page, previousSignature, 4000)) return true;
+    if (await tryWaitForTableSignatureChange(page, previousSignature, 4000)) {
+      await waitForCurrentTableToSettle(page);
+      return true;
+    }
   }
   return false;
 }
@@ -403,28 +426,30 @@ async function extractProductRows(page: Page, mapping: ProductIdMapping): Promis
 
 export async function collectExposurePage(config: AgentConfig, page: Page): Promise<ExposureCrawlResult> {
   const mapping = await loadExposureFallbackMapping(config);
-  let lastResult: { overview: ExposureOverviewMetric[]; products: ExposureCumulativeProduct[]; paginationStats: ExposurePaginationStats } | null = null;
 
   for (let attempt = 1; attempt <= MAX_EXPOSURE_COLLECTION_ATTEMPTS; attempt += 1) {
     await ensureExposurePage(config, page);
     const overview = await extractAllOverviews(page);
     await page.waitForSelector('.ant-table-tbody tr', { timeout: 30000 }).catch(() => undefined);
+    await waitForCurrentTableToSettle(page);
     const { products, paginationStats } = await extractProductRows(page, mapping);
-    lastResult = { overview, products, paginationStats };
 
     const reliable = products.length >= MIN_RELIABLE_EXPOSURE_PRODUCTS && paginationStats.uniquePageSignatures.length >= MIN_RELIABLE_EXPOSURE_WINDOWS;
-    if (reliable || attempt === MAX_EXPOSURE_COLLECTION_ATTEMPTS) {
+    if (reliable) {
       console.log(`[曝光] 总体概况: ${overview.length}个周期`);
       console.log(`[曝光] 当前托管商品: ${products.length} 条`);
       return { overview, products, paginationStats, url: page.url() };
+    }
+
+    if (attempt === MAX_EXPOSURE_COLLECTION_ATTEMPTS) {
+      throw new Error(`曝光商品抓取不完整: 商品=${products.length}, 唯一窗口=${paginationStats.uniquePageSignatures.length}`);
     }
 
     console.warn(`[曝光] 第${attempt}次抓取疑似不完整: 商品=${products.length}, 唯一窗口=${paginationStats.uniquePageSignatures.length}; 重新加载托管页重试`);
     await page.waitForTimeout(3000);
   }
 
-  if (!lastResult) throw new Error('曝光商品抓取未产生结果');
-  return { ...lastResult, url: page.url() };
+  throw new Error('曝光商品抓取未产生结果');
 }
 
 export async function crawlExposurePage(config: AgentConfig): Promise<ExposureCrawlResult> {

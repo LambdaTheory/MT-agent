@@ -81,6 +81,24 @@ describe('public traffic CLI wiring', () => {
     expect(text).toContain('duplicateProductRows');
   });
 
+  it('CLI rejects unreliable previous exposure snapshots before computing daily product deltas', async () => {
+    const text = await source('../src/cli/publicTrafficReport.ts');
+    expect(text).toContain('MIN_RELIABLE_PREVIOUS_EXPOSURE_PRODUCTS');
+    expect(text).toContain('昨日曝光商品快照不可靠');
+    expect(text.indexOf('assertExposureSnapshotCoverage(crawlResult.products.length, previous.products.length, log);')).toBeLessThan(
+      text.indexOf('const dailyDelta = previous.found ? computeExposureDailyDelta'),
+    );
+  });
+
+  it('CLI keeps a latest run log for inspection', async () => {
+    const cliText = await source('../src/cli/publicTrafficReport.ts');
+    const pathsText = await source('../src/publicTraffic/paths.ts');
+    expect(pathsText).toContain('latestLog');
+    expect(pathsText).toContain('公域数据运行日志_latest.log');
+    expect(cliText).toContain('const logText = log.toText();');
+    expect(cliText).toContain('await writeFile(paths.latestLog, logText,');
+  });
+
   it('paths 定义订单分析中文路径', async () => {
     const text = await source('../src/publicTraffic/paths.ts');
     expect(text).toContain('订单分析_');

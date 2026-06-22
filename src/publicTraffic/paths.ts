@@ -23,6 +23,7 @@ export interface PublicTrafficPaths {
   reportContext: string;
   publicTrafficRunState: string;
   log: string;
+  latestLog: string;
 }
 
 export function buildPublicTrafficPaths(outputDir: string, date: string): PublicTrafficPaths {
@@ -58,5 +59,6 @@ export function buildPublicTrafficPaths(outputDir: string, date: string): Public
     reportContext: `${dir}/公域数据上下文_${date}.json`,
     publicTrafficRunState: `${dir}/public-traffic-run-state.json`,
     log: `${dir}/公域数据运行日志_${date}.log`,
+    latestLog: `${outputDir}/latest/公域数据运行日志_latest.log`,
   };
 }
