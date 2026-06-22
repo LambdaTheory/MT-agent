@@ -15,6 +15,7 @@
     "closed-order-feedback:sync": "tsx src/cli/closedOrderFeedbackSync.ts",
     "closed-order-feedback:preview": "tsx src/cli/closedOrderFeedbackPreview.ts",
     "closed-order-observation:report": "tsx src/cli/closedOrderObservationReport.ts",
+    "link-registry:audit": "tsx src/cli/linkRegistryAudit.ts",
     "operations-learning-loop:preview": "tsx src/cli/operationsLearningLoopPreview.ts",
     "activity-automation:scout": "tsx src/cli/activityAutomation.ts",
     "capture-dashboard": "tsx src/cli/captureDashboard.ts",
