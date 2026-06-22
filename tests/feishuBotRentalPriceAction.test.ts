@@ -67,10 +67,11 @@ describe('rental price card action', () => {
       },
     });
 
-    await waitFor(() => executions.length === 1 && sent.some((item) => JSON.stringify(item).includes('改价执行成功')));
+    await waitFor(() => executions.length === 1 && sent.some((item) => JSON.stringify(item).includes('租赁商品改价已完成')));
     expect(executions).toEqual([{ mode: 'explicit_fields', productId: '761', fields: { rent1day: '22.00' } }]);
     expect(sent.some((item) => JSON.stringify(item).includes('租赁商品改价处理中'))).toBe(true);
-    expect(sent.some((item) => JSON.stringify(item).includes('改价执行成功'))).toBe(true);
+    expect(sent.some((item) => JSON.stringify(item).includes('租赁商品改价已完成'))).toBe(true);
+    expect(sent.filter((item) => JSON.stringify(item).includes('租赁商品改价已完成')).every((item) => JSON.stringify(item).includes('"kind":"patch"'))).toBe(true);
   });
 
   it('rejects forged confirmation fields before execution', () => {
@@ -108,6 +109,7 @@ describe('rental price card action', () => {
     expect(calls).toEqual(['delist:761']);
     expect(sent.some((item) => JSON.stringify(item).includes('租赁商品操作处理中'))).toBe(true);
     expect(sent.some((item) => JSON.stringify(item).includes('下架成功：商品 761'))).toBe(true);
+    expect(sent.filter((item) => JSON.stringify(item).includes('下架成功：商品 761')).every((item) => JSON.stringify(item).includes('"kind":"patch"'))).toBe(true);
   });
 
   it('does not execute a rental operation more than once when the same card is clicked repeatedly', async () => {
@@ -151,6 +153,7 @@ describe('rental price card action', () => {
     await registered['card.action.trigger'](callback);
 
     expect(calls).toEqual(['copy:875']);
+    expect(sent.filter((item) => JSON.stringify(item).includes('复制成功')).every((item) => JSON.stringify(item).includes('"kind":"patch"'))).toBe(true);
     expect(sent.some((item) => JSON.stringify(item).includes('已经执行完成'))).toBe(true);
   });
 

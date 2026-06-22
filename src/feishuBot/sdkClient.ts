@@ -319,7 +319,6 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
               const result = await rentalPriceClient.execute(request);
               setRentalActionStatus(claim.key, result.ok ? 'completed' : 'failed');
               await updateCard(client, messageId, statusCard(result.ok ? '租赁商品改价已完成' : '租赁商品改价失败', `商品 ${result.productId}\n${result.lines.join('\n')}`, result.ok ? 'green' : 'red')).catch(() => false);
-              await replyText(client, messageId, `${result.ok ? '改价执行成功' : '改价执行失败'}：商品 ${result.productId}\n${result.lines.join('\n')}`);
             } catch (error) {
               setRentalActionStatus(claim.key, 'failed');
               await updateCard(client, messageId, statusCard('租赁商品改价失败', `商品 ${request.productId}\n${error instanceof Error ? error.message : String(error)}`, 'red')).catch(() => false);
@@ -338,7 +337,6 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
           }
           setRentalActionStatus(claim.key, 'cancelled');
           await updateCard(client, messageId, statusCard('租赁商品改价已取消', `商品 ${productId} 改价已取消。`, 'grey')).catch(() => false);
-          await replyText(client, messageId, `已取消改价：商品 ${productId}`);
           return;
         }
 
@@ -359,7 +357,6 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
               const result = await executeRentalOperationConfirmRequest(rentalPriceClient, request);
               setRentalActionStatus(claim.key, result.ok ? 'completed' : 'failed');
               await updateCard(client, messageId, statusCard(result.ok ? '租赁商品操作已完成' : '租赁商品操作失败', result.text, result.ok ? 'green' : 'red')).catch(() => false);
-              await replyText(client, messageId, result.text);
             } catch (error) {
               setRentalActionStatus(claim.key, 'failed');
               await updateCard(client, messageId, statusCard('租赁商品操作失败', `商品 ${request.productId}\n${error instanceof Error ? error.message : String(error)}`, 'red')).catch(() => false);
@@ -378,7 +375,6 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
           }
           setRentalActionStatus(claim.key, 'cancelled');
           await updateCard(client, messageId, statusCard('租赁商品操作已取消', `商品 ${productId} 操作已取消。`, 'grey')).catch(() => false);
-          await replyText(client, messageId, `已取消租赁商品操作：商品 ${productId}`);
           return;
         }
 
