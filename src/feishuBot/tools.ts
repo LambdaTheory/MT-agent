@@ -42,6 +42,10 @@ import type { BotIntent, BotResponse } from './types.js';
 let running = false;
 
 const UNKNOWN_GUIDANCE = '我现在可以查：今日概况、商品、新链接池、待处理任务、转化差、曝光低、高潜力、下架链接、订单情况。你可以问“新链接池怎么样”或“查一下721”。';
+const NEW_LINK_WRITE_INTENT_NEEDS_LLM =
+  '这像是新链批量铺设写操作，需要 LLM Agent planner 先理解参数并生成飞书确认卡。当前没有可用计划，所以不会执行，也不会把它当作新链接池查询。请配置 MT_AGENT_LLM_BASE_URL / MT_AGENT_LLM_MODEL 后重启 PM2，或换成明确的只读问题。';
+const NEW_LINK_WRITE_INTENT_PLAN_FAILED =
+  '这像是新链批量铺设写操作，但 Agent planner 没有生成有效的新链批量铺设计划。为避免误执行或误答只读新链接池，本次不执行；请换个说法或检查 LLM 输出。';
 
 const HELP_TEXT = `📋 数据查询
   今日概况 — 查看今日公域流量概况
@@ -103,6 +107,13 @@ function rentalIntentToConfirmRequest(intent: BotIntent): RentalOperationConfirm
 
 function rentalOperationConfirmResponse(request: RentalOperationConfirmRequest, reason: string): BotResponse {
   return { text: `请确认租赁商品操作：${request.productId}`, card: buildRentalOperationConfirmCard(request, reason) };
+}
+
+function looksLikeNewLinkWriteIntent(text: string): boolean {
+  const compact = text.toLowerCase().replace(/\s+/g, '');
+  const hasNewLink = /新链|新链接/.test(compact);
+  const hasWriteVerb = /铺|补|新建|创建|生成|新增|复制|批量/.test(compact);
+  return hasNewLink && hasWriteVerb;
 }
 
 function closedOrderIngestStatePath(outputDir: string): string {
@@ -323,6 +334,9 @@ export async function handleBotIntent(intent: BotIntent, outputDir = 'output', o
 
     const plannedResponse = await agentPlannerResponse(intent.text, outputDir, options);
     if (plannedResponse) return plannedResponse;
+    if (looksLikeNewLinkWriteIntent(intent.text)) {
+      return { text: options.agentPlannerProvider ? NEW_LINK_WRITE_INTENT_PLAN_FAILED : NEW_LINK_WRITE_INTENT_NEEDS_LLM };
+    }
 
     const dataIntent = parseAgentDataIntent(intent.text);
     const tool = findReadOnlyTool(dataIntent);
