@@ -7,10 +7,10 @@
 ## 当前结论
 
 - 生产 PM2 进程 `mt-feishu-bot` 的 cwd 是 `C:\works\MT-agent`，也就是主 worktree。
-- 主 worktree 当前在 `master @ 079db61`，工作树干净。`master` 仍只作为稳定集成与 PM2 运行目录，不承载日常开发。
+- 主 worktree 当前在 `master @ b56155d`，工作树干净。`master` 仍只作为稳定集成与 PM2 运行目录，不承载日常开发。
 - `feature/closed-order-feedback` 功能已通过 `75d1d69 实现关单同步与观察流程` 进入 `master`，但保留 worktree 的 `dfa806a` 不是 `master` 祖先，后续只作为对照来源，不应直接 merge。
-- `feature/link-registry` 仍有独立价值，服务链接档案、同款分组和关单反馈置信度，但需要先 rebase 到最新 `master` 再验证。
 - `codex/public-traffic-reliability-followup` 已通过 `6a3f9ea Merge branch 'codex/public-traffic-reliability-followup'` 合入 `master`，对应 worktree 已删除。
+- `feature/link-registry` 已通过 `b56155d Merge branch 'feature/link-registry'` 合入 `master`，对应 worktree 暂留，仅因存在未跟踪 `.omo` 计划文档。
 - 后续所有功能、修复、文档治理都必须先进入独立 worktree，验证通过后再按明确指令合入 `master`。
 - 不读取、打印或提交 `.env`、真实账号凭据、浏览器 profile、任何 secret。
 - 不 push、不重启 PM2，除非用户明确要求。
@@ -28,7 +28,7 @@
 | worktree | branch | 状态 | 备注 |
 |---|---|---|---|
 | `.worktrees/closed-order-feedback` | `feature/closed-order-feedback` | clean，1 个独立提交 | 功能已在 `master` 另行落地；保留作对照，不直接 merge |
-| `.worktrees/link-registry` | `feature/link-registry` | 脏，3 个独立提交 + `.omo` 计划文档 | 链接档案覆盖与审计 CLI；建议 rebase 后继续推进 |
+| `.worktrees/link-registry` | `feature/link-registry` | 已合入，仍有未跟踪 `.omo` 计划文档 | 只因草稿文件暂留；确认可丢弃后可删除 worktree |
 | `.worktrees/worktree-governance` | `codex/worktree-governance` | clean，治理文档分支 | 维护本文档，更新后可评估合入 |
 
 ### 设计参考或旧实现参考
@@ -347,7 +347,6 @@ status: clean
 继续保留并评估：
 
 ```text
-.worktrees/link-registry
 .worktrees/worktree-governance
 .worktrees/closed-order-feedback
 .worktrees/feishu-bot-natural-question-routing
@@ -357,8 +356,8 @@ status: clean
 
 下一步建议：
 
-- 将 `feature/link-registry` rebase 到最新 `master` 后重新跑 link registry 相关测试。
 - 单独确认 `public-traffic-card-tables` 中的 `config/product-id-map*.json` 改动是要吸收、备份还是丢弃。
+- 如确认可丢弃 `.omo` 交接草稿，删除 `agent-runtime`、`public-traffic-capture-decoupling`、`link-registry` 三个已被主线包含的 worktree。
 
 ### 6. 公域抓取可靠性后续合入
 
@@ -384,6 +383,38 @@ tsc -p tsconfig.json -> passed
 
 后续当前优先级调整为：
 
-- rebase 并评估 `feature/link-registry`。
 - 单独处理 `public-traffic-card-tables` 的 `config/product-id-map*.json` 映射现场。
-- 如确认可丢弃 `.omo` 交接草稿，再删除 `agent-runtime` 和 `public-traffic-capture-decoupling` 两个已被主线包含的 worktree。
+- 如确认可丢弃 `.omo` 交接草稿，再删除 `agent-runtime`、`public-traffic-capture-decoupling` 和 `link-registry` 三个已被主线包含的 worktree。
+
+### 7. 链接档案审计能力合入
+
+已将 `feature/link-registry` rebase 到最新主线并合入：
+
+```text
+master commit: b56155d Merge branch 'feature/link-registry'
+worktree retained: .worktrees/link-registry
+branch retained: feature/link-registry
+```
+
+合入内容：
+
+- `link-registry:audit` CLI。
+- 链接档案人工覆盖解析与应用。
+- 按品类、商品类型、同款组聚合审计。
+- 覆盖风险、未知分类、同款组样本不足等风险提示。
+
+验证结果：
+
+```text
+vitest root focused:
+  tests/linkRegistryBuild.test.ts
+  tests/linkRegistryQuery.test.ts
+  tests/linkRegistryOverrides.test.ts
+  tests/linkRegistryAudit.test.ts
+  tests/linkRegistryAuditCli.test.ts
+  -> 5 files / 22 tests passed
+
+tsc -p tsconfig.json -> passed
+```
+
+说明：`.worktrees/link-registry` 仍有未跟踪 `.omo/plans/link-registry.md`，本次不强制删除。
