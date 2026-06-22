@@ -210,8 +210,9 @@ describe('startFeishuBotServer', () => {
 
       expect(response.status).toBe(200);
       const card = await response.json();
-      expect(JSON.stringify(card)).toContain('查询结果');
       expect(JSON.stringify(card)).toContain('还没有找到公域日报上下文。');
+      expect(JSON.stringify(card)).not.toContain('查询结果');
+      expect(JSON.stringify(card)).not.toContain('"tag":"hr"');
       expect(replies).toEqual([]);
     } finally {
       server.close();

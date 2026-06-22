@@ -118,8 +118,12 @@ describe('createFeishuSdkBot card.action.trigger', () => {
 
     expect(sent).toEqual([]);
     expect(result).toMatchObject({ card: { type: 'raw', data: { schema: '2.0' } } });
-    expect(JSON.stringify((result as any).card.data)).toContain('查询结果');
-    expect(JSON.stringify((result as any).card.data)).toContain('端内ID 565 对应平台商品ID');
+    expect(JSON.stringify((result as any).card.data)).toContain('"tag":"column_set"');
+    expect(JSON.stringify((result as any).card.data)).toContain('端内ID');
+    expect(JSON.stringify((result as any).card.data)).toContain('平台商品ID');
+    expect(JSON.stringify((result as any).card.data)).toContain('2000000000000000000001');
+    expect(JSON.stringify((result as any).card.data)).not.toContain('查询结果');
+    expect(JSON.stringify((result as any).card.data)).not.toContain('"tag":"hr"');
   });
 
   it('handles id_lookup submit when Feishu returns the callback value through behaviors', async () => {
@@ -138,7 +142,9 @@ describe('createFeishuSdkBot card.action.trigger', () => {
 
     expect(sent).toEqual([]);
     expect(result).toMatchObject({ card: { type: 'raw', data: { schema: '2.0' } } });
-    expect(JSON.stringify((result as any).card.data)).toContain('端内ID 565 对应平台商品ID');
+    expect(JSON.stringify((result as any).card.data)).toContain('"tag":"column_set"');
+    expect(JSON.stringify((result as any).card.data)).toContain('2000000000000000000001');
+    expect(JSON.stringify((result as any).card.data)).not.toContain('查询结果');
   });
 
   it('handles id_lookup form submit when SDK returns flattened card action data', async () => {
@@ -155,7 +161,9 @@ describe('createFeishuSdkBot card.action.trigger', () => {
 
     expect(sent).toEqual([]);
     expect(result).toMatchObject({ card: { type: 'raw', data: { schema: '2.0' } } });
-    expect(JSON.stringify((result as any).card.data)).toContain('端内ID 565 对应平台商品ID');
+    expect(JSON.stringify((result as any).card.data)).toContain('"tag":"column_set"');
+    expect(JSON.stringify((result as any).card.data)).toContain('2000000000000000000001');
+    expect(JSON.stringify((result as any).card.data)).not.toContain('查询结果');
   });
 
   it('persists operations learning feedback and replies with the next card', async () => {

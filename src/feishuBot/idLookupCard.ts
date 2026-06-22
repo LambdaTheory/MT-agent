@@ -1,11 +1,74 @@
 import type { FeishuCardPayload } from '../notify/feishuApp.js';
+import type { ProductIdLookupResult } from './idLookup.js';
 
 export interface IdLookupCardPayload extends FeishuCardPayload {
   schema: '2.0';
   body: { elements: Record<string, unknown>[] };
 }
 
-export function buildIdLookupCard(options: { defaultValue?: string; resultText?: string } = {}): IdLookupCardPayload {
+export interface IdLookupCardOptions {
+  defaultValue?: string;
+  resultText?: string;
+  lookupResult?: ProductIdLookupResult;
+}
+
+function markdown(content: string): Record<string, unknown> {
+  return { tag: 'markdown', content };
+}
+
+function resultColumn(label: string, value: string, color: 'blue' | 'green' | 'grey' = 'blue'): Record<string, unknown> {
+  return {
+    tag: 'column',
+    width: 'weighted',
+    weight: 1,
+    vertical_align: 'top',
+    elements: [markdown(`<text_tag color='${color}'>${label}</text_tag>\n**${value}**`)],
+  };
+}
+
+function resultHint(content: string, color: 'red' | 'orange' | 'grey' = 'grey'): Record<string, unknown> {
+  return markdown(`<text_tag color='${color}'>${content}</text_tag>`);
+}
+
+function lookupResultElements(result: ProductIdLookupResult): Record<string, unknown>[] {
+  if (result.kind === 'internal') {
+    return [
+      {
+        tag: 'column_set',
+        flex_mode: 'bisect',
+        horizontal_spacing: '8px',
+        columns: [
+          resultColumn('端内ID', result.internalId, 'blue'),
+          resultColumn('平台商品ID', result.platformIds.join('\n'), 'green'),
+        ],
+      },
+      ...(result.productName ? [resultHint(result.productName)] : []),
+    ];
+  }
+
+  if (result.kind === 'platform') {
+    return [
+      {
+        tag: 'column_set',
+        flex_mode: 'bisect',
+        horizontal_spacing: '8px',
+        columns: [
+          resultColumn('平台商品ID', result.input, 'green'),
+          resultColumn('端内ID', result.internalId ?? '未映射', result.internalId ? 'blue' : 'grey'),
+        ],
+      },
+      ...(result.productName ? [resultHint(result.productName)] : []),
+    ];
+  }
+
+  if (result.kind === 'ambiguous') {
+    return [resultHint(`请说明要查询端内ID还是平台商品ID：${result.input}`, 'orange')];
+  }
+
+  return [resultHint(`没有找到 ${result.input} 的ID映射。请确认已生成最新公域日报，或使用“端内ID 565”“平台商品ID 2000...”再试。`, 'red')];
+}
+
+export function buildIdLookupCard(options: IdLookupCardOptions = {}): IdLookupCardPayload {
   const input: Record<string, unknown> = {
     tag: 'input',
     element_id: 'id_lookup_query',
@@ -39,8 +102,11 @@ export function buildIdLookupCard(options: { defaultValue?: string; resultText?:
       ],
     },
   ];
+  if (options.lookupResult) {
+    elements.push(...lookupResultElements(options.lookupResult));
+  }
   if (options.resultText) {
-    elements.push({ tag: 'hr' }, { tag: 'markdown', content: `**查询结果**\n\n${options.resultText}` });
+    elements.push(markdown(options.resultText));
   }
 
   return {

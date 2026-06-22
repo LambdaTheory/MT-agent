@@ -4,7 +4,7 @@ import { handleOperationsLearningFeedback } from '../operationsLearningLoop/sess
 import { findLatestReportContext } from './reportStore.js';
 import { createFeishuMessageDispatcher } from './dispatcher.js';
 import { buildIdLookupCard } from './idLookupCard.js';
-import { formatIdLookupResult, lookupProductId } from './idLookup.js';
+import { lookupProductId } from './idLookup.js';
 import { createRentalPriceSkillClient, executeRentalOperationConfirmRequest, parseRentalOperationConfirmRequest, parseRentalPriceConfirmRequest, type RentalPriceSkillClient } from './rentalPrice.js';
 import type { LlmToolSelectionProvider } from './llmProvider.js';
 import type { LlmIntentProposalProvider } from './llmIntentProposal.js';
@@ -394,7 +394,9 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
             card = buildIdLookupCard({ resultText: '请输入端内ID或平台商品ID后再查询。' });
           } else {
             const latest = await findLatestReportContext(config.outputDir);
-            card = buildIdLookupCard({ defaultValue: query, resultText: latest ? formatIdLookupResult(lookupProductId(latest.context, query)) : '还没有找到公域日报上下文。' });
+            card = latest
+              ? buildIdLookupCard({ defaultValue: query, lookupResult: lookupProductId(latest.context, query) })
+              : buildIdLookupCard({ defaultValue: query, resultText: '还没有找到公域日报上下文。' });
           }
           return cardActionUpdateResponse(card);
         }

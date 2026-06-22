@@ -56,9 +56,18 @@ describe('buildIdLookupCard', () => {
     expect(input?.default_value).toBe('565');
   });
 
-  it('renders lookup result inside the card', () => {
-    const card = buildIdLookupCard({ defaultValue: '565', resultText: '端内ID 565 对应平台商品ID 2000000000000000000001' });
-    expect(JSON.stringify(card)).toContain('查询结果');
-    expect(JSON.stringify(card)).toContain('端内ID 565 对应平台商品ID');
+  it('renders lookup result as a two-column converter', () => {
+    const card = buildIdLookupCard({
+      defaultValue: '565',
+      lookupResult: { kind: 'internal', input: '565', internalId: '565', platformIds: ['2000000000000000000001'], productName: 'iPhone 15' },
+    });
+    const serialized = JSON.stringify(card);
+    expect(serialized).toContain('"tag":"column_set"');
+    expect(serialized).toContain('端内ID');
+    expect(serialized).toContain('平台商品ID');
+    expect(serialized).toContain('2000000000000000000001');
+    expect(serialized).toContain('iPhone 15');
+    expect(serialized).not.toContain('查询结果');
+    expect(serialized).not.toContain('"tag":"hr"');
   });
 });
