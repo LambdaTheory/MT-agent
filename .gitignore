@@ -1,4 +1,5 @@
 node_modules/
+.npm-cache/
 dist/
 output/
 .browser-profile/
@@ -9,3 +10,10 @@ output/
 .worktrees/
 config/product-id-map.json
 config/product-id-map.backup.json
+vendor/rental-price-agent/.browser-data/
+vendor/rental-price-agent/tasks/
+vendor/rental-price-agent/.daemon.pid
+vendor/rental-price-agent/.daemon.port
+vendor/rental-price-agent/.daemon.token
+vendor/rental-price-agent/.env
+vendor/rental-price-agent/config.json

@@ -1,5 +1,5 @@
-import { mkdir, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
 import type { FeishuCardPayload } from '../notify/feishuApp.js';
 
 export type RentalPriceChangeRequest =
@@ -22,6 +22,12 @@ export interface RentalPriceExecutionResult {
 export interface RentalPriceSkillClient {
   preview(request: RentalPriceChangeRequest): Promise<RentalPricePreview>;
   execute(request: Extract<RentalPriceChangeRequest, { mode: 'explicit_fields' }>): Promise<RentalPriceExecutionResult>;
+}
+
+interface RentalPriceSkillClientOptions {
+  rootDir?: string;
+  daemonUrl?: string;
+  daemonToken?: string;
 }
 
 const RENT_FIELD_PATTERN = /(1|2|3|4|5|7|10|15|30|60|90|180)\s*天(?:租金)?\s*([0-9]+(?:\.[0-9]+)?)/g;
@@ -117,12 +123,37 @@ function moneyValue(value: unknown): string | null {
   return Number.isFinite(numeric) ? money(numeric) : null;
 }
 
-export function createRentalPriceSkillClient(options: { rootDir?: string; daemonUrl?: string } = {}): RentalPriceSkillClient {
-  const rootDir = options.rootDir ?? process.env.RENTAL_PRICE_AGENT_DIR ?? 'C:\\works\\rental-price-agent';
-  const daemonUrl = options.daemonUrl ?? process.env.RENTAL_PRICE_AGENT_DAEMON_URL ?? 'http://127.0.0.1:9223';
+async function readOptionalText(path: string): Promise<string | null> {
+  try {
+    const value = (await readFile(path, 'utf8')).trim();
+    return value || null;
+  } catch {
+    return null;
+  }
+}
+
+export function createRentalPriceSkillClient(options: RentalPriceSkillClientOptions = {}): RentalPriceSkillClient {
+  const rootDir = options.rootDir ?? process.env.RENTAL_PRICE_AGENT_DIR ?? resolve(process.cwd(), 'vendor', 'rental-price-agent');
+  const configuredDaemonUrl = options.daemonUrl ?? process.env.RENTAL_PRICE_AGENT_DAEMON_URL;
+  const configuredDaemonToken = options.daemonToken ?? process.env.RENTAL_PRICE_AGENT_DAEMON_TOKEN;
+
+  async function resolveDaemonConfig(): Promise<{ daemonUrl: string; daemonToken: string | null }> {
+    const [port, fileToken] = await Promise.all([
+      configuredDaemonUrl ? Promise.resolve<string | null>(null) : readOptionalText(join(rootDir, '.daemon.port')),
+      configuredDaemonToken ? Promise.resolve<string | null>(null) : readOptionalText(join(rootDir, '.daemon.token')),
+    ]);
+
+    return {
+      daemonUrl: configuredDaemonUrl ?? (port ? `http://127.0.0.1:${port}` : 'http://127.0.0.1:9223'),
+      daemonToken: configuredDaemonToken ?? fileToken,
+    };
+  }
 
   async function send(command: Record<string, unknown>): Promise<Record<string, unknown>> {
-    const response = await fetch(daemonUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(command) });
+    const { daemonUrl, daemonToken } = await resolveDaemonConfig();
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (daemonToken) headers['x-rental-agent-token'] = daemonToken;
+    const response = await fetch(daemonUrl, { method: 'POST', headers, body: JSON.stringify(command) });
     return (await response.json()) as Record<string, unknown>;
   }
 
