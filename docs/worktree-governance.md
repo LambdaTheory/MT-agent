@@ -232,3 +232,98 @@ tests/publicTrafficCliSource.test.ts
 
 - 不直接把旧内容当作权威。
 - 后续应以本文件为新治理入口，再决定是否把 `.omo` 底稿更新或替换。
+
+## 2026-06-22 治理执行记录
+
+### 1. 保存 master 脏现场快照
+
+已在主 worktree 创建保护分支并提交完整脏现场：
+
+```text
+branch: codex/master-dirty-snapshot-20260622
+commit: a048a6d 备份：保存master脏工作区快照
+```
+
+随后主 worktree 已切回：
+
+```text
+C:\works\MT-agent
+branch: master
+status: clean
+```
+
+该快照分支仅用于防丢和后续比对，不应直接合入 `master`。
+
+### 2. 拆出公域抓取可靠性后续分支
+
+已创建独立 worktree：
+
+```text
+worktree: C:\works\MT-agent\.worktrees\public-traffic-reliability-followup
+branch: codex/public-traffic-reliability-followup
+commit: 3025548 修正：拆分公域抓取可靠性后续改动
+```
+
+只恢复并提交以下 8 个文件：
+
+```text
+src/cli/publicTrafficReport.ts
+src/crawler/dashboardCrawler.ts
+src/crawler/exposureCrawler.ts
+src/crawler/pageSizeProbe.ts
+src/publicTraffic/paths.ts
+tests/dashboardCrawlerSource.test.ts
+tests/exposureCrawlerSource.test.ts
+tests/publicTrafficCliSource.test.ts
+```
+
+验证结果：
+
+```text
+vitest focused:
+  tests/dashboardCrawlerSource.test.ts
+  tests/exposureCrawlerSource.test.ts
+  tests/publicTrafficCliSource.test.ts
+  -> 3 files / 26 tests passed
+
+tsc -p tsconfig.json -> passed
+```
+
+说明：系统 `npm` 当前指向缺失的全局 npm-cli，因此验证使用主 worktree 的本地依赖入口：
+
+```text
+C:\works\MT-agent\node_modules\.bin\vitest.cmd
+C:\works\MT-agent\node_modules\.bin\tsc.cmd
+```
+
+### 3. 关单反馈开发线核对
+
+已只读比较 `codex/master-dirty-snapshot-20260622` 中的关单反馈相关改动与当前：
+
+```text
+worktree: C:\works\MT-agent\.worktrees\closed-order-feedback
+branch: feature/closed-order-feedback
+```
+
+结论：
+
+- `src/closedOrderFeedback/feedback.ts` 和 `tests/closedOrderFeedback.test.ts` 与快照内容一致。
+- `feature/closed-order-feedback` 当前还有自己的新增文件：
+  - `src/closedOrderFeedback/ingest.ts`
+  - `tests/closedOrderFeedbackIngest.test.ts`
+- `apiProvider`、`preview CLI`、部分类型和 linkRegistry/productDisplayName 相关改动不能从快照直接覆盖，因为该开发 worktree 已经形成自己的未提交现场。
+
+处理规则：
+
+- 不自动合并、不覆盖、不清理 `feature/closed-order-feedback`。
+- 关单反馈线后续应自己在该 worktree 内完成收口、验证和提交。
+- 快照分支 `codex/master-dirty-snapshot-20260622` 保留作为对照来源。
+
+### 4. 当前安全状态
+
+```text
+master: clean
+codex/worktree-governance: clean after latest governance commit
+codex/public-traffic-reliability-followup: clean after commit 3025548
+feature/closed-order-feedback: dirty, intentionally preserved
+```
