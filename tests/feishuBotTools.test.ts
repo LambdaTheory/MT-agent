@@ -96,6 +96,93 @@ async function writeClosedOrderRegistryFixtures(rootDir: string): Promise<{
   };
 }
 
+async function writeNewLinkWorkflowContext(): Promise<{
+  outputDir: string;
+  registryPaths: {
+    productIdMapPath: string;
+    productNameMapPath: string;
+    firstSeenPath: string;
+    lifecyclePath: string;
+    artifactsDir: string;
+  };
+}> {
+  const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-new-link-workflow-output-'));
+  const registryRoot = await mkdtemp(join(tmpdir(), 'mt-agent-new-link-workflow-registry-'));
+  const configDir = join(registryRoot, 'config');
+  const stateDir = join(registryRoot, 'output', 'state');
+  await mkdir(join(outputDir, '2026-06-22'), { recursive: true });
+  await mkdir(configDir, { recursive: true });
+  await mkdir(stateDir, { recursive: true });
+  await writeFile(join(configDir, 'product-id-map.json'), JSON.stringify({
+    'platform-733': '733',
+    'platform-875': '875',
+    'platform-841': '841',
+  }), 'utf8');
+  await writeFile(join(configDir, 'product-name-map.json'), JSON.stringify({
+    '733': '大疆 Pocket3',
+    '875': 'DJI Pocket 3',
+    '841': '佳能 R50',
+  }), 'utf8');
+  await writeFile(join(outputDir, '2026-06-22', 'report-context.json'), JSON.stringify({
+    date: '2026-06-22',
+    summary: { '1d': summary, '7d': summary, '30d': summary },
+    conclusions: [],
+    rows: [
+      {
+        productName: '大疆DJI Pocket3云台相机128G 高转化',
+        platformProductId: 'platform-733',
+        displayProductId: '端内ID 733',
+        custodyDays: 7,
+        periods: {
+          '1d': { ...metric, exposure: 100, publicVisits: 10, shippedOrders: 0, amount: 0 },
+          '7d': { ...metric, exposure: 1700, publicVisits: 220, shippedOrders: 4, amount: 1800 },
+          '30d': { ...metric, exposure: 300, publicVisits: 20, shippedOrders: 0, amount: 0 },
+        },
+      },
+      {
+        productName: '大疆DJI Pocket3云台相机128G 低表现',
+        platformProductId: 'platform-875',
+        displayProductId: '端内ID 875',
+        custodyDays: 7,
+        periods: {
+          '1d': { ...metric, exposure: 50, publicVisits: 5, shippedOrders: 0, amount: 0 },
+          '7d': { ...metric, exposure: 300, publicVisits: 30, shippedOrders: 0, amount: 120 },
+          '30d': { ...metric, exposure: 300, publicVisits: 20, shippedOrders: 0, amount: 0 },
+        },
+      },
+      {
+        productName: '佳能R50微单相机',
+        platformProductId: 'platform-841',
+        displayProductId: '端内ID 841',
+        custodyDays: 7,
+        periods: {
+          '1d': { ...metric, exposure: 100, publicVisits: 10, shippedOrders: 0, amount: 0 },
+          '7d': { ...metric, exposure: 1200, publicVisits: 140, shippedOrders: 2, amount: 700 },
+          '30d': { ...metric, exposure: 300, publicVisits: 20, shippedOrders: 0, amount: 0 },
+        },
+      },
+    ],
+    lowExposure: [],
+    weakClick: [],
+    weakConversion: [],
+    highPotential: [],
+    newProductObservation: [],
+    lifecycleGovernance: [],
+    recommendedActions: [],
+    emptySectionNotes: {},
+  }), 'utf8');
+  return {
+    outputDir,
+    registryPaths: {
+      productIdMapPath: join(configDir, 'product-id-map.json'),
+      productNameMapPath: join(configDir, 'product-name-map.json'),
+      firstSeenPath: join(stateDir, 'goods-first-seen.json'),
+      lifecyclePath: join(stateDir, 'goods-link-lifecycle.json'),
+      artifactsDir: outputDir,
+    },
+  };
+}
+
 describe('handleBotIntent', () => {
   it('returns help text', async () => {
     await expect(handleBotIntent({ type: 'help' })).resolves.toEqual({ text: `📋 数据查询
@@ -308,6 +395,44 @@ describe('handleBotIntent', () => {
     expect(JSON.stringify(response.card)).toContain('agent_tool_confirm');
     expect(JSON.stringify(response.card)).toContain('delist');
     expect(JSON.stringify(response.card)).toContain('761');
+  });
+
+  it('plans new-link batch workflows through LLM without copying before confirmation', async () => {
+    const { outputDir, registryPaths } = await writeNewLinkWorkflowContext();
+    const planner: AgentPlannerProvider = {
+      async proposePlan(request) {
+        expect(request.workflows.map((workflow) => workflow.name)).toContain('rental.newLinkBatch');
+        return JSON.stringify({
+          goal: '铺设 pocket3 新链',
+          selectedWorkflow: 'rental.newLinkBatch',
+          arguments: { keyword: 'pocket3', count: 10 },
+          confidence: 0.95,
+          reason: '用户要求铺十条 pocket3 的新链',
+          requiresConfirmation: true,
+        });
+      },
+    };
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run'); },
+      async execute() { throw new Error('execute should not run'); },
+      async copy() { throw new Error('copy should not run before workflow confirmation'); },
+      async delist() { throw new Error('delist should not run'); },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+
+    const response = await handleBotIntent({ type: 'unknown', text: '帮我铺十条 pocket3 的新链' }, outputDir, {
+      agentPlannerProvider: planner,
+      rentalPriceClient,
+      closedOrderRegistryPaths: registryPaths,
+    });
+
+    expect(response.text).toContain('新链批量铺设计划：准备复制 10 条「pocket3」新链');
+    expect(response.text).toContain('推荐源商品：733 大疆DJI Pocket3云台相机128G 高转化');
+    expect(response.card).toBeDefined();
+    expect(JSON.stringify(response.card)).toContain('new_link_batch_confirm');
+    expect(JSON.stringify(response.card)).toContain('733');
   });
 
   it('returns a confirmation card for LLM-proposed rental delist without executing the daemon', async () => {

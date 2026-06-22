@@ -8,6 +8,7 @@ import { buildIdLookupCard } from './idLookupCard.js';
 import { lookupProductId } from './idLookup.js';
 import { createFeishuMessageDispatcher } from './dispatcher.js';
 import { executeAgentToolRequest } from './agentToolExecutor.js';
+import { executeNewLinkBatchConfirmRequest, parseNewLinkBatchConfirmRequest } from '../newLinkWorkflow/batch.js';
 import { createRentalPriceSkillClient, executeRentalOperationConfirmRequest, parseRentalOperationConfirmRequest, parseRentalPriceConfirmRequest, type RentalPriceSkillClient } from './rentalPrice.js';
 import type { LlmIntentProposalProvider } from './llmIntentProposal.js';
 import type { BotIntent, BotResponse, FeishuBotDispatchResult, FeishuBotIncomingTextMessage, FeishuMessageEvent } from './types.js';
@@ -182,6 +183,23 @@ async function handleCardActionTrigger(payload: FeishuCardActionEvent, config: F
   if (actionName === 'agent_tool_cancel') {
     const toolName = readString(value?.toolName) ?? '未知工具';
     await replyText(replyConfig, `已取消 Agent 操作：${toolName}`);
+    return;
+  }
+
+  if (actionName === 'new_link_batch_confirm') {
+    const request = parseNewLinkBatchConfirmRequest(value);
+    if (!request) {
+      await replyText(replyConfig, '新链批量复制确认参数无效，请重新发起。');
+      return;
+    }
+    const result = await executeNewLinkBatchConfirmRequest(config.rentalPriceClient ?? createRentalPriceSkillClient(), request);
+    await replyText(replyConfig, result.text);
+    return;
+  }
+
+  if (actionName === 'new_link_batch_cancel') {
+    const keyword = readString(value?.keyword) ?? '未知';
+    await replyText(replyConfig, `已取消新链批量复制：「${keyword}」`);
     return;
   }
 

@@ -8,6 +8,7 @@ import { createFeishuMessageDispatcher } from './dispatcher.js';
 import { executeAgentToolRequest } from './agentToolExecutor.js';
 import { buildIdLookupCard } from './idLookupCard.js';
 import { lookupProductId } from './idLookup.js';
+import { executeNewLinkBatchConfirmRequest, parseNewLinkBatchConfirmRequest } from '../newLinkWorkflow/batch.js';
 import { createRentalPriceSkillClient, executeRentalOperationConfirmRequest, parseRentalOperationConfirmRequest, parseRentalPriceConfirmRequest, type RentalPriceSkillClient } from './rentalPrice.js';
 import type { LlmToolSelectionProvider } from './llmProvider.js';
 import type { LlmIntentProposalProvider } from './llmIntentProposal.js';
@@ -362,6 +363,44 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
           }
           setRentalActionStatus(claim.key, 'cancelled');
           await updateCard(client, messageId, statusCard('Agent 操作已取消', `工具 ${toolName} 操作已取消。`, 'grey')).catch(() => false);
+          return;
+        }
+
+        if (actionName === 'new_link_batch_confirm') {
+          const request = parseNewLinkBatchConfirmRequest(value);
+          if (!request) {
+            await replyText(client, messageId, '新链批量复制确认参数无效，请重新发起。');
+            return;
+          }
+          const claim = claimRentalAction(messageId, actionName, value);
+          if (!claim.claimed) {
+            await replyText(client, messageId, duplicateRentalActionText(claim.claim));
+            return;
+          }
+          void (async () => {
+            await updateCard(client, messageId, statusCard('新链批量复制处理中', `源商品 ${request.sourceProductId} 已收到确认，准备复制 ${request.count} 条。`, 'blue')).catch(() => false);
+            try {
+              const result = await executeNewLinkBatchConfirmRequest(rentalPriceClient, request);
+              setRentalActionStatus(claim.key, result.ok ? 'completed' : 'failed');
+              await updateCard(client, messageId, statusCard(result.ok ? '新链批量复制已完成' : '新链批量复制失败', result.text, result.ok ? 'green' : 'red')).catch(() => false);
+            } catch (error) {
+              setRentalActionStatus(claim.key, 'failed');
+              await updateCard(client, messageId, statusCard('新链批量复制失败', `源商品 ${request.sourceProductId}\n${error instanceof Error ? error.message : String(error)}`, 'red')).catch(() => false);
+              logError(error, { messageId, phase: 'reply' });
+            }
+          })();
+          return;
+        }
+
+        if (actionName === 'new_link_batch_cancel') {
+          const keyword = readString(value?.keyword) ?? '未知';
+          const claim = claimRentalAction(messageId, actionName, value);
+          if (!claim.claimed) {
+            await replyText(client, messageId, duplicateRentalActionText(claim.claim));
+            return;
+          }
+          setRentalActionStatus(claim.key, 'cancelled');
+          await updateCard(client, messageId, statusCard('新链批量复制已取消', `「${keyword}」新链批量复制已取消。`, 'grey')).catch(() => false);
           return;
         }
 

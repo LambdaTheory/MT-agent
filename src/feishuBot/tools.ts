@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import { buildAgentToolConfirmCard } from '../agentRuntime/approvalCard.js';
 import { listAgentPlannerTools, validateAgentPlannerProposal, type AgentPlannerProvider } from '../agentRuntime/planner.js';
+import { validateAgentWorkflowPlannerProposal } from '../agentRuntime/workflowPlanner.js';
 import { listAgentWorkflows } from '../agentRuntime/workflowRegistry.js';
 import { parseAgentDataIntent } from '../agentData/intent.js';
 import { runPublicTrafficReportCli } from '../cli/publicTrafficReport.js';
@@ -8,6 +9,13 @@ import { loadClosedOrderIngestState } from '../closedOrderFeedback/ingest.js';
 import { buildClosedOrderObservationReport, writeClosedOrderObservationReportArtifacts } from '../closedOrderFeedback/observation.js';
 import { loadClosedOrderRegistryContext, type ClosedOrderRegistryPathsInput } from '../closedOrderFeedback/runtime.js';
 import { syncClosedOrderFeedbackFromApi } from '../closedOrderFeedback/sync.js';
+import {
+  buildNewLinkBatchConfirmCard,
+  buildNewLinkBatchPlan,
+  formatNewLinkBatchPlan,
+  NEW_LINK_BATCH_WORKFLOW_NAME,
+  readNewLinkBatchWorkflowRequest,
+} from '../newLinkWorkflow/batch.js';
 import { sendFeishuCard } from '../notify/feishu.js';
 import { startOperationsLearningSession, summarizeOperationsLearningHistory, summarizeOperationsLearningSession } from '../operationsLearningLoop/session.js';
 import { buildPublicTrafficCard } from '../publicTraffic/buildPublicTrafficCard.js';
@@ -134,7 +142,26 @@ async function agentPlannerResponse(
     workflows: listAgentWorkflows(),
   });
   const parsed = validateAgentPlannerProposal(rawProposal);
-  if (!parsed.ok) return null;
+  if (!parsed.ok) {
+    const workflowParsed = validateAgentWorkflowPlannerProposal(rawProposal);
+    if (!workflowParsed.ok) return null;
+    if (workflowParsed.proposal.selectedWorkflow !== NEW_LINK_BATCH_WORKFLOW_NAME) return null;
+    const workflowRequest = readNewLinkBatchWorkflowRequest(workflowParsed.proposal.arguments);
+    if (!workflowRequest) return { text: '新链批量铺设参数无效：需要 keyword 和 count。' };
+
+    const [latest, registryContext] = await Promise.all([
+      findLatestReportContext(outputDir),
+      loadClosedOrderRegistryContext(options.closedOrderRegistryPaths),
+    ]);
+    if (!latest) return { text: '还没有找到公域日报上下文，无法选择新链复制源商品。' };
+
+    const plan = buildNewLinkBatchPlan(workflowRequest, latest.context, registryContext.registry);
+    const text = formatNewLinkBatchPlan(plan);
+    return {
+      text,
+      ...(plan.status === 'ready' ? { card: buildNewLinkBatchConfirmCard(plan, workflowParsed.proposal.reason) } : {}),
+    };
+  }
 
   const request = {
     toolName: parsed.proposal.selectedTool,

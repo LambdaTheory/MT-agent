@@ -7,6 +7,7 @@ export interface AgentWorkflowDefinition {
   requiredCapabilities: string[];
   risk: AgentWorkflowRisk;
   requiresConfirmation: boolean;
+  argumentsSchema?: unknown;
 }
 
 const workflows: AgentWorkflowDefinition[] = [
@@ -22,6 +23,15 @@ const workflows: AgentWorkflowDefinition[] = [
     ],
     risk: 'high',
     requiresConfirmation: true,
+    argumentsSchema: {
+      type: 'object',
+      properties: {
+        keyword: { type: 'string' },
+        count: { type: 'integer' },
+      },
+      required: ['keyword', 'count'],
+      additionalProperties: false,
+    },
   },
 ];
 
@@ -30,6 +40,7 @@ function cloneWorkflow(workflow: AgentWorkflowDefinition): AgentWorkflowDefiniti
     ...workflow,
     triggerExamples: [...workflow.triggerExamples],
     requiredCapabilities: [...workflow.requiredCapabilities],
+    argumentsSchema: workflow.argumentsSchema === undefined ? undefined : structuredClone(workflow.argumentsSchema),
   };
 }
 

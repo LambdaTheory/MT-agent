@@ -199,6 +199,52 @@ describe('rental price card action', () => {
     expect(sent.filter((item) => JSON.stringify(item).includes('Agent 操作已完成')).every((item) => JSON.stringify(item).includes('"kind":"patch"'))).toBe(true);
   });
 
+  it('executes new-link batch confirmations by copying the selected source repeatedly', async () => {
+    const calls: string[] = [];
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run for new-link confirmation'); },
+      async execute() { throw new Error('price execute should not run for new-link confirmation'); },
+      async copy(productId) {
+        calls.push(productId);
+        return { productId, ok: true, newProductId: `new-${calls.length}`, lines: ['copy: ok'] };
+      },
+      async delist() { throw new Error('delist should not run for new-link confirmation'); },
+      async tenancySet() { throw new Error('tenancySet should not run for new-link confirmation'); },
+      async specDiscover() { throw new Error('specDiscover should not run for new-link confirmation'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run for new-link confirmation'); },
+    };
+    const registered: Record<string, (data: unknown) => Promise<void>> = {};
+    const sent: unknown[] = [];
+    const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', sdk: fakeSdk(sent, registered), rentalPriceClient });
+
+    bot.start();
+    await registered['card.action.trigger']({
+      event: {
+        context: { open_message_id: 'om-new-link-batch-confirm' },
+        action: {
+          value: {
+            action: 'new_link_batch_confirm',
+            request: {
+              workflowName: 'rental.newLinkBatch',
+              keyword: 'pocket3',
+              count: 3,
+              sourceProductId: '733',
+              sourceProductName: '大疆 Pocket3',
+              dataDate: '2026-06-22',
+              reason: '用户确认铺新链',
+            },
+          },
+        },
+      },
+    });
+
+    await waitFor(() => calls.length === 3 && sent.some((item) => JSON.stringify(item).includes('新链批量复制已完成')));
+    expect(calls).toEqual(['733', '733', '733']);
+    expect(sent.some((item) => JSON.stringify(item).includes('新链批量复制处理中'))).toBe(true);
+    expect(sent.some((item) => JSON.stringify(item).includes('成功 3 条'))).toBe(true);
+    expect(sent.filter((item) => JSON.stringify(item).includes('新链批量复制已完成')).every((item) => JSON.stringify(item).includes('"kind":"patch"'))).toBe(true);
+  });
+
   it('rejects forged rental operation confirmations', () => {
     expect(parseRentalOperationConfirmRequest({ request: { action: 'delist', productId: '761' } })).toEqual({ action: 'delist', productId: '761' });
     expect(parseRentalOperationConfirmRequest({ request: { action: 'delete-everything', productId: '761' } })).toBeNull();
