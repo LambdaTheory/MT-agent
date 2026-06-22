@@ -387,8 +387,7 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
             const latest = await findLatestReportContext(config.outputDir);
             card = buildIdLookupCard({ defaultValue: query, resultText: latest ? formatIdLookupResult(lookupProductId(latest.context, query)) : '还没有找到公域日报上下文。' });
           }
-          await updateCard(client, messageId, card);
-          return;
+          return card;
         }
       } catch (error) {
         logError(error, { messageId, phase: 'reply' });

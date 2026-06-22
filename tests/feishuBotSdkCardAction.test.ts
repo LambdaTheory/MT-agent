@@ -102,24 +102,23 @@ async function seedLearningSession(outputDir: string): Promise<void> {
 }
 
 describe('createFeishuSdkBot card.action.trigger', () => {
-  it('handles id_lookup form submit by updating the original card', async () => {
+  it('handles id_lookup form submit by returning the updated card', async () => {
     const outputDir = await writeContext();
     const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
     const sent: unknown[] = [];
     const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', outputDir, sdk: fakeSdk(sent, registered) });
 
     bot.start();
-    await registered['card.action.trigger']({
+    const result = await registered['card.action.trigger']({
       event: {
         context: { open_message_id: 'om-id-lookup' },
         action: { tag: 'button', value: { action: 'id_lookup' }, form_value: { lookup_query: '565' } },
       },
     });
 
-    expect(sent).toHaveLength(1);
-    expect(sent[0]).toMatchObject({ kind: 'patch', request: { path: { message_id: 'om-id-lookup' } } });
-    expect(JSON.stringify(sent[0])).toContain('查询结果');
-    expect(JSON.stringify(sent[0])).toContain('端内ID 565 对应平台商品ID');
+    expect(sent).toEqual([]);
+    expect(JSON.stringify(result)).toContain('查询结果');
+    expect(JSON.stringify(result)).toContain('端内ID 565 对应平台商品ID');
   });
 
   it('handles id_lookup submit when Feishu returns the callback value through behaviors', async () => {
@@ -129,16 +128,15 @@ describe('createFeishuSdkBot card.action.trigger', () => {
     const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', outputDir, sdk: fakeSdk(sent, registered) });
 
     bot.start();
-    await registered['card.action.trigger']({
+    const result = await registered['card.action.trigger']({
       event: {
         context: { open_message_id: 'om-id-lookup-behavior' },
         action: { tag: 'button', name: 'id_lookup_submit', behaviors: [{ type: 'callback', value: { action: 'id_lookup' } }], form_value: { lookup_query: '565' } },
       },
     });
 
-    expect(sent).toHaveLength(1);
-    expect(sent[0]).toMatchObject({ kind: 'patch', request: { path: { message_id: 'om-id-lookup-behavior' } } });
-    expect(JSON.stringify(sent[0])).toContain('端内ID 565 对应平台商品ID');
+    expect(sent).toEqual([]);
+    expect(JSON.stringify(result)).toContain('端内ID 565 对应平台商品ID');
   });
 
   it('handles id_lookup form submit when SDK returns flattened card action data', async () => {
@@ -148,14 +146,13 @@ describe('createFeishuSdkBot card.action.trigger', () => {
     const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', outputDir, sdk: fakeSdk(sent, registered) });
 
     bot.start();
-    await registered['card.action.trigger']({
+    const result = await registered['card.action.trigger']({
       context: { open_message_id: 'om-id-lookup-flat' },
       action: { tag: 'button', name: 'id_lookup_submit', behaviors: [{ type: 'callback', value: { action: 'id_lookup' } }], form_value: { lookup_query: '565' } },
     });
 
-    expect(sent).toHaveLength(1);
-    expect(sent[0]).toMatchObject({ kind: 'patch', request: { path: { message_id: 'om-id-lookup-flat' } } });
-    expect(JSON.stringify(sent[0])).toContain('端内ID 565 对应平台商品ID');
+    expect(sent).toEqual([]);
+    expect(JSON.stringify(result)).toContain('端内ID 565 对应平台商品ID');
   });
 
   it('persists operations learning feedback and replies with the next card', async () => {
