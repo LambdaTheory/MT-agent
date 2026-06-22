@@ -1,4 +1,4 @@
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -179,6 +179,31 @@ describe('rental price card action', () => {
 
       expect(result).toEqual({ productId: '761', ok: false, lines: ['apply: partial', 'submit: skipped', 'verify: skipped'] });
       expect(commands).toEqual(['apply']);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('uses daemon mode when port and token files are present', async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), 'mt-agent-rental-price-'));
+    await writeFile(join(rootDir, '.daemon.port'), '9333\n', 'utf8');
+    await writeFile(join(rootDir, '.daemon.token'), 'secret-token\n', 'utf8');
+
+    const requests: Array<{ input: string; headers: Headers }> = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input, init) => {
+      requests.push({ input: String(input), headers: new Headers(init?.headers) });
+      return new Response(JSON.stringify({ status: 'ok', productId: '761', values: { rent1day: '22.00' } }));
+    };
+
+    try {
+      const client = createRentalPriceSkillClient({ rootDir });
+      const preview = await client.preview({ mode: 'explicit_fields', productId: '761', fields: { rent1day: '22.00' } });
+
+      expect(preview.fields).toEqual({ rent1day: '22.00' });
+      expect(requests).toHaveLength(1);
+      expect(requests[0]?.input).toBe('http://127.0.0.1:9333');
+      expect(requests[0]?.headers.get('x-rental-agent-token')).toBe('secret-token');
     } finally {
       globalThis.fetch = originalFetch;
     }

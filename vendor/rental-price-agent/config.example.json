@@ -1,0 +1,71 @@
+{
+  "saas": {
+    "baseUrl": "<YOUR_SAAS_URL>",
+    "loginUrl": "<YOUR_SAAS_URL>/web/index.php?c=user&a=login",
+    "productDetailUrl": "<YOUR_SAAS_URL>/web/index.php?...&id={productId}",
+    "productListUrl": "<YOUR_SAAS_URL>/web/index.php?...&r=goods",
+    "credentials": {
+      "username": "${SAAS_USERNAME}",
+      "password": "${SAAS_PASSWORD}"
+    }
+  },
+  "selectors": {
+    "login": {
+      "username": "input[name='username']",
+      "password": "input[name='password']",
+      "submitButton": "button[type='submit']",
+      "successIndicator": ".user-avatar,.dashboard-header"
+    },
+    "product": {
+      "_note": "Selectors use spec item ID (e.g. 3862). Read dynamically from the spec table #options.",
+      "goodsName": "input#goodsname",
+      "stock": "input.option_stock_{specId}",
+      "rent1day": "input.option_rent1day_{specId}",
+      "rent10day": "input.option_rent10day_{specId}",
+      "rent30day": "input.option_rent30day_{specId}",
+      "marketPrice": "input.option_market_price_{specId}",
+      "deposit": "input.option_depositprice_{specId}",
+      "purchasePrice": "input.option_purchase_price_{specId}",
+      "costPrice": "input.option_costprice_{specId}",
+      "finalPayment": "input.option_final_payment_{specId}",
+      "saveButton": "input.btn.btn-primary[value='保存商品']",
+      "saveSuccessToast": null,
+      "specTable": "#options table tbody tr"
+    },
+    "spec": {
+      "addSpecBtn": "#add-spec",
+      "addSpecItemBtn": "#add-specitem-{dimId}",
+      "refreshBtn": "a:has-text('刷新规格项目表')",
+      "chooseRentalBtn": "a:has-text('选择租期')",
+      "enableSpecCheckbox": "#hasoption",
+      "enablePackageCheckbox": "#haspackage",
+      "specItemContainer": "#spec_item_{dimId}",
+      "specItemTitle": ".spec_item_title",
+      "specItemId": ".spec_item_id",
+      "specDimTitle": ".spec_title"
+    }
+  },
+  "rules": {
+    "minPrice": 0,
+    "maxPrice": 999999,
+    "maxChangePercent": 50,
+    "minStock": 0,
+    "confirmOnMultipleMatch": true,
+    "immediateVerify": true,
+    "delayedVerifyMinutes": 5,
+    "maxBatchSize": 20
+  },
+  "taskStorage": {
+    "directory": "./tasks"
+  },
+  "browser": {
+    "channel": "chrome",
+    "headless": true,
+    "viewport": { "width": 1440, "height": 900 },
+    "slowMo": 100
+  },
+  "mirror": {
+    "baseUrl": "<MIRROR_API_URL>",
+    "apiKey": "${MIRROR_API_KEY}"
+  }
+}
