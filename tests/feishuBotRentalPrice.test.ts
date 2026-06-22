@@ -76,7 +76,7 @@ describe('rental price Feishu integration', () => {
     expect(JSON.stringify(response.card)).toContain('rental_price_confirm');
   });
 
-  it('parses and executes copy product commands', async () => {
+  it('parses copy product commands and returns a confirmation card without executing', async () => {
     expect(parseBotIntent('复制商品 761')).toEqual({ type: 'rental_copy', productId: '761' });
     expect(parseBotIntent('商品复制 761')).toEqual({ type: 'rental_copy', productId: '761' });
 
@@ -84,12 +84,14 @@ describe('rental price Feishu integration', () => {
     const intent = parseBotIntent('复制商品 761');
     const response = await handleBotIntent(intent, 'output', { rentalPriceClient: client });
 
-    expect(client.copies).toEqual(['761']);
-    expect(response.text).toContain('复制成功');
-    expect(response.text).toContain('999');
+    expect(client.copies).toEqual([]);
+    expect(response.text).toContain('请确认租赁商品操作：761');
+    expect(JSON.stringify(response.card)).toContain('rental_operation_confirm');
+    expect(JSON.stringify(response.card)).toContain('copy');
+    expect(JSON.stringify(response.card)).toContain('761');
   });
 
-  it('parses and executes delist product commands', async () => {
+  it('parses delist product commands and returns a confirmation card without executing', async () => {
     expect(parseBotIntent('下架商品 761')).toEqual({ type: 'rental_delist', productId: '761' });
     expect(parseBotIntent('商品下架 761')).toEqual({ type: 'rental_delist', productId: '761' });
 
@@ -97,12 +99,14 @@ describe('rental price Feishu integration', () => {
     const intent = parseBotIntent('下架商品 761');
     const response = await handleBotIntent(intent, 'output', { rentalPriceClient: client });
 
-    expect(client.delists).toEqual(['761']);
-    expect(response.text).toContain('下架成功');
-    expect(response.text).toContain('761');
+    expect(client.delists).toEqual([]);
+    expect(response.text).toContain('请确认租赁商品操作：761');
+    expect(JSON.stringify(response.card)).toContain('rental_operation_confirm');
+    expect(JSON.stringify(response.card)).toContain('delist');
+    expect(JSON.stringify(response.card)).toContain('761');
   });
 
-  it('parses and executes tenancy set commands', async () => {
+  it('parses tenancy set commands and returns a confirmation card without executing', async () => {
     expect(parseBotIntent('设置租期 761 1,10,30')).toEqual({ type: 'rental_tenancy_set', productId: '761', days: '1,10,30' });
     expect(parseBotIntent('租期设置 761 1,7,30,90')).toEqual({ type: 'rental_tenancy_set', productId: '761', days: '1,7,30,90' });
 
@@ -110,9 +114,11 @@ describe('rental price Feishu integration', () => {
     const intent = parseBotIntent('设置租期 761 1,10,30');
     const response = await handleBotIntent(intent, 'output', { rentalPriceClient: client });
 
-    expect(client.tenancySets).toEqual([{ productId: '761', days: '1,10,30' }]);
-    expect(response.text).toContain('租期设置成功');
-    expect(response.text).toContain('761');
+    expect(client.tenancySets).toEqual([]);
+    expect(response.text).toContain('请确认租赁商品操作：761');
+    expect(JSON.stringify(response.card)).toContain('rental_operation_confirm');
+    expect(JSON.stringify(response.card)).toContain('tenancy-set');
+    expect(JSON.stringify(response.card)).toContain('1,10,30');
   });
 
   it('parses and executes spec discover commands', async () => {
@@ -128,7 +134,7 @@ describe('rental price Feishu integration', () => {
     expect(response.text).toContain('761');
   });
 
-  it('parses and executes spec add commands', async () => {
+  it('parses spec add commands and returns a confirmation card without executing', async () => {
     expect(parseBotIntent('添加规格 761 128G')).toEqual({ type: 'rental_spec_add', productId: '761', itemTitle: '128G' });
     expect(parseBotIntent('规格添加 761 256G')).toEqual({ type: 'rental_spec_add', productId: '761', itemTitle: '256G' });
 
@@ -136,8 +142,10 @@ describe('rental price Feishu integration', () => {
     const intent = parseBotIntent('添加规格 761 128G');
     const response = await handleBotIntent(intent, 'output', { rentalPriceClient: client });
 
-    expect(client.specAdds).toEqual([{ productId: '761', itemTitle: '128G' }]);
-    expect(response.text).toContain('规格添加成功');
-    expect(response.text).toContain('761');
+    expect(client.specAdds).toEqual([]);
+    expect(response.text).toContain('请确认租赁商品操作：761');
+    expect(JSON.stringify(response.card)).toContain('rental_operation_confirm');
+    expect(JSON.stringify(response.card)).toContain('spec-add-and-refresh');
+    expect(JSON.stringify(response.card)).toContain('128G');
   });
 });

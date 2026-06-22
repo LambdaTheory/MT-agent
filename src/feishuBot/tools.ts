@@ -6,7 +6,7 @@ import { buildPublicTrafficFeishuText } from '../publicTraffic/buildPublicTraffi
 import { startOperationsLearningSession, summarizeOperationsLearningHistory, summarizeOperationsLearningSession } from '../operationsLearningLoop/session.js';
 import { formatIdLookupResult, lookupProductId } from './idLookup.js';
 import { buildIdLookupCard } from './idLookupCard.js';
-import { buildRentalOperationConfirmCard, buildRentalPricePreviewCard, createRentalPriceSkillClient, executeRentalOperationConfirmRequest, type RentalOperationConfirmRequest, type RentalPriceSkillClient } from './rentalPrice.js';
+import { buildRentalOperationConfirmCard, buildRentalPricePreviewCard, createRentalPriceSkillClient, type RentalOperationConfirmRequest, type RentalPriceSkillClient } from './rentalPrice.js';
 import { findLatestReportContext, formatLatestSummary, formatProductRows, queryProductRows } from './reportStore.js';
 import { parseLlmToolSelection, type LlmToolSelectionProvider } from './llmProvider.js';
 import { getSupportedLlmIntentProposals, parseLlmIntentProposal, type LlmIntentProposalProvider } from './llmIntentProposal.js';
@@ -40,6 +40,10 @@ function rentalIntentToConfirmRequest(intent: BotIntent): RentalOperationConfirm
     default:
       return null;
   }
+}
+
+function rentalOperationConfirmResponse(request: RentalOperationConfirmRequest, reason: string): BotResponse {
+  return { text: `请确认租赁商品操作：${request.productId}`, card: buildRentalOperationConfirmCard(request, reason) };
 }
 
 export async function handleBotIntent(intent: BotIntent, outputDir = 'output', options: HandleBotIntentOptions = {}): Promise<BotResponse> {
@@ -101,24 +105,15 @@ export async function handleBotIntent(intent: BotIntent, outputDir = 'output', o
   }
 
   if (intent.type === 'rental_copy') {
-    const rentalPriceClient = options.rentalPriceClient ?? createRentalPriceSkillClient();
-    const result = await rentalPriceClient.copy(intent.productId);
-    if (result.ok) {
-      return { text: result.newProductId ? `复制成功：商品 ${intent.productId} → 新商品 ${result.newProductId}` : `复制成功：商品 ${intent.productId} 已复制（新商品ID未能自动获取，请到后台确认）` };
-    }
-    return { text: `复制失败：商品 ${intent.productId}\n${result.lines.join('\n')}` };
+    return rentalOperationConfirmResponse({ action: 'copy', productId: intent.productId }, '明确飞书命令需要二次确认后才能复制商品。');
   }
 
   if (intent.type === 'rental_delist') {
-    const rentalPriceClient = options.rentalPriceClient ?? createRentalPriceSkillClient();
-    const result = await rentalPriceClient.delist(intent.productId);
-    return { text: result.ok ? `下架成功：商品 ${result.productId}` : `下架失败：商品 ${result.productId}\n${result.lines.join('\n')}` };
+    return rentalOperationConfirmResponse({ action: 'delist', productId: intent.productId }, '明确飞书命令需要二次确认后才能下架商品。');
   }
 
   if (intent.type === 'rental_tenancy_set') {
-    const rentalPriceClient = options.rentalPriceClient ?? createRentalPriceSkillClient();
-    const result = await rentalPriceClient.tenancySet(intent.productId, intent.days);
-    return { text: result.ok ? `租期设置成功：商品 ${result.productId}，租期 ${result.days}` : `租期设置失败：商品 ${result.productId}\n${result.lines.join('\n')}` };
+    return rentalOperationConfirmResponse({ action: 'tenancy-set', productId: intent.productId, days: intent.days }, '明确飞书命令需要二次确认后才能设置租期。');
   }
 
   if (intent.type === 'rental_spec_discover') {
@@ -132,9 +127,7 @@ export async function handleBotIntent(intent: BotIntent, outputDir = 'output', o
   }
 
   if (intent.type === 'rental_spec_add') {
-    const rentalPriceClient = options.rentalPriceClient ?? createRentalPriceSkillClient();
-    const result = await rentalPriceClient.specAddAndRefresh(intent.productId, intent.itemTitle);
-    return { text: result.ok ? `规格添加成功：商品 ${result.productId}，新增 ${result.itemTitle}` : `规格添加失败：商品 ${result.productId}\n${result.lines.join('\n')}` };
+    return rentalOperationConfirmResponse({ action: 'spec-add-and-refresh', productId: intent.productId, itemTitle: intent.itemTitle }, '明确飞书命令需要二次确认后才能添加规格。');
   }
 
   if (intent.type === 'operations_learning_quiz') {
@@ -196,7 +189,7 @@ export async function handleBotIntent(intent: BotIntent, outputDir = 'output', o
         }
         const request = rentalIntentToConfirmRequest(proposedIntent);
         if (request) {
-          return { text: `请确认租赁商品操作：${request.productId}`, card: buildRentalOperationConfirmCard(request, parsedProposal.proposal.reason) };
+          return rentalOperationConfirmResponse(request, parsedProposal.proposal.reason);
         }
       }
     }

@@ -13,11 +13,11 @@
  * patterns. This is the FIRST safe step before LLM-based intent resolution.
  *
  * Side-effect intents (must NEVER trigger from accidental natural language):
- *   rental_price_change     — calls daemon preview+execute to modify prices
- *   rental_copy             — calls daemon copy to duplicate a listing
- *   rental_delist           — calls daemon delist to remove a listing
- *   rental_tenancy_set      — calls daemon tenancy-set to change rental periods
- *   rental_spec_add         — calls daemon spec-add-and-refresh to add specification options
+ *   rental_price_change     — previews changes and requires card confirmation before execution
+ *   rental_copy             — requires card confirmation before daemon copy
+ *   rental_delist           — requires card confirmation before daemon delist
+ *   rental_tenancy_set      — requires card confirmation before daemon tenancy-set
+ *   rental_spec_add         — requires card confirmation before daemon spec-add-and-refresh
  *   rental_spec_discover    — calls daemon spec-discover (read-only query to daemon,
  *                             but involves external binary call; classified as side-effect
  *                             for safety since it touches the daemon)
