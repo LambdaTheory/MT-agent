@@ -117,8 +117,9 @@ describe('createFeishuSdkBot card.action.trigger', () => {
     });
 
     expect(sent).toEqual([]);
-    expect(JSON.stringify(result)).toContain('查询结果');
-    expect(JSON.stringify(result)).toContain('端内ID 565 对应平台商品ID');
+    expect(result).toMatchObject({ card: { type: 'raw', data: { schema: '2.0' } } });
+    expect(JSON.stringify((result as any).card.data)).toContain('查询结果');
+    expect(JSON.stringify((result as any).card.data)).toContain('端内ID 565 对应平台商品ID');
   });
 
   it('handles id_lookup submit when Feishu returns the callback value through behaviors', async () => {
@@ -136,7 +137,8 @@ describe('createFeishuSdkBot card.action.trigger', () => {
     });
 
     expect(sent).toEqual([]);
-    expect(JSON.stringify(result)).toContain('端内ID 565 对应平台商品ID');
+    expect(result).toMatchObject({ card: { type: 'raw', data: { schema: '2.0' } } });
+    expect(JSON.stringify((result as any).card.data)).toContain('端内ID 565 对应平台商品ID');
   });
 
   it('handles id_lookup form submit when SDK returns flattened card action data', async () => {
@@ -152,7 +154,8 @@ describe('createFeishuSdkBot card.action.trigger', () => {
     });
 
     expect(sent).toEqual([]);
-    expect(JSON.stringify(result)).toContain('端内ID 565 对应平台商品ID');
+    expect(result).toMatchObject({ card: { type: 'raw', data: { schema: '2.0' } } });
+    expect(JSON.stringify((result as any).card.data)).toContain('端内ID 565 对应平台商品ID');
   });
 
   it('persists operations learning feedback and replies with the next card', async () => {

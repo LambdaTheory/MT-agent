@@ -63,6 +63,11 @@ interface FeishuSdkClient {
 
 type RentalActionStatus = 'processing' | 'completed' | 'failed' | 'cancelled';
 
+interface FeishuCardActionResponse {
+  toast?: { type: 'info' | 'success' | 'warning' | 'error'; content: string };
+  card?: { type: 'raw'; data: FeishuCardPayload };
+}
+
 interface RentalActionClaim {
   status: RentalActionStatus;
   actionName: string;
@@ -198,6 +203,10 @@ function statusCard(title: string, content: string, template: 'blue' | 'green' |
     header: { title: { tag: 'plain_text', content: title }, template },
     body: { elements: [{ tag: 'markdown', content }] },
   };
+}
+
+function cardActionUpdateResponse(card: FeishuCardPayload): FeishuCardActionResponse {
+  return { card: { type: 'raw', data: card } };
 }
 
 async function replyText(client: FeishuSdkClient, messageId: string, text: string): Promise<void> {
@@ -387,7 +396,7 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
             const latest = await findLatestReportContext(config.outputDir);
             card = buildIdLookupCard({ defaultValue: query, resultText: latest ? formatIdLookupResult(lookupProductId(latest.context, query)) : '还没有找到公域日报上下文。' });
           }
-          return card;
+          return cardActionUpdateResponse(card);
         }
       } catch (error) {
         logError(error, { messageId, phase: 'reply' });
