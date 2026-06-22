@@ -102,7 +102,7 @@ async function seedLearningSession(outputDir: string): Promise<void> {
 }
 
 describe('createFeishuSdkBot card.action.trigger', () => {
-  it('handles id_lookup form submit and replies with converted ID text', async () => {
+  it('handles id_lookup form submit by updating the original card', async () => {
     const outputDir = await writeContext();
     const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
     const sent: unknown[] = [];
@@ -117,7 +117,7 @@ describe('createFeishuSdkBot card.action.trigger', () => {
     });
 
     expect(sent).toHaveLength(1);
-    expect(sent[0]).toMatchObject({ kind: 'reply', request: { path: { message_id: 'om-id-lookup' }, data: { msg_type: 'interactive' } } });
+    expect(sent[0]).toMatchObject({ kind: 'patch', request: { path: { message_id: 'om-id-lookup' } } });
     expect(JSON.stringify(sent[0])).toContain('查询结果');
     expect(JSON.stringify(sent[0])).toContain('端内ID 565 对应平台商品ID');
   });
@@ -137,7 +137,7 @@ describe('createFeishuSdkBot card.action.trigger', () => {
     });
 
     expect(sent).toHaveLength(1);
-    expect(sent[0]).toMatchObject({ kind: 'reply', request: { path: { message_id: 'om-id-lookup-behavior' }, data: { msg_type: 'interactive' } } });
+    expect(sent[0]).toMatchObject({ kind: 'patch', request: { path: { message_id: 'om-id-lookup-behavior' } } });
     expect(JSON.stringify(sent[0])).toContain('端内ID 565 对应平台商品ID');
   });
 
@@ -154,7 +154,7 @@ describe('createFeishuSdkBot card.action.trigger', () => {
     });
 
     expect(sent).toHaveLength(1);
-    expect(sent[0]).toMatchObject({ kind: 'reply', request: { path: { message_id: 'om-id-lookup-flat' }, data: { msg_type: 'interactive' } } });
+    expect(sent[0]).toMatchObject({ kind: 'patch', request: { path: { message_id: 'om-id-lookup-flat' } } });
     expect(JSON.stringify(sent[0])).toContain('端内ID 565 对应平台商品ID');
   });
 
