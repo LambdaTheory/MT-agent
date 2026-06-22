@@ -294,13 +294,13 @@ export async function handleBotIntent(intent: BotIntent, outputDir = 'output', o
       }
     }
 
+    const plannedResponse = await agentPlannerResponse(intent.text, outputDir, options);
+    if (plannedResponse) return plannedResponse;
+
     const dataIntent = parseAgentDataIntent(intent.text);
     const tool = findReadOnlyTool(dataIntent);
     const latest = await findLatestReportContext(outputDir);
     if (tool && latest) return tool.run(latest.context, dataIntent);
-
-    const plannedResponse = await agentPlannerResponse(intent.text, outputDir, options);
-    if (plannedResponse) return plannedResponse;
 
     if (tool) return { text: '还没有找到公域日报上下文。' };
     if (!options.llmToolSelector) return { text: UNKNOWN_GUIDANCE };
