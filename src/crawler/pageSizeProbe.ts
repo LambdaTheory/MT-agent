@@ -1,4 +1,6 @@
-import type { Page } from 'playwright';
+import type { Frame, Page } from 'playwright';
+
+type PageLike = Frame | Page;
 
 export interface PageSizeProbeResult {
   size: number;
@@ -18,13 +20,17 @@ export function chooseBestPageSizeProbe(results: PageSizeProbeResult[]): PageSiz
   return results.find((result) => result.ok) ?? null;
 }
 
-export async function readCurrentPageSize(page: Page): Promise<number | null> {
+function waitForPageLikeTimeout(page: PageLike, timeout: number): Promise<void> {
+  return 'page' in page ? page.page().waitForTimeout(timeout) : page.waitForTimeout(timeout);
+}
+
+export async function readCurrentPageSize(page: PageLike): Promise<number | null> {
   const text = await page.locator('.ant-pagination-options-size-changer .ant-select-selection-item').last().textContent().catch(() => '');
   const match = (text ?? '').match(/(\d+)\s*条\/页/);
   return match ? Number(match[1]) : null;
 }
 
-export async function setDashboardPageSize(page: Page, size: number): Promise<void> {
+export async function setDashboardPageSize(page: PageLike, size: number): Promise<void> {
   const current = await readCurrentPageSize(page);
   if (current === size) {
     return;
@@ -33,7 +39,7 @@ export async function setDashboardPageSize(page: Page, size: number): Promise<vo
   const label = `${size} 条/页`;
   await page.locator('.ant-pagination-options-size-changer').last().click({ timeout: 10000 });
   await page.getByText(label, { exact: true }).last().click({ timeout: 10000 });
-  await page.waitForTimeout(3000);
+  await waitForPageLikeTimeout(page, 3000);
 }
 
 export async function probePageSizeCandidates(page: Page, candidates: number[]): Promise<PageSizeProbeResult[]> {

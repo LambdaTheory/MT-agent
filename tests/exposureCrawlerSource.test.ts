@@ -48,6 +48,8 @@ describe('exposureCrawler Playwright evaluation', () => {
     expect(source).toContain('scrollHeight > element.clientHeight');
     expect(source).toContain('repeatedSignatureAttempts');
     expect(source).toContain('tryWaitForTableSignatureChange');
+    expect(source).toContain('waitForCurrentTableToSettle');
+    expect(source).toContain('.ant-spin-spinning, .ant-spin-dot-spin');
     expect(source).toContain('wheelCurrentTableForward');
     expect(source).toContain("page.mouse.wheel(0, 900)");
     expect(source).toContain('keyboardCurrentTableForward');
@@ -74,6 +76,8 @@ describe('exposureCrawler Playwright evaluation', () => {
     expect(source).toContain('MIN_RELIABLE_EXPOSURE_WINDOWS');
     expect(source).toContain('MAX_EXPOSURE_COLLECTION_ATTEMPTS');
     expect(source).toContain('重新加载托管页重试');
+    expect(source).toContain('曝光商品抓取不完整');
+    expect(source).not.toContain('if (reliable || attempt === MAX_EXPOSURE_COLLECTION_ATTEMPTS)');
   });
 });
 
