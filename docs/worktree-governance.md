@@ -9,8 +9,8 @@
 - 生产 PM2 进程 `mt-feishu-bot` 的 cwd 是 `C:\works\MT-agent`，也就是主 worktree。
 - 主 worktree 当前在 `master @ 079db61`，工作树干净。`master` 仍只作为稳定集成与 PM2 运行目录，不承载日常开发。
 - `feature/closed-order-feedback` 功能已通过 `75d1d69 实现关单同步与观察流程` 进入 `master`，但保留 worktree 的 `dfa806a` 不是 `master` 祖先，后续只作为对照来源，不应直接 merge。
-- `codex/public-traffic-reliability-followup` 是当前最清晰的待评估合入候选，范围是公域抓取可靠性后续修正。
 - `feature/link-registry` 仍有独立价值，服务链接档案、同款分组和关单反馈置信度，但需要先 rebase 到最新 `master` 再验证。
+- `codex/public-traffic-reliability-followup` 已通过 `6a3f9ea Merge branch 'codex/public-traffic-reliability-followup'` 合入 `master`，对应 worktree 已删除。
 - 后续所有功能、修复、文档治理都必须先进入独立 worktree，验证通过后再按明确指令合入 `master`。
 - 不读取、打印或提交 `.env`、真实账号凭据、浏览器 profile、任何 secret。
 - 不 push、不重启 PM2，除非用户明确要求。
@@ -28,7 +28,6 @@
 | worktree | branch | 状态 | 备注 |
 |---|---|---|---|
 | `.worktrees/closed-order-feedback` | `feature/closed-order-feedback` | clean，1 个独立提交 | 功能已在 `master` 另行落地；保留作对照，不直接 merge |
-| `.worktrees/public-traffic-reliability-followup` | `codex/public-traffic-reliability-followup` | clean，1 个独立提交 | 公域抓取可靠性修正；优先评估合入 |
 | `.worktrees/link-registry` | `feature/link-registry` | 脏，3 个独立提交 + `.omo` 计划文档 | 链接档案覆盖与审计 CLI；建议 rebase 后继续推进 |
 | `.worktrees/worktree-governance` | `codex/worktree-governance` | clean，治理文档分支 | 维护本文档，更新后可评估合入 |
 
@@ -348,7 +347,6 @@ status: clean
 继续保留并评估：
 
 ```text
-.worktrees/public-traffic-reliability-followup
 .worktrees/link-registry
 .worktrees/worktree-governance
 .worktrees/closed-order-feedback
@@ -359,6 +357,33 @@ status: clean
 
 下一步建议：
 
-- 优先评估 `codex/public-traffic-reliability-followup` 是否合入 `master`。
 - 将 `feature/link-registry` rebase 到最新 `master` 后重新跑 link registry 相关测试。
 - 单独确认 `public-traffic-card-tables` 中的 `config/product-id-map*.json` 改动是要吸收、备份还是丢弃。
+
+### 6. 公域抓取可靠性后续合入
+
+已将 `codex/public-traffic-reliability-followup` 合入主线：
+
+```text
+master commit: 6a3f9ea Merge branch 'codex/public-traffic-reliability-followup'
+worktree removed: .worktrees/public-traffic-reliability-followup
+branch retained: codex/public-traffic-reliability-followup
+```
+
+验证结果：
+
+```text
+vitest root focused:
+  tests/dashboardCrawlerSource.test.ts
+  tests/exposureCrawlerSource.test.ts
+  tests/publicTrafficCliSource.test.ts
+  -> 3 files / 26 tests passed
+
+tsc -p tsconfig.json -> passed
+```
+
+后续当前优先级调整为：
+
+- rebase 并评估 `feature/link-registry`。
+- 单独处理 `public-traffic-card-tables` 的 `config/product-id-map*.json` 映射现场。
+- 如确认可丢弃 `.omo` 交接草稿，再删除 `agent-runtime` 和 `public-traffic-capture-decoupling` 两个已被主线包含的 worktree。
