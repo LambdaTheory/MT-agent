@@ -5,10 +5,12 @@ import type { RentalPriceSkillClient } from '../feishuBot/rentalPrice.js';
 
 export const NEW_LINK_BATCH_WORKFLOW_NAME = 'rental.newLinkBatch';
 export const MAX_NEW_LINK_BATCH_COUNT = 20;
+export const NEW_LINK_BATCH_CONFIRMATION_VERSION = 2;
 
 export interface NewLinkBatchWorkflowRequest {
   keyword: string;
   count: number;
+  sourceProductId?: string;
 }
 
 export interface NewLinkBatchCandidate {
@@ -25,16 +27,19 @@ export interface NewLinkBatchPlan {
   status: 'ready' | 'needs_review';
   request: NewLinkBatchWorkflowRequest;
   dataDate: string;
+  requestedSourceProductId?: string;
   selectedSource?: NewLinkBatchCandidate;
   candidates: NewLinkBatchCandidate[];
   warnings: string[];
 }
 
 export interface NewLinkBatchConfirmRequest {
+  safetyVersion: typeof NEW_LINK_BATCH_CONFIRMATION_VERSION;
   workflowName: typeof NEW_LINK_BATCH_WORKFLOW_NAME;
   keyword: string;
   count: number;
   sourceProductId: string;
+  requestedSourceProductId?: string;
   sourceProductName: string;
   dataDate: string;
   reason: string;
@@ -61,10 +66,16 @@ function readPositiveInteger(value: unknown): number | null {
   return null;
 }
 
+function readProductId(value: unknown): string | null {
+  const parsed = readPositiveInteger(value);
+  return parsed ? String(parsed) : null;
+}
+
 export function readNewLinkBatchWorkflowRequest(value: Record<string, unknown>): NewLinkBatchWorkflowRequest | null {
   const keyword = readString(value.keyword);
   const count = readPositiveInteger(value.count);
-  return keyword && count ? { keyword, count } : null;
+  const sourceProductId = readProductId(value.sourceProductId);
+  return keyword && count ? { keyword, count, ...(sourceProductId ? { sourceProductId } : {}) } : null;
 }
 
 function compact(value: string): string {
@@ -117,6 +128,14 @@ function buildRegistryIndexes(entries: LinkRegistryEntry[]): {
   return { byInternalId, byPlatformId };
 }
 
+function findRowByInternalProductId(context: PublicTrafficDataReportContext, internalProductId: string): PublicTrafficProductDataRow | undefined {
+  return context.rows.find((row) => displayProductId(row) === internalProductId);
+}
+
+function findRegistryEntryByInternalProductId(entries: LinkRegistryEntry[], internalProductId: string): LinkRegistryEntry | undefined {
+  return entries.find((entry) => entry.internalProductId.trim() === internalProductId);
+}
+
 function rowScore(row: PublicTrafficProductDataRow): { score: number; reasons: string[] } {
   const one = row.periods['1d'];
   const seven = row.periods['7d'];
@@ -157,10 +176,30 @@ export function buildNewLinkBatchPlan(
 ): NewLinkBatchPlan {
   const keyword = request.keyword.trim();
   const count = Math.trunc(request.count);
+  const sourceProductId = request.sourceProductId?.trim();
   const warnings: string[] = [];
 
   if (!keyword) warnings.push('缺少要铺新链的商品关键词。');
   if (!Number.isFinite(count) || count < 1 || count > MAX_NEW_LINK_BATCH_COUNT) warnings.push(`铺新链数量必须在 1-${MAX_NEW_LINK_BATCH_COUNT} 之间。`);
+
+  if (sourceProductId) {
+    const sourceRow = findRowByInternalProductId(context, sourceProductId);
+    const sourceRegistryEntry = findRegistryEntryByInternalProductId(registryEntries, sourceProductId);
+    if (!sourceRow) warnings.push(`没有在最新公域日报里找到端内ID ${sourceProductId}，不能复制。`);
+    if (sourceRegistryEntry?.status === 'removed') warnings.push(`端内ID ${sourceProductId} 在链接档案中已下架，不能复制。`);
+
+    const selectedSource = sourceRow ? candidateFrom(sourceRow, sourceRegistryEntry) : undefined;
+    const ready = Boolean(selectedSource && count >= 1 && count <= MAX_NEW_LINK_BATCH_COUNT && warnings.length === 0);
+    return {
+      status: ready ? 'ready' : 'needs_review',
+      request: { keyword, count, sourceProductId },
+      dataDate: context.date,
+      requestedSourceProductId: sourceProductId,
+      ...(selectedSource ? { selectedSource } : {}),
+      candidates: selectedSource ? [selectedSource] : [],
+      warnings,
+    };
+  }
 
   const registryMatches = matchingRegistryEntries(registryEntries, keyword);
   const { byInternalId, byPlatformId } = buildRegistryIndexes(registryMatches);
@@ -207,11 +246,14 @@ export function formatNewLinkBatchPlan(plan: NewLinkBatchPlan): string {
 
 export function buildNewLinkBatchConfirmRequest(plan: NewLinkBatchPlan, reason: string): NewLinkBatchConfirmRequest | null {
   if (plan.status !== 'ready' || !plan.selectedSource) return null;
+  if (plan.requestedSourceProductId && plan.selectedSource.productId !== plan.requestedSourceProductId) return null;
   return {
+    safetyVersion: NEW_LINK_BATCH_CONFIRMATION_VERSION,
     workflowName: NEW_LINK_BATCH_WORKFLOW_NAME,
     keyword: plan.request.keyword,
     count: plan.request.count,
     sourceProductId: plan.selectedSource.productId,
+    ...(plan.requestedSourceProductId ? { requestedSourceProductId: plan.requestedSourceProductId } : {}),
     sourceProductName: plan.selectedSource.productName,
     dataDate: plan.dataDate,
     reason,
@@ -250,13 +292,27 @@ export function buildNewLinkBatchConfirmCard(plan: NewLinkBatchPlan, reason: str
               name: 'new_link_batch_confirm_submit',
               behaviors: [{ type: 'callback', value: { action: 'new_link_batch_confirm', request } }],
             },
+          ],
+        },
+        {
+          tag: 'form',
+          name: 'new_link_batch_cancel_form',
+          elements: [
             {
               tag: 'button',
               text: { tag: 'plain_text', content: '取消' },
               type: 'default',
               form_action_type: 'submit',
               name: 'new_link_batch_cancel_submit',
-              behaviors: [{ type: 'callback', value: { action: 'new_link_batch_cancel', keyword: request.keyword } }],
+              behaviors: [{
+                type: 'callback',
+                value: {
+                  action: 'new_link_batch_cancel',
+                  keyword: request.keyword,
+                  sourceProductId: request.sourceProductId,
+                  safetyVersion: NEW_LINK_BATCH_CONFIRMATION_VERSION,
+                },
+              }],
             },
           ],
         },
@@ -268,21 +324,25 @@ export function buildNewLinkBatchConfirmCard(plan: NewLinkBatchPlan, reason: str
 export function parseNewLinkBatchConfirmRequest(value: unknown): NewLinkBatchConfirmRequest | null {
   if (!isRecord(value) || !isRecord(value.request)) return null;
   const request = value.request;
+  const safetyVersion = readPositiveInteger(request.safetyVersion);
   const workflowName = readString(request.workflowName);
   const keyword = readString(request.keyword);
   const count = readPositiveInteger(request.count);
   const sourceProductId = readString(request.sourceProductId);
+  const requestedSourceProductId = readString(request.requestedSourceProductId);
   const sourceProductName = readString(request.sourceProductName);
   const dataDate = readString(request.dataDate);
   const reason = readString(request.reason);
 
   if (
+    safetyVersion !== NEW_LINK_BATCH_CONFIRMATION_VERSION ||
     workflowName !== NEW_LINK_BATCH_WORKFLOW_NAME ||
     !keyword ||
     !count ||
     count > MAX_NEW_LINK_BATCH_COUNT ||
     !sourceProductId ||
     !/^\d+$/.test(sourceProductId) ||
+    (requestedSourceProductId !== null && (!/^\d+$/.test(requestedSourceProductId) || requestedSourceProductId !== sourceProductId)) ||
     !sourceProductName ||
     !dataDate ||
     !reason
@@ -290,7 +350,17 @@ export function parseNewLinkBatchConfirmRequest(value: unknown): NewLinkBatchCon
     return null;
   }
 
-  return { workflowName, keyword, count, sourceProductId, sourceProductName, dataDate, reason };
+  return {
+    safetyVersion: NEW_LINK_BATCH_CONFIRMATION_VERSION,
+    workflowName,
+    keyword,
+    count,
+    sourceProductId,
+    ...(requestedSourceProductId ? { requestedSourceProductId } : {}),
+    sourceProductName,
+    dataDate,
+    reason,
+  };
 }
 
 export async function executeNewLinkBatchConfirmRequest(

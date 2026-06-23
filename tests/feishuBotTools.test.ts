@@ -538,6 +538,43 @@ describe('handleBotIntent', () => {
     expect(JSON.stringify(response.card)).toContain('733');
   });
 
+  it('locks explicit internal product id as the new-link copy source', async () => {
+    const { outputDir, registryPaths } = await writeNewLinkWorkflowContext();
+    const planner: AgentPlannerProvider = {
+      async proposePlan() {
+        return JSON.stringify({
+          goal: '从端内ID 875 复制新链',
+          selectedWorkflow: 'rental.newLinkBatch',
+          arguments: { keyword: 'pocket3', count: 3 },
+          confidence: 0.95,
+          reason: '用户要求从端内ID 875 复制 3 条新链',
+          requiresConfirmation: true,
+        });
+      },
+    };
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run'); },
+      async execute() { throw new Error('execute should not run'); },
+      async copy() { throw new Error('copy should not run before workflow confirmation'); },
+      async delist() { throw new Error('delist should not run'); },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+
+    const response = await handleBotIntent({ type: 'unknown', text: '从端内ID 875 复制 3 条新链' }, outputDir, {
+      agentPlannerProvider: planner,
+      rentalPriceClient,
+      closedOrderRegistryPaths: registryPaths,
+    });
+
+    const cardText = JSON.stringify(response.card);
+    expect(response.text).toContain('875');
+    expect(cardText).toContain('"sourceProductId":"875"');
+    expect(cardText).toContain('"requestedSourceProductId":"875"');
+    expect(cardText).not.toContain('"sourceProductId":"733"');
+  });
+
   it('does not fall through to read-only new product pool when the LLM planner fails a new-link write plan', async () => {
     const outputDir = await writeContext();
     const planner: AgentPlannerProvider = {

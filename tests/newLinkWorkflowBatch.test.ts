@@ -129,6 +129,42 @@ describe('new link batch workflow', () => {
     expect(JSON.stringify(buildNewLinkBatchConfirmCard(plan, '用户要铺新链'))).toContain('new_link_batch_confirm');
   });
 
+  it('locks an explicit source product id instead of switching to a better same-sku candidate', () => {
+    const unsafeContext = {
+      ...context(),
+      rows: [
+        row('533', '大疆Pocket3手持数码口袋相机', 'platform-533', { exposure: 5000, publicVisits: 8405, shippedOrders: 0, amount: 22570 }),
+        row('848', '佳能G12复古CCD相机', 'platform-848', { exposure: 0, publicVisits: 0, shippedOrders: 0, amount: 0 }),
+      ],
+    };
+    const unsafeRegistry: LinkRegistryEntry[] = [
+      {
+        internalProductId: '533',
+        platformProductId: 'platform-533',
+        shortName: '大疆 Pocket3',
+        sameSkuGroupId: 'bad-shared-group',
+        status: 'active',
+        source: ['product_id_mapping'],
+      },
+      {
+        internalProductId: '848',
+        platformProductId: 'platform-848',
+        shortName: '佳能 G12',
+        sameSkuGroupId: 'bad-shared-group',
+        status: 'active',
+        source: ['product_id_mapping'],
+      },
+    ];
+
+    const plan = buildNewLinkBatchPlan({ keyword: '848', count: 3, sourceProductId: '848' }, unsafeContext, unsafeRegistry);
+
+    expect(plan.status).toBe('ready');
+    expect(plan.requestedSourceProductId).toBe('848');
+    expect(plan.selectedSource?.productId).toBe('848');
+    expect(plan.candidates.map((candidate) => candidate.productId)).toEqual(['848']);
+    expect(JSON.stringify(buildNewLinkBatchConfirmCard(plan, '从端内ID 848 复制'))).toContain('"requestedSourceProductId":"848"');
+  });
+
   it('requires review when registry classification misses the keyword', () => {
     const plan = buildNewLinkBatchPlan({ keyword: 'pocket3', count: 2 }, context(), []);
 
@@ -149,6 +185,7 @@ describe('new link batch workflow', () => {
   it('parses only valid confirmation requests', () => {
     expect(parseNewLinkBatchConfirmRequest({
       request: {
+        safetyVersion: 2,
         workflowName: 'rental.newLinkBatch',
         keyword: 'pocket3',
         count: 3,
@@ -161,6 +198,7 @@ describe('new link batch workflow', () => {
 
     expect(parseNewLinkBatchConfirmRequest({
       request: {
+        safetyVersion: 2,
         workflowName: 'rental.newLinkBatch',
         keyword: 'pocket3',
         count: 99,
@@ -168,6 +206,32 @@ describe('new link batch workflow', () => {
         sourceProductName: '大疆 Pocket3',
         dataDate: '2026-06-22',
         reason: 'too many',
+      },
+    })).toBeNull();
+
+    expect(parseNewLinkBatchConfirmRequest({
+      request: {
+        workflowName: 'rental.newLinkBatch',
+        keyword: 'pocket3',
+        count: 3,
+        sourceProductId: '733',
+        sourceProductName: '大疆 Pocket3',
+        dataDate: '2026-06-22',
+        reason: 'legacy card',
+      },
+    })).toBeNull();
+
+    expect(parseNewLinkBatchConfirmRequest({
+      request: {
+        safetyVersion: 2,
+        workflowName: 'rental.newLinkBatch',
+        keyword: '848',
+        count: 3,
+        sourceProductId: '533',
+        requestedSourceProductId: '848',
+        sourceProductName: '大疆 Pocket3',
+        dataDate: '2026-06-22',
+        reason: 'mismatched source',
       },
     })).toBeNull();
   });
@@ -188,6 +252,7 @@ describe('new link batch workflow', () => {
     };
 
     const result = await executeNewLinkBatchConfirmRequest(rentalPriceClient, {
+      safetyVersion: 2,
       workflowName: 'rental.newLinkBatch',
       keyword: 'pocket3',
       count: 3,

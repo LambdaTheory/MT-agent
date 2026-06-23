@@ -28,6 +28,7 @@ const workflows: AgentWorkflowDefinition[] = [
       properties: {
         keyword: { type: 'string' },
         count: { type: 'integer' },
+        sourceProductId: { description: '可选。用户明确说“从/用/以某个端内ID复制/铺新链”时填端内ID；填入后本地执行计划必须锁定该源商品，不能按同款组自动换源。' },
       },
       required: ['keyword', 'count'],
       additionalProperties: false,

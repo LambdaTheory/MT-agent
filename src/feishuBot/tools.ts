@@ -116,6 +116,32 @@ function looksLikeNewLinkWriteIntent(text: string): boolean {
   return hasNewLink && hasWriteVerb;
 }
 
+function extractExplicitNewLinkSourceProductId(text: string): string | undefined {
+  const compact = text.replace(/\s+/g, '');
+  if (!/(新链|新链接)/.test(compact)) return undefined;
+  const verb = '(?:复制|铺|铺设|新增|补|新建|创建|生成)';
+  const id = '(?:端内(?:ID)?|商品(?:ID)?|链接)?(\\d{2,})';
+  const patterns = [
+    new RegExp(`(?:从|用|以|基于)${id}.*${verb}`),
+    new RegExp(`${id}.*${verb}.*(?:新链|新链接)`),
+    new RegExp(`${verb}.*${id}.*(?:新链|新链接)`),
+  ];
+  for (const pattern of patterns) {
+    const match = pattern.exec(compact);
+    if (match?.[1]) return match[1];
+  }
+  return undefined;
+}
+
+function applyExplicitNewLinkSource(
+  message: string,
+  request: ReturnType<typeof readNewLinkBatchWorkflowRequest>,
+): ReturnType<typeof readNewLinkBatchWorkflowRequest> {
+  if (!request) return null;
+  const sourceProductId = extractExplicitNewLinkSourceProductId(message);
+  return sourceProductId ? { ...request, sourceProductId } : request;
+}
+
 async function agentPlannerResponse(
   message: string,
   outputDir: string,
@@ -139,7 +165,7 @@ async function agentPlannerResponse(
         : null;
     }
     if (workflowParsed.proposal.selectedWorkflow !== NEW_LINK_BATCH_WORKFLOW_NAME) return null;
-    const workflowRequest = readNewLinkBatchWorkflowRequest(workflowParsed.proposal.arguments);
+    const workflowRequest = applyExplicitNewLinkSource(message, readNewLinkBatchWorkflowRequest(workflowParsed.proposal.arguments));
     if (!workflowRequest) return { text: '新链批量铺设参数无效：需要 keyword 和 count。' };
 
     const [latest, registryContext] = await Promise.all([

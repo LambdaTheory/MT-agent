@@ -97,16 +97,100 @@ function readNumber(value: unknown): number | undefined {
   return undefined;
 }
 
-function cardActionValue(payload: FeishuCardActionEvent): Record<string, unknown> | undefined {
-  const action = payload.event?.action;
-  if (isRecord(action?.value)) return action.value;
+function expectedActionForButtonName(name: string | undefined): string | undefined {
+  if (!name) return undefined;
+  const exact: Record<string, string> = {
+    agent_tool_confirm_submit: 'agent_tool_confirm',
+    agent_tool_cancel_submit: 'agent_tool_cancel',
+    new_link_batch_confirm_submit: 'new_link_batch_confirm',
+    new_link_batch_cancel_submit: 'new_link_batch_cancel',
+    new_link_batch_confirm_form: 'new_link_batch_confirm',
+    new_link_batch_cancel_form: 'new_link_batch_cancel',
+    rental_price_confirm_submit: 'rental_price_confirm',
+    rental_price_cancel_submit: 'rental_price_cancel',
+    rental_operation_confirm_submit: 'rental_operation_confirm',
+    rental_operation_cancel_submit: 'rental_operation_cancel',
+    id_lookup_submit: 'id_lookup',
+  };
+  if (exact[name]) return exact[name];
+  if (name.startsWith('agent_clarify_select_')) return 'agent_clarify_select';
+  if (name === 'agent_clarify_custom') return 'agent_clarify_custom';
+  if (name === 'agent_clarify_cancel') return 'agent_clarify_cancel';
+  return undefined;
+}
+
+function actionValueCandidates(action: FeishuCardAction | undefined): Record<string, unknown>[] {
+  const candidates: Record<string, unknown>[] = [];
+  if (isRecord(action?.value)) candidates.push(action.value);
   if (Array.isArray(action?.behaviors)) {
     for (const behavior of action.behaviors) {
-      if (isRecord(behavior) && isRecord(behavior.value)) return behavior.value;
+      if (isRecord(behavior) && isRecord(behavior.value)) candidates.push(behavior.value);
     }
   }
-  if (readString(action?.name) === 'id_lookup_submit') return { action: 'id_lookup' };
+  return candidates;
+}
+
+function fallbackCancelValue(expectedAction: string, candidates: Record<string, unknown>[]): Record<string, unknown> | undefined {
+  const first = candidates[0];
+  const request = isRecord(first?.request) ? first.request : undefined;
+  if (expectedAction === 'new_link_batch_cancel') {
+    const keyword = readString(first?.keyword) ?? readString(request?.keyword);
+    const sourceProductId = readString(first?.sourceProductId) ?? readString(request?.sourceProductId);
+    return { action: expectedAction, ...(keyword ? { keyword } : {}), ...(sourceProductId ? { sourceProductId } : {}) };
+  }
+  if (expectedAction === 'rental_price_cancel' || expectedAction === 'rental_operation_cancel') {
+    const productId = readString(first?.productId) ?? readString(request?.productId);
+    return { action: expectedAction, ...(productId ? { productId } : {}) };
+  }
+  if (expectedAction === 'agent_tool_cancel') {
+    const toolName = readString(first?.toolName) ?? readString(request?.toolName);
+    return { action: expectedAction, ...(toolName ? { toolName } : {}) };
+  }
   return undefined;
+}
+
+function cardActionValue(payload: FeishuCardActionEvent): Record<string, unknown> | undefined {
+  const action = payload.event?.action;
+  const expectedAction = expectedActionForButtonName(readString(action?.name));
+  const candidates = actionValueCandidates(action);
+  if (expectedAction) {
+    const matched = candidates.find((candidate) => readString(candidate.action) === expectedAction);
+    if (matched) return matched;
+    if (expectedAction.endsWith('_cancel')) return fallbackCancelValue(expectedAction, candidates);
+    if (expectedAction === 'id_lookup') return { action: 'id_lookup' };
+    return undefined;
+  }
+  if (candidates[0]) return candidates[0];
+  return undefined;
+}
+
+type ServerCardActionStatus = 'processing' | 'completed' | 'failed' | 'cancelled';
+
+interface ServerCardActionClaim {
+  status: ServerCardActionStatus;
+  actionName: string;
+}
+
+const serverCardActionClaims = new Map<string, ServerCardActionClaim>();
+
+function claimServerCardAction(messageId: string, family: string, actionName: string): { claimed: true; key: string } | { claimed: false; claim: ServerCardActionClaim } {
+  const key = `${messageId}:${family}`;
+  const existing = serverCardActionClaims.get(key);
+  if (existing) return { claimed: false, claim: existing };
+  serverCardActionClaims.set(key, { status: 'processing', actionName });
+  return { claimed: true, key };
+}
+
+function setServerCardActionStatus(key: string, status: ServerCardActionStatus): void {
+  const claim = serverCardActionClaims.get(key);
+  if (claim) claim.status = status;
+}
+
+function duplicateServerCardActionText(claim: ServerCardActionClaim): string {
+  if (claim.status === 'processing') return '该确认卡片已经在执行中，请勿重复点击。';
+  if (claim.status === 'completed') return '该确认卡片已经执行完成，请勿重复点击。';
+  if (claim.status === 'cancelled') return '该确认卡片已经取消，请勿重复点击。';
+  return '该确认卡片已经处理过，请重新发起命令。';
 }
 
 function readActionFormValue(action: FeishuCardAction | undefined, name: string): string | undefined {
@@ -288,6 +372,11 @@ async function handleCardActionTrigger(
       await replyText(replyConfig, '新链批量复制确认参数无效，请重新发起。');
       return;
     }
+    const claim = claimServerCardAction(messageId, 'new_link_batch', actionName);
+    if (!claim.claimed) {
+      await replyText(replyConfig, duplicateServerCardActionText(claim.claim));
+      return;
+    }
     await recordAgentLearningEvent(outputDir, {
       type: 'workflow_confirmed',
       messageId,
@@ -300,6 +389,7 @@ async function handleCardActionTrigger(
       reason: request.reason,
     });
     const result = await executeNewLinkBatchConfirmRequest(config.rentalPriceClient ?? createRentalPriceSkillClient(), request);
+    setServerCardActionStatus(claim.key, result.ok ? 'completed' : 'failed');
     await recordAgentLearningEvent(outputDir, {
       type: result.ok ? 'workflow_completed' : 'workflow_failed',
       messageId,
@@ -315,6 +405,12 @@ async function handleCardActionTrigger(
 
   if (actionName === 'new_link_batch_cancel') {
     const keyword = readString(value?.keyword) ?? '未知';
+    const claim = claimServerCardAction(messageId, 'new_link_batch', actionName);
+    if (!claim.claimed) {
+      await replyText(replyConfig, duplicateServerCardActionText(claim.claim));
+      return;
+    }
+    setServerCardActionStatus(claim.key, 'cancelled');
     await recordAgentLearningEvent(outputDir, {
       type: 'workflow_cancelled',
       messageId,

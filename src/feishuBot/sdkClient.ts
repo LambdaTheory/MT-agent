@@ -138,6 +138,58 @@ function readNumber(value: unknown): number | undefined {
   return undefined;
 }
 
+function expectedActionForButtonName(name: string | undefined): string | undefined {
+  if (!name) return undefined;
+  const exact: Record<string, string> = {
+    agent_tool_confirm_submit: 'agent_tool_confirm',
+    agent_tool_cancel_submit: 'agent_tool_cancel',
+    new_link_batch_confirm_submit: 'new_link_batch_confirm',
+    new_link_batch_cancel_submit: 'new_link_batch_cancel',
+    new_link_batch_confirm_form: 'new_link_batch_confirm',
+    new_link_batch_cancel_form: 'new_link_batch_cancel',
+    rental_price_confirm_submit: 'rental_price_confirm',
+    rental_price_cancel_submit: 'rental_price_cancel',
+    rental_operation_confirm_submit: 'rental_operation_confirm',
+    rental_operation_cancel_submit: 'rental_operation_cancel',
+    id_lookup_submit: 'id_lookup',
+  };
+  if (exact[name]) return exact[name];
+  if (name.startsWith('agent_clarify_select_')) return 'agent_clarify_select';
+  if (name === 'agent_clarify_custom') return 'agent_clarify_custom';
+  if (name === 'agent_clarify_cancel') return 'agent_clarify_cancel';
+  return undefined;
+}
+
+function actionValueCandidates(action: SdkCardAction | undefined): Record<string, unknown>[] {
+  const candidates: Record<string, unknown>[] = [];
+  if (isRecord(action?.value)) candidates.push(action.value);
+  if (Array.isArray(action?.behaviors)) {
+    for (const behavior of action.behaviors) {
+      if (isRecord(behavior) && isRecord(behavior.value)) candidates.push(behavior.value);
+    }
+  }
+  return candidates;
+}
+
+function fallbackCancelValue(expectedAction: string, candidates: Record<string, unknown>[]): Record<string, unknown> | undefined {
+  const first = candidates[0];
+  const request = isRecord(first?.request) ? first.request : undefined;
+  if (expectedAction === 'new_link_batch_cancel') {
+    const keyword = readString(first?.keyword) ?? readString(request?.keyword);
+    const sourceProductId = readString(first?.sourceProductId) ?? readString(request?.sourceProductId);
+    return { action: expectedAction, ...(keyword ? { keyword } : {}), ...(sourceProductId ? { sourceProductId } : {}) };
+  }
+  if (expectedAction === 'rental_price_cancel' || expectedAction === 'rental_operation_cancel') {
+    const productId = readString(first?.productId) ?? readString(request?.productId);
+    return { action: expectedAction, ...(productId ? { productId } : {}) };
+  }
+  if (expectedAction === 'agent_tool_cancel') {
+    const toolName = readString(first?.toolName) ?? readString(request?.toolName);
+    return { action: expectedAction, ...(toolName ? { toolName } : {}) };
+  }
+  return undefined;
+}
+
 function readActionFormValue(action: SdkCardAction | undefined, name: string): string | undefined {
   if (!isRecord(action)) return undefined;
   for (const key of ['form_value', 'formValue']) {
@@ -167,20 +219,31 @@ function extractCardReviewerId(data: unknown): string | undefined {
 
 function cardActionValue(data: unknown): Record<string, unknown> | undefined {
   const action = extractCardAction(data);
-  if (isRecord(action?.value)) return action.value;
-  if (Array.isArray(action?.behaviors)) {
-    for (const behavior of action.behaviors) {
-      if (isRecord(behavior) && isRecord(behavior.value)) return behavior.value;
-    }
+  const expectedAction = expectedActionForButtonName(readString(action?.name));
+  const candidates = actionValueCandidates(action);
+  if (expectedAction) {
+    const matched = candidates.find((candidate) => readString(candidate.action) === expectedAction);
+    if (matched) return matched;
+    if (expectedAction.endsWith('_cancel')) return fallbackCancelValue(expectedAction, candidates);
+    if (expectedAction === 'id_lookup') return { action: 'id_lookup' };
+    return undefined;
   }
-  if (readString(action?.name) === 'id_lookup_submit') return { action: 'id_lookup' };
+  if (candidates[0]) return candidates[0];
   return undefined;
 }
 
 const rentalActionClaims = new Map<string, RentalActionClaim>();
 
+function actionClaimFamily(actionName: string): string {
+  if (actionName.startsWith('agent_tool_')) return 'agent_tool';
+  if (actionName.startsWith('new_link_batch_')) return 'new_link_batch';
+  if (actionName.startsWith('rental_price_')) return 'rental_price';
+  if (actionName.startsWith('rental_operation_')) return 'rental_operation';
+  return actionName;
+}
+
 function stableActionKey(messageId: string, actionName: string, value: Record<string, unknown>): string {
-  return createHash('sha256').update(JSON.stringify({ messageId, actionName, request: value.request ?? value })).digest('hex');
+  return createHash('sha256').update(JSON.stringify({ messageId, family: actionClaimFamily(actionName) })).digest('hex');
 }
 
 function claimRentalAction(messageId: string, actionName: string, value: Record<string, unknown>): { claimed: true; key: string } | { claimed: false; claim: RentalActionClaim } {
