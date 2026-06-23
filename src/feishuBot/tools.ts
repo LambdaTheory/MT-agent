@@ -15,6 +15,10 @@ import {
   readNewLinkBatchWorkflowRequest,
 } from '../newLinkWorkflow/batch.js';
 import { startOperationsLearningSession, summarizeOperationsLearningHistory, summarizeOperationsLearningSession } from '../operationsLearningLoop/session.js';
+import {
+  buildActivityAutomationCard,
+  type ActivityAutomationSkillClient,
+} from './activityAutomation.js';
 import { executeAgentToolRequest } from './agentToolExecutor.js';
 import { formatIdLookupResult, lookupProductId } from './idLookup.js';
 import { buildIdLookupCard } from './idLookupCard.js';
@@ -79,6 +83,7 @@ export interface HandleBotIntentOptions {
   llmIntentProposalProvider?: LlmIntentProposalProvider;
   agentPlannerProvider?: AgentPlannerProvider;
   rentalPriceClient?: RentalPriceSkillClient;
+  activityAutomationClient?: ActivityAutomationSkillClient;
   closedOrderFetchImpl?: typeof fetch;
   closedOrderRegistryPaths?: ClosedOrderRegistryPathsInput;
 }
@@ -223,6 +228,13 @@ async function agentPlannerResponse(
 export async function handleBotIntent(intent: BotIntent, outputDir = 'output', options: HandleBotIntentOptions = {}): Promise<BotResponse> {
   if (intent.type === 'help') {
     return { text: HELP_TEXT };
+  }
+
+  if (intent.type === 'differential_pricing_card') {
+    return {
+      text: '差异化定价卡片已打开，请在卡片中填写日期和折扣后确认执行。',
+      card: buildActivityAutomationCard(),
+    };
   }
 
   if (intent.type === 'sync_closed_order_feedback') {

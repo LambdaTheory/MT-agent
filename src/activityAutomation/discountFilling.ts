@@ -1,4 +1,5 @@
 import type { Page } from 'playwright';
+import type { DifferentialPricingDiscountValues } from './differentialPricing.js';
 
 export const MAX_DIFFERENTIAL_PRICING_BATCH_PRODUCTS = 20;
 
@@ -27,7 +28,7 @@ export interface DifferentialPricingDiscountFillResult extends DifferentialPrici
   filledCount: number;
 }
 
-const discountByMax = new Map<string, { level: DifferentialPricingDiscountLevel; value: string }>([
+const defaultDiscountByMax = new Map<string, { level: DifferentialPricingDiscountLevel; value: string }>([
   ['8.5', { level: 'SS', value: '8.5' }],
   ['9', { level: 'S', value: '9.0' }],
   ['9.0', { level: 'S', value: '9.0' }],
@@ -35,18 +36,33 @@ const discountByMax = new Map<string, { level: DifferentialPricingDiscountLevel;
   ['9.8', { level: 'B', value: '9.8' }],
 ]);
 
+function discountByMax(discounts?: DifferentialPricingDiscountValues): Map<string, { level: DifferentialPricingDiscountLevel; value: string }> {
+  if (!discounts) return defaultDiscountByMax;
+  return new Map<string, { level: DifferentialPricingDiscountLevel; value: string }>([
+    ['8.5', { level: 'SS', value: discounts.SS }],
+    ['9', { level: 'S', value: discounts.S }],
+    ['9.0', { level: 'S', value: discounts.S }],
+    ['9.5', { level: 'A', value: discounts.A }],
+    ['9.8', { level: 'B', value: discounts.B }],
+  ]);
+}
+
 function normalized(value: string | null): string {
   return String(value ?? '').trim();
 }
 
-export function planDifferentialPricingDiscountFills(inputs: DifferentialPricingDiscountInputSnapshot[]): DifferentialPricingDiscountFillPlan {
+export function planDifferentialPricingDiscountFills(
+  inputs: DifferentialPricingDiscountInputSnapshot[],
+  discounts?: DifferentialPricingDiscountValues,
+): DifferentialPricingDiscountFillPlan {
   const fills: DifferentialPricingDiscountFill[] = [];
   const unrecognizedMaxValues = new Set<string>();
+  const resolvedDiscounts = discountByMax(discounts);
 
   for (const [index, input] of inputs.entries()) {
     if (normalized(input.value)) continue;
     const max = normalized(input.ariaValueMax);
-    const discount = discountByMax.get(max);
+    const discount = resolvedDiscounts.get(max);
     if (!discount) {
       if (max) unrecognizedMaxValues.add(max);
       continue;
@@ -63,7 +79,10 @@ export function planDifferentialPricingDiscountFills(inputs: DifferentialPricing
   };
 }
 
-export async function fillMissingDifferentialPricingDiscounts(page: Page): Promise<DifferentialPricingDiscountFillResult> {
+export async function fillMissingDifferentialPricingDiscounts(
+  page: Page,
+  discounts?: DifferentialPricingDiscountValues,
+): Promise<DifferentialPricingDiscountFillResult> {
   const discountInputs = page.locator('.ant-table-content input.ant-input-number-input[role="spinbutton"]');
   const snapshots = await discountInputs.evaluateAll((inputs) =>
     inputs.map((input) => ({
@@ -71,7 +90,7 @@ export async function fillMissingDifferentialPricingDiscounts(page: Page): Promi
       ariaValueMax: input.getAttribute('aria-valuemax'),
     })),
   );
-  const plan = planDifferentialPricingDiscountFills(snapshots);
+  const plan = planDifferentialPricingDiscountFills(snapshots, discounts);
 
   if (plan.exceedsBatchLimit) return { ...plan, filledCount: 0 };
 

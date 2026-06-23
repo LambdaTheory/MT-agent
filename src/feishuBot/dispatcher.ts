@@ -5,6 +5,7 @@ import { handleBotIntent } from './tools.js';
 import type { LlmToolSelectionProvider } from './llmProvider.js';
 import type { LlmIntentProposalProvider } from './llmIntentProposal.js';
 import type { RentalPriceSkillClient } from './rentalPrice.js';
+import type { ActivityAutomationSkillClient } from './activityAutomation.js';
 import type { BotIntent, BotIntentResolver, BotResponse, FeishuBotDispatchResult, FeishuBotIncomingTextMessage } from './types.js';
 import type { AgentPlannerProvider } from '../agentRuntime/planner.js';
 
@@ -19,6 +20,7 @@ export interface FeishuMessageDispatcherConfig {
   llmIntentProposalProvider?: LlmIntentProposalProvider;
   agentPlannerProvider?: AgentPlannerProvider;
   rentalPriceClient?: RentalPriceSkillClient;
+  activityAutomationClient?: ActivityAutomationSkillClient;
   logError?: (error: unknown, message: FeishuBotIncomingTextMessage) => void;
 }
 
@@ -76,6 +78,7 @@ function textWithoutMentionKeys(message: FeishuBotIncomingTextMessage, config: F
 function canonicalizeIntent(intent: BotIntent): BotIntent {
   switch (intent.type) {
     case 'help':
+    case 'differential_pricing_card':
     case 'latest_summary':
     case 'operations_learning_quiz':
     case 'operations_learning_summary':
@@ -141,6 +144,7 @@ export function createFeishuMessageDispatcher(config: FeishuMessageDispatcherCon
     llmIntentProposalProvider: config.llmIntentProposalProvider,
     agentPlannerProvider: config.agentPlannerProvider,
     rentalPriceClient: config.rentalPriceClient,
+    activityAutomationClient: config.activityAutomationClient,
   }));
   const logError = config.logError ?? ((error, message) => console.error(`飞书消息处理失败 ${message.messageId}:`, error));
 
@@ -160,6 +164,7 @@ export function createFeishuMessageDispatcher(config: FeishuMessageDispatcherCon
           llmIntentProposalProvider: config.llmIntentProposalProvider,
           agentPlannerProvider: config.agentPlannerProvider,
           rentalPriceClient: config.rentalPriceClient,
+          activityAutomationClient: config.activityAutomationClient,
         });
         const response = toBotResponse(await runtime.handle(toAgentRequest(message, text)));
         return { ...response, skipped: false };

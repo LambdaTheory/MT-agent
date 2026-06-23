@@ -5,6 +5,7 @@ export type FeishuSendTo = 'personal' | 'group' | 'both';
 
 export type BotIntent =
   | { type: 'help' }
+  | { type: 'differential_pricing_card' }
   | { type: 'run_public_traffic_report'; sendTo?: FeishuSendTo }
   | { type: 'resend_latest_report'; sendTo?: FeishuSendTo }
   | { type: 'push_latest_report_to_group' }

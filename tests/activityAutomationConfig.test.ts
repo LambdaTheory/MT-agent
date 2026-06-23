@@ -27,8 +27,24 @@ describe('activity automation config', () => {
       browserProfileDir: '.browser-profile',
       headless: false,
       keepBrowserOnFailure: true,
+      pickProducts: false,
+      fillDiscounts: true,
+      draft: { productIds: [] },
     });
     expect(activityAutomationOutputDir(config)).toContain('activity-automation');
+  });
+
+  it('can enable automatic product picking from CLI options', () => {
+    const config = activityAutomationConfigFromAgentConfig(agentConfig, { pickProducts: true });
+    expect(config.pickProducts).toBe(true);
+  });
+
+  it('can pass date draft values from CLI options', () => {
+    const config = activityAutomationConfigFromAgentConfig(agentConfig, {
+      draft: { productIds: [], startsAt: '2026-06-23', endsAt: '2026-06-30' },
+    });
+
+    expect(config.draft).toEqual({ productIds: [], startsAt: '2026-06-23', endsAt: '2026-06-30' });
   });
 });
 

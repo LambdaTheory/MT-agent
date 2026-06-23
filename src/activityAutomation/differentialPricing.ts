@@ -4,6 +4,14 @@ export interface DifferentialPricingDraft {
   pricingRuleDescription?: string;
   startsAt?: string;
   endsAt?: string;
+  discounts?: DifferentialPricingDiscountValues;
+}
+
+export interface DifferentialPricingDiscountValues {
+  SS: string;
+  S: string;
+  A: string;
+  B: string;
 }
 
 export interface DifferentialPricingAutomationInput {

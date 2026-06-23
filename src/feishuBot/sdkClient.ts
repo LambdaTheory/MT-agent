@@ -10,6 +10,12 @@ import { createFeishuMessageDispatcher } from './dispatcher.js';
 import { executeAgentToolRequest } from './agentToolExecutor.js';
 import { buildIdLookupCard } from './idLookupCard.js';
 import { lookupProductId } from './idLookup.js';
+import {
+  createActivityAutomationSkillClient,
+  formatActivityAutomationExecutionResult,
+  parseActivityAutomationConfirmRequest,
+  type ActivityAutomationSkillClient,
+} from './activityAutomation.js';
 import { executeNewLinkBatchConfirmRequest, parseNewLinkBatchConfirmRequest } from '../newLinkWorkflow/batch.js';
 import { createRentalPriceSkillClient, executeRentalOperationConfirmRequest, parseRentalOperationConfirmRequest, parseRentalPriceConfirmRequest, type RentalPriceSkillClient } from './rentalPrice.js';
 import type { LlmToolSelectionProvider } from './llmProvider.js';
@@ -106,6 +112,7 @@ export interface FeishuSdkBotConfig {
   dispatchMessage?: (message: FeishuBotIncomingTextMessage) => Promise<FeishuBotDispatchResult>;
   logError?: (error: unknown, context: { messageId: string; phase: 'reply' | 'dispatch' }) => void;
   rentalPriceClient?: RentalPriceSkillClient;
+  activityAutomationClient?: ActivityAutomationSkillClient;
   sdk?: FeishuSdkModule;
 }
 
@@ -200,6 +207,15 @@ function readActionFormValue(action: SdkCardAction | undefined, name: string): s
     }
   }
   return readString(action.input_value);
+}
+
+function readActionForm(action: SdkCardAction | undefined): Record<string, unknown> | undefined {
+  if (!isRecord(action)) return undefined;
+  for (const key of ['form_value', 'formValue']) {
+    const formValue = action[key];
+    if (isRecord(formValue)) return formValue;
+  }
+  return undefined;
 }
 
 function extractCardMessageId(data: unknown): string | undefined {
@@ -348,9 +364,11 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
     llmIntentProposalProvider: config.llmIntentProposalProvider,
     agentPlannerProvider: config.agentPlannerProvider,
     rentalPriceClient: config.rentalPriceClient,
+    activityAutomationClient: config.activityAutomationClient,
   }).dispatch;
   const logError = config.logError ?? ((error: unknown, context: { messageId: string; phase: 'reply' | 'dispatch' }) => console.error(`飞书SDK消息处理失败 ${context.phase} ${context.messageId}:`, error));
   const rentalPriceClient = config.rentalPriceClient ?? createRentalPriceSkillClient();
+  const activityAutomationClient = config.activityAutomationClient ?? createActivityAutomationSkillClient();
   const outputDir = config.outputDir ?? 'output';
 
   function recordLearning(input: AgentLearningEventInput, contextMessageId: string): void {
@@ -669,6 +687,40 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
             } catch (error) {
               setRentalActionStatus(claim.key, 'failed');
               await updateCard(client, messageId, statusCard('租赁商品改价失败', `商品 ${request.productId}\n${error instanceof Error ? error.message : String(error)}`, 'red')).catch(() => false);
+              logError(error, { messageId, phase: 'reply' });
+            }
+          })();
+          return;
+        }
+
+        if (actionName === 'activity_automation_confirm') {
+          const request = parseActivityAutomationConfirmRequest(readActionForm(action));
+          if (!request) {
+            await replyText(client, messageId, '差异化定价参数无效，请重新填写卡片后再试。');
+            return;
+          }
+          const claim = claimRentalAction(messageId, actionName, value);
+          if (!claim.claimed) {
+            await replyText(client, messageId, duplicateRentalActionText(claim.claim));
+            return;
+          }
+          void (async () => {
+            await updateCard(client, messageId, statusCard('差异化定价处理中', `活动时间 ${request.startsAt} -> ${request.endsAt}\n已收到确认，正在执行。`, 'blue')).catch(() => false);
+            try {
+              const result = await activityAutomationClient.execute(request);
+              setRentalActionStatus(claim.key, result.ok ? 'completed' : 'failed');
+              await updateCard(
+                client,
+                messageId,
+                statusCard(result.ok ? '差异化定价已完成' : '差异化定价失败', formatActivityAutomationExecutionResult(result), result.ok ? 'green' : 'red'),
+              ).catch(() => false);
+            } catch (error) {
+              setRentalActionStatus(claim.key, 'failed');
+              await updateCard(
+                client,
+                messageId,
+                statusCard('差异化定价失败', `活动时间 ${request.startsAt} -> ${request.endsAt}\n${error instanceof Error ? error.message : String(error)}`, 'red'),
+              ).catch(() => false);
               logError(error, { messageId, phase: 'reply' });
             }
           })();

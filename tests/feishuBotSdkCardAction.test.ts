@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createFeishuSdkBot } from '../src/feishuBot/sdkClient.js';
+import type { ActivityAutomationSkillClient } from '../src/feishuBot/activityAutomation.js';
 
 const metric = {
   exposure: 10,
@@ -36,6 +37,28 @@ function fakeSdk(sent: unknown[], registered: Record<string, (data: unknown) => 
     }
   }
   return { Client: FakeClient, WSClient: FakeWSClient, EventDispatcher: FakeEventDispatcher };
+}
+
+function fakeActivityAutomationClient() {
+  const client: ActivityAutomationSkillClient & { executions: unknown[] } = {
+    executions: [],
+    async execute(request) {
+      client.executions.push(request);
+      return {
+        ok: true,
+        request,
+        selectedCount: 7,
+        pagesVisited: 3,
+        dateFilledCount: 7,
+        discountFilledCount: 28,
+        mappedCount: 7,
+        unmappedCount: 0,
+        productPickSessionPath: 'output/latest/activity-automation/activity-product-pick-session.json',
+        lines: ['自动选品: 7', '活动时间填写: 7', '折扣填写: 28', '已映射端内ID: 7'],
+      };
+    },
+  };
+  return client;
 }
 
 async function writeContext(): Promise<string> {
@@ -102,6 +125,55 @@ async function seedLearningSession(outputDir: string): Promise<void> {
 }
 
 describe('createFeishuSdkBot card.action.trigger', () => {
+  it('executes differential pricing automation from card confirmation and patches status cards', async () => {
+    const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
+    const sent: unknown[] = [];
+    const activityAutomationClient = fakeActivityAutomationClient();
+    const bot = createFeishuSdkBot({
+      appId: 'app',
+      appSecret: 'secret',
+      outputDir: 'output',
+      activityAutomationClient,
+      sdk: fakeSdk(sent, registered),
+    });
+
+    bot.start();
+    await registered['card.action.trigger']({
+      event: {
+        context: { open_message_id: 'om-activity-automation' },
+        action: {
+          tag: 'button',
+          value: { action: 'activity_automation_confirm' },
+          form_value: {
+            starts_at: '2026-06-23',
+            ends_at: '2026-06-30',
+            discount_ss: '8.5',
+            discount_s: '9.0',
+            discount_a: '9.5',
+            discount_b: '9.8',
+          },
+        },
+      },
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(activityAutomationClient.executions).toEqual([
+      {
+        startsAt: '2026-06-23',
+        endsAt: '2026-06-30',
+        discounts: { SS: '8.5', S: '9.0', A: '9.5', B: '9.8' },
+      },
+    ]);
+    expect(sent).toHaveLength(2);
+    expect(sent[0]).toMatchObject({ kind: 'patch', request: { path: { message_id: 'om-activity-automation' } } });
+    expect(JSON.stringify(sent[0])).toContain('处理中');
+    expect(sent[1]).toMatchObject({ kind: 'patch', request: { path: { message_id: 'om-activity-automation' } } });
+    expect(JSON.stringify(sent[1])).toContain('已完成');
+    expect(JSON.stringify(sent[1])).toContain('活动时间填写: 7');
+    expect(JSON.stringify(sent[1])).toContain('折扣填写: 28');
+  });
+
   it('handles id_lookup form submit by returning the updated card', async () => {
     const outputDir = await writeContext();
     const registered: Record<string, (data: unknown) => Promise<unknown>> = {};

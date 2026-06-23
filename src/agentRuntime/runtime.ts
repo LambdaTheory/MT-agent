@@ -2,6 +2,7 @@ import { parseBotIntent } from '../feishuBot/intent.js';
 import type { LlmIntentProposalProvider } from '../feishuBot/llmIntentProposal.js';
 import type { LlmToolSelectionProvider } from '../feishuBot/llmProvider.js';
 import type { RentalPriceSkillClient } from '../feishuBot/rentalPrice.js';
+import type { ActivityAutomationSkillClient } from '../feishuBot/activityAutomation.js';
 import { handleBotIntent } from '../feishuBot/tools.js';
 import type { BotIntent, BotResponse } from '../feishuBot/types.js';
 import type { AgentPlannerProvider } from './planner.js';
@@ -17,6 +18,7 @@ export interface AgentRuntimeConfig {
   llmIntentProposalProvider?: LlmIntentProposalProvider;
   agentPlannerProvider?: AgentPlannerProvider;
   rentalPriceClient?: RentalPriceSkillClient;
+  activityAutomationClient?: ActivityAutomationSkillClient;
 }
 
 export interface AgentRuntime {
@@ -30,6 +32,7 @@ export function createAgentRuntime(config: AgentRuntimeConfig = {}): AgentRuntim
     llmIntentProposalProvider: config.llmIntentProposalProvider,
     agentPlannerProvider: config.agentPlannerProvider,
     rentalPriceClient: config.rentalPriceClient,
+    activityAutomationClient: config.activityAutomationClient,
   }));
 
   return {

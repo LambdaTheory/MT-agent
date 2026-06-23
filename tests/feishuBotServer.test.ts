@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { extractTextMessage, startFeishuBotServer } from '../src/feishuBot/server.js';
+import type { ActivityAutomationSkillClient } from '../src/feishuBot/activityAutomation.js';
 import type { FeishuBotIncomingTextMessage } from '../src/feishuBot/types.js';
 
 const metric = {
@@ -46,6 +47,28 @@ async function writeLearningContext(): Promise<string> {
     emptySectionNotes: {},
   }));
   return dir;
+}
+
+function fakeActivityAutomationClient() {
+  const client: ActivityAutomationSkillClient & { executions: unknown[] } = {
+    executions: [],
+    async execute(request) {
+      client.executions.push(request);
+      return {
+        ok: true,
+        request,
+        selectedCount: 7,
+        pagesVisited: 3,
+        dateFilledCount: 7,
+        discountFilledCount: 28,
+        mappedCount: 7,
+        unmappedCount: 0,
+        productPickSessionPath: 'output/latest/activity-automation/activity-product-pick-session.json',
+        lines: ['自动选品: 7', '活动时间填写: 7', '折扣填写: 28', '已映射端内ID: 7'],
+      };
+    },
+  };
+  return client;
 }
 
 describe('extractTextMessage', () => {
@@ -214,6 +237,72 @@ describe('startFeishuBotServer', () => {
       expect(JSON.stringify(card)).not.toContain('查询结果');
       expect(JSON.stringify(card)).not.toContain('"tag":"hr"');
       expect(replies).toEqual([]);
+    } finally {
+      server.close();
+    }
+  });
+
+  it('executes differential pricing automation for HTTP card action callbacks', async () => {
+    const replies: Array<{ messageId: string; text: string }> = [];
+    let resolveReplySent!: () => void;
+    const replySent = new Promise<void>((resolve) => {
+      resolveReplySent = resolve;
+    });
+    const activityAutomationClient = fakeActivityAutomationClient();
+    const server = startFeishuBotServer({
+      port: 0,
+      appId: 'app',
+      appSecret: 'secret',
+      outputDir: 'output',
+      activityAutomationClient,
+      replyText: async ({ messageId }, text) => {
+        replies.push({ messageId, text });
+        resolveReplySent();
+        return { sent: true, channel: 'app' };
+      },
+    });
+    try {
+      await new Promise<void>((resolve) => server.once('listening', resolve));
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+
+      const response = await fetch(`http://127.0.0.1:${address.port}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          header: { event_type: 'card.action.trigger' },
+          event: {
+            context: { open_message_id: 'mid-http-activity-card' },
+            action: {
+              value: { action: 'activity_automation_confirm' },
+              form_value: {
+                starts_at: '2026-06-23',
+                ends_at: '2026-06-30',
+                discount_ss: '8.5',
+                discount_s: '9.0',
+                discount_a: '9.5',
+                discount_b: '9.8',
+              },
+            },
+          },
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      await replySent;
+      expect(activityAutomationClient.executions).toEqual([
+        {
+          startsAt: '2026-06-23',
+          endsAt: '2026-06-30',
+          discounts: { SS: '8.5', S: '9.0', A: '9.5', B: '9.8' },
+        },
+      ]);
+      expect(replies).toEqual([
+        {
+          messageId: 'mid-http-activity-card',
+          text: expect.stringContaining('活动时间填写: 7') as unknown as string,
+        },
+      ]);
     } finally {
       server.close();
     }
