@@ -19,7 +19,7 @@ import { formatIdLookupResult, lookupProductId } from './idLookup.js';
 import { buildIdLookupCard } from './idLookupCard.js';
 import { getSupportedLlmIntentProposals, parseLlmIntentProposal, type LlmIntentProposalProvider } from './llmIntentProposal.js';
 import { runReadOnlyToolSelection } from './llmReadOnlyToolAdapter.js';
-import { parseLlmToolSelection, type LlmToolSelectionProvider } from './llmProvider.js';
+import { parseLlmToolSelection, type LlmReadOnlyToolName, type LlmToolSelectionProvider } from './llmProvider.js';
 import { getRegistryBackedLlmTools } from './llmToolSelector.js';
 import {
   buildRentalOperationConfirmCard,
@@ -29,6 +29,7 @@ import {
   type RentalPriceSkillClient,
 } from './rentalPrice.js';
 import { findReadOnlyTool } from './readOnlyToolRegistry.js';
+import type { ReadOnlyToolRunOptions } from './readOnlyToolRegistry.js';
 import { findLatestReportContext, formatLatestSummary, formatProductRows, queryProductRows } from './reportStore.js';
 import type { BotIntent, BotResponse } from './types.js';
 
@@ -140,6 +141,23 @@ function applyExplicitNewLinkSource(
   if (!request) return null;
   const sourceProductId = extractExplicitNewLinkSourceProductId(message);
   return sourceProductId ? { ...request, sourceProductId } : request;
+}
+
+function readOnlyIntentNeedsLinkRegistry(intent: ReturnType<typeof parseAgentDataIntent>): boolean {
+  return intent.type === 'best_product_by_same_sku';
+}
+
+function llmReadOnlyToolNeedsLinkRegistry(tool: LlmReadOnlyToolName): boolean {
+  return tool === 'rank_best_same_sku_product';
+}
+
+async function buildReadOnlyToolRunOptions(
+  options: HandleBotIntentOptions,
+  needsLinkRegistry: boolean,
+): Promise<ReadOnlyToolRunOptions> {
+  if (!needsLinkRegistry) return {};
+  const registryContext = await loadClosedOrderRegistryContext(options.closedOrderRegistryPaths);
+  return { linkRegistryEntries: registryContext.registry };
 }
 
 async function agentPlannerResponse(
@@ -327,7 +345,7 @@ export async function handleBotIntent(intent: BotIntent, outputDir = 'output', o
     const dataIntent = parseAgentDataIntent(intent.text);
     const tool = findReadOnlyTool(dataIntent);
     const latest = await findLatestReportContext(outputDir);
-    if (tool && latest) return tool.run(latest.context, dataIntent);
+    if (tool && latest) return tool.run(latest.context, dataIntent, await buildReadOnlyToolRunOptions(options, readOnlyIntentNeedsLinkRegistry(dataIntent)));
 
     if (tool) return { text: '还没有找到公域日报上下文。' };
     if (!options.llmToolSelector) return { text: UNKNOWN_GUIDANCE };
@@ -336,7 +354,11 @@ export async function handleBotIntent(intent: BotIntent, outputDir = 'output', o
     const rawSelection = await options.llmToolSelector.selectTool({ message: intent.text, tools: getRegistryBackedLlmTools() });
     const parsed = parseLlmToolSelection(rawSelection);
     if (!parsed.ok || parsed.selection.tool === 'none' || parsed.selection.tool === 'get_supported_questions') return { text: UNKNOWN_GUIDANCE };
-    const result = await runReadOnlyToolSelection(latest.context, parsed.selection);
+    const result = await runReadOnlyToolSelection(
+      latest.context,
+      parsed.selection,
+      await buildReadOnlyToolRunOptions(options, llmReadOnlyToolNeedsLinkRegistry(parsed.selection.tool)),
+    );
     return result.ok ? result.response : { text: UNKNOWN_GUIDANCE };
   }
 

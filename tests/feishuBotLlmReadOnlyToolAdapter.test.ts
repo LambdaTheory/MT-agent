@@ -4,6 +4,7 @@ import { createLlmToolSelector } from '../src/feishuBot/llmToolSelector.js';
 import { findReadOnlyToolByLlmName } from '../src/feishuBot/readOnlyToolRegistry.js';
 import { runReadOnlyToolSelection } from '../src/feishuBot/llmReadOnlyToolAdapter.js';
 import type { LlmToolSelection } from '../src/feishuBot/llmProvider.js';
+import type { LinkRegistryEntry } from '../src/linkRegistry/types.js';
 import type { PublicTrafficDataReportContext } from '../src/publicTraffic/types.js';
 
 const metric = {
@@ -41,6 +42,29 @@ const context = {
   emptySectionNotes: { lowExposure: '', weakClick: '', weakConversion: '', highPotential: '', newProductObservation: '', lifecycleGovernance: '', recommendedActions: '' },
 } as unknown as PublicTrafficDataReportContext;
 
+const rankingContext = {
+  ...context,
+  rows: [
+    ...context.rows,
+    {
+      productName: '大疆 Pocket 3 高转化套装',
+      platformProductId: 'p702',
+      displayProductId: '端内ID 702',
+      custodyDays: 2,
+      periods: {
+        '1d': { ...metric, shippedOrders: 1, amount: 188, publicVisits: 22 },
+        '7d': { ...metric, shippedOrders: 4, amount: 888, publicVisits: 80 },
+        '30d': metric,
+      },
+    },
+  ],
+} as unknown as PublicTrafficDataReportContext;
+
+const registry: LinkRegistryEntry[] = [
+  { internalProductId: '701', platformProductId: 'p701', shortName: 'DJI Pocket 3', sameSkuGroupId: 'dji-pocket-3', status: 'active', source: ['product_name_map'] },
+  { internalProductId: '702', platformProductId: 'p702', shortName: 'DJI Pocket 3', sameSkuGroupId: 'dji-pocket-3', status: 'active', source: ['product_name_map'] },
+];
+
 function selection(tool: LlmToolSelection['tool'], selectionArguments: Record<string, unknown>): LlmToolSelection {
   return { intent: 'test', tool, arguments: selectionArguments, confidence: 0.9, reason: 'test' };
 }
@@ -57,6 +81,17 @@ describe('LLM read-only tool adapter', () => {
     await expect(runReadOnlyToolSelection(context, selection('query_product_performance', {}))).resolves.toEqual({ ok: false, reason: 'invalid_arguments' });
   });
 
+  it('runs a best same-sku ranking selection with registry data', async () => {
+    const result = await runReadOnlyToolSelection(
+      rankingContext,
+      selection('rank_best_same_sku_product', { query: 'Pocket3' }),
+      { linkRegistryEntries: registry },
+    );
+
+    expect(result).toMatchObject({ ok: true, intent: { type: 'best_product_by_same_sku', query: 'Pocket3' } });
+    if (result.ok) expect(result.response.text).toContain('端内ID 702');
+  });
+
   it('does not resolve unsupported LLM tools to registry tools', async () => {
     expect(findReadOnlyToolByLlmName('none')).toBeUndefined();
     expect(findReadOnlyToolByLlmName('get_supported_questions')).toBeUndefined();
@@ -69,6 +104,7 @@ describe('LLM read-only tool adapter', () => {
 
     await expect(selector.selectTool({ message: '今日概况' })).resolves.toContain('get_latest_summary');
     expect(provider.lastInput?.messages.at(-1)?.content).toContain('get_latest_summary');
+    expect(provider.lastInput?.messages.at(-1)?.content).toContain('rank_best_same_sku_product');
     expect(provider.lastInput?.messages.at(-1)?.content).not.toContain('run_public_traffic_report');
     expect(provider.lastInput?.messages.at(-1)?.content).not.toContain('get_supported_questions');
   });
