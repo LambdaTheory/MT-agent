@@ -82,6 +82,7 @@ function canonicalizeIntent(intent: BotIntent): BotIntent {
     case 'operations_learning_history':
     case 'agent_learning_summary':
     case 'lookup_product_id_card':
+    case 'link_registry_overview':
     case 'push_latest_report_to_group':
     case 'sync_closed_order_feedback':
     case 'run_closed_order_observation_report':

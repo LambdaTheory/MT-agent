@@ -131,6 +131,115 @@ async function writeClosedOrderRegistryFixtures(rootDir: string): Promise<{
   };
 }
 
+async function writeLinkRegistryOverviewFixtures(rootDir: string): Promise<{
+  productIdMapPath: string;
+  productNameMapPath: string;
+  firstSeenPath: string;
+  lifecyclePath: string;
+  overridesPath: string;
+  artifactsDir: string;
+}> {
+  const configDir = join(rootDir, 'config');
+  const outputDir = join(rootDir, 'output');
+  await mkdir(configDir, { recursive: true });
+  await mkdir(join(outputDir, 'state'), { recursive: true });
+  await writeFile(join(configDir, 'product-id-map.json'), JSON.stringify({
+    'platform-560': '560',
+    'platform-561': '561',
+    'platform-562': '562',
+    'platform-590': '590',
+  }), 'utf8');
+  await writeFile(join(configDir, 'product-name-map.json'), JSON.stringify({
+    '560': 'DJI Pocket 3 全能套装',
+    '561': 'DJI Pocket 3 标准版',
+    '562': 'DJI Pocket 3 Creator Combo',
+    '580': 'Canon SX70 HS',
+    '590': '未归类商品',
+  }), 'utf8');
+  await writeFile(join(outputDir, 'state', 'goods-link-lifecycle.json'), JSON.stringify({
+    active: {
+      '560': { platformProductId: 'platform-560', productName: 'DJI Pocket 3 全能套装' },
+      '561': { platformProductId: 'platform-561', productName: 'DJI Pocket 3 标准版' },
+      '590': { platformProductId: 'platform-590', productName: '未归类商品' },
+    },
+    removedLinks: [
+      {
+        productId: '562',
+        platformProductId: 'platform-562',
+        productName: 'DJI Pocket 3 Creator Combo',
+        removedDate: '2026-06-22',
+        reason: '商品总表缺失',
+        source: 'goods_snapshot_diff',
+      },
+    ],
+  }), 'utf8');
+  await writeFile(join(configDir, 'link-registry-overrides.json'), JSON.stringify({
+    version: 1,
+    entries: [
+      {
+        internalProductId: '560',
+        categoryId: 'camera',
+        categoryName: '相机',
+        productType: 'dji-pocket-3',
+        shortName: 'DJI Pocket 3',
+        aliases: ['Pocket3'],
+        sameSkuGroupId: 'dji-pocket-3',
+        updatedAt: '2026-06-23',
+      },
+      {
+        internalProductId: '561',
+        categoryId: 'camera',
+        categoryName: '相机',
+        productType: 'dji-pocket-3',
+        shortName: 'DJI Pocket 3',
+        aliases: ['Pocket3 标准版'],
+        sameSkuGroupId: 'dji-pocket-3',
+        updatedAt: '2026-06-23',
+      },
+      {
+        internalProductId: '562',
+        categoryId: 'camera',
+        categoryName: '相机',
+        productType: 'dji-pocket-3',
+        shortName: 'DJI Pocket 3',
+        aliases: ['Pocket3 Creator'],
+        sameSkuGroupId: 'dji-pocket-3',
+        updatedAt: '2026-06-23',
+      },
+      {
+        internalProductId: '580',
+        categoryId: 'camera',
+        categoryName: '相机',
+        productType: 'canon-sx70',
+        shortName: 'Canon SX70 HS',
+        aliases: ['SX70'],
+        sameSkuGroupId: 'canon-sx70',
+        updatedAt: '2026-06-23',
+      },
+      {
+        internalProductId: '999',
+        categoryId: 'camera',
+        categoryName: '相机',
+      },
+    ],
+    sameSkuGroupAliasRules: [
+      {
+        sameSkuGroupId: 'dji-pocket-3',
+        aliases: ['口袋3', 'pocket 3'],
+        updatedAt: '2026-06-23',
+      },
+    ],
+  }), 'utf8');
+  return {
+    productIdMapPath: join(configDir, 'product-id-map.json'),
+    productNameMapPath: join(configDir, 'product-name-map.json'),
+    firstSeenPath: join(outputDir, 'state', 'goods-first-seen.json'),
+    lifecyclePath: join(outputDir, 'state', 'goods-link-lifecycle.json'),
+    overridesPath: join(configDir, 'link-registry-overrides.json'),
+    artifactsDir: outputDir,
+  };
+}
+
 async function writeNewLinkWorkflowContext(): Promise<{
   outputDir: string;
   registryPaths: {
@@ -262,6 +371,29 @@ describe('handleBotIntent', () => {
     expect(JSON.stringify(response.card)).toContain('id_lookup_form');
     expect(JSON.stringify(response.card)).toContain('lookup_query');
     expect(JSON.stringify(response.card)).toContain('id_lookup');
+  });
+
+  it('returns a link registry overview card for the inventory command', async () => {
+    const registryRoot = await mkdtemp(join(tmpdir(), 'mt-agent-link-registry-overview-'));
+    const registryPaths = await writeLinkRegistryOverviewFixtures(registryRoot);
+
+    const response = await handleBotIntent(
+      { type: 'link_registry_overview' },
+      'output',
+      { closedOrderRegistryPaths: registryPaths },
+    );
+
+    expect(response.text).toContain('库存情况');
+    expect(response.text).toContain('总链接 5');
+    expect(response.text).toContain('分类覆盖 80%');
+    expect(response.card).toBeDefined();
+    const cardText = JSON.stringify(response.card);
+    expect(cardText).toContain('库存情况');
+    expect(cardText).toContain('分类覆盖');
+    expect(cardText).toContain('风险概览');
+    expect(cardText).toContain('DJI Pocket 3');
+    expect(cardText).toContain('Canon SX70 HS');
+    expect(cardText).toContain('未归类商品');
   });
 
   it('answers latest summary from report context', async () => {

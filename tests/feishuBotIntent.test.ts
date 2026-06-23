@@ -74,6 +74,10 @@ describe('parseBotIntent', () => {
     expect(parseBotIntent('查ID')).toEqual({ type: 'lookup_product_id_card' });
   });
 
+  it('parses inventory overview card intent', () => {
+    expect(parseBotIntent('库存情况')).toEqual({ type: 'link_registry_overview' });
+  });
+
   it('parses explicit product lookup questions', () => {
     expect(parseBotIntent('这个商品 721 数据如何')).toEqual({ type: 'query_product', keyword: '721' });
   });

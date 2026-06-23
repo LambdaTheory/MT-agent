@@ -18,6 +18,7 @@ import { startOperationsLearningSession, summarizeOperationsLearningHistory, sum
 import { executeAgentToolRequest } from './agentToolExecutor.js';
 import { formatIdLookupResult, lookupProductId } from './idLookup.js';
 import { buildIdLookupCard } from './idLookupCard.js';
+import { buildLinkRegistryOverviewCard, formatLinkRegistryOverviewText } from './linkRegistryOverviewCard.js';
 import { getSupportedLlmIntentProposals, parseLlmIntentProposal, type LlmIntentProposalProvider } from './llmIntentProposal.js';
 import { runReadOnlyToolSelection } from './llmReadOnlyToolAdapter.js';
 import { parseLlmToolSelection, type LlmReadOnlyToolName, type LlmToolSelectionProvider } from './llmProvider.js';
@@ -249,6 +250,12 @@ export async function handleBotIntent(intent: BotIntent, outputDir = 'output', o
 
   if (intent.type === 'lookup_product_id_card') {
     return { text: '已打开常驻商品ID互查卡，可保留在会话里反复查询。', card: buildIdLookupCard() };
+  }
+
+  if (intent.type === 'link_registry_overview') {
+    const registryContext = await loadClosedOrderRegistryContext(options.closedOrderRegistryPaths);
+    const audit = createLinkRegistry(registryContext.registry, registryContext.overrideRisks).audit();
+    return { text: formatLinkRegistryOverviewText(audit), card: buildLinkRegistryOverviewCard(audit) };
   }
 
   if (intent.type === 'rental_price_change') {

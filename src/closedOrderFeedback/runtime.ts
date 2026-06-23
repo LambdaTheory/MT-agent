@@ -1,7 +1,7 @@
 import { access, readdir, readFile } from 'node:fs/promises';
 import { isAbsolute, resolve } from 'node:path';
 import { buildLinkRegistry } from '../linkRegistry/buildRegistry.js';
-import { applyLinkRegistryOverrides, parseLinkRegistryOverrides } from '../linkRegistry/overrides.js';
+import { applyLinkRegistryOverrides, parseLinkRegistryOverrides, type LinkRegistryOverrideRisk } from '../linkRegistry/overrides.js';
 import { createLinkRegistryQuery, type LinkRegistryQuery } from '../linkRegistry/queryRegistry.js';
 import type { LinkRegistryEntry } from '../linkRegistry/types.js';
 import { loadProductIdMapping, type ProductIdMapping } from '../mapping/productIdMapping.js';
@@ -32,6 +32,7 @@ export interface ClosedOrderRegistryContext {
   registry: LinkRegistryEntry[];
   query: LinkRegistryQuery;
   productIdMapping: ProductIdMapping;
+  overrideRisks: LinkRegistryOverrideRisk[];
   resolvedPaths: ResolvedClosedOrderRegistryPaths;
 }
 
@@ -209,11 +210,15 @@ export async function loadClosedOrderRegistryContext(
     firstSeen,
     lifecycle,
   });
-  const registry = rawOverrides === null ? baseRegistry : applyLinkRegistryOverrides(baseRegistry, parseLinkRegistryOverrides(rawOverrides)).entries;
+  const overrideResult = rawOverrides === null
+    ? { entries: baseRegistry, risks: [] }
+    : applyLinkRegistryOverrides(baseRegistry, parseLinkRegistryOverrides(rawOverrides));
+  const registry = overrideResult.entries;
   return {
     registry,
     query: createLinkRegistryQuery(registry),
     productIdMapping,
+    overrideRisks: overrideResult.risks,
     resolvedPaths,
   };
 }
