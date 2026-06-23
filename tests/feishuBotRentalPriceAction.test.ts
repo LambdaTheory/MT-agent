@@ -311,6 +311,7 @@ describe('rental price card action', () => {
           value: {
             action: 'new_link_batch_confirm',
             request: {
+              safetyVersion: 2,
               workflowName: 'rental.newLinkBatch',
               keyword: 'pocket3',
               count: 3,
@@ -329,6 +330,63 @@ describe('rental price card action', () => {
     expect(sent.some((item) => JSON.stringify(item).includes('新链批量复制处理中'))).toBe(true);
     expect(sent.some((item) => JSON.stringify(item).includes('成功 3 条'))).toBe(true);
     expect(sent.filter((item) => JSON.stringify(item).includes('新链批量复制已完成')).every((item) => JSON.stringify(item).includes('"kind":"patch"'))).toBe(true);
+  });
+
+  it('does not copy when a new-link cancel click carries a stale confirm value', async () => {
+    const calls: string[] = [];
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run for new-link cancel'); },
+      async execute() { throw new Error('price execute should not run for new-link cancel'); },
+      async copy(productId) {
+        calls.push(productId);
+        return { productId, ok: true, newProductId: `new-${calls.length}`, lines: ['copy: ok'] };
+      },
+      async delist() { throw new Error('delist should not run for new-link cancel'); },
+      async tenancySet() { throw new Error('tenancySet should not run for new-link cancel'); },
+      async specDiscover() { throw new Error('specDiscover should not run for new-link cancel'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run for new-link cancel'); },
+    };
+    const registered: Record<string, (data: unknown) => Promise<void>> = {};
+    const sent: unknown[] = [];
+    const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', outputDir: await mkdtemp(join(tmpdir(), 'mt-agent-sdk-action-')), sdk: fakeSdk(sent, registered), rentalPriceClient });
+    const staleConfirmValue = {
+      action: 'new_link_batch_confirm',
+      request: {
+        safetyVersion: 2,
+        workflowName: 'rental.newLinkBatch',
+        keyword: '848',
+        count: 3,
+        sourceProductId: '848',
+        requestedSourceProductId: '848',
+        sourceProductName: '佳能 G12',
+        dataDate: '2026-06-22',
+        reason: '用户取消前的旧确认值',
+      },
+    };
+
+    bot.start();
+    await registered['card.action.trigger']({
+      event: {
+        context: { open_message_id: 'om-new-link-batch-cancel' },
+        action: {
+          name: 'new_link_batch_cancel_submit',
+          value: staleConfirmValue,
+        },
+      },
+    });
+    await registered['card.action.trigger']({
+      event: {
+        context: { open_message_id: 'om-new-link-batch-cancel' },
+        action: {
+          name: 'new_link_batch_confirm_submit',
+          value: staleConfirmValue,
+        },
+      },
+    });
+
+    expect(calls).toEqual([]);
+    expect(sent.some((item) => JSON.stringify(item).includes('已取消'))).toBe(true);
+    expect(sent.some((item) => JSON.stringify(item).includes('已经取消'))).toBe(true);
   });
 
   it('rejects forged rental operation confirmations', () => {
