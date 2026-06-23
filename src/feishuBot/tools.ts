@@ -1,14 +1,11 @@
-import { join } from 'node:path';
 import { buildAgentToolConfirmCard } from '../agentRuntime/approvalCard.js';
-import { listAgentPlannerTools, validateAgentPlannerProposal, type AgentPlannerProvider } from '../agentRuntime/planner.js';
+import { buildAgentClarificationCard } from '../agentRuntime/clarificationCard.js';
+import { listAgentPlannerTools, validateAgentPlannerClarificationProposal, validateAgentPlannerProposal, type AgentPlannerProvider } from '../agentRuntime/planner.js';
 import { validateAgentWorkflowPlannerProposal } from '../agentRuntime/workflowPlanner.js';
 import { listAgentWorkflows } from '../agentRuntime/workflowRegistry.js';
+import { buildAgentLearningPlannerHints, summarizeAgentLearning } from '../agentLearning/store.js';
 import { parseAgentDataIntent } from '../agentData/intent.js';
-import { runPublicTrafficReportCli } from '../cli/publicTrafficReport.js';
-import { loadClosedOrderIngestState } from '../closedOrderFeedback/ingest.js';
-import { buildClosedOrderObservationReport, writeClosedOrderObservationReportArtifacts } from '../closedOrderFeedback/observation.js';
 import { loadClosedOrderRegistryContext, type ClosedOrderRegistryPathsInput } from '../closedOrderFeedback/runtime.js';
-import { syncClosedOrderFeedbackFromApi } from '../closedOrderFeedback/sync.js';
 import {
   buildNewLinkBatchConfirmCard,
   buildNewLinkBatchPlan,
@@ -16,12 +13,8 @@ import {
   NEW_LINK_BATCH_WORKFLOW_NAME,
   readNewLinkBatchWorkflowRequest,
 } from '../newLinkWorkflow/batch.js';
-import { sendFeishuCard } from '../notify/feishu.js';
 import { startOperationsLearningSession, summarizeOperationsLearningHistory, summarizeOperationsLearningSession } from '../operationsLearningLoop/session.js';
-import { buildPublicTrafficCard } from '../publicTraffic/buildPublicTrafficCard.js';
-import { buildPublicTrafficFeishuText } from '../publicTraffic/buildPublicTrafficFeishu.js';
 import { executeAgentToolRequest } from './agentToolExecutor.js';
-import { buildClosedOrderObservationCard } from './closedOrderObservationCard.js';
 import { formatIdLookupResult, lookupProductId } from './idLookup.js';
 import { buildIdLookupCard } from './idLookupCard.js';
 import { getSupportedLlmIntentProposals, parseLlmIntentProposal, type LlmIntentProposalProvider } from './llmIntentProposal.js';
@@ -38,8 +31,6 @@ import {
 import { findReadOnlyTool } from './readOnlyToolRegistry.js';
 import { findLatestReportContext, formatLatestSummary, formatProductRows, queryProductRows } from './reportStore.js';
 import type { BotIntent, BotResponse } from './types.js';
-
-let running = false;
 
 const UNKNOWN_GUIDANCE = '我现在可以查：今日概况、商品、新链接池、待处理任务、转化差、曝光低、高潜力、下架链接、订单情况。你可以问“新链接池怎么样”或“查一下721”。';
 const NEW_LINK_WRITE_INTENT_NEEDS_LLM =
@@ -63,6 +54,7 @@ const HELP_TEXT = `📋 数据查询
 
 🎓 运营学习
   运营学习 — 开始运营学习测验
+  Agent学习汇总 — 查看 Agent 澄清与确认学习记录
 
 💰 租赁改价
   改价 761 1天22 10天55 — 指定租期改价（格式：改价 ID 租期1价格1 租期2价格2 ...）
@@ -109,36 +101,19 @@ function rentalOperationConfirmResponse(request: RentalOperationConfirmRequest, 
   return { text: `请确认租赁商品操作：${request.productId}`, card: buildRentalOperationConfirmCard(request, reason) };
 }
 
+function agentToolConfirmResponse(toolName: string, args: Record<string, unknown>, reason: string): BotResponse {
+  const request = { toolName, arguments: args, reason };
+  return {
+    text: `请确认 Agent 操作：${toolName}`,
+    card: buildAgentToolConfirmCard(request),
+  };
+}
+
 function looksLikeNewLinkWriteIntent(text: string): boolean {
   const compact = text.toLowerCase().replace(/\s+/g, '');
   const hasNewLink = /新链|新链接/.test(compact);
   const hasWriteVerb = /铺|补|新建|创建|生成|新增|复制|批量/.test(compact);
   return hasNewLink && hasWriteVerb;
-}
-
-function closedOrderIngestStatePath(outputDir: string): string {
-  return join(outputDir, 'state', 'closed-order-feedback-ingest.json');
-}
-
-function closedOrderObservationArtifactPaths(outputDir: string, reportDate: string): { jsonPath: string; markdownPath: string } {
-  const baseDir = join(outputDir, 'closed-order-observation');
-  const baseName = `closed-order-observation-${reportDate}`;
-  return {
-    jsonPath: join(baseDir, `${baseName}.json`),
-    markdownPath: join(baseDir, `${baseName}.md`),
-  };
-}
-
-function formatClosedOrderSyncSummary(result: Awaited<ReturnType<typeof syncClosedOrderFeedbackFromApi>>): string {
-  return `关单同步完成：拉取 ${result.fetchedCount} 条，新增 ${result.addedCount} 条，更新 ${result.updatedCount} 条，累计 ${result.totalCount} 条。`;
-}
-
-function formatClosedOrderObservationSummary(
-  report: Awaited<ReturnType<typeof buildClosedOrderObservationReport>>,
-  artifactMarkdownPath?: string,
-): string {
-  const base = `关单观察 ${report.date}：近 ${report.windowDays} 天 ${report.summary.recordCount} 条，今日 ${report.summary.todayRecordCount} 条，重点分组 ${report.summary.groupCount} 个，需人工复核 ${report.summary.manualReviewGroupCount} 个。`;
-  return artifactMarkdownPath ? `${base}\n报告已写入：${artifactMarkdownPath}` : base;
 }
 
 async function agentPlannerResponse(
@@ -147,15 +122,22 @@ async function agentPlannerResponse(
   options: HandleBotIntentOptions,
 ): Promise<BotResponse | null> {
   if (!options.agentPlannerProvider) return null;
+  const learningHints = await buildAgentLearningPlannerHints(outputDir, message);
   const rawProposal = await options.agentPlannerProvider.proposePlan({
     message,
     tools: listAgentPlannerTools(),
     workflows: listAgentWorkflows(),
+    ...(learningHints.length ? { learningHints } : {}),
   });
   const parsed = validateAgentPlannerProposal(rawProposal);
   if (!parsed.ok) {
     const workflowParsed = validateAgentWorkflowPlannerProposal(rawProposal);
-    if (!workflowParsed.ok) return null;
+    if (!workflowParsed.ok) {
+      const clarificationParsed = validateAgentPlannerClarificationProposal(rawProposal);
+      return clarificationParsed.ok
+        ? { text: clarificationParsed.proposal.question, card: buildAgentClarificationCard(clarificationParsed.proposal) }
+        : null;
+    }
     if (workflowParsed.proposal.selectedWorkflow !== NEW_LINK_BATCH_WORKFLOW_NAME) return null;
     const workflowRequest = readNewLinkBatchWorkflowRequest(workflowParsed.proposal.arguments);
     if (!workflowRequest) return { text: '新链批量铺设参数无效：需要 keyword 和 count。' };
@@ -180,7 +162,11 @@ async function agentPlannerResponse(
     reason: parsed.proposal.reason,
   };
   if (parsed.policy.decision === 'allow') {
-    return executeAgentToolRequest(request, outputDir, { rentalPriceClient: options.rentalPriceClient });
+    return executeAgentToolRequest(request, outputDir, {
+      rentalPriceClient: options.rentalPriceClient,
+      closedOrderFetchImpl: options.closedOrderFetchImpl,
+      closedOrderRegistryPaths: options.closedOrderRegistryPaths,
+    });
   }
   return {
     text: `请确认 Agent 操作：${parsed.proposal.selectedTool}`,
@@ -194,27 +180,11 @@ export async function handleBotIntent(intent: BotIntent, outputDir = 'output', o
   }
 
   if (intent.type === 'sync_closed_order_feedback') {
-    const result = await syncClosedOrderFeedbackFromApi(
-      closedOrderIngestStatePath(outputDir),
-      process.env,
-      20,
-      options.closedOrderFetchImpl ?? fetch,
-    );
-    return { text: formatClosedOrderSyncSummary(result) };
+    return agentToolConfirmResponse('closedOrder.syncFeedback', {}, '明确飞书命令需要二次确认后才能同步关单反馈。');
   }
 
   if (intent.type === 'run_closed_order_observation_report') {
-    const [state, registryContext] = await Promise.all([
-      loadClosedOrderIngestState(closedOrderIngestStatePath(outputDir)),
-      loadClosedOrderRegistryContext(options.closedOrderRegistryPaths),
-    ]);
-    const report = await buildClosedOrderObservationReport(state.items, registryContext.query);
-    const artifactPaths = closedOrderObservationArtifactPaths(outputDir, report.date);
-    await writeClosedOrderObservationReportArtifacts(artifactPaths.jsonPath, artifactPaths.markdownPath, report);
-    return {
-      text: formatClosedOrderObservationSummary(report, artifactPaths.markdownPath),
-      card: buildClosedOrderObservationCard(report),
-    };
+    return agentToolConfirmResponse('closedOrder.runObservationReport', {}, '明确飞书命令需要二次确认后才能生成关单观察报告。');
   }
 
   if (intent.type === 'latest_summary') {
@@ -284,34 +254,24 @@ export async function handleBotIntent(intent: BotIntent, outputDir = 'output', o
     return { text: await summarizeOperationsLearningHistory(outputDir) };
   }
 
+  if (intent.type === 'agent_learning_summary') {
+    return { text: await summarizeAgentLearning(outputDir) };
+  }
+
   if (intent.type === 'run_public_traffic_report') {
-    if (running) return { text: '公域日报正在运行中，请稍后再试。' };
-    running = true;
-    try {
-      await runPublicTrafficReportCli();
-      return { text: '公域日报已生成并发送。' };
-    } finally {
-      running = false;
-    }
+    return agentToolConfirmResponse('publicTraffic.runReport', {}, '明确飞书命令需要二次确认后才能生成并发送公域日报。');
   }
 
   if (intent.type === 'push_latest_report_to_group') {
-    const latest = await findLatestReportContext(outputDir);
-    if (!latest) return { text: '还没有找到可推送的公域日报。' };
-    const card = buildPublicTrafficCard(latest.context, { markdownPath: '', workbookPath: '' });
-    const fallbackText = buildPublicTrafficFeishuText(latest.context, { markdownPath: '', workbookPath: '' });
-    const result = await sendFeishuCard({ ...process.env, FEISHU_SEND_TO: 'group' }, card, fallbackText);
-    return { text: result.sent ? '最新公域日报已推送到群。' : `公域日报推送到群失败：${result.reason}` };
+    return agentToolConfirmResponse('publicTraffic.pushLatestReportToGroup', {}, '明确飞书命令需要二次确认后才能把日报推送到群。');
   }
 
   if (intent.type === 'resend_latest_report') {
-    const latest = await findLatestReportContext(outputDir);
-    if (!latest) return { text: '还没有找到可重发的公域日报。' };
-    const card = buildPublicTrafficCard(latest.context, { markdownPath: '', workbookPath: '' });
-    const fallbackText = buildPublicTrafficFeishuText(latest.context, { markdownPath: '', workbookPath: '' });
-    const env = intent.sendTo ? { ...process.env, FEISHU_SEND_TO: intent.sendTo } : process.env;
-    const result = await sendFeishuCard(env, card, fallbackText);
-    return { text: result.sent ? '最新公域日报已重发。' : `公域日报重发失败：${result.reason}` };
+    return agentToolConfirmResponse(
+      'publicTraffic.resendLatestReport',
+      intent.sendTo ? { sendTo: intent.sendTo } : {},
+      '明确飞书命令需要二次确认后才能重发公域日报。',
+    );
   }
 
   if (intent.type === 'unknown') {

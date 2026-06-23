@@ -4,6 +4,11 @@ const noArgumentsSchema = { type: 'object', additionalProperties: false };
 const keywordArgumentsSchema = { type: 'object', properties: { keyword: { type: 'string' } }, required: ['keyword'], additionalProperties: false };
 const productIdArgumentsSchema = { type: 'object', properties: { productId: { type: 'string' } }, required: ['productId'], additionalProperties: false };
 const goodsExportPathArgumentsSchema = { type: 'object', properties: { goodsExportPath: { type: 'string' } }, required: ['goodsExportPath'], additionalProperties: false };
+const optionalSendToArgumentsSchema = {
+  type: 'object',
+  properties: { sendTo: { type: 'string' } },
+  additionalProperties: false,
+};
 const rentalOperationArgumentsSchema = {
   type: 'object',
   properties: {
@@ -53,11 +58,39 @@ const agentTools: AgentToolDefinition[] = [
     inputSchema: noArgumentsSchema,
   },
   {
+    name: 'publicTraffic.resendLatestReport',
+    description: '重发最新公域流量日报卡片',
+    risk: 'write',
+    requiresConfirmation: true,
+    inputSchema: optionalSendToArgumentsSchema,
+  },
+  {
+    name: 'publicTraffic.pushLatestReportToGroup',
+    description: '把最新公域流量日报推送到群',
+    risk: 'write',
+    requiresConfirmation: true,
+    inputSchema: noArgumentsSchema,
+  },
+  {
     name: 'publicTraffic.crawlSources',
     description: '抓取公域日报所需的商品总表、曝光、后链路与订单分析原始数据',
     risk: 'write',
     requiresConfirmation: true,
     inputSchema: goodsExportPathArgumentsSchema,
+  },
+  {
+    name: 'closedOrder.syncFeedback',
+    description: '同步关单反馈到本地状态',
+    risk: 'write',
+    requiresConfirmation: true,
+    inputSchema: noArgumentsSchema,
+  },
+  {
+    name: 'closedOrder.runObservationReport',
+    description: '生成关单观察报告并写入产物',
+    risk: 'write',
+    requiresConfirmation: true,
+    inputSchema: noArgumentsSchema,
   },
   {
     name: 'rental.pricePreview',

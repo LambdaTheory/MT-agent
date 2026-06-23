@@ -14,6 +14,7 @@ export type BotIntent =
   | { type: 'operations_learning_quiz' }
   | { type: 'operations_learning_summary' }
   | { type: 'operations_learning_history' }
+  | { type: 'agent_learning_summary' }
   | { type: 'query_product'; keyword: string }
   | { type: 'lookup_product_id_card' }
   | { type: 'lookup_product_id'; query: string }

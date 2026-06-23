@@ -36,6 +36,11 @@ describe('parseBotIntent', () => {
     expect(parseBotIntent('学习反馈历史')).toEqual({ type: 'operations_learning_history' });
   });
 
+  it('parses Agent learning summary intent separately from operations learning', () => {
+    expect(parseBotIntent('Agent学习汇总')).toEqual({ type: 'agent_learning_summary' });
+    expect(parseBotIntent('语义学习统计')).toEqual({ type: 'agent_learning_summary' });
+  });
+
   it('parses latest summary intent', () => {
     expect(parseBotIntent('今日概况')).toEqual({ type: 'latest_summary' });
     expect(parseBotIntent('今天数据')).toEqual({ type: 'latest_summary' });

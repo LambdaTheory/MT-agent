@@ -1,6 +1,8 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { parseAgentToolConfirmRequest } from '../agentRuntime/approvalCard.js';
+import { parseAgentClarificationCustomSelection, parseAgentClarificationSelection } from '../agentRuntime/clarificationCard.js';
 import type { AgentPlannerProvider } from '../agentRuntime/planner.js';
+import { recordAgentLearningEvent } from '../agentLearning/store.js';
 import { replyFeishuMessageCard, replyFeishuMessageText, type FeishuAppSendResult, type FeishuCardPayload, type FeishuReplyConfig } from '../notify/feishuApp.js';
 import { handleOperationsLearningFeedback } from '../operationsLearningLoop/session.js';
 import { findLatestReportContext } from './reportStore.js';
@@ -135,7 +137,11 @@ function isCardActionTrigger(payload: unknown): payload is FeishuCardActionEvent
   return header?.event_type === 'card.action.trigger' || Boolean(event?.action);
 }
 
-async function handleCardActionTrigger(payload: FeishuCardActionEvent, config: FeishuBotServerConfig): Promise<FeishuCardPayload | undefined> {
+async function handleCardActionTrigger(
+  payload: FeishuCardActionEvent,
+  config: FeishuBotServerConfig,
+  dispatchMessage: (message: FeishuBotIncomingTextMessage) => Promise<FeishuBotDispatchResult>,
+): Promise<FeishuCardPayload | undefined> {
   const messageId = extractCardMessageId(payload);
   const value = cardActionValue(payload);
   const actionName = readString(value?.action);
@@ -144,6 +150,8 @@ async function handleCardActionTrigger(payload: FeishuCardActionEvent, config: F
   const replyText = config.replyText ?? replyFeishuMessageText;
   const replyCard = config.replyCard ?? replyFeishuMessageCard;
   const replyConfig = { appId: config.appId, appSecret: config.appSecret, messageId };
+  const actorId = extractCardReviewerId(payload);
+  const outputDir = config.outputDir ?? 'output';
 
   if (actionName === 'operations_learning_feedback') {
     const productId = readString(value?.productId);
@@ -166,14 +174,96 @@ async function handleCardActionTrigger(payload: FeishuCardActionEvent, config: F
     return;
   }
 
+  if (actionName === 'agent_clarify_select') {
+    const selection = parseAgentClarificationSelection(value);
+    if (!selection) {
+      await replyText(replyConfig, 'Agent 澄清选择参数无效，请重新发起。');
+      return;
+    }
+    await recordAgentLearningEvent(outputDir, {
+      type: 'clarification_selected',
+      messageId,
+      actorId,
+      originalMessage: selection.originalMessage,
+      selectedMessage: selection.selectedMessage,
+      label: selection.label,
+    });
+    const response = await dispatchMessage({
+      messageId: `${messageId}:clarify:${Buffer.from(selection.label).toString('hex').slice(0, 16)}`,
+      text: selection.selectedMessage,
+      source: 'http',
+      chatType: 'p2p',
+    });
+    if (!response.skipped) {
+      if (response.card) await replyCard(replyConfig, response.card);
+      else await replyText(replyConfig, response.text);
+    }
+    return;
+  }
+
+  if (actionName === 'agent_clarify_custom') {
+    const selection = parseAgentClarificationCustomSelection(value, readActionFormValue(payload.event?.action, 'custom_message'));
+    if (!selection) {
+      await replyText(replyConfig, '请先在澄清输入框里补充你的真实意图。');
+      return;
+    }
+    await recordAgentLearningEvent(outputDir, {
+      type: 'clarification_selected',
+      messageId,
+      actorId,
+      originalMessage: selection.originalMessage,
+      selectedMessage: selection.selectedMessage,
+      label: selection.label,
+    });
+    const response = await dispatchMessage({
+      messageId: `${messageId}:clarify:${Buffer.from(selection.selectedMessage).toString('hex').slice(0, 16)}`,
+      text: selection.selectedMessage,
+      source: 'http',
+      chatType: 'p2p',
+    });
+    if (!response.skipped) {
+      if (response.card) await replyCard(replyConfig, response.card);
+      else await replyText(replyConfig, response.text);
+    }
+    return;
+  }
+
+  if (actionName === 'agent_clarify_cancel') {
+    await recordAgentLearningEvent(outputDir, {
+      type: 'clarification_cancelled',
+      messageId,
+      actorId,
+      originalMessage: readString(value?.originalMessage),
+    });
+    await replyText(replyConfig, '已取消 Agent 澄清。');
+    return;
+  }
+
   if (actionName === 'agent_tool_confirm') {
     const request = parseAgentToolConfirmRequest(value);
     if (!request) {
       await replyText(replyConfig, 'Agent 操作确认参数无效，请重新发起。');
       return;
     }
+    await recordAgentLearningEvent(outputDir, {
+      type: 'tool_confirmed',
+      messageId,
+      actorId,
+      toolName: request.toolName,
+      arguments: request.arguments,
+      reason: request.reason,
+    });
     const response = await executeAgentToolRequest(request, config.outputDir ?? 'output', {
       rentalPriceClient: config.rentalPriceClient,
+    });
+    await recordAgentLearningEvent(outputDir, {
+      type: 'tool_completed',
+      messageId,
+      actorId,
+      toolName: request.toolName,
+      arguments: request.arguments,
+      reason: request.reason,
+      resultSummary: response.text,
     });
     if (response.card) await replyCard(replyConfig, response.card);
     else await replyText(replyConfig, response.text);
@@ -182,6 +272,12 @@ async function handleCardActionTrigger(payload: FeishuCardActionEvent, config: F
 
   if (actionName === 'agent_tool_cancel') {
     const toolName = readString(value?.toolName) ?? '未知工具';
+    await recordAgentLearningEvent(outputDir, {
+      type: 'tool_cancelled',
+      messageId,
+      actorId,
+      toolName,
+    });
     await replyText(replyConfig, `已取消 Agent 操作：${toolName}`);
     return;
   }
@@ -192,13 +288,41 @@ async function handleCardActionTrigger(payload: FeishuCardActionEvent, config: F
       await replyText(replyConfig, '新链批量复制确认参数无效，请重新发起。');
       return;
     }
+    await recordAgentLearningEvent(outputDir, {
+      type: 'workflow_confirmed',
+      messageId,
+      actorId,
+      workflowName: request.workflowName,
+      originalMessage: request.reason,
+      selectedMessage: `从商品 ${request.sourceProductId} 复制 ${request.count} 条「${request.keyword}」新链`,
+      label: '新链批量复制',
+      arguments: { keyword: request.keyword, count: request.count, sourceProductId: request.sourceProductId },
+      reason: request.reason,
+    });
     const result = await executeNewLinkBatchConfirmRequest(config.rentalPriceClient ?? createRentalPriceSkillClient(), request);
+    await recordAgentLearningEvent(outputDir, {
+      type: result.ok ? 'workflow_completed' : 'workflow_failed',
+      messageId,
+      actorId,
+      workflowName: request.workflowName,
+      arguments: { keyword: request.keyword, count: request.count, sourceProductId: request.sourceProductId },
+      reason: request.reason,
+      resultSummary: result.text,
+    });
     await replyText(replyConfig, result.text);
     return;
   }
 
   if (actionName === 'new_link_batch_cancel') {
     const keyword = readString(value?.keyword) ?? '未知';
+    await recordAgentLearningEvent(outputDir, {
+      type: 'workflow_cancelled',
+      messageId,
+      actorId,
+      workflowName: 'rental.newLinkBatch',
+      label: '新链批量复制',
+      arguments: { keyword },
+    });
     await replyText(replyConfig, `已取消新链批量复制：「${keyword}」`);
     return;
   }
@@ -272,7 +396,7 @@ export function startFeishuBotServer(config: FeishuBotServerConfig) {
     if (verification) return writeJson(res, 200, verification);
 
     if (isCardActionTrigger(payload)) {
-      const card = await handleCardActionTrigger(payload, config);
+      const card = await handleCardActionTrigger(payload, config, dispatchMessage);
       writeJson(res, 200, card ?? { ok: true });
       return;
     }
