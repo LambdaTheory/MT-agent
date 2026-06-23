@@ -91,6 +91,17 @@ describe('parseBotIntent', () => {
     expect(parseBotIntent('可以重新看下日报吗')).toEqual({ type: 'latest_summary' });
   });
 
+  it('keeps new-link write intents for the Agent planner even when the bot name contains report words', () => {
+    expect(parseBotIntent('公域数据日报 端内ID 848 复制 3 条新链')).toEqual({
+      type: 'unknown',
+      text: '公域数据日报 端内ID 848 复制 3 条新链',
+    });
+    expect(parseBotIntent('@公域数据日报 端内ID 848 复制 3 条新链')).toEqual({
+      type: 'unknown',
+      text: '@公域数据日报 端内ID 848 复制 3 条新链',
+    });
+  });
+
   it('falls back to unknown intent', () => {
     expect(parseBotIntent('随便聊聊')).toEqual({ type: 'unknown', text: '随便聊聊' });
   });
