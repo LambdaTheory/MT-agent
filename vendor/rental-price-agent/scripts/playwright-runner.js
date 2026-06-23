@@ -448,7 +448,7 @@ async function actionSpecRemoveItem(specDimId) {
 
   const lastRow = rows[rows.length - 1];
   const parent = await lastRow.evaluateHandle(el => el.closest("div,tr,li"));
-  
+
   // Try multiple strategies to find the delete button
   let delBtn = await parent.$("a[onclick*='remove'],a[onclick*='delete'],a.btn-danger,a[class*='del'],a[class*='remove']");
   if (!delBtn) {
@@ -478,7 +478,7 @@ async function actionSpecRemoveItem(specDimId) {
   } catch (e) {
     log("spec-remove-item fallback failed: " + e.message);
   }
-  
+
   return { status: "error", message: "Delete button not found for dim " + specDimId };
 }
 
