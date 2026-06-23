@@ -15,8 +15,10 @@ export type BotIntent =
   | { type: 'operations_learning_quiz' }
   | { type: 'operations_learning_summary' }
   | { type: 'operations_learning_history' }
+  | { type: 'agent_learning_summary' }
   | { type: 'query_product'; keyword: string }
   | { type: 'lookup_product_id_card' }
+  | { type: 'link_registry_overview' }
   | { type: 'lookup_product_id'; query: string }
   | { type: 'rental_price_change'; productId: string; request: RentalPriceChangeRequest }
   | { type: 'rental_copy'; productId: string }

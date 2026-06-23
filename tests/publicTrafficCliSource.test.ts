@@ -35,7 +35,7 @@ describe('public traffic CLI wiring', () => {
     const text = await source('../src/cli/publicTrafficReport.ts');
     expect(text).toContain('const snapshotDate = daysBefore(date, 1);');
     expect(text).not.toContain('days <= 7');
-    expect(text).toContain('const dailyDelta = previous.found ? computeExposureDailyDelta(dataDate, previous.products, crawlResult.products, mapping) : [];');
+    expect(text).toContain('const dailyDelta = previous.found ? computeExposureDailyDelta(dataDate, previous.products, crawlResult.products, mapping, { newProductPlatformIds: newGoodsPlatformIds }) : [];');
     expect(text).toContain('if (!previous.found) {');
     expect(text).toContain("log.addEvent('商品级曝光历史不足: 跳过商品级日差分');");
     expect(text).toContain("'1d': dailyDelta.map((row) => ({");
@@ -52,6 +52,14 @@ describe('public traffic CLI wiring', () => {
     expect(text).not.toContain("'7d': hasReliableExposureHistory ? sevenDaySummary : []");
     expect(text).not.toContain("'30d': hasReliableExposureHistory ? thirtyDaySummary : []");
     expect(text).toContain('overview: crawlResult.overview');
+  });
+
+  it('bases exposure new_product flags on goods table first-seen state', async () => {
+    const text = await source('../src/cli/publicTrafficReport.ts');
+    expect(text).toContain('newGoodsPlatformIdsFromFirstSeen');
+    expect(text).toContain('entry.firstSeenDate === currentDate');
+    expect(text).toContain('newProductPlatformIds: newGoodsPlatformIds');
+    expect(text).toContain('昨日漏抓=');
   });
 
   it('crawler 接入订单分析抓取', async () => {

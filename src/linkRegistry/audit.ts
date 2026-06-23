@@ -1,8 +1,9 @@
+import { aliasGroupKey, collectEntryAliases, normalizeAlias } from './alias.js';
 import { createLinkRegistryQuery, type SameSkuGroupConfidence } from './queryRegistry.js';
 import type { LinkRegistryEntry, LinkRegistryStatus } from './types.js';
 import type { LinkRegistryOverrideRisk } from './overrides.js';
 
-export type LinkRegistryAuditRiskType = LinkRegistryOverrideRisk['type'] | 'sample_insufficient' | 'classification_unknown';
+export type LinkRegistryAuditRiskType = LinkRegistryOverrideRisk['type'] | 'sample_insufficient' | 'classification_unknown' | 'alias_duplicate_hit' | 'removed_link_returned_in_active_query' | 'platform_id_mapping_missing';
 
 export interface LinkRegistryAuditRisk {
   type: LinkRegistryAuditRiskType;
@@ -135,6 +136,52 @@ function unknownClassificationRisks(entries: LinkRegistryEntry[]): LinkRegistryA
     .map((entry) => ({ type: 'classification_unknown', message: `Entry ${entry.internalProductId} has no complete category/productType classification`, internalProductId: entry.internalProductId }));
 }
 
+function aliasDuplicateRisks(entries: LinkRegistryEntry[]): LinkRegistryAuditRisk[] {
+  const aliasToGroups = new Map<string, Set<string>>();
+  const aliasDisplay = new Map<string, string>();
+  for (const entry of entries) {
+    const groupKey = aliasGroupKey(entry);
+    for (const alias of collectEntryAliases(entry)) {
+      const normalized = normalizeAlias(alias);
+      if (!normalized || normalized.compact.length < 4) continue;
+      const groups = aliasToGroups.get(normalized.compact) ?? new Set<string>();
+      groups.add(groupKey);
+      aliasToGroups.set(normalized.compact, groups);
+      if (!aliasDisplay.has(normalized.compact)) aliasDisplay.set(normalized.compact, alias);
+    }
+  }
+  return [...aliasToGroups.entries()]
+    .filter(([, groups]) => groups.size > 1)
+    .map(([aliasKey]) => ({
+      type: 'alias_duplicate_hit',
+      message: `Alias resolves to multiple groups: ${aliasDisplay.get(aliasKey) ?? aliasKey}`,
+      shortName: aliasDisplay.get(aliasKey) ?? aliasKey,
+    }));
+}
+
+function mappingMissingRisks(entries: LinkRegistryEntry[]): LinkRegistryAuditRisk[] {
+  return entries
+    .filter((entry) => !entry.platformProductId?.trim())
+    .map((entry) => ({
+      type: 'platform_id_mapping_missing',
+      message: `Entry ${entry.internalProductId} is missing platformProductId mapping`,
+      internalProductId: entry.internalProductId,
+    }));
+}
+
+function activeQueryLeakRisks(entries: LinkRegistryEntry[]): LinkRegistryAuditRisk[] {
+  const query = createLinkRegistryQuery(entries);
+  return sameSkuGroupIds(entries).flatMap((sameSkuGroupId) => {
+    const leaked = query.listBySameSkuGroup(sameSkuGroupId).filter((entry) => entry.status !== 'active');
+    return leaked.map((entry) => ({
+      type: 'removed_link_returned_in_active_query' as const,
+      message: `Active query for ${sameSkuGroupId} returned non-active entry ${entry.internalProductId}`,
+      sameSkuGroupId,
+      internalProductId: entry.internalProductId,
+    }));
+  });
+}
+
 function overrideRiskToAuditRisk(risk: LinkRegistryOverrideRisk): LinkRegistryAuditRisk {
   return { type: risk.type, message: risk.message, ...(risk.internalProductId ? { internalProductId: risk.internalProductId } : {}), ...(risk.shortName ? { shortName: risk.shortName } : {}) };
 }
@@ -148,6 +195,9 @@ export function buildLinkRegistryAudit(entries: LinkRegistryEntry[], overrideRis
   const risks = [
     ...overrideRisks.map(overrideRiskToAuditRisk),
     ...unknownClassificationRisks(entries),
+    ...mappingMissingRisks(entries),
+    ...aliasDuplicateRisks(entries),
+    ...activeQueryLeakRisks(entries),
     ...sameSkuGroups.flatMap((group) => group.risks),
   ];
   return {

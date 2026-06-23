@@ -3,11 +3,11 @@ import { buildLinkRegistryAudit } from '../src/linkRegistry/audit.js';
 import type { LinkRegistryEntry } from '../src/linkRegistry/types.js';
 
 const entries: LinkRegistryEntry[] = [
-  { internalProductId: '701', categoryId: 'camera', categoryName: '相机', productType: 'canon-sx', shortName: '佳能 SX70 A', sameSkuGroupId: 'canon-sx70', status: 'active', classificationSource: 'manual_override', source: ['product_id_mapping', 'link_registry_override'] },
-  { internalProductId: '702', categoryId: 'camera', categoryName: '相机', productType: 'canon-sx', shortName: '佳能 SX70 B', sameSkuGroupId: 'canon-sx70', status: 'removed', source: ['product_id_mapping'] },
-  { internalProductId: '703', categoryId: 'camera', categoryName: '相机', productType: 'canon-sx', shortName: '佳能 SX70 C', sameSkuGroupId: 'canon-sx70', status: 'unknown', source: ['product_id_mapping'] },
-  { internalProductId: '704', categoryId: 'camera', categoryName: '相机', productType: 'sony-zv', shortName: '索尼 ZV-1', sameSkuGroupId: 'sony-zv1', status: 'active', source: ['product_id_mapping'] },
-  { internalProductId: '705', shortName: '未分类', status: 'active', source: ['product_id_mapping'] },
+  { internalProductId: '701', platformProductId: 'platform-701', categoryId: 'camera', categoryName: '相机', productType: 'canon-sx', shortName: 'Canon SX70 A', aliases: ['SX70 HS'], sameSkuGroupId: 'canon-sx70', status: 'active', classificationSource: 'manual_override', source: ['product_id_mapping', 'link_registry_override'] },
+  { internalProductId: '702', platformProductId: 'platform-702', categoryId: 'camera', categoryName: '相机', productType: 'canon-sx', shortName: 'Canon SX70 B', aliases: ['SX70 HS'], sameSkuGroupId: 'canon-sx70', status: 'removed', source: ['product_id_mapping'] },
+  { internalProductId: '703', platformProductId: 'platform-703', categoryId: 'camera', categoryName: '相机', productType: 'canon-sx', shortName: 'Canon SX70 C', sameSkuGroupId: 'canon-sx70', status: 'unknown', source: ['product_id_mapping'] },
+  { internalProductId: '704', platformProductId: 'platform-704', categoryId: 'camera', categoryName: '相机', productType: 'sony-zv', shortName: 'Sony ZV-1', aliases: ['Ace pro 2'], sameSkuGroupId: 'sony-zv1', status: 'active', source: ['product_id_mapping'] },
+  { internalProductId: '705', shortName: 'Unclassified', aliases: ['Ace pro 2'], status: 'active', source: ['product_id_mapping'] },
 ];
 
 describe('link registry audit', () => {
@@ -26,12 +26,14 @@ describe('link registry audit', () => {
     expect(audit.sameSkuGroups.find((group) => group.sameSkuGroupId === 'sony-zv1')).toMatchObject({ sampleSize: 1, sampleInsufficient: true, confidence: 'low', manual: false });
   });
 
-  it('surfaces classification unknown and sample insufficient risks', () => {
+  it('surfaces classification unknown, alias duplicate, mapping-missing, and sample risks', () => {
     const audit = buildLinkRegistryAudit(entries);
 
     expect(audit.unknownEntries.map((entry) => entry.internalProductId)).toEqual(['705']);
     expect(audit.risks).toEqual(expect.arrayContaining([
       expect.objectContaining({ type: 'classification_unknown', internalProductId: '705' }),
+      expect.objectContaining({ type: 'platform_id_mapping_missing', internalProductId: '705' }),
+      expect.objectContaining({ type: 'alias_duplicate_hit', shortName: 'Ace pro 2' }),
       expect.objectContaining({ type: 'sample_insufficient', sameSkuGroupId: 'sony-zv1' }),
     ]));
   });

@@ -24,6 +24,10 @@ export interface RentalPriceCopyResult {
   ok: boolean;
   newProductId: string | null;
   lines: string[];
+  status?: string;
+  message?: string;
+  sideEffectPossible?: boolean;
+  retrySafe?: boolean;
 }
 
 export interface RentalPriceDelistResult {
@@ -214,6 +218,16 @@ function commandStatus(response: Record<string, unknown>): string {
   return typeof response.status === 'string' ? response.status : 'unknown';
 }
 
+function optionalString(response: Record<string, unknown>, key: string): string | undefined {
+  const value = response[key];
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function optionalBoolean(response: Record<string, unknown>, key: string): boolean | undefined {
+  const value = response[key];
+  return typeof value === 'boolean' ? value : undefined;
+}
+
 function readableValues(response: Record<string, unknown>): Record<string, unknown> {
   const values = isRecord(response.values) ? response.values : {};
   const firstSpec = Object.values(values).find(isRecord) as Record<string, unknown> | undefined;
@@ -294,7 +308,30 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
       const result = await send({ action: 'copy', productId });
       const status = commandStatus(result);
       const newProductId = typeof result.newProductId === 'string' ? result.newProductId : null;
-      return { productId, ok: status === 'ok', newProductId, lines: [`copy: ${status}`, `newProductId: ${newProductId ?? 'unknown'}`] };
+      const message = optionalString(result, 'message');
+      const sideEffectPossible = optionalBoolean(result, 'sideEffectPossible');
+      const retrySafe = optionalBoolean(result, 'retrySafe');
+      const currentUrl = optionalString(result, 'currentUrl');
+      const newUrl = optionalString(result, 'newUrl');
+      const lines = [
+        `copy: ${status}`,
+        `newProductId: ${newProductId ?? 'unknown'}`,
+        ...(message ? [`message: ${message}`] : []),
+        ...(sideEffectPossible !== undefined ? [`sideEffectPossible: ${sideEffectPossible}`] : []),
+        ...(retrySafe !== undefined ? [`retrySafe: ${retrySafe}`] : []),
+        ...(currentUrl ? [`currentUrl: ${currentUrl}`] : []),
+        ...(newUrl ? [`newUrl: ${newUrl}`] : []),
+      ];
+      return {
+        productId,
+        ok: status === 'ok',
+        newProductId,
+        status,
+        ...(message ? { message } : {}),
+        ...(sideEffectPossible !== undefined ? { sideEffectPossible } : {}),
+        ...(retrySafe !== undefined ? { retrySafe } : {}),
+        lines,
+      };
     },
     async delist(productId) {
       const result = await send({ action: 'delist', productId });
@@ -396,6 +433,12 @@ export async function executeRentalOperationConfirmRequest(client: RentalPriceSk
   switch (request.action) {
     case 'copy': {
       const result = await client.copy(request.productId);
+      if (!result.ok && (result.status === 'unknown' || result.sideEffectPossible)) {
+        return {
+          ok: false,
+          text: `复制状态未知：商品 ${result.productId}\n${result.lines.join('\n')}\n注意：本次复制可能已经提交但未拿到新商品ID；为避免重复复制，请先到后台核对，不要直接重试。`,
+        };
+      }
       return { ok: result.ok, text: result.ok ? (result.newProductId ? `复制成功：商品 ${result.productId} → 新商品 ${result.newProductId}` : `复制成功：商品 ${result.productId} 已复制（新商品ID未能自动获取，请到后台确认）`) : `复制失败：商品 ${result.productId}\n${result.lines.join('\n')}` };
     }
     case 'delist': {

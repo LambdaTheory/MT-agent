@@ -1,4 +1,8 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { parseAgentToolConfirmRequest } from '../agentRuntime/approvalCard.js';
+import { parseAgentClarificationCustomSelection, parseAgentClarificationSelection } from '../agentRuntime/clarificationCard.js';
+import type { AgentPlannerProvider } from '../agentRuntime/planner.js';
+import { recordAgentLearningEvent } from '../agentLearning/store.js';
 import { replyFeishuMessageCard, replyFeishuMessageText, type FeishuAppSendResult, type FeishuCardPayload, type FeishuReplyConfig } from '../notify/feishuApp.js';
 import { handleOperationsLearningFeedback } from '../operationsLearningLoop/session.js';
 import { findLatestReportContext } from './reportStore.js';
@@ -11,6 +15,8 @@ import {
   parseActivityAutomationConfirmRequest,
   type ActivityAutomationSkillClient,
 } from './activityAutomation.js';
+import { executeAgentToolRequest } from './agentToolExecutor.js';
+import { executeNewLinkBatchConfirmRequest, parseNewLinkBatchConfirmRequest } from '../newLinkWorkflow/batch.js';
 import { createRentalPriceSkillClient, executeRentalOperationConfirmRequest, parseRentalOperationConfirmRequest, parseRentalPriceConfirmRequest, type RentalPriceSkillClient } from './rentalPrice.js';
 import type { LlmIntentProposalProvider } from './llmIntentProposal.js';
 import type { BotIntent, BotResponse, FeishuBotDispatchResult, FeishuBotIncomingTextMessage, FeishuMessageEvent } from './types.js';
@@ -32,6 +38,7 @@ export interface FeishuBotServerConfig {
   rentalPriceClient?: RentalPriceSkillClient;
   activityAutomationClient?: ActivityAutomationSkillClient;
   llmIntentProposalProvider?: LlmIntentProposalProvider;
+  agentPlannerProvider?: AgentPlannerProvider;
 }
 
 interface FeishuCardActionEvent {
@@ -97,16 +104,100 @@ function readNumber(value: unknown): number | undefined {
   return undefined;
 }
 
-function cardActionValue(payload: FeishuCardActionEvent): Record<string, unknown> | undefined {
-  const action = payload.event?.action;
-  if (isRecord(action?.value)) return action.value;
+function expectedActionForButtonName(name: string | undefined): string | undefined {
+  if (!name) return undefined;
+  const exact: Record<string, string> = {
+    agent_tool_confirm_submit: 'agent_tool_confirm',
+    agent_tool_cancel_submit: 'agent_tool_cancel',
+    new_link_batch_confirm_submit: 'new_link_batch_confirm',
+    new_link_batch_cancel_submit: 'new_link_batch_cancel',
+    new_link_batch_confirm_form: 'new_link_batch_confirm',
+    new_link_batch_cancel_form: 'new_link_batch_cancel',
+    rental_price_confirm_submit: 'rental_price_confirm',
+    rental_price_cancel_submit: 'rental_price_cancel',
+    rental_operation_confirm_submit: 'rental_operation_confirm',
+    rental_operation_cancel_submit: 'rental_operation_cancel',
+    id_lookup_submit: 'id_lookup',
+  };
+  if (exact[name]) return exact[name];
+  if (name.startsWith('agent_clarify_select_')) return 'agent_clarify_select';
+  if (name === 'agent_clarify_custom') return 'agent_clarify_custom';
+  if (name === 'agent_clarify_cancel') return 'agent_clarify_cancel';
+  return undefined;
+}
+
+function actionValueCandidates(action: FeishuCardAction | undefined): Record<string, unknown>[] {
+  const candidates: Record<string, unknown>[] = [];
+  if (isRecord(action?.value)) candidates.push(action.value);
   if (Array.isArray(action?.behaviors)) {
     for (const behavior of action.behaviors) {
-      if (isRecord(behavior) && isRecord(behavior.value)) return behavior.value;
+      if (isRecord(behavior) && isRecord(behavior.value)) candidates.push(behavior.value);
     }
   }
-  if (readString(action?.name) === 'id_lookup_submit') return { action: 'id_lookup' };
+  return candidates;
+}
+
+function fallbackCancelValue(expectedAction: string, candidates: Record<string, unknown>[]): Record<string, unknown> | undefined {
+  const first = candidates[0];
+  const request = isRecord(first?.request) ? first.request : undefined;
+  if (expectedAction === 'new_link_batch_cancel') {
+    const keyword = readString(first?.keyword) ?? readString(request?.keyword);
+    const sourceProductId = readString(first?.sourceProductId) ?? readString(request?.sourceProductId);
+    return { action: expectedAction, ...(keyword ? { keyword } : {}), ...(sourceProductId ? { sourceProductId } : {}) };
+  }
+  if (expectedAction === 'rental_price_cancel' || expectedAction === 'rental_operation_cancel') {
+    const productId = readString(first?.productId) ?? readString(request?.productId);
+    return { action: expectedAction, ...(productId ? { productId } : {}) };
+  }
+  if (expectedAction === 'agent_tool_cancel') {
+    const toolName = readString(first?.toolName) ?? readString(request?.toolName);
+    return { action: expectedAction, ...(toolName ? { toolName } : {}) };
+  }
   return undefined;
+}
+
+function cardActionValue(payload: FeishuCardActionEvent): Record<string, unknown> | undefined {
+  const action = payload.event?.action;
+  const expectedAction = expectedActionForButtonName(readString(action?.name));
+  const candidates = actionValueCandidates(action);
+  if (expectedAction) {
+    const matched = candidates.find((candidate) => readString(candidate.action) === expectedAction);
+    if (matched) return matched;
+    if (expectedAction.endsWith('_cancel')) return fallbackCancelValue(expectedAction, candidates);
+    if (expectedAction === 'id_lookup') return { action: 'id_lookup' };
+    return undefined;
+  }
+  if (candidates[0]) return candidates[0];
+  return undefined;
+}
+
+type ServerCardActionStatus = 'processing' | 'completed' | 'failed' | 'cancelled';
+
+interface ServerCardActionClaim {
+  status: ServerCardActionStatus;
+  actionName: string;
+}
+
+const serverCardActionClaims = new Map<string, ServerCardActionClaim>();
+
+function claimServerCardAction(messageId: string, family: string, actionName: string): { claimed: true; key: string } | { claimed: false; claim: ServerCardActionClaim } {
+  const key = `${messageId}:${family}`;
+  const existing = serverCardActionClaims.get(key);
+  if (existing) return { claimed: false, claim: existing };
+  serverCardActionClaims.set(key, { status: 'processing', actionName });
+  return { claimed: true, key };
+}
+
+function setServerCardActionStatus(key: string, status: ServerCardActionStatus): void {
+  const claim = serverCardActionClaims.get(key);
+  if (claim) claim.status = status;
+}
+
+function duplicateServerCardActionText(claim: ServerCardActionClaim): string {
+  if (claim.status === 'processing') return '该确认卡片已经在执行中，请勿重复点击。';
+  if (claim.status === 'completed') return '该确认卡片已经执行完成，请勿重复点击。';
+  if (claim.status === 'cancelled') return '该确认卡片已经取消，请勿重复点击。';
+  return '该确认卡片已经处理过，请重新发起命令。';
 }
 
 function readActionFormValue(action: FeishuCardAction | undefined, name: string): string | undefined {
@@ -147,7 +238,11 @@ function isCardActionTrigger(payload: unknown): payload is FeishuCardActionEvent
   return header?.event_type === 'card.action.trigger' || Boolean(event?.action);
 }
 
-async function handleCardActionTrigger(payload: FeishuCardActionEvent, config: FeishuBotServerConfig): Promise<FeishuCardPayload | undefined> {
+async function handleCardActionTrigger(
+  payload: FeishuCardActionEvent,
+  config: FeishuBotServerConfig,
+  dispatchMessage: (message: FeishuBotIncomingTextMessage) => Promise<FeishuBotDispatchResult>,
+): Promise<FeishuCardPayload | undefined> {
   const messageId = extractCardMessageId(payload);
   const value = cardActionValue(payload);
   const actionName = readString(value?.action);
@@ -156,6 +251,8 @@ async function handleCardActionTrigger(payload: FeishuCardActionEvent, config: F
   const replyText = config.replyText ?? replyFeishuMessageText;
   const replyCard = config.replyCard ?? replyFeishuMessageCard;
   const replyConfig = { appId: config.appId, appSecret: config.appSecret, messageId };
+  const actorId = extractCardReviewerId(payload);
+  const outputDir = config.outputDir ?? 'output';
 
   if (actionName === 'operations_learning_feedback') {
     const productId = readString(value?.productId);
@@ -175,6 +272,171 @@ async function handleCardActionTrigger(payload: FeishuCardActionEvent, config: F
     });
     if (response.card) await replyCard(replyConfig, response.card);
     else await replyText(replyConfig, response.text);
+    return;
+  }
+
+  if (actionName === 'agent_clarify_select') {
+    const selection = parseAgentClarificationSelection(value);
+    if (!selection) {
+      await replyText(replyConfig, 'Agent 澄清选择参数无效，请重新发起。');
+      return;
+    }
+    await recordAgentLearningEvent(outputDir, {
+      type: 'clarification_selected',
+      messageId,
+      actorId,
+      originalMessage: selection.originalMessage,
+      selectedMessage: selection.selectedMessage,
+      label: selection.label,
+    });
+    const response = await dispatchMessage({
+      messageId: `${messageId}:clarify:${Buffer.from(selection.label).toString('hex').slice(0, 16)}`,
+      text: selection.selectedMessage,
+      source: 'http',
+      chatType: 'p2p',
+    });
+    if (!response.skipped) {
+      if (response.card) await replyCard(replyConfig, response.card);
+      else await replyText(replyConfig, response.text);
+    }
+    return;
+  }
+
+  if (actionName === 'agent_clarify_custom') {
+    const selection = parseAgentClarificationCustomSelection(value, readActionFormValue(payload.event?.action, 'custom_message'));
+    if (!selection) {
+      await replyText(replyConfig, '请先在澄清输入框里补充你的真实意图。');
+      return;
+    }
+    await recordAgentLearningEvent(outputDir, {
+      type: 'clarification_selected',
+      messageId,
+      actorId,
+      originalMessage: selection.originalMessage,
+      selectedMessage: selection.selectedMessage,
+      label: selection.label,
+    });
+    const response = await dispatchMessage({
+      messageId: `${messageId}:clarify:${Buffer.from(selection.selectedMessage).toString('hex').slice(0, 16)}`,
+      text: selection.selectedMessage,
+      source: 'http',
+      chatType: 'p2p',
+    });
+    if (!response.skipped) {
+      if (response.card) await replyCard(replyConfig, response.card);
+      else await replyText(replyConfig, response.text);
+    }
+    return;
+  }
+
+  if (actionName === 'agent_clarify_cancel') {
+    await recordAgentLearningEvent(outputDir, {
+      type: 'clarification_cancelled',
+      messageId,
+      actorId,
+      originalMessage: readString(value?.originalMessage),
+    });
+    await replyText(replyConfig, '已取消 Agent 澄清。');
+    return;
+  }
+
+  if (actionName === 'agent_tool_confirm') {
+    const request = parseAgentToolConfirmRequest(value);
+    if (!request) {
+      await replyText(replyConfig, 'Agent 操作确认参数无效，请重新发起。');
+      return;
+    }
+    await recordAgentLearningEvent(outputDir, {
+      type: 'tool_confirmed',
+      messageId,
+      actorId,
+      toolName: request.toolName,
+      arguments: request.arguments,
+      reason: request.reason,
+    });
+    const response = await executeAgentToolRequest(request, config.outputDir ?? 'output', {
+      rentalPriceClient: config.rentalPriceClient,
+    });
+    await recordAgentLearningEvent(outputDir, {
+      type: 'tool_completed',
+      messageId,
+      actorId,
+      toolName: request.toolName,
+      arguments: request.arguments,
+      reason: request.reason,
+      resultSummary: response.text,
+    });
+    if (response.card) await replyCard(replyConfig, response.card);
+    else await replyText(replyConfig, response.text);
+    return;
+  }
+
+  if (actionName === 'agent_tool_cancel') {
+    const toolName = readString(value?.toolName) ?? '未知工具';
+    await recordAgentLearningEvent(outputDir, {
+      type: 'tool_cancelled',
+      messageId,
+      actorId,
+      toolName,
+    });
+    await replyText(replyConfig, `已取消 Agent 操作：${toolName}`);
+    return;
+  }
+
+  if (actionName === 'new_link_batch_confirm') {
+    const request = parseNewLinkBatchConfirmRequest(value);
+    if (!request) {
+      await replyText(replyConfig, '新链批量复制确认参数无效，请重新发起。');
+      return;
+    }
+    const claim = claimServerCardAction(messageId, 'new_link_batch', actionName);
+    if (!claim.claimed) {
+      await replyText(replyConfig, duplicateServerCardActionText(claim.claim));
+      return;
+    }
+    await recordAgentLearningEvent(outputDir, {
+      type: 'workflow_confirmed',
+      messageId,
+      actorId,
+      workflowName: request.workflowName,
+      originalMessage: request.reason,
+      selectedMessage: `从商品 ${request.sourceProductId} 复制 ${request.count} 条「${request.keyword}」新链`,
+      label: '新链批量复制',
+      arguments: { keyword: request.keyword, count: request.count, sourceProductId: request.sourceProductId },
+      reason: request.reason,
+    });
+    const result = await executeNewLinkBatchConfirmRequest(config.rentalPriceClient ?? createRentalPriceSkillClient(), request);
+    setServerCardActionStatus(claim.key, result.ok ? 'completed' : 'failed');
+    await recordAgentLearningEvent(outputDir, {
+      type: result.ok ? 'workflow_completed' : 'workflow_failed',
+      messageId,
+      actorId,
+      workflowName: request.workflowName,
+      arguments: { keyword: request.keyword, count: request.count, sourceProductId: request.sourceProductId },
+      reason: request.reason,
+      resultSummary: result.text,
+    });
+    await replyText(replyConfig, result.text);
+    return;
+  }
+
+  if (actionName === 'new_link_batch_cancel') {
+    const keyword = readString(value?.keyword) ?? '未知';
+    const claim = claimServerCardAction(messageId, 'new_link_batch', actionName);
+    if (!claim.claimed) {
+      await replyText(replyConfig, duplicateServerCardActionText(claim.claim));
+      return;
+    }
+    setServerCardActionStatus(claim.key, 'cancelled');
+    await recordAgentLearningEvent(outputDir, {
+      type: 'workflow_cancelled',
+      messageId,
+      actorId,
+      workflowName: 'rental.newLinkBatch',
+      label: '新链批量复制',
+      arguments: { keyword },
+    });
+    await replyText(replyConfig, `已取消新链批量复制：「${keyword}」`);
     return;
   }
 
@@ -245,6 +507,7 @@ export function startFeishuBotServer(config: FeishuBotServerConfig) {
     rentalPriceClient: config.rentalPriceClient,
     activityAutomationClient: config.activityAutomationClient,
     llmIntentProposalProvider: config.llmIntentProposalProvider,
+    agentPlannerProvider: config.agentPlannerProvider,
   });
   const dispatchMessage = config.dispatchMessage ?? dispatcher.dispatch;
 
@@ -258,7 +521,7 @@ export function startFeishuBotServer(config: FeishuBotServerConfig) {
     if (verification) return writeJson(res, 200, verification);
 
     if (isCardActionTrigger(payload)) {
-      const card = await handleCardActionTrigger(payload, config);
+      const card = await handleCardActionTrigger(payload, config, dispatchMessage);
       writeJson(res, 200, card ?? { ok: true });
       return;
     }

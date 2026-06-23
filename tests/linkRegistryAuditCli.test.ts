@@ -6,9 +6,9 @@ import { runLinkRegistryAuditCli } from '../src/cli/linkRegistryAudit.js';
 import type { LinkRegistryEntry } from '../src/linkRegistry/types.js';
 
 const entries: LinkRegistryEntry[] = [
-  { internalProductId: '701', categoryId: 'camera', categoryName: '相机', productType: 'canon-sx', shortName: '佳能 SX70', sameSkuGroupId: 'canon-sx70', status: 'active', source: ['product_id_mapping'] },
-  { internalProductId: '702', categoryId: 'camera', categoryName: '相机', productType: 'canon-sx', shortName: '佳能 SX70 B', sameSkuGroupId: 'canon-sx70', status: 'removed', source: ['product_id_mapping'] },
-  { internalProductId: '703', shortName: '未分类', status: 'unknown', source: ['product_id_mapping'] },
+  { internalProductId: '701', platformProductId: 'platform-701', categoryId: 'camera', categoryName: '相机', productType: 'canon-sx', shortName: 'Canon SX70', sameSkuGroupId: 'canon-sx70', status: 'active', source: ['product_id_mapping'] },
+  { internalProductId: '702', platformProductId: 'platform-702', categoryId: 'camera', categoryName: '相机', productType: 'canon-sx', shortName: 'Canon SX70 B', sameSkuGroupId: 'canon-sx70', status: 'removed', source: ['product_id_mapping'] },
+  { internalProductId: '703', shortName: 'Unclassified', status: 'unknown', source: ['product_id_mapping'] },
 ];
 
 describe('link registry audit CLI', () => {

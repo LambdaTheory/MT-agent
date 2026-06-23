@@ -19,6 +19,15 @@ export interface OpenAiCompatibleLlmProviderConfig {
   fetchImpl?: typeof fetch;
 }
 
+export interface LlmProviderEnvSummary {
+  enabled: boolean;
+  reason: string;
+  providerName?: string;
+  model?: string;
+  apiKeyConfigured: boolean;
+  missingKeys: string[];
+}
+
 interface ChatCompletionResponse {
   model?: unknown;
   choices?: Array<{ message?: { content?: unknown } }>;
@@ -27,6 +36,57 @@ interface ChatCompletionResponse {
 function normalized(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
   return trimmed ? trimmed : undefined;
+}
+
+function envValue(env: OpenAiCompatibleLlmEnv, primary: keyof OpenAiCompatibleLlmEnv, fallback: keyof OpenAiCompatibleLlmEnv): string | undefined {
+  return normalized(env[primary]) ?? normalized(env[fallback]);
+}
+
+export function summarizeLlmProviderEnv(env: OpenAiCompatibleLlmEnv = process.env): LlmProviderEnvSummary {
+  const providerName = envValue(env, 'MT_AGENT_LLM_PROVIDER', 'LLM_PROVIDER');
+  if (providerName === 'disabled') {
+    return {
+      enabled: false,
+      reason: 'disabled by provider setting',
+      providerName,
+      apiKeyConfigured: Boolean(envValue(env, 'MT_AGENT_LLM_API_KEY', 'LLM_API_KEY')),
+      missingKeys: [],
+    };
+  }
+
+  const baseUrl = envValue(env, 'MT_AGENT_LLM_BASE_URL', 'LLM_BASE_URL');
+  const model = envValue(env, 'MT_AGENT_LLM_MODEL', 'LLM_MODEL');
+  const apiKey = envValue(env, 'MT_AGENT_LLM_API_KEY', 'LLM_API_KEY');
+  const missingKeys = [
+    ...(baseUrl ? [] : ['MT_AGENT_LLM_BASE_URL or LLM_BASE_URL']),
+    ...(model ? [] : ['MT_AGENT_LLM_MODEL or LLM_MODEL']),
+  ];
+
+  if (missingKeys.length > 0) {
+    return {
+      enabled: false,
+      reason: `missing ${missingKeys.join(', ')}`,
+      ...(providerName ? { providerName } : {}),
+      ...(model ? { model } : {}),
+      apiKeyConfigured: Boolean(apiKey),
+      missingKeys,
+    };
+  }
+
+  return {
+    enabled: true,
+    reason: 'configured',
+    ...(providerName ? { providerName } : {}),
+    model: model!,
+    apiKeyConfigured: Boolean(apiKey),
+    missingKeys: [],
+  };
+}
+
+export function formatLlmProviderEnvSummary(summary: LlmProviderEnvSummary): string {
+  if (!summary.enabled) return `disabled (${summary.reason})`;
+  const provider = summary.providerName ? `provider=${summary.providerName}, ` : '';
+  return `enabled (${provider}model=${summary.model}, apiKey=${summary.apiKeyConfigured ? 'set' : 'not set'})`;
 }
 
 function chatCompletionsUrl(baseUrl: string): string {
@@ -75,12 +135,12 @@ export class OpenAiCompatibleLlmProvider implements LlmProvider {
 }
 
 export function createLlmProviderFromEnv(env: OpenAiCompatibleLlmEnv = process.env, fetchImpl: typeof fetch = fetch): LlmProvider | null {
-  const providerName = normalized(env.MT_AGENT_LLM_PROVIDER) ?? normalized(env.LLM_PROVIDER);
+  const providerName = envValue(env, 'MT_AGENT_LLM_PROVIDER', 'LLM_PROVIDER');
   if (providerName === 'disabled') return null;
-  const baseUrl = normalized(env.MT_AGENT_LLM_BASE_URL) ?? normalized(env.LLM_BASE_URL);
-  const model = normalized(env.MT_AGENT_LLM_MODEL) ?? normalized(env.LLM_MODEL);
+  const baseUrl = envValue(env, 'MT_AGENT_LLM_BASE_URL', 'LLM_BASE_URL');
+  const model = envValue(env, 'MT_AGENT_LLM_MODEL', 'LLM_MODEL');
   if (!baseUrl || !model) return null;
-  const apiKey = normalized(env.MT_AGENT_LLM_API_KEY) ?? normalized(env.LLM_API_KEY);
+  const apiKey = envValue(env, 'MT_AGENT_LLM_API_KEY', 'LLM_API_KEY');
   return new OpenAiCompatibleLlmProvider({ baseUrl, model, apiKey, fetchImpl });
 }
 

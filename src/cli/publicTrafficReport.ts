@@ -281,6 +281,15 @@ function goodsSnapshotFromMapping(mapping: ProductIdMapping): GoodsSnapshotItem[
   return items;
 }
 
+function newGoodsPlatformIdsFromFirstSeen(currentGoods: GoodsSnapshotItem[], firstSeen: GoodsFirstSeenIndex, currentDate: string): string[] {
+  return currentGoods.flatMap((item) => {
+    const internalId = item.internalProductId.trim();
+    if (!/^\d+$/.test(internalId)) return [];
+    const entry = firstSeen[internalId];
+    return entry && !entry.baseline && entry.firstSeenDate === currentDate ? [item.platformProductId] : [];
+  });
+}
+
 async function loadGoodsFirstSeenState(path: string): Promise<{ state: GoodsFirstSeenIndex; found: boolean }> {
   try {
     const parsed = JSON.parse(await readFile(path, 'utf8')) as unknown;
@@ -426,6 +435,7 @@ export async function runPublicTrafficReportCli(): Promise<void> {
       current: currentGoodsSnapshot,
       baseline: !previousFirstSeen.found,
     });
+    const newGoodsPlatformIds = newGoodsPlatformIdsFromFirstSeen(currentGoodsSnapshot, firstSeenState, runDate);
     await saveGoodsFirstSeenState(paths.goodsFirstSeenState, firstSeenState);
     const previousLinkLifecycleState = await loadGoodsLinkLifecycleState(paths.goodsLinkLifecycleState, log);
     const linkLifecycle = updateGoodsLinkLifecycle({
@@ -494,9 +504,9 @@ export async function runPublicTrafficReportCli(): Promise<void> {
     if (!previous.found) {
       log.addEvent('商品级曝光历史不足: 跳过商品级日差分');
     }
-    const dailyDelta = previous.found ? computeExposureDailyDelta(dataDate, previous.products, crawlResult.products, mapping) : [];
+    const dailyDelta = previous.found ? computeExposureDailyDelta(dataDate, previous.products, crawlResult.products, mapping, { newProductPlatformIds: newGoodsPlatformIds }) : [];
     await writeFile(paths.exposureDailyDelta, JSON.stringify(dailyDelta, null, 2), 'utf8');
-    log.addEvent(`日差分: ${dailyDelta.length} 条, 新品=${dailyDelta.filter((row) => row.flags.includes('new_product')).length}`);
+    log.addEvent(`日差分: ${dailyDelta.length} 条, 新品=${dailyDelta.filter((row) => row.flags.includes('new_product')).length}, 昨日漏抓=${dailyDelta.filter((row) => row.flags.includes('missing_previous_snapshot_row')).length}`);
 
     const sevenDayDeltas = await loadRecentExposureDeltas(config.outputDir, runDate, 7);
     const thirtyDayDeltas = await loadRecentExposureDeltas(config.outputDir, runDate, 30);

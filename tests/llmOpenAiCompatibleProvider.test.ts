@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createLlmProviderFromEnv, createOpenAiCompatibleProviderFromEnv, OpenAiCompatibleLlmProvider } from '../src/llm/openAiCompatibleProvider.js';
+import {
+  createLlmProviderFromEnv,
+  createOpenAiCompatibleProviderFromEnv,
+  formatLlmProviderEnvSummary,
+  OpenAiCompatibleLlmProvider,
+  summarizeLlmProviderEnv,
+} from '../src/llm/openAiCompatibleProvider.js';
 
 function jsonResponse(value: unknown, status = 200): Response {
   return new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
@@ -70,5 +76,27 @@ describe('OpenAiCompatibleLlmProvider', () => {
 
   it('keeps the MVP provider disabled when LLM_PROVIDER is disabled', () => {
     expect(createLlmProviderFromEnv({ LLM_PROVIDER: 'disabled', LLM_BASE_URL: 'https://llm.example/v1', LLM_MODEL: 'test-model' })).toBeNull();
+  });
+
+  it('summarizes LLM runtime env without leaking API keys', () => {
+    const enabled = summarizeLlmProviderEnv({
+      MT_AGENT_LLM_PROVIDER: 'openai-compatible',
+      MT_AGENT_LLM_BASE_URL: 'https://llm.example/v1',
+      MT_AGENT_LLM_API_KEY: 'secret-token',
+      MT_AGENT_LLM_MODEL: 'demo-model',
+    });
+
+    expect(enabled).toMatchObject({
+      enabled: true,
+      providerName: 'openai-compatible',
+      model: 'demo-model',
+      apiKeyConfigured: true,
+      missingKeys: [],
+    });
+    const text = formatLlmProviderEnvSummary(enabled);
+    expect(text).toBe('enabled (provider=openai-compatible, model=demo-model, apiKey=set)');
+    expect(text).not.toContain('secret-token');
+
+    expect(formatLlmProviderEnvSummary(summarizeLlmProviderEnv({ LLM_MODEL: 'demo-model' }))).toContain('missing MT_AGENT_LLM_BASE_URL or LLM_BASE_URL');
   });
 });

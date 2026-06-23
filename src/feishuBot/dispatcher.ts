@@ -7,6 +7,7 @@ import type { LlmIntentProposalProvider } from './llmIntentProposal.js';
 import type { RentalPriceSkillClient } from './rentalPrice.js';
 import type { ActivityAutomationSkillClient } from './activityAutomation.js';
 import type { BotIntent, BotIntentResolver, BotResponse, FeishuBotDispatchResult, FeishuBotIncomingTextMessage } from './types.js';
+import type { AgentPlannerProvider } from '../agentRuntime/planner.js';
 
 export interface FeishuMessageDispatcherConfig {
   outputDir?: string;
@@ -17,6 +18,7 @@ export interface FeishuMessageDispatcherConfig {
   handleIntent?: (intent: BotIntent, outputDir?: string) => Promise<BotResponse>;
   llmToolSelector?: LlmToolSelectionProvider;
   llmIntentProposalProvider?: LlmIntentProposalProvider;
+  agentPlannerProvider?: AgentPlannerProvider;
   rentalPriceClient?: RentalPriceSkillClient;
   activityAutomationClient?: ActivityAutomationSkillClient;
   logError?: (error: unknown, message: FeishuBotIncomingTextMessage) => void;
@@ -81,7 +83,9 @@ function canonicalizeIntent(intent: BotIntent): BotIntent {
     case 'operations_learning_quiz':
     case 'operations_learning_summary':
     case 'operations_learning_history':
+    case 'agent_learning_summary':
     case 'lookup_product_id_card':
+    case 'link_registry_overview':
     case 'push_latest_report_to_group':
     case 'sync_closed_order_feedback':
     case 'run_closed_order_observation_report':
@@ -138,6 +142,7 @@ export function createFeishuMessageDispatcher(config: FeishuMessageDispatcherCon
   const handleIntent = config.handleIntent ?? ((intent, outputDir) => handleBotIntent(intent, outputDir, {
     llmToolSelector: config.llmToolSelector,
     llmIntentProposalProvider: config.llmIntentProposalProvider,
+    agentPlannerProvider: config.agentPlannerProvider,
     rentalPriceClient: config.rentalPriceClient,
     activityAutomationClient: config.activityAutomationClient,
   }));
@@ -157,6 +162,7 @@ export function createFeishuMessageDispatcher(config: FeishuMessageDispatcherCon
           handleIntent,
           llmToolSelector: config.llmToolSelector,
           llmIntentProposalProvider: config.llmIntentProposalProvider,
+          agentPlannerProvider: config.agentPlannerProvider,
           rentalPriceClient: config.rentalPriceClient,
           activityAutomationClient: config.activityAutomationClient,
         });

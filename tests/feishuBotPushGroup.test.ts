@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { executeAgentToolRequest } from '../src/feishuBot/agentToolExecutor.js';
 import { handleBotIntent } from '../src/feishuBot/tools.js';
 
 const mocks = vi.hoisted(() => ({
@@ -79,10 +80,27 @@ describe('push latest report to group', () => {
     mocks.sendFeishuCard.mockResolvedValue({ sent: true, channel: 'app' });
   });
 
-  it('pushes the latest saved public traffic report to group only', async () => {
+  it('returns a confirmation card before pushing the latest saved public traffic report to group', async () => {
     const outputDir = await writeContext();
 
     const response = await handleBotIntent({ type: 'push_latest_report_to_group' }, outputDir);
+
+    expect(response.text).toBe('请确认 Agent 操作：publicTraffic.pushLatestReportToGroup');
+    expect(response.card).toBeDefined();
+    expect(JSON.stringify(response.card)).toContain('agent_tool_confirm');
+    expect(JSON.stringify(response.card)).toContain('publicTraffic.pushLatestReportToGroup');
+    expect(mocks.runPublicTrafficReportCli).not.toHaveBeenCalled();
+    expect(mocks.sendFeishuCard).not.toHaveBeenCalled();
+  });
+
+  it('pushes the latest saved public traffic report to group only after confirmation', async () => {
+    const outputDir = await writeContext();
+
+    const response = await executeAgentToolRequest({
+      toolName: 'publicTraffic.pushLatestReportToGroup',
+      arguments: {},
+      reason: '测试确认推送日报到群',
+    }, outputDir);
 
     expect(response.text).toBe('最新公域日报已推送到群。');
     expect(mocks.runPublicTrafficReportCli).not.toHaveBeenCalled();

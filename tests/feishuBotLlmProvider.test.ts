@@ -10,6 +10,13 @@ describe('parseLlmToolSelection', () => {
     });
   });
 
+  it('parses best same-sku ranking as a read-only tool selection', () => {
+    expect(parseLlmToolSelection('{"intent":"rank_best","tool":"rank_best_same_sku_product","arguments":{"query":"Ace pro 2"},"confidence":0.9,"reason":"查询同款组表现最佳链接"}')).toEqual({
+      ok: true,
+      selection: { intent: 'rank_best', tool: 'rank_best_same_sku_product', arguments: { query: 'Ace pro 2' }, confidence: 0.9, reason: '查询同款组表现最佳链接' },
+    });
+  });
+
   it('rejects invalid JSON', () => {
     expect(parseLlmToolSelection('不是 JSON')).toEqual({ ok: false, reason: 'invalid_json' });
   });

@@ -2,9 +2,12 @@ import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import type { AgentPlannerProvider } from '../src/agentRuntime/planner.js';
 import type { LlmIntentProposalProvider } from '../src/feishuBot/llmIntentProposal.js';
 import type { LlmToolSelectionProvider } from '../src/feishuBot/llmProvider.js';
 import type { RentalPriceSkillClient } from '../src/feishuBot/rentalPrice.js';
+import { recordAgentLearningEvent } from '../src/agentLearning/store.js';
+import { executeAgentToolRequest } from '../src/feishuBot/agentToolExecutor.js';
 import { handleBotIntent } from '../src/feishuBot/tools.js';
 
 const summary = {
@@ -45,6 +48,17 @@ async function writeContext(): Promise<string> {
     rows: [
       { productName: 'iPhone 15', platformProductId: '2000000000000000000001', displayProductId: '端内ID 565', custodyDays: 10, periods: { '1d': metric, '7d': metric, '30d': metric } },
       { productName: '大疆 Pocket 3', platformProductId: 'p701', displayProductId: '端内ID 701', custodyDays: 1, periods: { '1d': metric, '7d': metric, '30d': metric } },
+      {
+        productName: '大疆 Pocket 3 高转化套装',
+        platformProductId: 'p702',
+        displayProductId: '端内ID 702',
+        custodyDays: 2,
+        periods: {
+          '1d': { ...metric, shippedOrders: 1, amount: 188, publicVisits: 22 },
+          '7d': { ...metric, shippedOrders: 4, amount: 888, publicVisits: 80 },
+          '30d': metric,
+        },
+      },
       { productName: 'vivo X300Ultra 733 长焦演唱会神器', platformProductId: '2000000000000000000733', displayProductId: '端内ID 649', custodyDays: 1, periods: { '1d': metric, '7d': metric, '30d': metric } },
       { productName: '佳能R50微单相机', platformProductId: 'p-841-733', displayProductId: '端内ID 841', custodyDays: 1, periods: { '1d': metric, '7d': metric, '30d': metric } },
       { productName: '大疆DJI Pocket3云台相机128G', platformProductId: 'p-733-target', displayProductId: '端内ID 733', custodyDays: 1, periods: { '1d': metric, '7d': metric, '30d': metric } },
@@ -66,6 +80,28 @@ async function writeContext(): Promise<string> {
     emptySectionNotes: {},
   }));
   return dir;
+}
+
+async function writeRankingRegistryFixtures(rootDir: string, artifactsDir: string): Promise<{
+  productIdMapPath: string;
+  productNameMapPath: string;
+  firstSeenPath: string;
+  lifecyclePath: string;
+  artifactsDir: string;
+}> {
+  const configDir = join(rootDir, 'config');
+  const stateDir = join(rootDir, 'output', 'state');
+  await mkdir(configDir, { recursive: true });
+  await mkdir(stateDir, { recursive: true });
+  await writeFile(join(configDir, 'product-id-map.json'), JSON.stringify({ p701: '701', p702: '702' }), 'utf8');
+  await writeFile(join(configDir, 'product-name-map.json'), JSON.stringify({ '701': 'DJI Pocket 3', '702': 'DJI Pocket 3' }), 'utf8');
+  return {
+    productIdMapPath: join(configDir, 'product-id-map.json'),
+    productNameMapPath: join(configDir, 'product-name-map.json'),
+    firstSeenPath: join(stateDir, 'goods-first-seen.json'),
+    lifecyclePath: join(stateDir, 'goods-link-lifecycle.json'),
+    artifactsDir,
+  };
 }
 
 async function writeClosedOrderRegistryFixtures(rootDir: string): Promise<{
@@ -95,6 +131,202 @@ async function writeClosedOrderRegistryFixtures(rootDir: string): Promise<{
   };
 }
 
+async function writeLinkRegistryOverviewFixtures(rootDir: string): Promise<{
+  productIdMapPath: string;
+  productNameMapPath: string;
+  firstSeenPath: string;
+  lifecyclePath: string;
+  overridesPath: string;
+  artifactsDir: string;
+}> {
+  const configDir = join(rootDir, 'config');
+  const outputDir = join(rootDir, 'output');
+  await mkdir(configDir, { recursive: true });
+  await mkdir(join(outputDir, 'state'), { recursive: true });
+  await writeFile(join(configDir, 'product-id-map.json'), JSON.stringify({
+    'platform-560': '560',
+    'platform-561': '561',
+    'platform-562': '562',
+    'platform-590': '590',
+  }), 'utf8');
+  await writeFile(join(configDir, 'product-name-map.json'), JSON.stringify({
+    '560': 'DJI Pocket 3 全能套装',
+    '561': 'DJI Pocket 3 标准版',
+    '562': 'DJI Pocket 3 Creator Combo',
+    '580': 'Canon SX70 HS',
+    '590': '未归类商品',
+  }), 'utf8');
+  await writeFile(join(outputDir, 'state', 'goods-link-lifecycle.json'), JSON.stringify({
+    active: {
+      '560': { platformProductId: 'platform-560', productName: 'DJI Pocket 3 全能套装' },
+      '561': { platformProductId: 'platform-561', productName: 'DJI Pocket 3 标准版' },
+      '590': { platformProductId: 'platform-590', productName: '未归类商品' },
+    },
+    removedLinks: [
+      {
+        productId: '562',
+        platformProductId: 'platform-562',
+        productName: 'DJI Pocket 3 Creator Combo',
+        removedDate: '2026-06-22',
+        reason: '商品总表缺失',
+        source: 'goods_snapshot_diff',
+      },
+    ],
+  }), 'utf8');
+  await writeFile(join(configDir, 'link-registry-overrides.json'), JSON.stringify({
+    version: 1,
+    entries: [
+      {
+        internalProductId: '560',
+        categoryId: 'camera',
+        categoryName: '相机',
+        productType: 'dji-pocket-3',
+        shortName: 'DJI Pocket 3',
+        aliases: ['Pocket3'],
+        sameSkuGroupId: 'dji-pocket-3',
+        updatedAt: '2026-06-23',
+      },
+      {
+        internalProductId: '561',
+        categoryId: 'camera',
+        categoryName: '相机',
+        productType: 'dji-pocket-3',
+        shortName: 'DJI Pocket 3',
+        aliases: ['Pocket3 标准版'],
+        sameSkuGroupId: 'dji-pocket-3',
+        updatedAt: '2026-06-23',
+      },
+      {
+        internalProductId: '562',
+        categoryId: 'camera',
+        categoryName: '相机',
+        productType: 'dji-pocket-3',
+        shortName: 'DJI Pocket 3',
+        aliases: ['Pocket3 Creator'],
+        sameSkuGroupId: 'dji-pocket-3',
+        updatedAt: '2026-06-23',
+      },
+      {
+        internalProductId: '580',
+        categoryId: 'camera',
+        categoryName: '相机',
+        productType: 'canon-sx70',
+        shortName: 'Canon SX70 HS',
+        aliases: ['SX70'],
+        sameSkuGroupId: 'canon-sx70',
+        updatedAt: '2026-06-23',
+      },
+      {
+        internalProductId: '999',
+        categoryId: 'camera',
+        categoryName: '相机',
+      },
+    ],
+    sameSkuGroupAliasRules: [
+      {
+        sameSkuGroupId: 'dji-pocket-3',
+        aliases: ['口袋3', 'pocket 3'],
+        updatedAt: '2026-06-23',
+      },
+    ],
+  }), 'utf8');
+  return {
+    productIdMapPath: join(configDir, 'product-id-map.json'),
+    productNameMapPath: join(configDir, 'product-name-map.json'),
+    firstSeenPath: join(outputDir, 'state', 'goods-first-seen.json'),
+    lifecyclePath: join(outputDir, 'state', 'goods-link-lifecycle.json'),
+    overridesPath: join(configDir, 'link-registry-overrides.json'),
+    artifactsDir: outputDir,
+  };
+}
+
+async function writeNewLinkWorkflowContext(): Promise<{
+  outputDir: string;
+  registryPaths: {
+    productIdMapPath: string;
+    productNameMapPath: string;
+    firstSeenPath: string;
+    lifecyclePath: string;
+    artifactsDir: string;
+  };
+}> {
+  const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-new-link-workflow-output-'));
+  const registryRoot = await mkdtemp(join(tmpdir(), 'mt-agent-new-link-workflow-registry-'));
+  const configDir = join(registryRoot, 'config');
+  const stateDir = join(registryRoot, 'output', 'state');
+  await mkdir(join(outputDir, '2026-06-22'), { recursive: true });
+  await mkdir(configDir, { recursive: true });
+  await mkdir(stateDir, { recursive: true });
+  await writeFile(join(configDir, 'product-id-map.json'), JSON.stringify({
+    'platform-733': '733',
+    'platform-875': '875',
+    'platform-841': '841',
+  }), 'utf8');
+  await writeFile(join(configDir, 'product-name-map.json'), JSON.stringify({
+    '733': '大疆 Pocket3',
+    '875': 'DJI Pocket 3',
+    '841': '佳能 R50',
+  }), 'utf8');
+  await writeFile(join(outputDir, '2026-06-22', 'report-context.json'), JSON.stringify({
+    date: '2026-06-22',
+    summary: { '1d': summary, '7d': summary, '30d': summary },
+    conclusions: [],
+    rows: [
+      {
+        productName: '大疆DJI Pocket3云台相机128G 高转化',
+        platformProductId: 'platform-733',
+        displayProductId: '端内ID 733',
+        custodyDays: 7,
+        periods: {
+          '1d': { ...metric, exposure: 100, publicVisits: 10, shippedOrders: 0, amount: 0 },
+          '7d': { ...metric, exposure: 1700, publicVisits: 220, shippedOrders: 4, amount: 1800 },
+          '30d': { ...metric, exposure: 300, publicVisits: 20, shippedOrders: 0, amount: 0 },
+        },
+      },
+      {
+        productName: '大疆DJI Pocket3云台相机128G 低表现',
+        platformProductId: 'platform-875',
+        displayProductId: '端内ID 875',
+        custodyDays: 7,
+        periods: {
+          '1d': { ...metric, exposure: 50, publicVisits: 5, shippedOrders: 0, amount: 0 },
+          '7d': { ...metric, exposure: 300, publicVisits: 30, shippedOrders: 0, amount: 120 },
+          '30d': { ...metric, exposure: 300, publicVisits: 20, shippedOrders: 0, amount: 0 },
+        },
+      },
+      {
+        productName: '佳能R50微单相机',
+        platformProductId: 'platform-841',
+        displayProductId: '端内ID 841',
+        custodyDays: 7,
+        periods: {
+          '1d': { ...metric, exposure: 100, publicVisits: 10, shippedOrders: 0, amount: 0 },
+          '7d': { ...metric, exposure: 1200, publicVisits: 140, shippedOrders: 2, amount: 700 },
+          '30d': { ...metric, exposure: 300, publicVisits: 20, shippedOrders: 0, amount: 0 },
+        },
+      },
+    ],
+    lowExposure: [],
+    weakClick: [],
+    weakConversion: [],
+    highPotential: [],
+    newProductObservation: [],
+    lifecycleGovernance: [],
+    recommendedActions: [],
+    emptySectionNotes: {},
+  }), 'utf8');
+  return {
+    outputDir,
+    registryPaths: {
+      productIdMapPath: join(configDir, 'product-id-map.json'),
+      productNameMapPath: join(configDir, 'product-name-map.json'),
+      firstSeenPath: join(stateDir, 'goods-first-seen.json'),
+      lifecyclePath: join(stateDir, 'goods-link-lifecycle.json'),
+      artifactsDir: outputDir,
+    },
+  };
+}
+
 describe('handleBotIntent', () => {
   it('returns help text', async () => {
     await expect(handleBotIntent({ type: 'help' })).resolves.toEqual({ text: `📋 数据查询
@@ -113,6 +345,7 @@ describe('handleBotIntent', () => {
 
 🎓 运营学习
   运营学习 — 开始运营学习测验
+  Agent学习汇总 — 查看 Agent 澄清与确认学习记录
 
 💰 租赁改价
   改价 761 1天22 10天55 — 指定租期改价（格式：改价 ID 租期1价格1 租期2价格2 ...）
@@ -138,6 +371,29 @@ describe('handleBotIntent', () => {
     expect(JSON.stringify(response.card)).toContain('id_lookup_form');
     expect(JSON.stringify(response.card)).toContain('lookup_query');
     expect(JSON.stringify(response.card)).toContain('id_lookup');
+  });
+
+  it('returns a link registry overview card for the inventory command', async () => {
+    const registryRoot = await mkdtemp(join(tmpdir(), 'mt-agent-link-registry-overview-'));
+    const registryPaths = await writeLinkRegistryOverviewFixtures(registryRoot);
+
+    const response = await handleBotIntent(
+      { type: 'link_registry_overview' },
+      'output',
+      { closedOrderRegistryPaths: registryPaths },
+    );
+
+    expect(response.text).toContain('库存情况');
+    expect(response.text).toContain('总链接 5');
+    expect(response.text).toContain('分类覆盖 80%');
+    expect(response.card).toBeDefined();
+    const cardText = JSON.stringify(response.card);
+    expect(cardText).toContain('库存情况');
+    expect(cardText).toContain('分类覆盖');
+    expect(cardText).toContain('风险概览');
+    expect(cardText).toContain('DJI Pocket 3');
+    expect(cardText).toContain('Canon SX70 HS');
+    expect(cardText).toContain('未归类商品');
   });
 
   it('answers latest summary from report context', async () => {
@@ -221,6 +477,18 @@ describe('handleBotIntent', () => {
     await expect(handleBotIntent({ type: 'unknown', text: '订单情况' }, outputDir)).resolves.toMatchObject({ text: expect.stringContaining('发货订单：12') });
   });
 
+  it('does not misroute new-link write intents to the read-only new product pool when LLM is unavailable', async () => {
+    const outputDir = await writeContext();
+
+    const response = await handleBotIntent({ type: 'unknown', text: '帮我铺十条 pocket3 的新链' }, outputDir);
+
+    expect(response.text).toContain('LLM Agent planner');
+    expect(response.text).toContain('不会执行');
+    expect(response.text).toContain('不会把它当作新链接池查询');
+    expect(response.text).not.toContain('大疆 Pocket 3');
+    expect(response.card).toBeUndefined();
+  });
+
   it('answers removed-link questions through agent data understanding', async () => {
     const outputDir = await writeContext();
     const response = await handleBotIntent({ type: 'unknown', text: '下架链接有哪些' }, outputDir);
@@ -249,6 +517,267 @@ describe('handleBotIntent', () => {
     const response = await handleBotIntent({ type: 'unknown', text: '帮我看看苹果手机' }, outputDir, { llmToolSelector: selector });
 
     expect(response.text).toContain('端内ID 565 iPhone 15');
+  });
+
+  it('uses the LLM read-only ranking tool with link registry context', async () => {
+    const outputDir = await writeContext();
+    const registryRoot = await mkdtemp(join(tmpdir(), 'mt-agent-ranking-registry-'));
+    const registryPaths = await writeRankingRegistryFixtures(registryRoot, outputDir);
+    const selector: LlmToolSelectionProvider = {
+      async selectTool(request) {
+        expect(request.message).toBe('数据最好的 pocket3 的端内id是多少');
+        expect(request.tools.map((tool) => tool.name)).toContain('rank_best_same_sku_product');
+        return '{"intent":"rank_best","tool":"rank_best_same_sku_product","arguments":{"query":"pocket3"},"confidence":0.92,"reason":"用户要查询同款组中数据最好的端内ID"}';
+      },
+    };
+
+    const response = await handleBotIntent({ type: 'unknown', text: '数据最好的 pocket3 的端内id是多少' }, outputDir, {
+      llmToolSelector: selector,
+      closedOrderRegistryPaths: registryPaths,
+    });
+
+    expect(response.text).toContain('端内ID 702');
+    expect(response.text).toContain('数据日期：2026-06-11');
+    expect(response.text).toContain('7日：发货 4');
+  });
+
+  it('uses the generic agent planner to run safe registered tools', async () => {
+    const outputDir = await writeContext();
+    const planner: AgentPlannerProvider = {
+      async proposePlan(request) {
+        expect(request.message).toBe('帮我看看苹果手机');
+        expect(request.tools.map((tool) => tool.name)).toContain('product.query');
+        expect(request.workflows.map((workflow) => workflow.name)).toContain('rental.newLinkBatch');
+        return JSON.stringify({
+          goal: '查询商品表现',
+          selectedTool: 'product.query',
+          arguments: { keyword: 'iPhone' },
+          confidence: 0.92,
+          reason: '用户要查看苹果手机表现',
+        });
+      },
+    };
+
+    const response = await handleBotIntent({ type: 'unknown', text: '帮我看看苹果手机' }, outputDir, { agentPlannerProvider: planner });
+
+    expect(response.text).toContain('端内ID 565 iPhone 15');
+  });
+
+  it('passes silent learning hints into the generic agent planner', async () => {
+    const outputDir = await writeContext();
+    await recordAgentLearningEvent(outputDir, {
+      type: 'clarification_selected',
+      originalMessage: '帮我处理一下 pocket3',
+      selectedMessage: '帮我铺十条 pocket3 的新链',
+      label: '铺新链',
+      createdAt: '2026-06-23T01:00:00.000Z',
+    });
+    const planner: AgentPlannerProvider = {
+      async proposePlan(request) {
+        expect(request.message).toBe('帮我处理 pocket3');
+        expect(request.learningHints).toEqual([expect.objectContaining({
+          originalMessage: '帮我处理一下 pocket3',
+          selectedMessage: '帮我铺十条 pocket3 的新链',
+          label: '铺新链',
+        })]);
+        return JSON.stringify({
+          goal: '查询商品表现',
+          selectedTool: 'product.query',
+          arguments: { keyword: 'pocket3' },
+          confidence: 0.82,
+          reason: '测试学习提示注入',
+        });
+      },
+    };
+
+    const response = await handleBotIntent({ type: 'unknown', text: '帮我处理 pocket3' }, outputDir, { agentPlannerProvider: planner });
+
+    expect(response.text).toContain('端内ID');
+  });
+
+  it('returns the Agent learning summary on request', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-bot-learning-summary-'));
+    await recordAgentLearningEvent(outputDir, {
+      type: 'clarification_selected',
+      originalMessage: '帮我处理一下 875',
+      selectedMessage: '复制商品 875',
+      label: '复制商品',
+    });
+
+    const response = await handleBotIntent({ type: 'agent_learning_summary' }, outputDir);
+
+    expect(response.text).toContain('Agent 学习汇总');
+    expect(response.text).toContain('澄清选择 1');
+    expect(response.text).toContain('复制商品 875');
+  });
+
+  it('turns high-risk generic agent plans into approval cards without side effects', async () => {
+    const planner: AgentPlannerProvider = {
+      async proposePlan(request) {
+        expect(request.tools.map((tool) => tool.name)).toContain('rental.operationConfirmRequest');
+        return JSON.stringify({
+          goal: '下架租赁商品',
+          selectedTool: 'rental.operationConfirmRequest',
+          arguments: { action: 'delist', productId: '761' },
+          confidence: 0.95,
+          reason: '用户要求下架商品 761',
+          requiresConfirmation: true,
+        });
+      },
+    };
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run before approval'); },
+      async execute() { throw new Error('execute should not run before approval'); },
+      async copy() { throw new Error('copy should not run before approval'); },
+      async delist() { throw new Error('delist should not run before approval'); },
+      async tenancySet() { throw new Error('tenancySet should not run before approval'); },
+      async specDiscover() { throw new Error('specDiscover should not run before approval'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run before approval'); },
+    };
+
+    const response = await handleBotIntent({ type: 'unknown', text: '帮我把 761 下架' }, 'output', {
+      agentPlannerProvider: planner,
+      rentalPriceClient,
+    });
+
+    expect(response.text).toContain('请确认 Agent 操作：rental.operationConfirmRequest');
+    expect(response.card).toBeDefined();
+    expect(JSON.stringify(response.card)).toContain('agent_tool_confirm');
+    expect(JSON.stringify(response.card)).toContain('delist');
+    expect(JSON.stringify(response.card)).toContain('761');
+  });
+
+  it('turns ambiguous generic agent plans into clarification cards', async () => {
+    const planner: AgentPlannerProvider = {
+      async proposePlan(request) {
+        expect(request.message).toBe('帮我处理一下 pocket3');
+        return JSON.stringify({
+          goal: '澄清 pocket3 操作',
+          needsClarification: true,
+          originalMessage: request.message,
+          question: '你想怎么处理 pocket3？',
+          options: [
+            { label: '查询数据', message: '查询 pocket3 的公域数据', description: '只读查询' },
+            { label: '铺新链', message: '帮我铺十条 pocket3 的新链', description: '需要确认后复制' },
+          ],
+          confidence: 0.4,
+          reason: '处理动作不明确',
+        });
+      },
+    };
+
+    const response = await handleBotIntent({ type: 'unknown', text: '帮我处理一下 pocket3' }, 'output', {
+      agentPlannerProvider: planner,
+    });
+
+    expect(response.text).toBe('你想怎么处理 pocket3？');
+    expect(response.card).toBeDefined();
+    expect(JSON.stringify(response.card)).toContain('agent_clarify_select');
+    expect(JSON.stringify(response.card)).toContain('帮我铺十条 pocket3 的新链');
+    expect(JSON.stringify(response.card)).not.toContain('agent_tool_confirm');
+  });
+
+  it('returns confirmation cards for exact report write operations', async () => {
+    const runReport = await handleBotIntent({ type: 'run_public_traffic_report' }, 'output');
+    expect(runReport.text).toContain('请确认 Agent 操作：publicTraffic.runReport');
+    expect(JSON.stringify(runReport.card)).toContain('agent_tool_confirm');
+
+    const resend = await handleBotIntent({ type: 'resend_latest_report', sendTo: 'both' }, 'output');
+    expect(resend.text).toContain('请确认 Agent 操作：publicTraffic.resendLatestReport');
+    expect(JSON.stringify(resend.card)).toContain('"sendTo":"both"');
+  });
+
+  it('plans new-link batch workflows through LLM without copying before confirmation', async () => {
+    const { outputDir, registryPaths } = await writeNewLinkWorkflowContext();
+    const planner: AgentPlannerProvider = {
+      async proposePlan(request) {
+        expect(request.workflows.map((workflow) => workflow.name)).toContain('rental.newLinkBatch');
+        return JSON.stringify({
+          goal: '铺设 pocket3 新链',
+          selectedWorkflow: 'rental.newLinkBatch',
+          arguments: { keyword: 'pocket3', count: 10 },
+          confidence: 0.95,
+          reason: '用户要求铺十条 pocket3 的新链',
+          requiresConfirmation: true,
+        });
+      },
+    };
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run'); },
+      async execute() { throw new Error('execute should not run'); },
+      async copy() { throw new Error('copy should not run before workflow confirmation'); },
+      async delist() { throw new Error('delist should not run'); },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+
+    const response = await handleBotIntent({ type: 'unknown', text: '帮我铺十条 pocket3 的新链' }, outputDir, {
+      agentPlannerProvider: planner,
+      rentalPriceClient,
+      closedOrderRegistryPaths: registryPaths,
+    });
+
+    expect(response.text).toContain('新链批量铺设计划：准备复制 10 条「pocket3」新链');
+    expect(response.text).toContain('推荐源商品：733 大疆DJI Pocket3云台相机128G 高转化');
+    expect(response.card).toBeDefined();
+    expect(JSON.stringify(response.card)).toContain('new_link_batch_confirm');
+    expect(JSON.stringify(response.card)).toContain('733');
+  });
+
+  it('locks explicit internal product id as the new-link copy source', async () => {
+    const { outputDir, registryPaths } = await writeNewLinkWorkflowContext();
+    const planner: AgentPlannerProvider = {
+      async proposePlan() {
+        return JSON.stringify({
+          goal: '从端内ID 875 复制新链',
+          selectedWorkflow: 'rental.newLinkBatch',
+          arguments: { keyword: 'pocket3', count: 3 },
+          confidence: 0.95,
+          reason: '用户要求从端内ID 875 复制 3 条新链',
+          requiresConfirmation: true,
+        });
+      },
+    };
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run'); },
+      async execute() { throw new Error('execute should not run'); },
+      async copy() { throw new Error('copy should not run before workflow confirmation'); },
+      async delist() { throw new Error('delist should not run'); },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+
+    const response = await handleBotIntent({ type: 'unknown', text: '从端内ID 875 复制 3 条新链' }, outputDir, {
+      agentPlannerProvider: planner,
+      rentalPriceClient,
+      closedOrderRegistryPaths: registryPaths,
+    });
+
+    const cardText = JSON.stringify(response.card);
+    expect(response.text).toContain('875');
+    expect(cardText).toContain('"sourceProductId":"875"');
+    expect(cardText).toContain('"requestedSourceProductId":"875"');
+    expect(cardText).not.toContain('"sourceProductId":"733"');
+  });
+
+  it('does not fall through to read-only new product pool when the LLM planner fails a new-link write plan', async () => {
+    const outputDir = await writeContext();
+    const planner: AgentPlannerProvider = {
+      async proposePlan() {
+        return '{"goal":"bad","selectedWorkflow":"rental.newLinkBatch","arguments":{"keyword":"pocket3","count":"10"},"confidence":0.9,"reason":"bad"}';
+      },
+    };
+
+    const response = await handleBotIntent({ type: 'unknown', text: '帮我铺十条 pocket3 的新链' }, outputDir, {
+      agentPlannerProvider: planner,
+    });
+
+    expect(response.text).toContain('Agent planner 没有生成有效');
+    expect(response.text).toContain('本次不执行');
+    expect(response.text).not.toContain('大疆 Pocket 3');
+    expect(response.card).toBeUndefined();
   });
 
   it('returns a confirmation card for LLM-proposed rental delist without executing the daemon', async () => {
@@ -328,12 +857,32 @@ describe('handleBotIntent', () => {
     process.env.CLOSED_ORDER_REMARKS_SOURCE_APP_CODE = 'order_dispatch';
 
     const response = await handleBotIntent({ type: 'sync_closed_order_feedback' }, outputDir, { closedOrderFetchImpl: fetchImpl as typeof fetch });
-    expect(response.text).toContain('关单同步完成');
-    expect(response.text).toContain('新增 1 条');
+    expect(response.text).toContain('请确认 Agent 操作：closedOrder.syncFeedback');
+    expect(response.card).toBeDefined();
+    expect(JSON.stringify(response.card)).toContain('agent_tool_confirm');
+    expect(JSON.stringify(response.card)).toContain('closedOrder.syncFeedback');
+
+    const executed = await executeAgentToolRequest(
+      { toolName: 'closedOrder.syncFeedback', arguments: {}, reason: '测试确认同步关单' },
+      outputDir,
+      { closedOrderFetchImpl: fetchImpl as typeof fetch },
+    );
+    expect(executed.text).toContain('关单同步完成');
+    expect(executed.text).toContain('新增 1 条');
     await expect(readFile(join(outputDir, 'state', 'closed-order-feedback-ingest.json'), 'utf8')).resolves.toContain('close:close-1');
   });
 
-  it('returns a closed-order observation card through the bot command', async () => {
+  it('returns a confirmation card before running the closed-order observation report', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-closed-order-bot-report-confirm-'));
+
+    const response = await handleBotIntent({ type: 'run_closed_order_observation_report' }, outputDir);
+    expect(response.text).toContain('请确认 Agent 操作：closedOrder.runObservationReport');
+    expect(response.card).toBeDefined();
+    expect(JSON.stringify(response.card)).toContain('agent_tool_confirm');
+    expect(JSON.stringify(response.card)).toContain('closedOrder.runObservationReport');
+  });
+
+  it('runs a closed-order observation report after Agent confirmation', async () => {
     const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-closed-order-bot-report-'));
     const registryRoot = await mkdtemp(join(tmpdir(), 'mt-agent-closed-order-registry-'));
     const registryPaths = await writeClosedOrderRegistryFixtures(registryRoot);
@@ -364,8 +913,8 @@ describe('handleBotIntent', () => {
       ],
     }), 'utf8');
 
-    const response = await handleBotIntent(
-      { type: 'run_closed_order_observation_report' },
+    const response = await executeAgentToolRequest(
+      { toolName: 'closedOrder.runObservationReport', arguments: {}, reason: '测试确认生成关单观察' },
       outputDir,
       { closedOrderRegistryPaths: registryPaths },
     );
@@ -375,6 +924,8 @@ describe('handleBotIntent', () => {
     expect(JSON.stringify(response.card)).toContain('重点分组');
     expect(JSON.stringify(response.card)).toContain('DJI Pocket 3');
     expect(JSON.stringify(response.card)).toContain('价格信号');
-    await expect(readFile(join(outputDir, 'closed-order-observation', 'closed-order-observation-2026-06-22.md'), 'utf8')).resolves.toContain('关单观察 2026-06-22');
+    const markdownPath = response.text.split('报告已写入：')[1]?.trim();
+    expect(markdownPath).toBeTruthy();
+    await expect(readFile(markdownPath!, 'utf8')).resolves.toContain('关单观察');
   });
 });

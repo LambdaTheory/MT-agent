@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { validateAgentPlannerProposal } from '../src/agentRuntime/planner.js';
+import { validateAgentPlannerClarificationProposal, validateAgentPlannerProposal } from '../src/agentRuntime/planner.js';
 
 describe('agent runtime planner proposal validation', () => {
   it('validates a read-tool proposal and applies allow policy', () => {
@@ -44,5 +44,38 @@ describe('agent runtime planner proposal validation', () => {
         proposal: { toolName: 'rental.pricePreview', input: { productId: '761' }, reason: '用户想看改价影响' },
       },
     });
+  });
+
+  it('validates clarification proposals for ambiguous goals', () => {
+    expect(validateAgentPlannerClarificationProposal(JSON.stringify({
+      goal: '澄清 pocket3 操作',
+      needsClarification: true,
+      originalMessage: '帮我处理一下 pocket3',
+      question: '你想怎么处理 pocket3？',
+      options: [
+        { label: '查询数据', message: '查询 pocket3 的公域数据', description: '只读查询' },
+        { label: '铺新链', message: '帮我铺十条 pocket3 的新链', description: '需要确认后复制' },
+      ],
+      confidence: 0.42,
+      reason: '处理动作不明确',
+    }))).toEqual({
+      ok: true,
+      proposal: {
+        goal: '澄清 pocket3 操作',
+        originalMessage: '帮我处理一下 pocket3',
+        question: '你想怎么处理 pocket3？',
+        options: [
+          { label: '查询数据', message: '查询 pocket3 的公域数据', description: '只读查询' },
+          { label: '铺新链', message: '帮我铺十条 pocket3 的新链', description: '需要确认后复制' },
+        ],
+        confidence: 0.42,
+        reason: '处理动作不明确',
+      },
+    });
+  });
+
+  it('rejects malformed clarification proposals', () => {
+    expect(validateAgentPlannerClarificationProposal('{"goal":"bad","needsClarification":true,"originalMessage":"x","question":"q","options":[{"label":"only","message":"x"}],"confidence":0.5,"reason":"bad"}')).toEqual({ ok: false, reason: 'invalid_options' });
+    expect(validateAgentPlannerClarificationProposal('{"goal":"bad","needsClarification":false,"originalMessage":"x","question":"q","options":[],"confidence":0.5,"reason":"bad"}')).toEqual({ ok: false, reason: 'invalid_shape' });
   });
 });

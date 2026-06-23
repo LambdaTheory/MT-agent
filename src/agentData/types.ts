@@ -68,6 +68,7 @@ export interface AgentTaskItem {
 export type AgentIntent =
   | { type: 'overview' }
   | { type: 'product'; keyword: string }
+  | { type: 'best_product_by_same_sku'; query: string }
   | { type: 'tasks' }
   | { type: 'problem_products'; problemType: AgentProblemType }
   | { type: 'new_product_pool' }

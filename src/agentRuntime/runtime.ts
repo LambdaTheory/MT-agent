@@ -5,6 +5,7 @@ import type { RentalPriceSkillClient } from '../feishuBot/rentalPrice.js';
 import type { ActivityAutomationSkillClient } from '../feishuBot/activityAutomation.js';
 import { handleBotIntent } from '../feishuBot/tools.js';
 import type { BotIntent, BotResponse } from '../feishuBot/types.js';
+import type { AgentPlannerProvider } from './planner.js';
 import type { AgentRequest, AgentResponse } from './types.js';
 
 export type AgentIntentResolver = (text: string) => BotIntent;
@@ -15,6 +16,7 @@ export interface AgentRuntimeConfig {
   handleIntent?: (intent: BotIntent, outputDir?: string) => Promise<BotResponse>;
   llmToolSelector?: LlmToolSelectionProvider;
   llmIntentProposalProvider?: LlmIntentProposalProvider;
+  agentPlannerProvider?: AgentPlannerProvider;
   rentalPriceClient?: RentalPriceSkillClient;
   activityAutomationClient?: ActivityAutomationSkillClient;
 }
@@ -28,6 +30,7 @@ export function createAgentRuntime(config: AgentRuntimeConfig = {}): AgentRuntim
   const handleIntent = config.handleIntent ?? ((intent: BotIntent, outputDir?: string) => handleBotIntent(intent, outputDir, {
     llmToolSelector: config.llmToolSelector,
     llmIntentProposalProvider: config.llmIntentProposalProvider,
+    agentPlannerProvider: config.agentPlannerProvider,
     rentalPriceClient: config.rentalPriceClient,
     activityAutomationClient: config.activityAutomationClient,
   }));

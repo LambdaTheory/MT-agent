@@ -20,7 +20,7 @@ export interface ExposureCumulativeProduct {
   raw: Record<string, string>;
 }
 
-export type ExposureDeltaFlag = 'new_product' | 'missing' | 'counter_reset_or_data_error';
+export type ExposureDeltaFlag = 'new_product' | 'missing' | 'missing_previous_snapshot_row' | 'counter_reset_or_data_error';
 
 export interface ExposureDailyDelta {
   date: string;

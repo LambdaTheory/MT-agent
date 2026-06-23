@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { buildPublicTrafficPaths } from './paths.js';
 import type { ExposureDailyDelta, ExposureDeltaFlag } from './types.js';
 
-const VALID_FLAGS = new Set<ExposureDeltaFlag>(['new_product', 'missing', 'counter_reset_or_data_error']);
+const VALID_FLAGS = new Set<ExposureDeltaFlag>(['new_product', 'missing', 'missing_previous_snapshot_row', 'counter_reset_or_data_error']);
 
 function dateBefore(date: string, days: number): string {
   const d = new Date(`${date}T00:00:00.000Z`);
