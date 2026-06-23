@@ -20,6 +20,11 @@ function sendTo(text: string): FeishuSendTo | undefined {
   return undefined;
 }
 
+function looksLikeNewLinkWriteIntent(text: string): boolean {
+  const compact = text.toLowerCase().replace(/\s+/g, '');
+  return /(新链|新链接)/.test(compact) && /(铺|补|新建|创建|生成|新增|复制|批量)/.test(compact);
+}
+
 export function parseExactBotIntent(input: string): BotIntent {
   const text = normalize(input);
   if (!text) return { type: 'help' };
@@ -74,6 +79,8 @@ export function parseBotIntent(input: string): BotIntent {
 
   const exact = parseExactBotIntent(text);
   if (exact.type !== 'unknown') return exact;
+
+  if (looksLikeNewLinkWriteIntent(text)) return { type: 'unknown', text };
 
   const alias = resolveSemanticAlias(text);
   if (alias !== undefined) return alias;
