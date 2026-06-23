@@ -82,6 +82,51 @@ async function writeContext(): Promise<string> {
   return dir;
 }
 
+async function writeX200RankingContext(): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), 'mt-agent-x200-ranking-'));
+  await mkdir(join(dir, '2026-06-11'), { recursive: true });
+  await writeFile(join(dir, '2026-06-11', 'report-context.json'), JSON.stringify({
+    date: '2026-06-11',
+    summary: { '1d': summary, '7d': summary, '30d': summary },
+    conclusions: [],
+    rows: [
+      {
+        productName: 'vivoX200Ultra增距镜蔡司2.35倍演...',
+        platformProductId: 'p372',
+        displayProductId: '端内ID 372',
+        custodyDays: 30,
+        periods: {
+          '1d': { ...metric, exposure: 198, publicVisits: 4 },
+          '7d': { ...metric, exposure: 100767, publicVisits: 5044, amount: 0 },
+          '30d': metric,
+        },
+      },
+      {
+        productName: 'VIVO X200 Ultra 演唱会神器 2亿像...',
+        platformProductId: 'p362',
+        displayProductId: '端内ID 362',
+        custodyDays: 30,
+        periods: {
+          '1d': { ...metric, exposure: 20, publicVisits: 3 },
+          '7d': { ...metric, exposure: 4000, publicVisits: 1028, amount: 3697.12 },
+          '30d': metric,
+        },
+      },
+    ],
+    lowExposure: [],
+    weakClick: [],
+    weakConversion: [],
+    highPotential: [],
+    newProductObservation: [],
+    lifecycleGovernance: [],
+    recommendedActions: [],
+    newProductPoolIds: [],
+    newProductPoolItems: [],
+    emptySectionNotes: {},
+  }), 'utf8');
+  return dir;
+}
+
 async function writeRankingRegistryFixtures(rootDir: string, artifactsDir: string): Promise<{
   productIdMapPath: string;
   productNameMapPath: string;
@@ -95,6 +140,28 @@ async function writeRankingRegistryFixtures(rootDir: string, artifactsDir: strin
   await mkdir(stateDir, { recursive: true });
   await writeFile(join(configDir, 'product-id-map.json'), JSON.stringify({ p701: '701', p702: '702' }), 'utf8');
   await writeFile(join(configDir, 'product-name-map.json'), JSON.stringify({ '701': 'DJI Pocket 3', '702': 'DJI Pocket 3' }), 'utf8');
+  return {
+    productIdMapPath: join(configDir, 'product-id-map.json'),
+    productNameMapPath: join(configDir, 'product-name-map.json'),
+    firstSeenPath: join(stateDir, 'goods-first-seen.json'),
+    lifecyclePath: join(stateDir, 'goods-link-lifecycle.json'),
+    artifactsDir,
+  };
+}
+
+async function writeX200RankingRegistryFixtures(rootDir: string, artifactsDir: string): Promise<{
+  productIdMapPath: string;
+  productNameMapPath: string;
+  firstSeenPath: string;
+  lifecyclePath: string;
+  artifactsDir: string;
+}> {
+  const configDir = join(rootDir, 'config');
+  const stateDir = join(rootDir, 'output', 'state');
+  await mkdir(configDir, { recursive: true });
+  await mkdir(stateDir, { recursive: true });
+  await writeFile(join(configDir, 'product-id-map.json'), JSON.stringify({ p362: '362', p372: '372' }), 'utf8');
+  await writeFile(join(configDir, 'product-name-map.json'), JSON.stringify({ '362': 'vivo X200 Ultra', '372': 'vivo 蔡司增距镜' }), 'utf8');
   return {
     productIdMapPath: join(configDir, 'product-id-map.json'),
     productNameMapPath: join(configDir, 'product-name-map.json'),
@@ -519,26 +586,49 @@ describe('handleBotIntent', () => {
     expect(response.text).toContain('端内ID 565 iPhone 15');
   });
 
-  it('uses the LLM read-only ranking tool with link registry context', async () => {
+  it('uses the LLM read-only ranking tool with link registry context for unsupported natural phrasing', async () => {
     const outputDir = await writeContext();
     const registryRoot = await mkdtemp(join(tmpdir(), 'mt-agent-ranking-registry-'));
     const registryPaths = await writeRankingRegistryFixtures(registryRoot, outputDir);
+    let selectorCalled = false;
     const selector: LlmToolSelectionProvider = {
       async selectTool(request) {
-        expect(request.message).toBe('数据最好的 pocket3 的端内id是多少');
+        selectorCalled = true;
+        expect(request.message).toBe('帮我找 pocket3 里最能打的链接');
         expect(request.tools.map((tool) => tool.name)).toContain('rank_best_same_sku_product');
         return '{"intent":"rank_best","tool":"rank_best_same_sku_product","arguments":{"query":"pocket3"},"confidence":0.92,"reason":"用户要查询同款组中数据最好的端内ID"}';
       },
     };
 
-    const response = await handleBotIntent({ type: 'unknown', text: '数据最好的 pocket3 的端内id是多少' }, outputDir, {
+    const response = await handleBotIntent({ type: 'unknown', text: '帮我找 pocket3 里最能打的链接' }, outputDir, {
       llmToolSelector: selector,
       closedOrderRegistryPaths: registryPaths,
     });
 
+    expect(selectorCalled).toBe(true);
     expect(response.text).toContain('端内ID 702');
     expect(response.text).toContain('数据日期：2026-06-11');
     expect(response.text).toContain('7日：发货 4');
+  });
+
+  it('routes best-id questions to registry ranking before legacy product keyword lookup', async () => {
+    const outputDir = await writeX200RankingContext();
+    const registryRoot = await mkdtemp(join(tmpdir(), 'mt-agent-x200-ranking-registry-'));
+    const registryPaths = await writeX200RankingRegistryFixtures(registryRoot, outputDir);
+    const selector: LlmToolSelectionProvider = {
+      async selectTool() {
+        throw new Error('LLM selector should not run for deterministic best-link questions');
+      },
+    };
+
+    const response = await handleBotIntent({ type: 'unknown', text: '数据最好的X200Ultra是哪个id?' }, outputDir, {
+      llmToolSelector: selector,
+      closedOrderRegistryPaths: registryPaths,
+    });
+
+    expect(response.text).toContain('端内ID 362');
+    expect(response.text).toContain('同款组 vivo-x200-ultra');
+    expect(response.text).not.toContain('端内ID 372');
   });
 
   it('uses the generic agent planner to run safe registered tools', async () => {

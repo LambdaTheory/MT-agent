@@ -18,6 +18,14 @@ describe('parseAgentDataIntent', () => {
     expect(parseAgentDataIntent('随便问问')).toEqual({ type: 'unknown', text: '随便问问' });
   });
 
+  it('maps best-link questions to same-sku ranking intents before product lookup', () => {
+    expect(parseAgentDataIntent('数据最好的X200Ultra是哪个id?')).toEqual({ type: 'best_product_by_same_sku', query: 'X200Ultra' });
+    expect(parseAgentDataIntent('数据最好的 X200Ultra 是哪个 id')).toEqual({ type: 'best_product_by_same_sku', query: 'X200Ultra' });
+    expect(parseAgentDataIntent('数据最好的 pocket3 的端内id是多少')).toEqual({ type: 'best_product_by_same_sku', query: 'pocket3' });
+    expect(parseAgentDataIntent('X200Ultra 数据最好的是哪个id')).toEqual({ type: 'best_product_by_same_sku', query: 'X200Ultra' });
+    expect(parseAgentDataIntent('端内ID 733 这个同款组里数据最好的是哪条')).toEqual({ type: 'best_product_by_same_sku', query: '733' });
+  });
+
   it('maps natural read-only questions to agent data intents', () => {
     expect(parseAgentDataIntent('新链接池怎么样')).toEqual({ type: 'new_product_pool' });
     expect(parseAgentDataIntent('新链有哪些')).toEqual({ type: 'new_product_pool' });

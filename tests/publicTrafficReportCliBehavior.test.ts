@@ -535,7 +535,7 @@ describe('runPublicTrafficReportCli public traffic sequencing', () => {
     await expect(readFile(todayPaths.log, 'utf8')).resolves.toContain('今日访问数据支付宝暂未更新，本期访问量板块指标缺失。');
   });
 
-  it('treats an existing empty previous cumulative snapshot as history for new-product daily deltas', async () => {
+  it('treats an existing empty previous cumulative snapshot as history without implying new products', async () => {
     const yesterdayPaths = buildPublicTrafficPaths(mocks.outputDir, '2026-06-09');
     await writeFile(yesterdayPaths.exposureCumulativeProducts, '[]', 'utf8');
     const { runPublicTrafficReportCli } = await import('../src/cli/publicTrafficReport.js');
@@ -549,10 +549,10 @@ describe('runPublicTrafficReportCli public traffic sequencing', () => {
       date: '2026-06-09',
       productName: '当前商品',
       platformProductId: 'p-current',
-      exposure: 1000,
-      visits: 100,
-      amount: 200,
-      flags: ['new_product'],
+      exposure: 0,
+      visits: 0,
+      amount: 0,
+      flags: ['missing_previous_snapshot_row'],
     });
     await expect(readFile(todayPaths.log, 'utf8')).resolves.not.toContain('商品级曝光历史不足');
   });
