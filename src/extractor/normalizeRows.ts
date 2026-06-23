@@ -66,9 +66,9 @@ export function normalizeRowsForPeriod(table: RawTableData): PeriodProductMetric
     signedOrders: parseCount(row[indexes.signedOrders]),
     reviewedOrders: parseCount(row[indexes.reviewedOrders]),
     shippedOrders: parseCount(row[indexes.shippedOrders]),
-    createdOrderAmount: indexes.createdOrderAmount >= 0 ? parseCount(row[indexes.createdOrderAmount]) : 0,
-    signedOrderAmount: indexes.signedOrderAmount >= 0 ? parseCount(row[indexes.signedOrderAmount]) : 0,
-    reviewedOrderAmount: indexes.reviewedOrderAmount >= 0 ? parseCount(row[indexes.reviewedOrderAmount]) : 0,
-    shippedOrderAmount: indexes.shippedOrderAmount >= 0 ? parseCount(row[indexes.shippedOrderAmount]) : 0,
+    ...(indexes.createdOrderAmount >= 0 ? { createdOrderAmount: parseCount(row[indexes.createdOrderAmount]) } : {}),
+    ...(indexes.signedOrderAmount >= 0 ? { signedOrderAmount: parseCount(row[indexes.signedOrderAmount]) } : {}),
+    ...(indexes.reviewedOrderAmount >= 0 ? { reviewedOrderAmount: parseCount(row[indexes.reviewedOrderAmount]) } : {}),
+    ...(indexes.shippedOrderAmount >= 0 ? { shippedOrderAmount: parseCount(row[indexes.shippedOrderAmount]) } : {}),
   }));
 }

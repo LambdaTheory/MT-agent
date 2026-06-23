@@ -92,4 +92,27 @@ describe('mergePublicTrafficData', () => {
     expect(metrics.reviewedOrderAmount).toBe(300);
     expect(metrics.shippedOrderAmount).toBe(200);
   });
+
+  it('保留缺失访问页金额字段为 undefined', () => {
+    const merged = mergePublicTrafficData({
+      dashboardRows: [dashboard('1d', 'P2', 10, 0)],
+      exposureByPeriod: { '1d': [], '7d': [], '30d': [] },
+      cumulativeProducts: [],
+      mapping: {},
+    });
+    expect(merged.rows[0].periods['1d'].createdOrders).toBe(1);
+    expect(merged.rows[0].periods['1d'].createdOrderAmount).toBeUndefined();
+  });
+
+  it('空 period 不默认生成访问页金额字段', () => {
+    const merged = mergePublicTrafficData({
+      dashboardRows: [dashboard('1d', 'P3', 10, 0)],
+      exposureByPeriod: { '1d': [], '7d': [], '30d': [] },
+      cumulativeProducts: [],
+      mapping: {},
+    });
+
+    expect(merged.rows[0].periods['7d'].hasDashboardData).toBe(false);
+    expect(merged.rows[0].periods['7d'].createdOrderAmount).toBeUndefined();
+  });
 });

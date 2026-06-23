@@ -1,5 +1,6 @@
 import XLSX from 'xlsx-js-style';
 import type { PeriodKey } from '../domain/types.js';
+import type { GoodsManagerNewProductPoolItem } from './goodsManagerNewProducts.js';
 import { ORDER_ANALYSIS_PAGE_KEYS, type OrderAnalysisResult } from './orderAnalysis.js';
 import type { PublicTrafficDataReportContext, PublicTrafficProductDataRow, PublicTrafficReportContext, PublicTrafficReportSectionItem } from './types.js';
 
@@ -97,6 +98,32 @@ function orderAnalysisSheet(result: OrderAnalysisResult): XLSX.WorkSheet {
   return XLSX.utils.aoa_to_sheet(aoa);
 }
 
+function newProductPoolSheetFromItems(items: GoodsManagerNewProductPoolItem[]): XLSX.WorkSheet {
+  return XLSX.utils.aoa_to_sheet([
+    ['商品ID', '商品名称', '短标题', '最近提交时间', '商家', '同步状态', '支付宝编码', '库存', 'SKU数', '维护状态', '备注'],
+    ...items.map((item) => [
+      item.productId,
+      item.productName,
+      item.shortTitle,
+      item.submittedAt,
+      item.merchant,
+      item.alipaySyncStatus,
+      item.alipayCode,
+      item.stock,
+      item.skuCount,
+      item.maintenanceStatus,
+      item.note,
+    ]),
+  ]);
+}
+
+function newProductPoolSheetFromIds(ids: string[]): XLSX.WorkSheet {
+  return XLSX.utils.aoa_to_sheet([
+    ['商品ID', '维护状态', '备注'],
+    ...ids.map((id) => [id, '待维护', '']),
+  ]);
+}
+
 function writeLegacyWorkbookBuffer(context: PublicTrafficReportContext): Buffer {
   const workbook = XLSX.utils.book_new();
   const overviewAoa: (string | number)[][] = [['period', 'exposure', 'visits', 'conversionRate', 'amount']];
@@ -129,6 +156,11 @@ export function writePublicTrafficWorkbookBuffer(context: PublicTrafficDataRepor
   XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(sectionRows(context.weakConversion, context.emptySectionNotes.weakConversion)), '转化弱');
   XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(sectionRows(context.highPotential, context.emptySectionNotes.highPotential)), '高潜力');
   XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(sectionRows(context.newProductObservation, context.emptySectionNotes.newProductObservation)), '新品观察');
+  if (context.newProductPoolItems?.length) {
+    XLSX.utils.book_append_sheet(workbook, newProductPoolSheetFromItems(context.newProductPoolItems), '新品池维护');
+  } else if (context.newProductPoolIds?.length) {
+    XLSX.utils.book_append_sheet(workbook, newProductPoolSheetFromIds(context.newProductPoolIds), '新品池维护');
+  }
   XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(sectionRows(context.lifecycleGovernance, context.emptySectionNotes.lifecycleGovernance)), '生命周期治理');
   if (context.orderAnalysis) {
     XLSX.utils.book_append_sheet(workbook, orderAnalysisSheet(context.orderAnalysis), '订单分析');

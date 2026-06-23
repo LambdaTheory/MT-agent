@@ -19,4 +19,14 @@ describe('orderAnalysisCrawler wiring', () => {
     expect(source).toContain('cleanOrderAnalysisIndicator');
     expect(source).toContain('resolveOrderAnalysisDataDate');
   });
+
+  it('点击周期前会关闭遮挡浮层并在 pointer 拦截后重试', async () => {
+    const source = await readFile('src/crawler/orderAnalysisCrawler.ts', 'utf8');
+    expect(source).toContain('dismissBlockingOverlays');
+    expect(source).toContain('intercepts pointer events');
+    expect(source).toContain("click({ force: true })");
+    expect(source).toContain("getByRole('button'");
+    expect(source).toContain("getByText('我知道了'");
+    expect(source).toContain("getByText('关闭'");
+  });
 });

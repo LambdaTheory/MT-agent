@@ -41,4 +41,27 @@ describe('aggregateExposureDeltas', () => {
       },
     ]);
   });
+
+  it('canonicalizes polluted historical IDs before aggregating', () => {
+    expect(
+      aggregateExposureDeltas(
+        [
+          { date: '2026-06-10', productName: 'SX70', platformProductId: '20260302220008988390751', exposure: 100, visits: 2, amount: 0, custodyDays: 102, flags: [] },
+          { date: '2026-06-11', productName: 'SX70', platformProductId: '2026030222000898839075', exposure: 128, visits: 4, amount: 0, custodyDays: 103, flags: [] },
+        ],
+        { '2026030222000898839075': '251' },
+      ),
+    ).toEqual([
+      {
+        productName: 'SX70',
+        platformProductId: '2026030222000898839075',
+        exposure: 228,
+        visits: 6,
+        amount: 0,
+        visitRate: 6 / 228,
+        days: 2,
+        flags: [],
+      },
+    ]);
+  });
 });

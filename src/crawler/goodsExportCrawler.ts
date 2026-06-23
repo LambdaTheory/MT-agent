@@ -1,11 +1,10 @@
 import { mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import { chromium, type BrowserContext, type Locator, type Page } from 'playwright';
+import type { BrowserContext, Locator, Page } from 'playwright';
 import type { AgentConfig } from '../domain/types.js';
-import { clearBrowserProfileLocks, prepareDashboardPage } from './browserProfile.js';
-import { selectSubAccountIfNeeded } from './dashboardCrawler.js';
+import { selectSubAccountIfNeeded } from './subAccount.js';
 import { shouldKeepBrowserOpenOnFailure } from './failureHandling.js';
-import { waitForSettledLoginState } from './loginState.js';
+import { ensureAuthenticatedMerchantSession } from './merchantSession.js';
 
 const EXPORT_MENU_MATCHERS = [/导出/, /下载/];
 const SELECTED_ONLY_MATCHERS = [/已选/, /选中/];
@@ -70,23 +69,9 @@ async function clickExportDropdown(page: Page): Promise<void> {
 
 async function prepareGoodsExportPage(config: AgentConfig, browser: BrowserContext, page: Page): Promise<void> {
   const url = config.goodsExportUrl ?? 'https://b.alipay.com/page/commerce/goods/list?itemSubType=RENT&itemType=NORMAL_ITEM';
-  await page.goto(config.targetUrl, { waitUntil: 'domcontentloaded' });
-
-  let loginState = await waitForSettledLoginState(page, { timeoutMs: 60000, intervalMs: 1000 });
-  if (loginState === 'login-page') {
-    console.log('检测到支付宝登录页，请在打开的浏览器窗口扫码登录；登录成功后程序会自动继续下载商品总表。');
-    await page.waitForURL((currentUrl) => !/auth\.alipay\.com|login/i.test(currentUrl.toString()), { timeout: 300000 });
-    loginState = await waitForSettledLoginState(page, { timeoutMs: 60000, intervalMs: 1000 });
-  }
-
-  if (loginState === 'select-identity' || page.url().includes('select-identity')) {
-    await selectSubAccountIfNeeded(page);
-  }
-
   await page.goto(url, { waitUntil: 'domcontentloaded' });
-  loginState = await waitForSettledLoginState(page, { timeoutMs: 60000, intervalMs: 1000 });
 
-  if (loginState === 'select-identity' || page.url().includes('select-identity')) {
+  if (page.url().includes('select-identity')) {
     await selectSubAccountIfNeeded(page);
     await page.goto(url, { waitUntil: 'domcontentloaded' });
   }
@@ -110,11 +95,7 @@ export async function collectGoodsExportPage(config: AgentConfig, browser: Brows
 }
 
 export async function downloadGoodsExport(config: AgentConfig, outputPath = 'output/latest/goods-export.xlsx'): Promise<string> {
-  await mkdir(config.browserProfileDir, { recursive: true });
-  await clearBrowserProfileLocks(config.browserProfileDir);
-
-  const browser = await chromium.launchPersistentContext(config.browserProfileDir, { acceptDownloads: true, headless: false, viewport: { width: 1920, height: 1080 } });
-  const page = await prepareDashboardPage(browser.pages(), () => browser.newPage());
+  const { browser, page } = await ensureAuthenticatedMerchantSession(config, { acceptDownloads: true, stage: 'goods-export' });
   let completed = false;
 
   try {

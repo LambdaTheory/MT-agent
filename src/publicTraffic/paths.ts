@@ -1,4 +1,5 @@
 import type { PeriodKey } from '../domain/types.js';
+import { buildPublicTrafficArtifactManifestPath, type PublicTrafficArtifactStage } from './artifacts.js';
 
 export interface PublicTrafficPaths {
   dir: string;
@@ -13,11 +14,16 @@ export interface PublicTrafficPaths {
   productIdMappingSyncLog: string;
   newProductObservation: string;
   observationState: string;
+  goodsFirstSeenState: string;
+  goodsLinkLifecycleState: string;
   orderAnalysis: string;
+  artifactManifests: Record<PublicTrafficArtifactStage, string>;
   markdown: string;
   workbook: string;
   reportContext: string;
+  publicTrafficRunState: string;
   log: string;
+  latestLog: string;
 }
 
 export function buildPublicTrafficPaths(outputDir: string, date: string): PublicTrafficPaths {
@@ -39,10 +45,20 @@ export function buildPublicTrafficPaths(outputDir: string, date: string): Public
     productIdMappingSyncLog: `${dir}/商品ID映射同步日志_${date}.log`,
     newProductObservation: `${dir}/new-product-observation.json`,
     observationState: `${dir}/observation-state.json`,
+    goodsFirstSeenState: `${outputDir}/state/goods-first-seen.json`,
+    goodsLinkLifecycleState: `${outputDir}/state/goods-link-lifecycle.json`,
     orderAnalysis: `${dir}/订单分析_${date}.json`,
+    artifactManifests: {
+      'goods-export': buildPublicTrafficArtifactManifestPath(outputDir, date, 'goods-export'),
+      exposure: buildPublicTrafficArtifactManifestPath(outputDir, date, 'exposure'),
+      dashboard: buildPublicTrafficArtifactManifestPath(outputDir, date, 'dashboard'),
+      'order-analysis': buildPublicTrafficArtifactManifestPath(outputDir, date, 'order-analysis'),
+    },
     markdown: `${dir}/公域数据日报_${date}.md`,
     workbook: `${dir}/公域数据日报_${date}.xlsx`,
     reportContext: `${dir}/公域数据上下文_${date}.json`,
+    publicTrafficRunState: `${dir}/public-traffic-run-state.json`,
     log: `${dir}/公域数据运行日志_${date}.log`,
+    latestLog: `${outputDir}/latest/公域数据运行日志_latest.log`,
   };
 }

@@ -23,12 +23,12 @@ describe('normalizeRowsForPeriod 金额列', () => {
     expect(row.shippedOrderAmount).toBe(200);
   });
 
-  it('旧表头缺金额列时为 0，不报错', () => {
+  it('旧表头缺金额列时保留为 undefined，不报错', () => {
     const oldHeaders = ['商品名称', '商品ID', 'SPU名称', 'SPUID', '频道访问次数', '创建订单数', '签约订单数', '审出订单数', '发货订单数'];
     const table = tableWith(oldHeaders, [['测试商品', 'P1', 'SPU', 'S1', '10', '5', '4', '3', '2']]);
     const [row] = normalizeRowsForPeriod(table);
-    expect(row.createdOrderAmount).toBe(0);
-    expect(row.shippedOrderAmount).toBe(0);
+    expect(row.createdOrderAmount).toBeUndefined();
+    expect(row.shippedOrderAmount).toBeUndefined();
   });
 
   it('金额列表头不与订单数列冲突', () => {

@@ -16,8 +16,8 @@ describe('publicTrafficReport rules wiring', () => {
     expect(source).toContain("import { analyzePublicTrafficData } from '../publicTraffic/analyzePublicTrafficData.js';");
     expect(source).toContain("import { buildPublicTrafficCard } from '../publicTraffic/buildPublicTrafficCard.js';");
     expect(source).toContain("import { sendFeishuCard } from '../notify/feishu.js';");
-    expect(source).toContain('aggregateExposureDeltas(sevenDayDeltas)');
-    expect(source).toContain('aggregateExposureDeltas(thirtyDayDeltas)');
+    expect(source).toContain('aggregateExposureDeltas(sevenDayDeltas, mapping)');
+    expect(source).toContain('aggregateExposureDeltas(thirtyDayDeltas, mapping)');
     expect(source).toContain('paths.exposure7dSummary');
     expect(source).toContain('paths.exposure30dSummary');
     expect(source.indexOf('const { goodsExportPath, exposure: crawlResult, dashboard: rawTables } = await crawlPublicTrafficSources(config, paths.goodsExportWorkbook);')).toBeLessThan(

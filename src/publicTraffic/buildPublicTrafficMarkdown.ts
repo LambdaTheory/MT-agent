@@ -1,5 +1,5 @@
 import { flattenDiagnosticItems, sortedActions } from './diagnosticItems.js';
-import { findOrderAnalysisIndicator, fulfillmentRateLines, shortDataDate } from './orderAnalysis.js';
+import { businessMetricLines, findOrderAnalysisIndicator, shortDataDate } from './orderAnalysis.js';
 import type {
   ExposureOverviewMetric,
   PublicTrafficDataReportContext,
@@ -49,8 +49,8 @@ function toDataContext(context: PublicTrafficDataReportContext | PublicTrafficRe
 
 function overviewLines(summary: PublicTrafficDataSummary): string[] {
   return [
-    `曝光 ${summary.exposure}｜公域访问 ${summary.publicVisits}｜商品页访问 ${summary.dashboardVisits}｜订单 ${summary.createdOrders}｜发货 ${summary.shippedOrders}｜金额 ¥${summary.amount.toFixed(2)}`,
-    `曝光到访问率 ${(summary.exposureVisitRate * 100).toFixed(2)}%｜访问到下单率 ${(summary.visitCreatedOrderRate * 100).toFixed(2)}%｜访问到发货率 ${(summary.visitShipmentRate * 100).toFixed(2)}%`,
+    `曝光 ${summary.exposure}｜公域访问 ${summary.publicVisits}｜公域金额 ¥${summary.amount.toFixed(2)}`,
+    `转化率 ${(summary.exposureVisitRate * 100).toFixed(2)}%`,
   ];
 }
 
@@ -63,21 +63,20 @@ function oneDayOverviewLines(context: PublicTrafficDataReportContext): string[] 
   const returns = oa.pages.return;
   const customs = oa.pages.customs;
   return [
-    `公域（${context.date}）：曝光 ${summary.exposure}｜公域访问 ${summary.publicVisits}｜商品页访问 ${summary.dashboardVisits}｜金额 ¥${summary.amount.toFixed(2)}`,
-    `订单（${shortDataDate(overview?.dataDate)}）：创建订单 ${findOrderAnalysisIndicator(overview, ['创建订单数'])}｜签约订单 ${findOrderAnalysisIndicator(overview, ['签约订单数'])}｜审出订单 ${findOrderAnalysisIndicator(overview, ['审出订单数'])}｜发货订单 ${findOrderAnalysisIndicator(overview, ['发货订单数'])}｜签约金额 ${findOrderAnalysisIndicator(overview, ['签约完成金额（元）', '签约完成金额'])}`,
+    `公域（${context.date}）：曝光 ${summary.exposure}｜公域访问 ${summary.publicVisits}｜公域金额 ¥${summary.amount.toFixed(2)}｜转化率 ${(summary.exposureVisitRate * 100).toFixed(2)}%`,
+    `订单经营（${shortDataDate(overview?.dataDate)}）：创建订单 ${findOrderAnalysisIndicator(overview, ['创建订单数'])}｜签约订单 ${findOrderAnalysisIndicator(overview, ['签约订单数'])}｜发货订单 ${findOrderAnalysisIndicator(overview, ['发货订单数'])}`,
     `履约（发货${shortDataDate(delivery?.dataDate)}｜归还${shortDataDate(returns?.dataDate)}｜关单${shortDataDate(customs?.dataDate)}）：待发货 ${findOrderAnalysisIndicator(delivery, ['待发货订单数'])}｜归还 ${findOrderAnalysisIndicator(returns, ['归还订单数'])}｜逾期 ${findOrderAnalysisIndicator(returns, ['逾期订单数'])}｜关单 ${findOrderAnalysisIndicator(customs, ['关单数'])}`,
-    `曝光到访问率 ${(summary.exposureVisitRate * 100).toFixed(2)}%｜访问到下单率 ${(summary.visitCreatedOrderRate * 100).toFixed(2)}%｜访问到发货率 ${(summary.visitShipmentRate * 100).toFixed(2)}%`,
+    `经营指标：${businessMetricLines(overview, customs).join('') || '发货率 -｜关单率 -（目标<=35%）｜客单价 -'}`,
   ];
 }
 
 function productLine(row: PublicTrafficProductDataRow, index: number): string {
   const one = row.periods['1d'];
-  const visits = one.publicVisits || one.dashboardVisits;
-  return `${index + 1}. ${row.displayProductId}｜${row.productName || 'Unknown'}｜曝光 ${one.exposure}｜访问 ${visits}｜金额 ¥${one.amount.toFixed(2)}`;
+  return `${index + 1}. ${row.displayProductId}｜${row.productName || 'Unknown'}｜曝光 ${one.exposure}｜公域访问 ${one.publicVisits}｜公域金额 ¥${one.amount.toFixed(2)}`;
 }
 
 function topExposureLines(rows: PublicTrafficProductDataRow[]): string[] {
-  const score = (row: PublicTrafficProductDataRow) => row.periods['1d'].exposure || row.periods['1d'].publicVisits || row.periods['1d'].dashboardVisits;
+  const score = (row: PublicTrafficProductDataRow) => row.periods['1d'].exposure || row.periods['1d'].publicVisits;
   const items = [...rows].sort((a, b) => score(b) - score(a)).slice(0, 10);
   return items.map(productLine);
 }
@@ -112,19 +111,7 @@ export function buildPublicTrafficMarkdown(input: PublicTrafficDataReportContext
     '## 1日总览',
     ...oneDayOverviewLines(context),
   ];
-  appendMarkdownSection(lines, '履约比率', fulfillmentRateLines(context.orderAnalysis?.pages.overview));
-  if (context.dataQualityNotes?.length) {
-    lines.push('', '## 数据提示', ...context.dataQualityNotes);
-  }
-  lines.push(
-    '',
-    '## 7日总览',
-    ...overviewLines(context.summary['7d']),
-    '',
-    '## 30日总览',
-    ...overviewLines(context.summary['30d']),
-    '',
-  );
+  lines.push('');
   appendMarkdownSection(lines, '今日曝光 Top10', topExposureLines(context.rows));
   appendMarkdownTable(lines, '诊断问题', ['类型', '商品', '操作', '原因'], diagnosticRows(context));
   appendMarkdownTable(lines, '建议操作', ['操作', '商品', '原因'], sortedActions(context.recommendedActions).map((item) => [item.action, item.identifier, item.reason]));

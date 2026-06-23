@@ -11,12 +11,14 @@ export async function findLatestReportContext(outputDir = 'output'): Promise<{ p
     .reverse();
 
   for (const date of dates) {
-    const path = join(outputDir, date, 'report-context.json');
-    try {
-      return { path, context: JSON.parse(await readFile(path, 'utf8')) as PublicTrafficDataReportContext };
-    } catch (error) {
-      if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') continue;
-      throw error;
+    for (const fileName of [`公域数据上下文_${date}.json`, 'report-context.json']) {
+      const path = join(outputDir, date, fileName);
+      try {
+        return { path, context: JSON.parse(await readFile(path, 'utf8')) as PublicTrafficDataReportContext };
+      } catch (error) {
+        if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') continue;
+        throw error;
+      }
     }
   }
 
@@ -25,6 +27,22 @@ export async function findLatestReportContext(outputDir = 'output'): Promise<{ p
 
 function percent(value: number): string {
   return `${(value * 100).toFixed(2)}%`;
+}
+
+function normalizeProductIdentifier(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function extractInternalProductId(displayProductId: string): string | null {
+  return /^端内id\s*(\d+)$/i.exec(displayProductId.trim())?.[1] ?? null;
+}
+
+function matchesExactNumericProductId(row: PublicTrafficProductDataRow, normalizedKeyword: string): boolean {
+  return (
+    extractInternalProductId(row.displayProductId) === normalizedKeyword ||
+    normalizeProductIdentifier(row.displayProductId) === normalizedKeyword ||
+    normalizeProductIdentifier(row.platformProductId) === normalizedKeyword
+  );
 }
 
 export function formatLatestSummary(context: PublicTrafficDataReportContext): string {
@@ -39,7 +57,12 @@ export function formatLatestSummary(context: PublicTrafficDataReportContext): st
 }
 
 export function queryProductRows(context: PublicTrafficDataReportContext, keyword: string): PublicTrafficProductDataRow[] {
-  const normalized = keyword.trim().toLowerCase();
+  const normalized = normalizeProductIdentifier(keyword);
+  if (!normalized) return [];
+  if (/^\d+$/.test(normalized)) {
+    return context.rows.filter((row) => matchesExactNumericProductId(row, normalized)).slice(0, 5);
+  }
+
   return context.rows
     .filter(
       (row) =>

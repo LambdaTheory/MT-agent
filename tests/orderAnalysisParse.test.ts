@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  businessMetricLines,
   cleanOrderAnalysisIndicator,
+  derivedOrderBusinessMetrics,
   findOrderAnalysisIndicator,
   resolveOrderAnalysisDataDate,
   shortDataDate,
@@ -72,5 +74,79 @@ describe('findOrderAnalysisIndicator / shortDataDate', () => {
   it('shortDataDate 截取月日，空值返回未知', () => {
     expect(shortDataDate('2026-06-10')).toBe('06-10');
     expect(shortDataDate(null)).toBe('未知');
+  });
+});
+
+describe('derived order business metrics', () => {
+  it('computes derived shipment rate, close rate, and average order value', () => {
+    const overview = {
+      key: 'overview' as const,
+      label: '标准订单分析',
+      dataDate: '2026-06-10',
+      indicators: [
+        { label: '创建订单数', value: '200', delta: '' },
+        { label: '签约订单数', value: '100', delta: '' },
+        { label: '发货订单数', value: '80', delta: '' },
+        { label: '签约完成金额（元）', value: '4,000', delta: '' },
+      ],
+    };
+    const customs = {
+      key: 'customs' as const,
+      label: '关单分析',
+      dataDate: '2026-06-10',
+      indicators: [{ label: '关单数', value: '70', delta: '' }],
+    };
+
+    expect(derivedOrderBusinessMetrics(overview, customs)).toEqual({
+      shipmentRate: '40.00%',
+      closeRate: '35.00%',
+      closeRateStatus: '达标',
+      averageOrderValue: '¥40.00',
+    });
+    expect(businessMetricLines(overview, customs)).toEqual(['发货率 40.00%｜关单率 35.00%（目标<=35%，达标）｜客单价 ¥40.00']);
+  });
+
+  it('marks close rate above 35 percent as risk and handles missing denominators', () => {
+    const riskyOverview = {
+      key: 'overview' as const,
+      label: '标准订单分析',
+      dataDate: '2026-06-10',
+      indicators: [
+        { label: '创建订单数', value: '100', delta: '' },
+        { label: '签约订单数', value: '0', delta: '' },
+        { label: '发货订单数', value: '20', delta: '' },
+        { label: '签约完成金额（元）', value: '0', delta: '' },
+      ],
+    };
+    const riskyCustoms = {
+      key: 'customs' as const,
+      label: '关单分析',
+      dataDate: '2026-06-10',
+      indicators: [{ label: '关单数', value: '36', delta: '' }],
+    };
+
+    expect(derivedOrderBusinessMetrics(riskyOverview, riskyCustoms)).toEqual({
+      shipmentRate: '20.00%',
+      closeRate: '36.00%',
+      closeRateStatus: '风险',
+      averageOrderValue: '-',
+    });
+  });
+
+  it('formats unavailable close rate status in business metric lines', () => {
+    expect(businessMetricLines(undefined, undefined)).toEqual([]);
+    const noCreated = {
+      key: 'overview' as const,
+      label: '标准订单分析',
+      dataDate: '2026-06-10',
+      indicators: [
+        { label: '创建订单数', value: '0', delta: '' },
+        { label: '签约订单数', value: '0', delta: '' },
+        { label: '发货订单数', value: '0', delta: '' },
+        { label: '签约完成金额（元）', value: '0', delta: '' },
+      ],
+    };
+
+    expect(businessMetricLines(noCreated, undefined)).toEqual(['发货率 -｜关单率 -（目标<=35%）｜客单价 -']);
   });
 });

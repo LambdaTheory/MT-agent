@@ -1,11 +1,11 @@
 import { mkdir, writeFile } from 'node:fs/promises';
-import { chromium, type Locator, type Page } from 'playwright';
+import type { Frame, Page } from 'playwright';
 import type { AgentConfig, RawTableData } from '../domain/types.js';
-import { clearBrowserProfileLocks, prepareDashboardPage } from './browserProfile.js';
+import { ensureAuthenticatedMerchantSession } from './merchantSession.js';
 import { shouldKeepBrowserOpenOnFailure } from './failureHandling.js';
-import { waitForDashboardAfterLogin, waitForSettledLoginState } from './loginState.js';
 import { normalizePageSizeCandidates, readCurrentPageSize, setDashboardPageSize } from './pageSizeProbe.js';
 import { dedupeRowsByProductId, isCollectionComplete } from './pagination.js';
+import { selectSubAccountIfNeeded } from './subAccount.js';
 
 const PERIOD_LABELS = {
   '1d': '1日',
@@ -13,8 +13,14 @@ const PERIOD_LABELS = {
   '30d': '30日',
 } as const;
 
+type DashboardTarget = Frame | Page;
+
 function normalize(value: string | null | undefined): string {
   return (value ?? '').replace(/\s+/g, ' ').trim();
+}
+
+function waitForDashboardTargetTimeout(target: DashboardTarget, timeout: number): Promise<void> {
+  return 'page' in target ? target.page().waitForTimeout(timeout) : target.waitForTimeout(timeout);
 }
 
 export function isDashboardEmptyStateText(text: string | null | undefined): boolean {
@@ -22,9 +28,20 @@ export function isDashboardEmptyStateText(text: string | null | undefined): bool
   return normalized.includes('未查询到相关数据') || normalized.includes('暂无数据');
 }
 
-async function isDashboardEmptyStateVisible(page: Page): Promise<boolean> {
+async function isDashboardEmptyStateVisible(page: DashboardTarget): Promise<boolean> {
+  const visibleTable = page.locator('.ant-table table, table, [role="table"]').first();
+  if ((await visibleTable.count().catch(() => 0)) > 0 && (await visibleTable.isVisible().catch(() => false))) return false;
+
+  const emptyText = page.locator('.emptyTxt-LkXGcaGA').filter({ hasText: /未查询到相关数据|暂无数据/ }).first();
+  if ((await emptyText.count().catch(() => 0)) > 0 && (await emptyText.isVisible().catch(() => false))) return true;
   const text = await page.locator('body').textContent().catch(() => '');
   return isDashboardEmptyStateText(text);
+}
+
+async function confirmDashboardEmptyState(page: DashboardTarget): Promise<boolean> {
+  if (!(await isDashboardEmptyStateVisible(page))) return false;
+  await waitForDashboardTargetTimeout(page, 3000);
+  return isDashboardEmptyStateVisible(page);
 }
 
 function emptyDashboardTable(period: keyof typeof PERIOD_LABELS): RawTableData {
@@ -45,25 +62,50 @@ function emptyDashboardTable(period: keyof typeof PERIOD_LABELS): RawTableData {
   };
 }
 
-async function waitForTableOrEmptyState(page: Page, timeout: number): Promise<void> {
-  await Promise.race([
-    page.waitForSelector('.ant-table table', { timeout }),
-    page.waitForFunction(
-      () => {
-        const text = String(document.body?.innerText ?? '').replace(/\s+/g, ' ').trim();
-        return text.includes('未查询到相关数据') || text.includes('暂无数据');
-      },
-      undefined,
-      { timeout },
-    ),
+async function dashboardTargetState(target: DashboardTarget): Promise<'table' | 'empty' | null> {
+  return target
+    .evaluate(`(() => {
+      const isVisible = (element) => {
+        const rect = element.getBoundingClientRect();
+        const style = window.getComputedStyle(element);
+        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+      };
+      const hasVisibleTable = Array.from(document.querySelectorAll('.ant-table table, table, [role="table"]')).some((element) => isVisible(element));
+      if (hasVisibleTable) return 'table';
+      const emptyElements = Array.from(document.querySelectorAll('.emptyTxt-LkXGcaGA'));
+      if (emptyElements.some((element) => isVisible(element) && /未查询到相关数据|暂无数据/.test(String(element.textContent ?? '')))) return 'empty';
+      return null;
+    })()`)
+    .catch(() => null) as Promise<'table' | 'empty' | null>;
+}
+
+async function waitForTableOrEmptyState(page: Page, timeout: number): Promise<DashboardTarget> {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    for (const target of [page, ...page.frames()]) {
+      if (await dashboardTargetState(target)) return target;
+    }
+    await page.waitForTimeout(1000);
+  }
+  throw new Error('Dashboard table or empty-state did not appear within timeout');
+}
+
+async function dashboardTimeoutMessage(page: Page): Promise<string> {
+  const [url, title, bodyText] = await Promise.all([
+    Promise.resolve(page.url()).catch(() => ''),
+    page.title().catch(() => ''),
+    page.locator('body').innerText({ timeout: 1000 }).catch(() => ''),
   ]);
+  const snippet = normalize(bodyText).slice(0, 240);
+  const frameUrls = page.frames().map((frame) => frame.url()).filter(Boolean).slice(0, 10).join(' | ');
+  return `Dashboard table or empty-state did not appear within 180 seconds. url=${url || 'unknown'} title=${title || 'unknown'} text=${snippet || 'empty'} frames=${frameUrls || 'none'}`;
 }
 
-async function waitForTableRefresh(page: Page): Promise<void> {
-  await page.waitForTimeout(2000);
+async function waitForTableRefresh(page: DashboardTarget): Promise<void> {
+  await waitForDashboardTargetTimeout(page, 2000);
 }
 
-async function selectPeriod(page: Page, period: keyof typeof PERIOD_LABELS): Promise<void> {
+async function selectPeriod(page: DashboardTarget, period: keyof typeof PERIOD_LABELS): Promise<void> {
   const label = PERIOD_LABELS[period];
   const target = page.getByText(label, { exact: true }).first();
   await target.waitFor({ state: 'visible', timeout: 30000 });
@@ -71,7 +113,7 @@ async function selectPeriod(page: Page, period: keyof typeof PERIOD_LABELS): Pro
   await waitForTableRefresh(page);
 }
 
-async function readActualPageSize(page: Page): Promise<number> {
+async function readActualPageSize(page: DashboardTarget): Promise<number> {
   try {
     return (await readCurrentPageSize(page)) ?? 10;
   } catch {
@@ -79,7 +121,7 @@ async function readActualPageSize(page: Page): Promise<number> {
   }
 }
 
-async function readDisplayedTotal(page: Page): Promise<number | null> {
+async function readDisplayedTotal(page: DashboardTarget): Promise<number | null> {
   try {
     const text = normalize(await page.locator('.ant-pagination, .ant-table-pagination').last().textContent().catch(() => ''));
     const match = text.match(/共\s*(\d+)\s*条/);
@@ -89,7 +131,7 @@ async function readDisplayedTotal(page: Page): Promise<number | null> {
   }
 }
 
-async function isNextDisabled(page: Page): Promise<boolean> {
+async function isNextDisabled(page: DashboardTarget): Promise<boolean> {
   const next = page.locator('.ant-pagination-next').last();
 
   if ((await next.count()) === 0) {
@@ -100,18 +142,21 @@ async function isNextDisabled(page: Page): Promise<boolean> {
   return Boolean(className?.includes('disabled'));
 }
 
-async function goToNextPage(page: Page): Promise<void> {
+async function goToNextPage(page: DashboardTarget): Promise<void> {
   const button = page.locator('.ant-pagination-next button, .ant-pagination-next').last();
   await button.click();
   await waitForTableRefresh(page);
 }
 
-async function extractCurrentTable(page: Page): Promise<{ headers: string[]; rows: string[][] }> {
+async function extractCurrentTable(page: DashboardTarget): Promise<{ headers: string[]; rows: string[][] }> {
   return page.evaluate(`(() => {
     const normalizeText = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
-    const container = document.querySelector('.ant-table');
-    if (!container) throw new Error('Could not find .ant-table');
-    const table = container.querySelector('table');
+    const isVisible = (element) => {
+      const rect = element.getBoundingClientRect();
+      const style = window.getComputedStyle(element);
+      return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+    };
+    const table = Array.from(document.querySelectorAll('.ant-table table, table, [role="table"]')).find((element) => isVisible(element));
     if (!table) throw new Error('Could not find table');
 
     const sourceHeaders = Array.from(table.querySelectorAll('thead th')).map((cell) => normalizeText(cell.textContent || ''));
@@ -160,15 +205,15 @@ async function extractCurrentTable(page: Page): Promise<{ headers: string[]; row
   })()`);
 }
 
-async function collectPeriod(page: Page, period: keyof typeof PERIOD_LABELS, pageSize: number, preferredPageSize: number): Promise<RawTableData> {
+async function collectPeriod(page: DashboardTarget, period: keyof typeof PERIOD_LABELS, pageSize: number, preferredPageSize: number): Promise<RawTableData> {
   await selectPeriod(page, period);
-  if (await isDashboardEmptyStateVisible(page)) {
+  if (await confirmDashboardEmptyState(page)) {
     return emptyDashboardTable(period);
   }
 
   await setDashboardPageSize(page, pageSize);
-  await waitForTableOrEmptyState(page, 30000);
-  if (await isDashboardEmptyStateVisible(page)) {
+  await waitForDashboardTargetTableOrEmptyState(page, 30000);
+  if (await confirmDashboardEmptyState(page)) {
     return emptyDashboardTable(period);
   }
 
@@ -215,7 +260,16 @@ async function collectPeriod(page: Page, period: keyof typeof PERIOD_LABELS, pag
   };
 }
 
-async function collectPeriodWithAdaptivePageSize(page: Page, period: keyof typeof PERIOD_LABELS, preferredPageSize: number): Promise<RawTableData> {
+async function waitForDashboardTargetTableOrEmptyState(target: DashboardTarget, timeout: number): Promise<void> {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    if (await dashboardTargetState(target)) return;
+    await waitForDashboardTargetTimeout(target, 1000);
+  }
+  throw new Error('Dashboard target table or empty-state did not appear within timeout');
+}
+
+async function collectPeriodWithAdaptivePageSize(page: DashboardTarget, period: keyof typeof PERIOD_LABELS, preferredPageSize: number): Promise<RawTableData> {
   const candidates = normalizePageSizeCandidates(preferredPageSize);
   let lastError: Error | null = null;
 
@@ -233,66 +287,10 @@ async function collectPeriodWithAdaptivePageSize(page: Page, period: keyof typeo
   throw lastError ?? new Error(`[${period}] all page size candidates failed`);
 }
 
-export async function selectSubAccountIfNeeded(page: Page): Promise<void> {
-  if (!page.url().includes('select-identity')) {
-    return;
-  }
-
-  const matchers = [/深圳.*米奇/, /米奇.*租赁/];
-  const fallbackMatchers = [/米奇/];
-  const accountRows = page.locator('.ant-table-tbody tr');
-
-  try {
-    await accountRows.first().waitFor({ state: 'visible', timeout: 30000 });
-  } catch {
-    const bodyText = normalize(await page.locator('body').textContent().catch(() => ''));
-    throw new Error(`Reached the account selection page, but account rows did not appear. Visible text: ${bodyText.slice(0, 1000)}`);
-  }
-
-  const count = await accountRows.count();
-
-  async function clickAndNavigate(row: Locator): Promise<boolean> {
-    await row.locator('h3').first().click();
-    await page.waitForTimeout(2000);
-
-    try {
-      await page.waitForURL((url) => !url.toString().includes('select-identity'), { timeout: 30000 });
-      await page.waitForTimeout(2000);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  for (let index = 0; index < count; index += 1) {
-    const row = accountRows.nth(index);
-    const text = normalize(await row.textContent());
-    if (matchers.some((matcher) => matcher.test(text)) || fallbackMatchers.some((matcher) => matcher.test(text))) {
-      if (await clickAndNavigate(row)) {
-        return;
-      }
-
-      await row.click();
-      try {
-        await page.waitForSelector('.ant-table table', { timeout: 10000 });
-        return;
-      } catch {
-        // continue to error
-      }
-    }
-  }
-
-  const visibleAccounts = await accountRows.evaluateAll((rows) => rows.map((row) => String(row.textContent ?? '').replace(/\s+/g, ' ').trim()).filter(Boolean));
-  throw new Error(`Reached the account selection page, but could not find the 深圳市米奇租赁有限责任公司 sub-account. Visible accounts: ${visibleAccounts.join(' | ')}`);
-}
+export { selectSubAccountIfNeeded } from './subAccount.js';
 
 export async function collectDashboardPage(config: AgentConfig, page: Page): Promise<RawTableData[]> {
   await page.goto(config.targetUrl, { waitUntil: 'domcontentloaded' });
-  const loginState = await waitForSettledLoginState(page, { timeoutMs: 60000, intervalMs: 1000 });
-  if (loginState === 'login-page') {
-    await waitForDashboardAfterLogin(page);
-  }
-
   await selectSubAccountIfNeeded(page);
 
   if (page.url().includes('select-identity')) {
@@ -301,19 +299,31 @@ export async function collectDashboardPage(config: AgentConfig, page: Page): Pro
 
   await page.waitForURL(/assistant-data-analysis\/index\/product\/list/, { timeout: 180000 }).catch(() => undefined);
 
+  let dashboardTarget: DashboardTarget;
   try {
-    await waitForTableOrEmptyState(page, 180000);
+    dashboardTarget = await waitForTableOrEmptyState(page, 180000);
   } catch {
-    throw new Error('Dashboard table or empty-state did not appear within 180 seconds. Complete QR login in the opened browser window.');
+    throw new Error(await dashboardTimeoutMessage(page));
   }
 
   const rawDir = `${config.outputDir}/latest`;
   await mkdir(rawDir, { recursive: true });
 
+  const periods = ['1d', '7d', '30d'] as const;
+  if (await confirmDashboardEmptyState(dashboardTarget)) {
+    const emptyResults = periods.map((period) => emptyDashboardTable(period));
+    for (const table of emptyResults) {
+      const path = `${rawDir}/raw-${table.period}.json`;
+      await writeFile(path, JSON.stringify(table, null, 2), 'utf8');
+      console.log(`[${table.period}] saved ${table.rows.length} rows to ${path}`);
+    }
+    return emptyResults;
+  }
+
   const results: RawTableData[] = [];
 
-  for (const period of ['1d', '7d', '30d'] as const) {
-    const table = await collectPeriodWithAdaptivePageSize(page, period, config.preferredPageSize);
+  for (const period of periods) {
+    const table = await collectPeriodWithAdaptivePageSize(dashboardTarget, period, config.preferredPageSize);
     results.push(table);
     const path = `${rawDir}/raw-${period}.json`;
     await writeFile(path, JSON.stringify(table, null, 2), 'utf8');
@@ -324,10 +334,7 @@ export async function collectDashboardPage(config: AgentConfig, page: Page): Pro
 }
 
 export async function crawlDashboard(config: AgentConfig): Promise<RawTableData[]> {
-  await mkdir(config.browserProfileDir, { recursive: true });
-  await clearBrowserProfileLocks(config.browserProfileDir);
-  const browser = await chromium.launchPersistentContext(config.browserProfileDir, { headless: false });
-  const page = await prepareDashboardPage(browser.pages(), () => browser.newPage());
+  const { browser, page } = await ensureAuthenticatedMerchantSession(config, { acceptDownloads: false, stage: 'dashboard' });
   let completed = false;
 
   try {

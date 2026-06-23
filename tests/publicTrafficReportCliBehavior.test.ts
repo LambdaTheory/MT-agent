@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentConfig, PeriodProductMetrics, RawTableData } from '../src/domain/types.js';
+import { parsePublicTrafficArtifactManifest } from '../src/publicTraffic/artifacts.js';
 import { buildPublicTrafficPaths } from '../src/publicTraffic/paths.js';
 import type { ExposureDailyDelta, PublicTrafficDataReportContext } from '../src/publicTraffic/types.js';
 
@@ -15,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   crawlPublicTrafficSources: vi.fn(),
   normalizeRowsForPeriod: vi.fn<(table: RawTableData) => PeriodProductMetrics[]>(),
   sendFeishuCard: vi.fn(),
+  fetchRecentGoodsManagerProducts: vi.fn(),
 }));
 
 vi.mock('../src/config/loadEnv.js', () => ({
@@ -47,6 +49,10 @@ vi.mock('../src/extractor/normalizeRows.js', () => ({
 
 vi.mock('../src/notify/feishu.js', () => ({
   sendFeishuCard: mocks.sendFeishuCard,
+}));
+
+vi.mock('../src/publicTraffic/goodsManagerNewProducts.js', () => ({
+  fetchRecentGoodsManagerProducts: mocks.fetchRecentGoodsManagerProducts,
 }));
 
 describe('runPublicTrafficReportCli public traffic sequencing', () => {
@@ -115,6 +121,7 @@ describe('runPublicTrafficReportCli public traffic sequencing', () => {
       },
     ]);
     mocks.sendFeishuCard.mockResolvedValue({ sent: false, reason: 'test' });
+    mocks.fetchRecentGoodsManagerProducts.mockResolvedValue([]);
 
     const historicalPaths = buildPublicTrafficPaths(mocks.outputDir, '2026-06-09');
     await mkdir(historicalPaths.dir, { recursive: true });
@@ -139,6 +146,163 @@ describe('runPublicTrafficReportCli public traffic sequencing', () => {
     if (mocks.outputDir) {
       await rm(mocks.outputDir, { recursive: true, force: true });
     }
+  });
+
+  it('loads goods-manager new product pool items when GOODS_MANAGER_BASE_URL is configured', async () => {
+    vi.stubEnv('GOODS_MANAGER_BASE_URL', 'http://192.168.1.22:3010');
+    mocks.loadProductIdMapping.mockResolvedValueOnce({ p701: '701', p702: '702' });
+    await mkdir(join(mocks.outputDir, 'state'), { recursive: true });
+    await writeFile(join(mocks.outputDir, 'state', 'goods-first-seen.json'), JSON.stringify({
+      '701': { firstSeenDate: '2026-06-10', platformProductId: 'p701', productName: '新品 Alpha' },
+      '702': { firstSeenDate: '2026-06-10', platformProductId: 'p702', productName: '新品 Beta' },
+    }), 'utf8');
+    mocks.fetchRecentGoodsManagerProducts.mockResolvedValueOnce([
+      {
+        productId: '701',
+        productName: '新品 Alpha',
+        shortTitle: 'Alpha 短标题',
+        submittedAt: '2026-06-12 09:00:00',
+        merchant: '主商家',
+        alipaySyncStatus: '已同步',
+        alipayCode: 'ALI-701',
+        stock: 8,
+        skuCount: 2,
+        maintenanceStatus: '待维护',
+        note: '',
+      },
+      {
+        productId: '702',
+        productName: '新品 Beta',
+        shortTitle: '',
+        submittedAt: '2026-06-12 10:00:00',
+        merchant: '',
+        alipaySyncStatus: '',
+        alipayCode: '',
+        stock: 0,
+        skuCount: 0,
+        maintenanceStatus: '待维护',
+        note: '',
+      },
+    ]);
+    const { runPublicTrafficReportCli } = await import('../src/cli/publicTrafficReport.js');
+
+    await runPublicTrafficReportCli();
+
+    expect(mocks.fetchRecentGoodsManagerProducts).toHaveBeenCalledWith({
+      baseUrl: 'http://192.168.1.22:3010',
+      days: 7,
+      referenceDate: '2026-06-10',
+      requireAlipaySynced: true,
+    });
+    const todayPaths = buildPublicTrafficPaths(mocks.outputDir, '2026-06-10');
+    const context = JSON.parse(await readFile(todayPaths.reportContext, 'utf8')) as PublicTrafficDataReportContext;
+    expect(context.newProductPoolIds).toEqual(['702', '701']);
+    expect(context.newProductPoolItems).toEqual([
+      expect.objectContaining({ productId: '702', productName: '新品 Beta', stock: 0, skuCount: 0 }),
+      expect.objectContaining({ productId: '701', productName: '新品 Alpha', stock: 8, skuCount: 2 }),
+    ]);
+    await expect(readFile(todayPaths.log, 'utf8')).resolves.toContain('goods-manager 新品池: 2 个商品');
+  });
+
+  it('filters goods-manager new links by current goods export membership and first-seen date', async () => {
+    vi.stubEnv('GOODS_MANAGER_BASE_URL', 'http://192.168.1.22:3010');
+    mocks.loadProductIdMapping.mockResolvedValueOnce({ p701: '701', p702: '702' });
+    const statePath = join(mocks.outputDir, 'state', 'goods-first-seen.json');
+    await mkdir(join(mocks.outputDir, 'state'), { recursive: true });
+    await writeFile(statePath, JSON.stringify({
+      '701': { firstSeenDate: '2026-06-08', platformProductId: 'p701', productName: 'Recent' },
+      '702': { firstSeenDate: '2026-06-01', platformProductId: 'p702', productName: 'Old' },
+    }), 'utf8');
+    mocks.fetchRecentGoodsManagerProducts.mockResolvedValueOnce([
+      { productId: '701', productName: '近7天首次出现', shortTitle: '', submittedAt: '2026-06-10 09:00:00', merchant: '', alipaySyncStatus: '已同步', alipayCode: '', stock: 0, skuCount: 0, maintenanceStatus: '待维护', note: '' },
+      { productId: '702', productName: '很早已出现', shortTitle: '', submittedAt: '2026-06-10 09:00:00', merchant: '', alipaySyncStatus: '已同步', alipayCode: '', stock: 0, skuCount: 0, maintenanceStatus: '待维护', note: '' },
+      { productId: '703', productName: '不在商品总表', shortTitle: '', submittedAt: '2026-06-10 09:00:00', merchant: '', alipaySyncStatus: '已同步', alipayCode: '', stock: 0, skuCount: 0, maintenanceStatus: '待维护', note: '' },
+    ]);
+    const { runPublicTrafficReportCli } = await import('../src/cli/publicTrafficReport.js');
+
+    await runPublicTrafficReportCli();
+
+    const todayPaths = buildPublicTrafficPaths(mocks.outputDir, '2026-06-10');
+    const context = JSON.parse(await readFile(todayPaths.reportContext, 'utf8')) as PublicTrafficDataReportContext;
+    expect(context.newProductPoolIds).toEqual(['701']);
+    expect(context.newProductPoolItems?.map((item) => item.productId)).toEqual(['701']);
+    await expect(readFile(todayPaths.log, 'utf8')).resolves.toContain('goods-manager 新链接观察: 原始=3, 商品总表近7天首次出现=1');
+  });
+
+  it('initializes first-seen state as baseline and does not treat all existing goods as new links', async () => {
+    vi.stubEnv('GOODS_MANAGER_BASE_URL', 'http://192.168.1.22:3010');
+    mocks.loadProductIdMapping.mockResolvedValueOnce({ p701: '701' });
+    mocks.fetchRecentGoodsManagerProducts.mockResolvedValueOnce([
+      { productId: '701', productName: '存量链接', shortTitle: '', submittedAt: '2026-06-10 09:00:00', merchant: '', alipaySyncStatus: '已同步', alipayCode: '', stock: 0, skuCount: 0, maintenanceStatus: '待维护', note: '' },
+    ]);
+    const { runPublicTrafficReportCli } = await import('../src/cli/publicTrafficReport.js');
+
+    await runPublicTrafficReportCli();
+
+    const todayPaths = buildPublicTrafficPaths(mocks.outputDir, '2026-06-10');
+    const context = JSON.parse(await readFile(todayPaths.reportContext, 'utf8')) as PublicTrafficDataReportContext;
+    expect(context.newProductPoolItems).toBeUndefined();
+    const firstSeen = JSON.parse(await readFile(todayPaths.goodsFirstSeenState, 'utf8')) as Record<string, { baseline?: boolean }>;
+    expect(firstSeen['701']?.baseline).toBe(true);
+    await expect(readFile(todayPaths.log, 'utf8')).resolves.toContain('goods-manager 新链接观察: 原始=1, 商品总表近7天首次出现=0');
+  });
+
+  it('preserves first-seen baseline markers when reading existing state', async () => {
+    vi.stubEnv('GOODS_MANAGER_BASE_URL', 'http://192.168.1.22:3010');
+    mocks.loadProductIdMapping.mockResolvedValueOnce({ p701: '701' });
+    const stateDir = join(mocks.outputDir, 'state');
+    await mkdir(stateDir, { recursive: true });
+    await writeFile(join(stateDir, 'goods-first-seen.json'), JSON.stringify({
+      '701': { firstSeenDate: '2026-06-10', platformProductId: 'p701', productName: '存量链接', baseline: true },
+    }), 'utf8');
+    mocks.fetchRecentGoodsManagerProducts.mockResolvedValueOnce([
+      { productId: '701', productName: '存量链接', shortTitle: '', submittedAt: '2026-06-10 09:00:00', merchant: '', alipaySyncStatus: '已同步', alipayCode: '', stock: 0, skuCount: 0, maintenanceStatus: '待维护', note: '' },
+    ]);
+
+    const { runPublicTrafficReportCli } = await import('../src/cli/publicTrafficReport.js');
+
+    await runPublicTrafficReportCli();
+
+    const todayPaths = buildPublicTrafficPaths(mocks.outputDir, '2026-06-10');
+    const context = JSON.parse(await readFile(todayPaths.reportContext, 'utf8')) as PublicTrafficDataReportContext;
+    expect(context.newProductPoolItems).toBeUndefined();
+    await expect(readFile(todayPaths.log, 'utf8')).resolves.toContain('goods-manager 新链接观察: 原始=1, 商品总表近7天首次出现=0');
+  });
+
+  it('initializes removed-link lifecycle state without reporting removed links on first run', async () => {
+    mocks.loadProductIdMapping.mockResolvedValueOnce({ p701: '701', p702: '702' });
+    const { runPublicTrafficReportCli } = await import('../src/cli/publicTrafficReport.js');
+
+    await runPublicTrafficReportCli();
+
+    const todayPaths = buildPublicTrafficPaths(mocks.outputDir, '2026-06-10');
+    const context = JSON.parse(await readFile(todayPaths.reportContext, 'utf8')) as PublicTrafficDataReportContext;
+    const state = JSON.parse(await readFile(todayPaths.goodsLinkLifecycleState, 'utf8')) as { active: Record<string, unknown>; removedLinks: unknown[] };
+    expect(Object.keys(state.active).sort()).toEqual(['701', '702']);
+    expect(state.removedLinks).toEqual([]);
+    expect(context.agentData?.removedLinks).toEqual([]);
+  });
+
+  it('writes removed links to agent data without adding visible report modules', async () => {
+    mocks.loadProductIdMapping.mockResolvedValueOnce({ p702: '702' });
+    const todayPaths = buildPublicTrafficPaths(mocks.outputDir, '2026-06-10');
+    await mkdir(join(mocks.outputDir, 'state'), { recursive: true });
+    await writeFile(todayPaths.goodsLinkLifecycleState, JSON.stringify({
+      active: {
+        '701': { platformProductId: 'p701', productName: '已下架链接' },
+        '702': { platformProductId: 'p702', productName: '保留链接' },
+      },
+      removedLinks: [],
+    }), 'utf8');
+    const { runPublicTrafficReportCli } = await import('../src/cli/publicTrafficReport.js');
+
+    await runPublicTrafficReportCli();
+
+    const context = JSON.parse(await readFile(todayPaths.reportContext, 'utf8')) as PublicTrafficDataReportContext;
+    expect(context.agentData?.removedLinks).toEqual([
+      { productId: '701', platformProductId: 'p701', productName: '已下架链接', removedDate: '2026-06-10', reason: '商品总表缺失', source: 'goods_snapshot_diff' },
+    ]);
+    await expect(readFile(todayPaths.markdown, 'utf8')).resolves.not.toContain('已下架链接');
   });
 
   it('keeps first-run daily delta empty while historical deltas still feed report summaries and rows', async () => {
@@ -170,6 +334,18 @@ describe('runPublicTrafficReportCli public traffic sequencing', () => {
     const latestOrderAnalysis = JSON.parse(await readFile(join(mocks.outputDir, 'latest', 'order-analysis.json'), 'utf8')) as { runDate: string };
     expect(latestOrderAnalysis.runDate).toBe('2026-06-10');
     expect(context.orderAnalysis?.pages?.overview?.label).toBe('标准订单分析');
+
+    const manifests = {
+      goodsExport: parsePublicTrafficArtifactManifest(await readFile(todayPaths.artifactManifests['goods-export'], 'utf8')),
+      exposure: parsePublicTrafficArtifactManifest(await readFile(todayPaths.artifactManifests.exposure, 'utf8')),
+      dashboard: parsePublicTrafficArtifactManifest(await readFile(todayPaths.artifactManifests.dashboard, 'utf8')),
+      orderAnalysis: parsePublicTrafficArtifactManifest(await readFile(todayPaths.artifactManifests['order-analysis'], 'utf8')),
+    };
+    expect(manifests.goodsExport).toMatchObject({ stage: 'goods-export', sourceUrl: 'https://b.alipay.com/page/commerce/goods/list?itemSubType=RENT&itemType=NORMAL_ITEM', files: { goodsExportWorkbook: todayPaths.goodsExportWorkbook } });
+    expect(manifests.exposure.files).toEqual({ exposureCumulativeProducts: todayPaths.exposureCumulativeProducts, exposureOverview: todayPaths.exposureOverview });
+    expect(manifests.dashboard).toMatchObject({ stage: 'dashboard', freshness: 'fresh', files: { '1d': todayPaths.publicVisitRaw['1d'], '7d': todayPaths.publicVisitRaw['7d'], '30d': todayPaths.publicVisitRaw['30d'] } });
+    expect(manifests.dashboard).not.toHaveProperty('notes');
+    expect(manifests.orderAnalysis).toMatchObject({ stage: 'order-analysis', capturedAt: '2026-06-10T12:00:00Z', dataDate: '2026-06-09', files: { orderAnalysis: todayPaths.orderAnalysis } });
   });
 
   it('uses the source data date in the report title while keeping output paths on the run date', async () => {
@@ -352,11 +528,14 @@ describe('runPublicTrafficReportCli public traffic sequencing', () => {
     const todayPaths = buildPublicTrafficPaths(mocks.outputDir, '2026-06-10');
     const context = JSON.parse(await readFile(todayPaths.reportContext, 'utf8')) as PublicTrafficDataReportContext;
     expect(context.dataQualityNotes).toEqual(['今日访问数据支付宝暂未更新，本期访问量板块指标缺失。']);
-    await expect(readFile(todayPaths.markdown, 'utf8')).resolves.toContain('今日访问数据支付宝暂未更新，本期访问量板块指标缺失。');
+    const dashboardManifest = parsePublicTrafficArtifactManifest(await readFile(todayPaths.artifactManifests.dashboard, 'utf8'));
+    expect(dashboardManifest.freshness).toBe('not_updated');
+    expect(dashboardManifest.notes).toEqual(['今日访问数据支付宝暂未更新，本期访问量板块指标缺失。']);
+    await expect(readFile(todayPaths.markdown, 'utf8')).resolves.not.toContain('今日访问数据支付宝暂未更新，本期访问量板块指标缺失。');
     await expect(readFile(todayPaths.log, 'utf8')).resolves.toContain('今日访问数据支付宝暂未更新，本期访问量板块指标缺失。');
   });
 
-  it('treats an existing empty previous cumulative snapshot as history for new-product daily deltas', async () => {
+  it('treats an existing empty previous cumulative snapshot as history without implying new products', async () => {
     const yesterdayPaths = buildPublicTrafficPaths(mocks.outputDir, '2026-06-09');
     await writeFile(yesterdayPaths.exposureCumulativeProducts, '[]', 'utf8');
     const { runPublicTrafficReportCli } = await import('../src/cli/publicTrafficReport.js');
@@ -370,10 +549,10 @@ describe('runPublicTrafficReportCli public traffic sequencing', () => {
       date: '2026-06-09',
       productName: '当前商品',
       platformProductId: 'p-current',
-      exposure: 1000,
-      visits: 100,
-      amount: 200,
-      flags: ['new_product'],
+      exposure: 0,
+      visits: 0,
+      amount: 0,
+      flags: ['missing_previous_snapshot_row'],
     });
     await expect(readFile(todayPaths.log, 'utf8')).resolves.not.toContain('商品级曝光历史不足');
   });

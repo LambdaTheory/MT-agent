@@ -10,13 +10,44 @@ import {
   type OrderAnalysisPageData,
   type OrderAnalysisPageKey,
 } from '../publicTraffic/orderAnalysis.js';
-import { selectSubAccountIfNeeded } from './dashboardCrawler.js';
+import { selectSubAccountIfNeeded } from './subAccount.js';
 
 const ORDER_ANALYSIS_BASE_URL = 'https://b.alipay.com/page/recycle-im/app/assistant-data-analysis/index/order/';
 const APP_ID = '2021005181665859';
 
 function orderAnalysisUrl(key: OrderAnalysisPageKey): string {
   return `${ORDER_ANALYSIS_BASE_URL}${key}?appId=${APP_ID}`;
+}
+
+async function dismissBlockingOverlays(page: Page): Promise<void> {
+  const candidates = [
+    page.getByRole('button', { name: /关闭|我知道了|知道了|跳过|以后再说|取消|×|Close/i }),
+    page.locator('[aria-label="close"], [aria-label="Close"], .ant-modal-close, .ant-drawer-close').first(),
+    page.getByText('我知道了', { exact: true }),
+    page.getByText('关闭', { exact: true }),
+    page.getByText('跳过', { exact: true }),
+    page.getByText('以后再说', { exact: true }),
+  ];
+
+  for (const candidate of candidates) {
+    const target = candidate.first();
+    if ((await target.count().catch(() => 0)) === 0) continue;
+    if (!(await target.isVisible().catch(() => false))) continue;
+    await target.click({ timeout: 2000 }).catch(() => undefined);
+    await page.waitForTimeout(500);
+  }
+}
+
+async function clickWithOverlayRetry(page: Page, target: ReturnType<Page['getByText']>): Promise<void> {
+  await dismissBlockingOverlays(page);
+  try {
+    await target.click();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!message.includes('intercepts pointer events')) throw error;
+    await dismissBlockingOverlays(page);
+    await target.click({ force: true });
+  }
 }
 
 async function selectOneDayPeriod(page: Page, key: OrderAnalysisPageKey): Promise<void> {
@@ -26,7 +57,7 @@ async function selectOneDayPeriod(page: Page, key: OrderAnalysisPageKey): Promis
   } catch {
     throw new Error(`订单分析页 ${key} 未找到「1日」日期切换控件`);
   }
-  await target.click();
+  await clickWithOverlayRetry(page, target);
   await page.waitForTimeout(3000);
 }
 
@@ -34,7 +65,7 @@ async function expandIndicators(page: Page, key: OrderAnalysisPageKey): Promise<
   const expand = page.getByText('展开', { exact: true }).first();
   if ((await expand.count()) === 0) return;
   const before = await page.locator('.merchant-ui-data-indicator').count();
-  await expand.click();
+  await clickWithOverlayRetry(page, expand);
   await page.waitForTimeout(3000);
   const after = await page.locator('.merchant-ui-data-indicator').count();
   if (after <= before) {
@@ -69,6 +100,7 @@ async function collectOrderAnalysisPage(page: Page, key: OrderAnalysisPageKey): 
     await page.goto(orderAnalysisUrl(key), { waitUntil: 'domcontentloaded' });
   }
   await page.waitForSelector('.merchant-ui-data-indicator', { timeout: 60000 });
+  await dismissBlockingOverlays(page);
   await selectOneDayPeriod(page, key);
   await expandIndicators(page, key);
 

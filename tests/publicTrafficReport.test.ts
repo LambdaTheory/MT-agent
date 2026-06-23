@@ -162,7 +162,7 @@ describe('public traffic report outputs', () => {
     expect(markdown).toContain('曝光 1000，较昨日上升 100');
     expect(markdown).toContain('## 1日总览');
     expect(markdown).toContain('## 今日曝光 Top10');
-    expect(markdown).toContain('端内ID 1001｜公域商品A｜曝光 100｜访问 10｜金额 ¥88.50');
+    expect(markdown).toContain('端内ID 1001｜公域商品A｜曝光 100｜公域访问 10｜公域金额 ¥88.50');
     expect(markdown).not.toContain('## 预警商品（托管>5天 且 曝光<100）');
     expect(markdown).toContain('## 诊断问题');
     expect(markdown).toContain('| 类型 | 商品 | 操作 | 原因 |');
@@ -214,18 +214,26 @@ describe('public traffic report outputs', () => {
   });
 
   it('builds medium-density Feishu text', () => {
-    const text = buildPublicTrafficFeishuText(context, { markdownPath: 'report.md', workbookPath: 'report.xlsx' });
+    const text = buildPublicTrafficFeishuText(contextWithOrderAnalysis, { markdownPath: 'report.md', workbookPath: 'report.xlsx' });
     expect(text).toContain('公域数据日报 2026-06-10');
     expect(text).toContain('经营结论');
     expect(text).toContain('建议操作');
     expect(text).toContain('今日曝光 Top10');
-    expect(text).toContain('端内ID 1001｜公域商品A｜曝光 100｜访问 10｜金额 ¥88.50');
+    expect(text).toContain('端内ID 1001｜公域商品A｜曝光 100｜公域访问 10｜公域金额 ¥88.50');
     expect(text).not.toContain('预警商品（托管>5天 且 曝光<100）');
     expect(text).toContain('诊断问题');
     expect(text).toContain('3. 转化弱｜端内ID 900｜点击有但转化弱｜访问有发货弱');
     expect(text).toContain('1. 检查价格/押金/库存/风控/履约链路｜端内ID 900｜访问有发货弱');
-    expect(text).toContain('曝光 1000｜公域访问 50｜商品页访问 40｜订单 4｜发货 2｜金额 ¥300.00');
-    expect(text).toContain('曝光到访问率 5.00%｜访问到发货率 5.00%');
+    expect(text).toContain('曝光 1000｜公域访问 50｜公域金额 ¥300.00｜转化率 5.00%');
+    expect(text).toContain('订单经营');
+    expect(text).toContain('创建订单 194');
+    expect(text).toContain('签约订单 103');
+    expect(text).toContain('发货订单 64');
+    expect(text).toContain('关单 90');
+    expect(text).toContain('发货率');
+    expect(text).toContain('关单率');
+    expect(text).toContain('客单价');
+    expect(text).not.toContain('审出订单');
     expect(text).toContain('曝光不足 1｜点击弱 1｜转化弱 1｜高潜力 1｜新品观察 1｜生命周期治理 1｜建议操作 1');
     expect(text).not.toContain('转化弱 Top5');
     expect(text).not.toContain('高潜力 Top5');
@@ -247,18 +255,82 @@ describe('public traffic report outputs', () => {
     expect(serialized).not.toContain('预警商品（托管>5天 且 曝光<100）');
     expect(serialized).toContain('分析与建议');
     expect(serialized).toContain('动作聚焦');
-    expect(serialized).toContain('新品观察 1');
-    expect(serialized).toContain('生命周期治理 1');
+    expect(serialized).not.toContain('新品观察 1');
+    expect(serialized).not.toContain('生命周期治理 1');
     expect(serialized).toContain('exposure_top_table');
-    expect(serialized).toContain('boost_table');
-    expect(serialized).toContain('conversion_table');
-    expect(serialized).toContain('scale_table');
+    expect(serialized).not.toContain('boost_table');
+    expect(serialized).not.toContain('conversion_table');
+    expect(serialized).not.toContain('scale_table');
     expect(serialized).not.toContain('new_table');
     expect(serialized).not.toContain('高潜力 Top5');
     expect(serialized).not.toContain('新品观察 Top5');
     expect(serialized).not.toContain('生命周期治理 Top5');
     expect(serialized).not.toContain('report.md');
     expect(serialized).not.toContain('report.xlsx');
+  });
+
+  it('keeps removed-link Agent data out of visible Markdown and Feishu card outputs', () => {
+    const withRemovedLinks: PublicTrafficDataReportContext = {
+      ...context,
+      agentData: {
+        removedLinks: [
+          { productId: '701', platformProductId: 'p701', productName: '已下架链接', removedDate: '2026-06-12', reason: '商品总表缺失', source: 'goods_snapshot_diff' },
+        ],
+      },
+    };
+
+    expect(buildPublicTrafficMarkdown(withRemovedLinks)).not.toContain('已下架链接');
+    expect(JSON.stringify(buildPublicTrafficCard(withRemovedLinks, { markdownPath: 'report.md', workbookPath: 'report.xlsx' }))).not.toContain('已下架链接');
+    expect(buildPublicTrafficFeishuText(withRemovedLinks, { markdownPath: 'report.md', workbookPath: 'report.xlsx' })).not.toContain('已下架链接');
+  });
+
+  it('uses manual product short names only in Feishu card tables', () => {
+    const card = buildPublicTrafficCard(context, { markdownPath: 'report.md', workbookPath: 'report.xlsx' }, { productNameMap: { '1001': '佳能 SX70' } });
+    const serialized = JSON.stringify(card);
+
+    expect(serialized).toContain('佳能 SX70');
+    expect(serialized).not.toContain('公域商品A');
+    expect(buildPublicTrafficMarkdown(context)).toContain('公域商品A');
+  });
+
+  it('cleans noisy product names and falls back to ID for empty names in Feishu card tables', () => {
+    const noisyContext = makeDataReportContext({
+      rows: [
+        {
+          platformProductId: 'P-251',
+          displayProductId: '端内ID 251',
+          productName: '佳能 SX70 65倍长焦4K相机演唱会出游日常记录出片神器芝麻免押租赁 ZFB',
+          custodyDays: 12,
+          periods: {
+            '1d': metrics({ exposure: 120, publicVisits: 4, dashboardVisits: 4, shippedOrders: 0 }),
+            '7d': metrics({ exposure: 700, publicVisits: 20, dashboardVisits: 18, shippedOrders: 1 }),
+            '30d': metrics({ exposure: 3000, publicVisits: 80, dashboardVisits: 70, shippedOrders: 3 }),
+          },
+        },
+        {
+          platformProductId: 'P-empty',
+          displayProductId: '端内ID 999',
+          productName: '  ',
+          custodyDays: 12,
+          periods: {
+            '1d': metrics({ exposure: 80, publicVisits: 1, dashboardVisits: 1, shippedOrders: 0 }),
+            '7d': metrics({ exposure: 300, publicVisits: 10, dashboardVisits: 8, shippedOrders: 0 }),
+            '30d': metrics({ exposure: 1200, publicVisits: 40, dashboardVisits: 30, shippedOrders: 1 }),
+          },
+        },
+      ],
+      weakConversion: [],
+      highPotential: [],
+      newProductObservation: [],
+      recommendedActions: [],
+    });
+
+    const serialized = JSON.stringify(buildPublicTrafficCard(noisyContext, { markdownPath: 'report.md', workbookPath: 'report.xlsx' }));
+
+    expect(serialized).toContain('佳能 SX70');
+    expect(serialized).not.toContain('演唱会');
+    expect(serialized).not.toContain('芝麻免押');
+    expect(serialized).toContain('端内ID 999');
   });
 
   it('renders full diagnostic sections as paginated root-level Feishu tables', () => {
@@ -292,7 +364,7 @@ describe('public traffic report outputs', () => {
     const card = buildPublicTrafficCard(context, { markdownPath: 'report.md', workbookPath: 'report.xlsx' });
     const tables = findCardElementsByTag(card, 'table');
 
-    expect(tables).toHaveLength(4);
+    expect(tables).toHaveLength(1);
     const allColumns = tables.flatMap((table) => table.columns as Array<{ name: string; display_name: string }>);
     expect(allColumns.map((column) => column.name)).not.toContain('reason');
     expect(JSON.stringify(card)).not.toContain('new_table');
@@ -305,23 +377,20 @@ describe('public traffic report outputs', () => {
     expect(expectedNewProductRows).toBeGreaterThan(0);
 
     expect(tables[0].element_id).toBe('exposure_top_table');
-    expect((tables[0].columns as Array<{ display_name: string }>).map((column) => column.display_name)).toEqual(['商品', 'ID', '曝光', '访问', '成交']);
-    expect(tableRows(tables[0])[0]).toMatchObject({ product: expect.any(String), id: expect.any(String), exposure: expect.any(Number), visits: expect.any(Number), deals: expect.any(Number) });
+    expect((tables[0].columns as Array<{ display_name: string }>).map((column) => column.display_name)).toEqual(['商品', 'ID', '曝光', '公域访问', '公域金额']);
+    expect(tableRows(tables[0])[0]).toMatchObject({ product: expect.any(String), id: expect.any(String), exposure: expect.any(Number), visits: expect.any(Number), amount: expect.any(Number) });
 
-    expect(tables.slice(1).map((table) => table.element_id)).toEqual(['boost_table', 'conversion_table', 'scale_table']);
-    expect((tables[1].columns as Array<{ display_name: string }>).map((column) => column.display_name)).toEqual(['补曝光（0）', 'ID', '曝光', '访问', '托管天']);
-    expect((tables[2].columns as Array<{ display_name: string }>).map((column) => column.display_name)).toEqual(['提转化（0）', 'ID', '访问', '成交', '转化率']);
-    expect((tables[3].columns as Array<{ display_name: string }>).map((column) => column.display_name)).toEqual(['继续放量（0）', 'ID', '曝光', '访问', '成交']);
+    expect(tables.slice(1).map((table) => table.element_id)).toEqual([]);
 
     const cardText = JSON.stringify(card);
     expect(cardText).toContain('曝光 100，较昨日上升 10');
     expect(cardText).toContain('公域访问 20，较昨日上升 2');
     expect(cardText).toContain('金额 30元，较昨日上升 3元');
     expect(cardText).toContain('曝光 Top10');
-    expect(cardText).toContain('待优化');
-    expect(cardText).toContain('补曝光（0）');
-    expect(cardText).toContain('提转化（0）');
-    expect(cardText).toContain('继续放量（0）');
+    expect(cardText).not.toContain('待优化');
+    expect(cardText).not.toContain('补曝光（0）');
+    expect(cardText).not.toContain('提转化（0）');
+    expect(cardText).not.toContain('继续放量（0）');
     expect(cardText).toContain('分析与建议');
     expect(cardText).toContain('collapsible_panel');
     expect(cardText).not.toContain('曝光不足 Top5');
@@ -343,11 +412,11 @@ describe('public traffic report outputs', () => {
     expect(JSON.stringify(card)).not.toContain('经营结论');
     expect(JSON.stringify(card)).not.toContain('今日漏斗');
     expect(JSON.stringify(card)).not.toContain('**公域**');
-    expect(markdowns[0].content).toContain('**转化率**');
-    expect(columnSets.length).toBeGreaterThanOrEqual(2);
+    expect(JSON.stringify(columnSets[0])).toContain('转化率\\n**5.00%**');
+    expect(columnSets.length).toBeGreaterThanOrEqual(1);
     expect(JSON.stringify(columnSets[0])).toContain('曝光\\n**1000**');
-    expect(contents(columnSets[0]).join('\n')).toContain('订单');
-    expect(JSON.stringify(columnSets[0])).toContain('发货\\n**2**');
+    expect(JSON.stringify(columnSets[0])).toContain('公域访问\\n**50**');
+    expect(JSON.stringify(columnSets[0])).toContain('公域金额\\n**¥300.00**');
   });
 
   it('renders explanatory notes for empty sections', () => {
@@ -408,7 +477,7 @@ describe('public traffic report outputs', () => {
       ],
     };
 
-    expect(buildPublicTrafficFeishuText(fallback, { markdownPath: 'report.md', workbookPath: 'report.xlsx' })).toContain('端内ID 888｜访问兜底商品｜曝光 0｜访问 66｜金额 ¥0.00');
+    expect(buildPublicTrafficFeishuText(fallback, { markdownPath: 'report.md', workbookPath: 'report.xlsx' })).toContain('端内ID 888｜访问兜底商品｜曝光 0｜公域访问 0｜公域金额 ¥0.00');
   });
 
   it('renders top exposure products with internal id first', () => {
@@ -431,19 +500,19 @@ describe('public traffic report outputs', () => {
 
     const text = buildPublicTrafficFeishuText(warning, { markdownPath: 'report.md', workbookPath: 'report.xlsx' });
     expect(text).not.toContain('预警商品（托管>5天 且 曝光<100）');
-    expect(text).toContain('端内ID 284｜预警商品A｜曝光 9｜访问 1｜金额 ¥0.00');
+    expect(text).toContain('端内ID 284｜预警商品A｜曝光 9｜公域访问 1｜公域金额 ¥0.00');
     expect(text).not.toContain('预警商品A (端内ID 284)');
   });
 
-  it('renders dashboard freshness notes in compact outputs', () => {
+  it('keeps dashboard freshness notes out of visible public report outputs', () => {
     const stale: PublicTrafficDataReportContext = {
       ...context,
       dataQualityNotes: ['今日访问数据支付宝暂未更新，本期访问量板块指标缺失。'],
     };
 
-    expect(buildPublicTrafficMarkdown(stale)).toContain('## 数据提示\n今日访问数据支付宝暂未更新，本期访问量板块指标缺失。');
-    expect(buildPublicTrafficFeishuText(stale, { markdownPath: 'report.md', workbookPath: 'report.xlsx' })).toContain('数据提示\n今日访问数据支付宝暂未更新，本期访问量板块指标缺失。');
-    expect(JSON.stringify(buildPublicTrafficCard(stale, { markdownPath: 'report.md', workbookPath: 'report.xlsx' }))).toContain('今日访问数据支付宝暂未更新，本期访问量板块指标缺失。');
+    expect(buildPublicTrafficMarkdown(stale)).not.toContain('今日访问数据支付宝暂未更新，本期访问量板块指标缺失。');
+    expect(buildPublicTrafficFeishuText(stale, { markdownPath: 'report.md', workbookPath: 'report.xlsx' })).not.toContain('今日访问数据支付宝暂未更新，本期访问量板块指标缺失。');
+    expect(JSON.stringify(buildPublicTrafficCard(stale, { markdownPath: 'report.md', workbookPath: 'report.xlsx' }))).not.toContain('今日访问数据支付宝暂未更新，本期访问量板块指标缺失。');
   });
 
   it('does not truncate Feishu diagnostic items', () => {
@@ -499,6 +568,199 @@ describe('public traffic report outputs', () => {
       '30日审出订单': 40,
       '30日金额（元）': 2888.5,
     });
+  });
+
+  it('writes goods-manager new product pool IDs into workbook and Feishu text', () => {
+    const withPool: PublicTrafficDataReportContext = { ...context, newProductPoolIds: ['701', '702'] };
+    const workbook = XLSX.read(writePublicTrafficWorkbookBuffer(withPool), { type: 'buffer' });
+    expect(workbook.SheetNames).toContain('新品池维护');
+    const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets['新品池维护']);
+    expect(rows).toEqual([
+      { 商品ID: '701', 维护状态: '待维护', 备注: '' },
+      { 商品ID: '702', 维护状态: '待维护', 备注: '' },
+    ]);
+
+    const text = buildPublicTrafficFeishuText(withPool, { markdownPath: 'report.md', workbookPath: 'report.xlsx' });
+    expect(text).toContain('新品池维护 2');
+    expect(text).toContain('新品池维护');
+    expect(text).toContain('1. 商品ID 701｜待维护');
+  });
+
+  it('falls back to new product pool IDs when enriched pool items are empty', () => {
+    const withPool: PublicTrafficDataReportContext = { ...context, newProductPoolItems: [], newProductPoolIds: ['701', '702'] };
+
+    const text = buildPublicTrafficFeishuText(withPool, { markdownPath: 'report.md', workbookPath: 'report.xlsx' });
+    expect(text).toContain('新品池维护 2');
+    expect(text).toContain('1. 商品ID 701｜待维护');
+
+    const cardJson = JSON.stringify(buildPublicTrafficCard(withPool, { markdownPath: 'report.md', workbookPath: 'report.xlsx' }));
+    expect(cardJson).toContain('新链接冷启动（2）');
+    expect(cardJson).toContain('商品ID 701：待观察');
+  });
+
+  it('renders new link cold-start distribution and prioritized link details in Feishu card', () => {
+    const row = (id: string, publicVisits: number, amount: number): PublicTrafficDataReportContext['rows'][number] => ({
+      platformProductId: `P-${id}`,
+      displayProductId: `端内ID ${id}`,
+      productName: `新链接 ${id}`,
+      custodyDays: 1,
+      periods: {
+        '1d': metrics({ publicVisits: Math.min(publicVisits, 10), amount: amount > 0 ? amount : 0 }),
+        '7d': metrics({ publicVisits, amount }),
+        '30d': metrics({ publicVisits, amount }),
+      },
+    });
+    const withPool: PublicTrafficDataReportContext = {
+      ...context,
+      rows: [row('701', 0, 100), row('702', 25, 0), row('703', 14, 0), row('704', 8, 0), row('705', 2, 0), row('706', 0, 0)],
+      newProductPoolItems: [
+        { productId: '701', productName: '成交跑通链接', shortTitle: '', submittedAt: '2026-06-09 00:00:00', merchant: '', alipaySyncStatus: '', alipayCode: '', stock: 1, skuCount: 1, maintenanceStatus: '待维护', note: '' },
+        { productId: '702', productName: '优秀访问链接', shortTitle: '', submittedAt: '2026-06-09 00:00:00', merchant: '', alipaySyncStatus: '', alipayCode: '', stock: 1, skuCount: 1, maintenanceStatus: '待维护', note: '' },
+        { productId: '703', productName: '访问达标链接', shortTitle: '', submittedAt: '2026-06-09 00:00:00', merchant: '', alipaySyncStatus: '', alipayCode: '', stock: 1, skuCount: 1, maintenanceStatus: '待维护', note: '' },
+        { productId: '704', productName: '有苗头链接', shortTitle: '', submittedAt: '2026-06-09 00:00:00', merchant: '', alipaySyncStatus: '', alipayCode: '', stock: 1, skuCount: 1, maintenanceStatus: '待维护', note: '' },
+        { productId: '705', productName: '未启动链接', shortTitle: '', submittedAt: '2026-06-09 00:00:00', merchant: '', alipaySyncStatus: '', alipayCode: '', stock: 1, skuCount: 1, maintenanceStatus: '待维护', note: '' },
+        { productId: '706', productName: '危险链接', shortTitle: '', submittedAt: '2026-06-06 00:00:00', merchant: '', alipaySyncStatus: '', alipayCode: '', stock: 1, skuCount: 1, maintenanceStatus: '待维护', note: '' },
+        { productId: '707', productName: '未匹配链接', shortTitle: '', submittedAt: '2026-06-09 00:00:00', merchant: '', alipaySyncStatus: '', alipayCode: '', stock: 1, skuCount: 1, maintenanceStatus: '待维护', note: '' },
+      ],
+    };
+
+    const cardJson = JSON.stringify(buildPublicTrafficCard(withPool, { markdownPath: 'report.md', workbookPath: 'report.xlsx' }));
+    expect(cardJson).toContain('新链接冷启动（7）');
+    expect(cardJson).toContain('近7天链接');
+    expect(cardJson).toContain('优秀 1｜访问达标 1');
+    expect(cardJson).toContain('认可线 >=6/天');
+    expect(cardJson).toContain('优秀线 >=10/天');
+    expect(cardJson).toContain('强跑通');
+    expect(cardJson).toContain('优秀链接');
+    expect(cardJson).toContain('访问达标');
+    expect(cardJson).toContain('有苗头');
+    expect(cardJson).toContain('未启动');
+    expect(cardJson).toContain('危险');
+    expect(cardJson).toContain('待观察');
+    expect(cardJson).toContain('继续放量');
+    expect(cardJson).toContain('优先重做');
+    expect(cardJson).not.toContain('新品维护池（7）');
+
+    const card = buildPublicTrafficCard(withPool, { markdownPath: 'report.md', workbookPath: 'report.xlsx' });
+    const cardBody = card.body as { elements: Array<{ element_id?: string; elements?: Array<{ tag?: string }> }> };
+    const panel = cardBody.elements.find((element) => element.element_id === 'new_product_pool');
+    expect(panel?.elements?.some((element) => element.tag === 'table')).toBe(false);
+  });
+
+  it('marks links submitted after the report data date as waiting instead of dangerous', () => {
+    const withPool: PublicTrafficDataReportContext = {
+      ...context,
+      date: '2026-06-10',
+      rows: [
+        {
+          platformProductId: 'P-701',
+          displayProductId: '端内ID 701',
+          productName: '今日新同步链接',
+          custodyDays: 0,
+          periods: {
+            '1d': metrics({ dashboardVisits: 0, shippedOrders: 0 }),
+            '7d': metrics({ dashboardVisits: 0, shippedOrders: 0 }),
+            '30d': metrics({ dashboardVisits: 0, shippedOrders: 0 }),
+          },
+        },
+      ],
+      newProductPoolItems: [
+        { productId: '701', productName: '今日新同步链接', shortTitle: '', submittedAt: '2026-06-11 09:00:00', merchant: '', alipaySyncStatus: '已同步', alipayCode: '', stock: 0, skuCount: 0, maintenanceStatus: '待维护', note: '' },
+      ],
+    };
+
+    const cardJson = JSON.stringify(buildPublicTrafficCard(withPool, { markdownPath: 'report.md', workbookPath: 'report.xlsx' }));
+    expect(cardJson).toContain('待观察');
+    expect(cardJson).not.toContain('危险 1');
+    expect(cardJson).not.toContain('优先重做');
+  });
+
+  it('shows newer new-link pool items before older item IDs in the Feishu card', () => {
+    const withPool: PublicTrafficDataReportContext = {
+      ...context,
+      date: '2026-06-12',
+      rows: [],
+      newProductPoolItems: [
+        { productId: '703', productName: '较早链接', shortTitle: '', submittedAt: '2026-06-12 09:00:00', merchant: '', alipaySyncStatus: '已同步', alipayCode: '', stock: 0, skuCount: 0, maintenanceStatus: '待维护', note: '' },
+        { productId: '900', productName: '最新链接', shortTitle: '', submittedAt: '2026-06-12 12:00:00', merchant: '', alipaySyncStatus: '已同步', alipayCode: '', stock: 0, skuCount: 0, maintenanceStatus: '待维护', note: '' },
+      ],
+    };
+
+    const cardJson = JSON.stringify(buildPublicTrafficCard(withPool, { markdownPath: 'report.md', workbookPath: 'report.xlsx' }));
+    expect(cardJson.indexOf('商品ID 900 最新链接')).toBeLessThan(cardJson.indexOf('商品ID 703 较早链接'));
+  });
+
+  it('renders enriched goods-manager new product pool summaries in Feishu text and card', () => {
+    const longName = '超长商品名称用于验证卡片会做简短展示避免过宽';
+    const withPool: PublicTrafficDataReportContext = {
+      ...context,
+      newProductPoolItems: Array.from({ length: 11 }, (_, index) => ({
+        productId: String(701 + index),
+        productName: index === 0 ? '新品 Alpha' : index === 10 ? '第十一个不展示' : longName,
+        shortTitle: '',
+        submittedAt: '2026-06-12 09:00:00',
+        merchant: '',
+        alipaySyncStatus: '',
+        alipayCode: '',
+        stock: 0,
+        skuCount: 0,
+        maintenanceStatus: '待维护',
+        note: '',
+      })),
+    };
+
+    const text = buildPublicTrafficFeishuText(withPool, { markdownPath: 'report.md', workbookPath: 'report.xlsx' });
+    expect(text).toContain('新品池维护 11');
+    expect(text).toContain('1. 商品ID 701 新品 Alpha：待维护');
+    expect(text).toContain('10. 商品ID 710 超长商品名称用于验证卡片会做简短展示避免过宽：待维护');
+    expect(text).not.toContain('第十一个不展示');
+
+    const cardJson = JSON.stringify(buildPublicTrafficCard(withPool, { markdownPath: 'report.md', workbookPath: 'report.xlsx' }));
+    expect(cardJson).toContain('新链接冷启动（11）');
+    expect(cardJson).toContain('商品ID 701 新品 Alpha：待观察');
+    expect(cardJson).toContain('商品ID 710 超长商品名称用于验证卡片会做简短展示...：待观察');
+    expect(cardJson).not.toContain('第十一个不展示');
+  });
+
+  it('writes enriched goods-manager new product pool items into workbook maintenance sheet', () => {
+    const withPool: PublicTrafficDataReportContext = {
+      ...context,
+      newProductPoolItems: [
+        {
+          productId: '701',
+          productName: '新品 Alpha',
+          shortTitle: 'Alpha 短标题',
+          submittedAt: '2026-06-12 09:00:00',
+          merchant: '主商家',
+          alipaySyncStatus: '已同步',
+          alipayCode: 'ALI-701',
+          stock: 8,
+          skuCount: 2,
+          maintenanceStatus: '待维护',
+          note: '',
+        },
+      ],
+    };
+
+    const workbook = XLSX.read(writePublicTrafficWorkbookBuffer(withPool), { type: 'buffer' });
+    expect(workbook.SheetNames).toContain('新品池维护');
+    const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets['新品池维护']);
+    expect(Object.keys(rows[0])).toEqual(['商品ID', '商品名称', '短标题', '最近提交时间', '商家', '同步状态', '支付宝编码', '库存', 'SKU数', '维护状态', '备注']);
+    expect(rows).toEqual([
+      {
+        商品ID: '701',
+        商品名称: '新品 Alpha',
+        短标题: 'Alpha 短标题',
+        最近提交时间: '2026-06-12 09:00:00',
+        商家: '主商家',
+        同步状态: '已同步',
+        支付宝编码: 'ALI-701',
+        库存: 8,
+        SKU数: 2,
+        维护状态: '待维护',
+        备注: '',
+      },
+    ]);
   });
 
   it('writes explanatory notes for empty workbook sections', () => {
@@ -577,12 +839,54 @@ describe('public traffic report outputs', () => {
     const json = JSON.stringify(card);
     expect(json).not.toContain('今日漏斗');
     expect(json).not.toContain('公域（');
-    expect(json).toContain('订单（06-10）');
+    expect(json).toContain('订单经营（06-10）');
+    expect(json).toContain('发货率');
+    expect(json).not.toContain('关单率');
+    expect(json).not.toContain('客单价');
+    expect(json).not.toContain('审出订单');
     expect(json).toContain('履约（发货06-10｜归还未知｜关单06-10）');
     expect(json).toContain('创建订单');
-    expect(json).toContain('签约金额');
+    expect(json).not.toContain('签约金额');
     expect(json).toContain('待发货');
     expect(json).toContain('关单');
+  });
+
+  it('卡片履约指标在同一行展示', () => {
+    const card = buildPublicTrafficCard(contextWithOrderAnalysis, { markdownPath: 'report.md', workbookPath: 'report.xlsx' }) as { body: { elements: Array<Record<string, unknown>> } };
+    const fulfillment = card.body.elements.find((element) => element.element_id === 'funnel_fulfillment') as { columns: Array<{ elements: Array<Record<string, unknown>> }> } | undefined;
+
+    expect(fulfillment).toBeDefined();
+    const metricRows = fulfillment!.columns[0].elements.filter((element) => element.tag === 'column_set') as Array<{ columns: Array<{ elements: Array<{ content?: string }> }> }>;
+    expect(metricRows).toHaveLength(1);
+    expect(metricRows[0].columns).toHaveLength(4);
+    expect(metricRows[0].columns.map((column) => column.elements[0].content?.split('\n')[0])).toEqual(['待发货', '归还', '逾期', '关单']);
+  });
+
+  it('卡片关单率低于等于35%时显示达标', () => {
+    const healthy = {
+      ...contextWithOrderAnalysis,
+      orderAnalysis: {
+        ...contextWithOrderAnalysis.orderAnalysis!,
+        pages: {
+          ...contextWithOrderAnalysis.orderAnalysis!.pages,
+          overview: {
+            ...contextWithOrderAnalysis.orderAnalysis!.pages.overview,
+            indicators: [
+              { label: '创建订单数', value: '200', delta: '' },
+              { label: '签约订单数', value: '100', delta: '' },
+              { label: '发货订单数', value: '80', delta: '' },
+              { label: '签约完成金额（元）', value: '4,000', delta: '' },
+            ],
+          },
+          customs: { key: 'customs' as const, label: '关单分析', dataDate: '2026-06-10', indicators: [{ label: '关单数', value: '70', delta: '' }] },
+        },
+      },
+    };
+
+    const json = JSON.stringify(buildPublicTrafficCard(healthy, { markdownPath: 'report.md', workbookPath: 'report.xlsx' }));
+    expect(json).toContain('发货率');
+    expect(json).toContain('40.00%');
+    expect(json).not.toContain('关单率');
   });
 
   it('无订单分析时卡片漏斗保持单行旧版', () => {
@@ -596,8 +900,11 @@ describe('public traffic report outputs', () => {
   it('Markdown 1日总览输出三行', () => {
     const markdown = buildPublicTrafficMarkdown(contextWithOrderAnalysis);
     expect(markdown).toContain('公域（');
-    expect(markdown).toContain('订单（06-10）：创建订单 194｜签约订单 103｜审出订单 -｜发货订单 64｜签约金额 3,977');
+    expect(markdown).toContain('订单经营（06-10）：创建订单 194｜签约订单 103｜发货订单 64');
+    expect(markdown).not.toContain('签约金额');
+    expect(markdown).not.toContain('审出订单');
     expect(markdown).toContain('履约（发货06-10｜归还未知｜关单06-10）：待发货 168｜归还 15｜逾期 5｜关单 90');
+    expect(markdown).toContain('经营指标：发货率 32.99%｜关单率 46.39%（目标<=35%，风险）｜客单价 ¥38.61');
   });
 
   it('renders fulfillment as rates', () => {
@@ -611,17 +918,16 @@ describe('public traffic report outputs', () => {
 
     const cardJson = JSON.stringify(buildPublicTrafficCard(reportContext, { markdownPath: 'report.md', workbookPath: 'report.xlsx' }));
 
-    expect(cardJson).toContain('签约/创建 50.00%');
-    expect(cardJson).toContain('审出/签约 50.00%');
-    expect(cardJson).toContain('发货/审出 40.00%');
-    expect(cardJson).toContain('暂无昨日履约率对比');
+    expect(cardJson).toContain('发货率');
+    expect(cardJson).not.toContain('审出/签约 50.00%');
+    expect(cardJson).not.toContain('暂无昨日履约率对比');
 
     const markdown = buildPublicTrafficMarkdown(reportContext);
-    expect(markdown.indexOf('## 履约比率')).toBeGreaterThan(markdown.indexOf('## 1日总览'));
-    expect(markdown).toContain('签约/创建 50.00%');
-    expect(markdown).toContain('审出/签约 50.00%');
-    expect(markdown).toContain('发货/审出 40.00%');
-    expect(markdown).toContain('暂无昨日履约率对比');
+    expect(markdown).not.toContain('## 履约比率');
+    expect(markdown).not.toContain('签约/创建 50.00%');
+    expect(markdown).not.toContain('审出/签约 50.00%');
+    expect(markdown).not.toContain('发货/审出 40.00%');
+    expect(markdown).not.toContain('暂无昨日履约率对比');
   });
 
   it('renders fulfillment rates from comma and unit indicator values', () => {
@@ -635,10 +941,11 @@ describe('public traffic report outputs', () => {
     const cardJson = JSON.stringify(buildPublicTrafficCard(reportContext, { markdownPath: 'report.md', workbookPath: 'report.xlsx' }));
     const markdown = buildPublicTrafficMarkdown(reportContext);
 
-    expect(cardJson).toContain('签约/创建 50.00%');
-    expect(cardJson).toContain('发货/审出 0.00%');
-    expect(markdown).toContain('签约/创建 50.00%');
-    expect(markdown).toContain('发货/审出 0.00%');
+    expect(cardJson).toContain('发货率');
+    expect(cardJson).not.toContain('签约/创建 50.00%');
+    expect(cardJson).not.toContain('发货/审出 0.00%');
+    expect(markdown).not.toContain('签约/创建 50.00%');
+    expect(markdown).not.toContain('发货/审出 0.00%');
   });
 
   it('renders missing fulfillment rates for zero and negative denominators', () => {
@@ -652,12 +959,13 @@ describe('public traffic report outputs', () => {
     const cardJson = JSON.stringify(buildPublicTrafficCard(reportContext, { markdownPath: 'report.md', workbookPath: 'report.xlsx' }));
     const markdown = buildPublicTrafficMarkdown(reportContext);
 
-    expect(cardJson).toContain('签约/创建 -');
-    expect(cardJson).toContain('审出/签约 -');
-    expect(cardJson).toContain('发货/审出 0.00%');
-    expect(markdown).toContain('签约/创建 -');
-    expect(markdown).toContain('审出/签约 -');
-    expect(markdown).toContain('发货/审出 0.00%');
+    expect(cardJson).toContain('发货率');
+    expect(cardJson).not.toContain('签约/创建 -');
+    expect(cardJson).not.toContain('审出/签约 -');
+    expect(cardJson).not.toContain('发货/审出 0.00%');
+    expect(markdown).not.toContain('签约/创建 -');
+    expect(markdown).not.toContain('审出/签约 -');
+    expect(markdown).not.toContain('发货/审出 0.00%');
   });
 
   it('renders missing fulfillment rates for non-numeric indicators', () => {
@@ -671,8 +979,9 @@ describe('public traffic report outputs', () => {
     const cardJson = JSON.stringify(buildPublicTrafficCard(reportContext, { markdownPath: 'report.md', workbookPath: 'report.xlsx' }));
     const markdown = buildPublicTrafficMarkdown(reportContext);
 
-    expect(cardJson).toContain('签约/创建 -');
-    expect(markdown).toContain('签约/创建 -');
+    expect(cardJson).toContain('发货率');
+    expect(cardJson).not.toContain('签约/创建 -');
+    expect(markdown).not.toContain('签约/创建 -');
   });
 
   it('omits fulfillment rate section without order analysis', () => {

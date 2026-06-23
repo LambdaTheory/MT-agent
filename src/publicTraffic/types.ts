@@ -1,4 +1,5 @@
 import type { PeriodKey } from '../domain/types.js';
+import type { GoodsManagerNewProductPoolItem } from './goodsManagerNewProducts.js';
 import type { OrderAnalysisResult } from './orderAnalysis.js';
 
 export interface ExposureOverviewMetric {
@@ -19,7 +20,7 @@ export interface ExposureCumulativeProduct {
   raw: Record<string, string>;
 }
 
-export type ExposureDeltaFlag = 'new_product' | 'missing' | 'counter_reset_or_data_error';
+export type ExposureDeltaFlag = 'new_product' | 'missing' | 'missing_previous_snapshot_row' | 'counter_reset_or_data_error';
 
 export interface ExposureDailyDelta {
   date: string;
@@ -83,6 +84,7 @@ export interface PublicTrafficReportSectionItem {
   identifier: string;
   action: string;
   reason: string;
+  priority?: 'high' | 'medium' | 'low';
 }
 
 export interface PublicTrafficReportContext {
@@ -148,6 +150,19 @@ export interface PublicTrafficConclusion {
   text: string;
 }
 
+export interface AgentRemovedLinkContextItem {
+  productId: string;
+  platformProductId: string;
+  productName: string;
+  removedDate: string;
+  reason: '商品总表缺失';
+  source: 'goods_snapshot_diff';
+}
+
+export interface PublicTrafficAgentData {
+  removedLinks: AgentRemovedLinkContextItem[];
+}
+
 export interface PublicTrafficEmptySectionNotes {
   lowExposure: string;
   weakClick: string;
@@ -163,6 +178,9 @@ export interface PublicTrafficDataReportContext {
   summary: Record<PeriodKey, PublicTrafficDataSummary>;
   conclusions: PublicTrafficConclusion[];
   dataQualityNotes?: string[];
+  newProductPoolItems?: GoodsManagerNewProductPoolItem[];
+  newProductPoolIds?: string[];
+  agentData?: PublicTrafficAgentData;
   rows: PublicTrafficProductDataRow[];
   lowExposure: PublicTrafficReportSectionItem[];
   weakClick: PublicTrafficReportSectionItem[];

@@ -4,6 +4,7 @@ import { chromium } from 'playwright';
 import { loadConfig } from '../config/loadConfig.js';
 import { clearBrowserProfileLocks, prepareDashboardPage } from '../crawler/browserProfile.js';
 import { selectSubAccountIfNeeded } from '../crawler/dashboardCrawler.js';
+import { notifyLoginRequired } from '../crawler/loginNotification.js';
 import { waitForDashboardAfterLogin, waitForSettledLoginState } from '../crawler/loginState.js';
 import { chooseBestPageSizeProbe, probePageSizeCandidates } from '../crawler/pageSizeProbe.js';
 
@@ -19,7 +20,9 @@ export async function runProbePageSizeCli(): Promise<void> {
 
   try {
     await page.goto(config.targetUrl, { waitUntil: 'domcontentloaded' });
-    if ((await waitForSettledLoginState(page, { timeoutMs: 60000, intervalMs: 1000 })) === 'login-page') {
+    const loginState = await waitForSettledLoginState(page, { timeoutMs: 60000, intervalMs: 1000 });
+    if (loginState === 'login-page') {
+      await notifyLoginRequired({ page, stage: 'page-size-probe', outputDir: config.outputDir, log: console.log });
       await waitForDashboardAfterLogin(page);
     }
 

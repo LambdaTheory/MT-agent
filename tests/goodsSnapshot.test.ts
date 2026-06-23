@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { detectNewGoods, latestInternalIds } from '../src/publicTraffic/goodsSnapshot.js';
+import { detectNewGoods, filterFirstSeenWithinDays, latestInternalIds, updateGoodsFirstSeen } from '../src/publicTraffic/goodsSnapshot.js';
 
 describe('goods snapshot', () => {
   it('detects new internal product ids from snapshots', () => {
@@ -67,5 +67,64 @@ describe('goods snapshot', () => {
         { platformProductId: 'p1', internalProductId: '100', productName: 'A' },
       ], 0),
     ).toEqual([]);
+  });
+
+  it('preserves existing first-seen dates and records newly observed internal ids', () => {
+    expect(updateGoodsFirstSeen({
+      currentDate: '2026-06-12',
+      previous: {
+        '701': { firstSeenDate: '2026-06-09', platformProductId: 'p701', productName: 'Old Link' },
+      },
+      current: [
+        { platformProductId: 'p701-new', internalProductId: '701', productName: 'Old Link Renamed' },
+        { platformProductId: 'p702', internalProductId: '702', productName: 'New Link' },
+        { platformProductId: 'invalid', internalProductId: 'abc', productName: 'Invalid' },
+      ],
+    })).toEqual({
+      '701': { firstSeenDate: '2026-06-09', platformProductId: 'p701', productName: 'Old Link' },
+      '702': { firstSeenDate: '2026-06-12', platformProductId: 'p702', productName: 'New Link' },
+    });
+  });
+
+  it('can initialize first-seen state as baseline entries that are not eligible as new links', () => {
+    const baseline = updateGoodsFirstSeen({
+      currentDate: '2026-06-12',
+      previous: {},
+      current: [{ platformProductId: 'p701', internalProductId: '701', productName: 'Existing Link' }],
+      baseline: true,
+    });
+
+    expect(baseline).toEqual({
+      '701': { firstSeenDate: '2026-06-12', platformProductId: 'p701', productName: 'Existing Link', baseline: true },
+    });
+    expect(filterFirstSeenWithinDays([
+      { platformProductId: 'p701', internalProductId: '701', productName: 'Existing Link' },
+    ], baseline, '2026-06-12', 7)).toEqual([]);
+
+    const updated = updateGoodsFirstSeen({
+      currentDate: '2026-06-13',
+      previous: baseline,
+      current: [
+        { platformProductId: 'p701', internalProductId: '701', productName: 'Existing Link' },
+        { platformProductId: 'p702', internalProductId: '702', productName: 'New Link' },
+      ],
+    });
+    expect(filterFirstSeenWithinDays([
+      { platformProductId: 'p701', internalProductId: '701', productName: 'Existing Link' },
+      { platformProductId: 'p702', internalProductId: '702', productName: 'New Link' },
+    ], updated, '2026-06-13', 7).map((item) => item.internalProductId)).toEqual(['702']);
+  });
+
+  it('filters current goods to internal ids first seen within the requested window', () => {
+    const current = [
+      { platformProductId: 'p701', internalProductId: '701', productName: 'Recent' },
+      { platformProductId: 'p702', internalProductId: '702', productName: 'Old' },
+      { platformProductId: 'p703', internalProductId: '703', productName: 'Missing First Seen' },
+    ];
+
+    expect(filterFirstSeenWithinDays(current, {
+      '701': { firstSeenDate: '2026-06-06', platformProductId: 'p701', productName: 'Recent' },
+      '702': { firstSeenDate: '2026-06-04', platformProductId: 'p702', productName: 'Old' },
+    }, '2026-06-12', 7).map((item) => item.internalProductId)).toEqual(['701']);
   });
 });

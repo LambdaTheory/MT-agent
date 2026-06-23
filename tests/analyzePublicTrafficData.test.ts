@@ -84,15 +84,69 @@ describe('analyzePublicTrafficData', () => {
       rows: [
         row('端内ID low', metric(10, 0, 0, 0)),
         row('端内ID click-weak', metric(2000, 5, 4, 0)),
-        row('端内ID conversion-weak', metric(1500, 120, 100, 0)),
-        row('端内ID potential', metric(1500, 180, 160, 8)),
+        row('端内ID potential', metric(1500, 180, 10, 1)),
       ],
     });
 
     expect(report.lowExposure[0].identifier).toBe('端内ID low');
     expect(report.weakClick[0].identifier).toBe('端内ID click-weak');
-    expect(report.weakConversion[0].identifier).toBe('端内ID conversion-weak');
+    expect(report.weakConversion).toHaveLength(0);
     expect(report.highPotential[0].identifier).toBe('端内ID potential');
+  });
+
+  it('excludes healthy rows with public amount from every operation bucket and action', () => {
+    const healthyOne = metric(20, 0, 0, 0);
+    const healthySeven = metric(20, 0, 0, 1);
+    const report = analyzePublicTrafficData({
+      date: '2026-06-10',
+      rows: [row('端内ID healthy', healthyOne, healthySeven)],
+    });
+
+    expect(report.lowExposure).toHaveLength(0);
+    expect(report.weakClick).toHaveLength(0);
+    expect(report.weakConversion).toHaveLength(0);
+    expect(report.highPotential).toHaveLength(0);
+    expect(report.lifecycleGovernance).toHaveLength(0);
+    expect(report.recommendedActions).toHaveLength(0);
+  });
+
+  it('uses public amount instead of created order count for healthy detection', () => {
+    const oneDay = { ...metric(20, 0, 10, 1), createdOrders: 1 };
+    const sevenDay = { ...metric(20, 0, 10, 0), createdOrders: 0 };
+    const report = analyzePublicTrafficData({
+      date: '2026-06-10',
+      rows: [row('端内ID created-only', oneDay, sevenDay)],
+    });
+
+    expect(report.recommendedActions).toHaveLength(0);
+    expect(report.weakConversion).toHaveLength(0);
+    expect(report.lowExposure).toHaveLength(0);
+  });
+
+  it('uses public amount per period for healthy detection', () => {
+    const oneDay = { ...metric(20, 0, 10, 1), createdOrders: 0, createdOrderAmount: 0 };
+    const sevenDay = { ...metric(20, 0, 10, 1), createdOrders: 1 };
+    const report = analyzePublicTrafficData({
+      date: '2026-06-10',
+      rows: [row('端内ID mixed-created', oneDay, sevenDay)],
+    });
+
+    expect(report.recommendedActions).toHaveLength(0);
+    expect(report.weakConversion).toHaveLength(0);
+    expect(report.lowExposure).toHaveLength(0);
+  });
+
+  it('assigns overlapping rows only to the highest severity bucket with priority', () => {
+    const report = analyzePublicTrafficData({
+      date: '2026-06-10',
+      rows: [row('端内ID overlap', metric(80, 2, 60, 0), metric(200, 2, 120, 0), metric(200, 2, 120, 0), 6)],
+    });
+
+    expect(report.weakConversion).toHaveLength(0);
+    expect(report.lowExposure).toHaveLength(1);
+    expect(report.lowExposure[0]).toMatchObject({ identifier: '端内ID overlap', priority: 'medium' });
+    expect(report.recommendedActions).toHaveLength(1);
+    expect(report.recommendedActions[0]).toMatchObject({ identifier: '端内ID overlap', priority: 'medium' });
   });
 
   it('does not classify rows when required one-day source data is missing', () => {
@@ -101,7 +155,7 @@ describe('analyzePublicTrafficData', () => {
       rows: [
         row('端内ID missing-low', metric(0, 0, 0, 0, false, false)),
         row('端内ID missing-click', metric(2000, 5, 4, 0, false, true)),
-        row('端内ID missing-conversion', metric(1500, 120, 100, 0, true, false)),
+        row('端内ID missing-conversion', metric(1500, 20, 100, 0, true, false)),
         row('端内ID missing-potential', metric(1500, 180, 160, 8, false, true)),
       ],
     });
@@ -174,11 +228,10 @@ describe('analyzePublicTrafficData', () => {
       },
     });
 
-    expect(report.conclusions.map((item) => item.label)).toEqual(['曝光', '公域访问', '金额', '发货', '曝光到访问率', '访问到发货率']);
+    expect(report.conclusions.map((item) => item.label)).toEqual(['曝光', '公域访问', '公域金额', '转化率']);
     expect(report.conclusions[0].text).toContain('较昨日上升 200');
     expect(report.conclusions[1].text).toContain('较昨日上升 30');
-    expect(report.conclusions[3].text).toContain('较昨日上升 3');
-    expect(report.conclusions[4].text).toContain('百分点');
+    expect(report.conclusions[3].text).toContain('百分点');
   });
 
   it('builds baseline conclusions when yesterday summary is missing', () => {
@@ -191,7 +244,7 @@ describe('analyzePublicTrafficData', () => {
   it('builds new product observation from daily new_product deltas', () => {
     const report = analyzePublicTrafficData({
       date: '2026-06-10',
-      rows: [row('端内ID 888', metric(12, 0, 0, 0))],
+      rows: [row('端内ID 888', metric(500, 20, 10, 0))],
       dailyDelta: [
         {
           date: '2026-06-10',
@@ -210,7 +263,17 @@ describe('analyzePublicTrafficData', () => {
       identifier: '端内ID 888',
       action: '新品数据监控',
     });
-    expect(report.newProductObservation[0]?.reason).toContain('1日曝光 12，访问 0，发货 0，金额 0.00');
+    expect(report.newProductObservation[0]?.reason).toContain('1日曝光 500，公域访问 20，金额 0.00');
+  });
+
+  it('does not classify high internal ids as new products without a daily new_product delta', () => {
+    const report = analyzePublicTrafficData({
+      date: '2026-06-10',
+      rows: [row('端内ID 888', metric(500, 20, 10, 0))],
+      dailyDelta: [],
+    });
+
+    expect(report.newProductObservation).toHaveLength(0);
   });
 
   it('builds lifecycle governance from weak thirty-day performance', () => {
@@ -231,14 +294,16 @@ describe('analyzePublicTrafficData', () => {
       rows: [
         row('端内ID conversion', metric(1000, 120, 100, 0)),
         row('端内ID click', metric(2000, 5, 5, 0), metric(5000, 20, 20, 0)),
-        row('端内ID potential', metric(1500, 160, 120, 8)),
+        row('端内ID potential', metric(1500, 160, 20, 1), metric(3000, 320, 40, 1)),
       ],
     });
 
     expect(report.recommendedActions[0]).toMatchObject({
       identifier: '端内ID conversion',
       action: '检查价格/押金/库存/风控/履约链路',
+      priority: 'high',
     });
+    expect(report.recommendedActions.map((item) => item.action).join('\n')).toContain('检查价格/押金/库存/风控/履约链路');
     expect(report.recommendedActions.map((item) => item.action).join('\n')).toContain('优化主图、标题、价格露出和首屏卖点');
     expect(report.recommendedActions.map((item) => item.action).join('\n')).toContain('继续放量');
   });

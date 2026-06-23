@@ -1,29 +1,42 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { basename, isAbsolute, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { loadConfig } from '../config/loadConfig.js';
 import { loadEnv } from '../config/loadEnv.js';
 import { crawlPublicTrafficSources } from '../crawler/publicTrafficCrawler.js';
 import { normalizeRowsForPeriod } from '../extractor/normalizeRows.js';
 import { annotateGoodsExportWorkbookWithInternalId } from '../mapping/annotateGoodsExportWorkbook.js';
-import { loadProductIdMapping } from '../mapping/productIdMapping.js';
+import { loadProductIdMapping, type ProductIdMapping } from '../mapping/productIdMapping.js';
 import { writeProductIdMappingFromExport } from '../mapping/refreshProductIdMapping.js';
 import { sendFeishuCard } from '../notify/feishu.js';
 import { analyzePublicTrafficData } from '../publicTraffic/analyzePublicTrafficData.js';
 import { buildPublicTrafficCard } from '../publicTraffic/buildPublicTrafficCard.js';
+import { assessDashboardQuality } from '../publicTraffic/dashboardQuality.js';
+import { buildPublicTrafficArtifactManifest, savePublicTrafficArtifactManifest, type PublicTrafficArtifactManifest } from '../publicTraffic/artifacts.js';
 import { aggregateExposureDeltas } from '../publicTraffic/exposureAggregate.js';
 import { computeExposureDailyDelta } from '../publicTraffic/exposureDelta.js';
+import { resolveFallbackProductId } from '../publicTraffic/extractProductIdFromInfo.js';
 import { buildPublicTrafficFeishuText } from '../publicTraffic/buildPublicTrafficFeishu.js';
 import { buildPublicTrafficMarkdown } from '../publicTraffic/buildPublicTrafficMarkdown.js';
 import { writePublicTrafficWorkbookBuffer } from '../publicTraffic/buildPublicTrafficWorkbook.js';
+import { updateGoodsLinkLifecycle, type GoodsLinkLifecycleState } from '../publicTraffic/goodsLinkLifecycle.js';
+import { fetchRecentGoodsManagerProducts } from '../publicTraffic/goodsManagerNewProducts.js';
+import { filterFirstSeenWithinDays, updateGoodsFirstSeen, type GoodsFirstSeenIndex } from '../publicTraffic/goodsSnapshot.js';
 import { mergePublicTrafficData } from '../publicTraffic/mergePublicTrafficData.js';
 import { buildPublicTrafficPaths } from '../publicTraffic/paths.js';
+import { loadProductNameMap } from '../publicTraffic/productDisplayName.js';
+import { savePublicTrafficRunState } from '../publicTraffic/publicTrafficRunState.js';
 import { loadRecentExposureDeltas } from '../publicTraffic/recentExposureDeltas.js';
 import type { PeriodProductMetrics, RawTableData } from '../domain/types.js';
-import type { ExposureCumulativeProduct, PublicTrafficDataReportContext, PublicTrafficDataSummary } from '../publicTraffic/types.js';
+import type { GoodsManagerNewProductPoolItem } from '../publicTraffic/goodsManagerNewProducts.js';
+import type { ExposureCumulativeProduct, GoodsSnapshotItem, PublicTrafficDataReportContext, PublicTrafficDataSummary } from '../publicTraffic/types.js';
 import { createRunLog } from '../storage/runLog.js';
 
 const TODAY_DASHBOARD_NOT_UPDATED_NOTE = '今日访问数据支付宝暂未更新，本期访问量板块指标缺失。';
+const GOODS_EXPORT_SOURCE_URL = 'https://b.alipay.com/page/commerce/goods/list?itemSubType=RENT&itemType=NORMAL_ITEM';
+const EXPOSURE_SOURCE_URL = 'https://b.alipay.com/page/self-operation-center/custody?custodyChannel=public';
+const ORDER_ANALYSIS_SOURCE_URL = 'https://b.alipay.com/page/recycle-im/app/assistant-data-analysis/index/order/';
+const MIN_RELIABLE_PREVIOUS_EXPOSURE_PRODUCTS = 200;
 type FeishuSendTo = 'personal' | 'group' | 'both';
 
 export function parseFeishuSendToArg(argv: string[]): FeishuSendTo | undefined {
@@ -41,6 +54,12 @@ function today(): string {
 function yesterday(date: string): string {
   const d = new Date(date);
   d.setDate(d.getDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
+function daysBefore(date: string, days: number): string {
+  const d = new Date(date);
+  d.setDate(d.getDate() - days);
   return d.toISOString().slice(0, 10);
 }
 
@@ -65,6 +84,26 @@ interface PreviousCumulativeSnapshot {
   found: boolean;
 }
 
+interface ExposurePaginationStatsLike {
+  pageRowCounts: number[];
+  uniquePageSignatures: string[];
+  duplicatePageSignatures: number;
+  maxRepeatedSignatureAttempts: number;
+  duplicateProductRows: number;
+  skippedProductIdRows: number;
+}
+
+function exposurePaginationStatsOrEmpty(stats: Partial<ExposurePaginationStatsLike> | undefined): ExposurePaginationStatsLike {
+  return {
+    pageRowCounts: stats?.pageRowCounts ?? [],
+    uniquePageSignatures: stats?.uniquePageSignatures ?? [],
+    duplicatePageSignatures: stats?.duplicatePageSignatures ?? 0,
+    maxRepeatedSignatureAttempts: stats?.maxRepeatedSignatureAttempts ?? 0,
+    duplicateProductRows: stats?.duplicateProductRows ?? 0,
+    skippedProductIdRows: stats?.skippedProductIdRows ?? 0,
+  };
+}
+
 export function parsePreviousCumulativeSnapshot(text: string): ExposureCumulativeProduct[] {
   const parsed: unknown = JSON.parse(text);
   if (!Array.isArray(parsed) || !parsed.every(isExposureCumulativeProduct)) {
@@ -74,17 +113,34 @@ export function parsePreviousCumulativeSnapshot(text: string): ExposureCumulativ
   return parsed;
 }
 
-async function loadPreviousCumulative(outputDir: string, date: string): Promise<PreviousCumulativeSnapshot> {
-  for (const reportContextPath of previousReportContextCandidatePaths(outputDir, date)) {
-    const exposurePath = reportContextPath.replace(/公域数据上下文_([^/\\]+)\.json$/, '公域曝光商品快照_$1.json');
-    try {
-      return { products: parsePreviousCumulativeSnapshot(await readFile(exposurePath, 'utf8')), found: true };
-    } catch (error) {
-      if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') continue;
-      throw error;
+function canonicalProductId(platformProductId: string, mapping: Record<string, string>): string {
+  return resolveFallbackProductId(platformProductId, mapping) ?? platformProductId;
+}
+
+export function mergePreviousCumulativeSnapshots(snapshots: ExposureCumulativeProduct[][], mapping: Record<string, string>): ExposureCumulativeProduct[] {
+  const merged = new Map<string, ExposureCumulativeProduct>();
+  for (const snapshot of snapshots) {
+    for (const row of snapshot) {
+      const platformProductId = canonicalProductId(row.platformProductId, mapping);
+      if (!merged.has(platformProductId)) {
+        merged.set(platformProductId, { ...row, platformProductId });
+      }
     }
   }
-  return { products: [], found: false };
+  return Array.from(merged.values());
+}
+
+async function loadPreviousCumulative(outputDir: string, date: string, mapping: Record<string, string>): Promise<PreviousCumulativeSnapshot> {
+  const snapshotDate = daysBefore(date, 1);
+  const exposurePath = buildPublicTrafficPaths(outputDir, snapshotDate).exposureCumulativeProducts;
+  try {
+    return { products: mergePreviousCumulativeSnapshots([parsePreviousCumulativeSnapshot(await readFile(exposurePath, 'utf8'))], mapping), found: true };
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
+      return { products: [], found: false };
+    }
+    throw error;
+  }
 }
 
 export function previousReportContextCandidatePaths(outputDir: string, date: string, cwd = process.cwd()): string[] {
@@ -146,6 +202,22 @@ function isPublicTrafficDataSummary(value: unknown): value is PublicTrafficDataS
   );
 }
 
+function assertExposureSnapshotCoverage(currentCount: number, previousCount: number, log: ReturnType<typeof createRunLog>): void {
+  if (previousCount <= 0) return;
+  if (previousCount < MIN_RELIABLE_PREVIOUS_EXPOSURE_PRODUCTS) {
+    const message = `昨日曝光商品快照不可靠: 昨日=${previousCount}, 最低要求=${MIN_RELIABLE_PREVIOUS_EXPOSURE_PRODUCTS}`;
+    log.addEvent(message);
+    throw new Error(message);
+  }
+
+  const coverage = currentCount / previousCount;
+  if (coverage >= 0.75) return;
+
+  const message = `曝光商品快照覆盖不足: 当前=${currentCount}, 昨日=${previousCount}, 覆盖率=${(coverage * 100).toFixed(1)}%`;
+  log.addEvent(message);
+  throw new Error(message);
+}
+
 export function normalizeDashboardRowsForReport(rawTables: RawTableData[], log: ReturnType<typeof createRunLog>): PeriodProductMetrics[] {
   return rawTables.flatMap((table) => {
     try {
@@ -183,6 +255,134 @@ async function loadMappingSafely(path: string | undefined, log: ReturnType<typeo
   }
 }
 
+async function loadGoodsManagerNewProductPool(date: string, log: ReturnType<typeof createRunLog>): Promise<GoodsManagerNewProductPoolItem[]> {
+  const baseUrl = process.env.GOODS_MANAGER_BASE_URL?.trim();
+  if (!baseUrl) return [];
+
+  try {
+    const products = await fetchRecentGoodsManagerProducts({ baseUrl, days: 7, referenceDate: date, requireAlipaySynced: true });
+    log.addEvent(`goods-manager 新品池: ${products.length} 个商品`);
+    return products;
+  } catch (error) {
+    log.addEvent(`goods-manager 新品池读取失败: ${error instanceof Error ? error.message : String(error)}`);
+    return [];
+  }
+}
+
+function goodsSnapshotFromMapping(mapping: ProductIdMapping): GoodsSnapshotItem[] {
+  const seen = new Set<string>();
+  const items: GoodsSnapshotItem[] = [];
+  for (const [platformProductId, internalProductId] of Object.entries(mapping)) {
+    const id = internalProductId.trim();
+    if (!/^\d+$/.test(id) || seen.has(id)) continue;
+    seen.add(id);
+    items.push({ platformProductId, internalProductId: id, productName: '' });
+  }
+  return items;
+}
+
+function newGoodsPlatformIdsFromFirstSeen(currentGoods: GoodsSnapshotItem[], firstSeen: GoodsFirstSeenIndex, currentDate: string): string[] {
+  return currentGoods.flatMap((item) => {
+    const internalId = item.internalProductId.trim();
+    if (!/^\d+$/.test(internalId)) return [];
+    const entry = firstSeen[internalId];
+    return entry && !entry.baseline && entry.firstSeenDate === currentDate ? [item.platformProductId] : [];
+  });
+}
+
+async function loadGoodsFirstSeenState(path: string): Promise<{ state: GoodsFirstSeenIndex; found: boolean }> {
+  try {
+    const parsed = JSON.parse(await readFile(path, 'utf8')) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { state: {}, found: true };
+    const state: GoodsFirstSeenIndex = {};
+    for (const [internalId, value] of Object.entries(parsed)) {
+      if (!/^\d+$/.test(internalId) || !value || typeof value !== 'object' || Array.isArray(value)) continue;
+      const record = value as Record<string, unknown>;
+      if (typeof record.firstSeenDate !== 'string') continue;
+      state[internalId] = {
+        firstSeenDate: record.firstSeenDate,
+        platformProductId: typeof record.platformProductId === 'string' ? record.platformProductId : '',
+        productName: typeof record.productName === 'string' ? record.productName : '',
+        ...(record.baseline === true ? { baseline: true } : {}),
+      };
+    }
+    return { state, found: true };
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return { state: {}, found: false };
+    throw error;
+  }
+}
+
+async function saveGoodsFirstSeenState(path: string, state: GoodsFirstSeenIndex): Promise<void> {
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, `${JSON.stringify(state, null, 2)}\n`, 'utf8');
+}
+
+function isGoodsLinkLifecycleState(value: unknown): value is GoodsLinkLifecycleState {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const state = value as Record<string, unknown>;
+  if (!state.active || typeof state.active !== 'object' || Array.isArray(state.active) || !Array.isArray(state.removedLinks)) return false;
+  const activeValid = Object.values(state.active as Record<string, unknown>).every((entry) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return false;
+    const record = entry as Record<string, unknown>;
+    return typeof record.platformProductId === 'string' && typeof record.productName === 'string';
+  });
+  const removedValid = state.removedLinks.every((entry) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return false;
+    const record = entry as Record<string, unknown>;
+    return (
+      typeof record.productId === 'string' &&
+      typeof record.platformProductId === 'string' &&
+      typeof record.productName === 'string' &&
+      typeof record.removedDate === 'string' &&
+      record.reason === '商品总表缺失' &&
+      record.source === 'goods_snapshot_diff'
+    );
+  });
+  return activeValid && removedValid;
+}
+
+async function loadGoodsLinkLifecycleState(path: string, log: ReturnType<typeof createRunLog>): Promise<GoodsLinkLifecycleState | null> {
+  try {
+    const parsed = JSON.parse(await readFile(path, 'utf8')) as unknown;
+    if (!isGoodsLinkLifecycleState(parsed)) throw new Error('Invalid goods link lifecycle state');
+    return parsed;
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return null;
+    log.addEvent('商品链接生命周期状态损坏: 重新初始化');
+    return null;
+  }
+}
+
+async function saveGoodsLinkLifecycleState(path: string, state: GoodsLinkLifecycleState): Promise<void> {
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, `${JSON.stringify(state, null, 2)}\n`, 'utf8');
+}
+
+function filterNewLinkPoolByFirstSeen(products: GoodsManagerNewProductPoolItem[], currentGoods: GoodsSnapshotItem[], firstSeen: GoodsFirstSeenIndex, referenceDate: string): GoodsManagerNewProductPoolItem[] {
+  const eligibleIds = new Set(filterFirstSeenWithinDays(currentGoods, firstSeen, referenceDate, 7).map((item) => item.internalProductId));
+  return sortNewLinkPoolBySubmittedAt(products.filter((item) => eligibleIds.has(item.productId)));
+}
+
+function parseSubmittedAtTime(value: string): number {
+  if (!value.trim()) return Number.NEGATIVE_INFINITY;
+  const date = new Date(value.trim().replace(' ', 'T'));
+  return Number.isNaN(date.getTime()) ? Number.NEGATIVE_INFINITY : date.getTime();
+}
+
+function compareProductIds(a: string, b: string): number {
+  const aNumber = /^\d+$/.test(a) ? Number(a) : null;
+  const bNumber = /^\d+$/.test(b) ? Number(b) : null;
+  if (aNumber !== null && bNumber !== null) return aNumber - bNumber;
+  if (aNumber !== null) return -1;
+  if (bNumber !== null) return 1;
+  return a.localeCompare(b);
+}
+
+function sortNewLinkPoolBySubmittedAt(items: GoodsManagerNewProductPoolItem[]): GoodsManagerNewProductPoolItem[] {
+  return [...items].sort((a, b) => parseSubmittedAtTime(b.submittedAt) - parseSubmittedAtTime(a.submittedAt) || compareProductIds(a.productId, b.productId));
+}
+
 function resolveProductIdMappingPath(config: Awaited<ReturnType<typeof loadConfig>>): string {
   return config.productIdMappingPath ?? 'config/product-id-map.json';
 }
@@ -201,6 +401,15 @@ function dashboardDataQualityNotes(rawTables: RawTableData[]): string[] {
   return rawTables.some((table) => table.period === '1d' && isEmptyDashboardTable(table)) ? [TODAY_DASHBOARD_NOT_UPDATED_NOTE] : [];
 }
 
+async function saveArtifactManifestSafely(path: string, manifest: PublicTrafficArtifactManifest, log: ReturnType<typeof createRunLog>): Promise<void> {
+  try {
+    await savePublicTrafficArtifactManifest(path, manifest);
+    log.addEvent(`产物清单已保存: ${path}`);
+  } catch (error) {
+    log.addEvent(`产物清单保存失败: ${path}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 export async function runPublicTrafficReportCli(): Promise<void> {
   await loadEnv();
   const config = await loadConfig();
@@ -216,6 +425,26 @@ export async function runPublicTrafficReportCli(): Promise<void> {
     log.addEvent('开始下载商品总表、抓取曝光与后链路数据');
     const { goodsExportPath, exposure: crawlResult, dashboard: rawTables, orderAnalysis: orderAnalysisCapture } = await crawlPublicTrafficSources(config, paths.goodsExportWorkbook);
     await refreshProductIdMappingForReport(goodsExportPath, mappingPath, paths.productIdMappingSyncLog, log);
+    const mapping = await loadMappingSafely(mappingPath, log);
+    const currentGoodsSnapshot = goodsSnapshotFromMapping(mapping);
+    await writeFile(paths.goodsListSnapshot, JSON.stringify(currentGoodsSnapshot, null, 2), 'utf8');
+    const previousFirstSeen = await loadGoodsFirstSeenState(paths.goodsFirstSeenState);
+    const firstSeenState = updateGoodsFirstSeen({
+      currentDate: runDate,
+      previous: previousFirstSeen.state,
+      current: currentGoodsSnapshot,
+      baseline: !previousFirstSeen.found,
+    });
+    const newGoodsPlatformIds = newGoodsPlatformIdsFromFirstSeen(currentGoodsSnapshot, firstSeenState, runDate);
+    await saveGoodsFirstSeenState(paths.goodsFirstSeenState, firstSeenState);
+    const previousLinkLifecycleState = await loadGoodsLinkLifecycleState(paths.goodsLinkLifecycleState, log);
+    const linkLifecycle = updateGoodsLinkLifecycle({
+      currentDate: runDate,
+      previous: previousLinkLifecycleState,
+      current: currentGoodsSnapshot,
+    });
+    await saveGoodsLinkLifecycleState(paths.goodsLinkLifecycleState, linkLifecycle.state);
+    log.addEvent(`商品链接生命周期: 当前=${Object.keys(linkLifecycle.state.active).length}, 近7天下架=${linkLifecycle.removedLinks.length}`);
 
     try {
       const annotatedCount = annotateGoodsExportWorkbookWithInternalId(paths.goodsExportWorkbook);
@@ -223,9 +452,22 @@ export async function runPublicTrafficReportCli(): Promise<void> {
     } catch (error) {
       log.addEvent(`商品总表端内ID列注入失败: ${error instanceof Error ? error.message : String(error)}`);
     }
+    await saveArtifactManifestSafely(paths.artifactManifests['goods-export'], buildPublicTrafficArtifactManifest({
+      runDate,
+      stage: 'goods-export',
+      sourceUrl: config.goodsExportUrl ?? GOODS_EXPORT_SOURCE_URL,
+      files: { goodsExportWorkbook: paths.goodsExportWorkbook },
+    }), log);
+
+    const previous = await loadPreviousCumulative(config.outputDir, runDate, mapping);
+    assertExposureSnapshotCoverage(crawlResult.products.length, previous.products.length, log);
 
     await writeFile(paths.exposureCumulativeProducts, JSON.stringify(crawlResult.products, null, 2), 'utf8');
     log.addEvent(`保存累计快照: ${crawlResult.products.length} 条商品`);
+    const paginationStats = exposurePaginationStatsOrEmpty(crawlResult.paginationStats);
+    log.addEvent(
+      `曝光商品分页: 页数=${paginationStats.pageRowCounts.length}, 每页=${paginationStats.pageRowCounts.join('/')}, 唯一页=${paginationStats.uniquePageSignatures.length}, 重复页签名=${paginationStats.duplicatePageSignatures}, 最大连续重复=${paginationStats.maxRepeatedSignatureAttempts}, 重复商品行=${paginationStats.duplicateProductRows}, 跳过无ID行=${paginationStats.skippedProductIdRows}`,
+    );
 
     const orderAnalysis = { ...orderAnalysisCapture, runDate };
     await writeFile(paths.orderAnalysis, JSON.stringify(orderAnalysis, null, 2), 'utf8');
@@ -233,24 +475,43 @@ export async function runPublicTrafficReportCli(): Promise<void> {
     await mkdir(latestDir, { recursive: true });
     await writeFile(`${latestDir}/order-analysis.json`, JSON.stringify(orderAnalysis, null, 2), 'utf8');
     log.addEvent(`订单分析: ${Object.values(orderAnalysis.pages).map((page) => `${page.label}=${page.indicators.length}条(${page.dataDate ?? '未知'})`).join(', ')}`);
+    await saveArtifactManifestSafely(paths.artifactManifests['order-analysis'], buildPublicTrafficArtifactManifest({
+      runDate,
+      capturedAt: orderAnalysisCapture.capturedAt,
+      stage: 'order-analysis',
+      sourceUrl: ORDER_ANALYSIS_SOURCE_URL,
+      dataDate: orderAnalysisCapture.pages.overview.dataDate ?? undefined,
+      files: { orderAnalysis: paths.orderAnalysis },
+    }), log);
 
+    let exposureOverviewWritten = false;
     if (crawlResult.overview.length > 0) {
       await writeFile(paths.exposureOverview, JSON.stringify(crawlResult.overview, null, 2), 'utf8');
+      exposureOverviewWritten = true;
       log.addEvent(`保存总体概况: ${crawlResult.overview.length} 个周期`);
     }
+    await saveArtifactManifestSafely(paths.artifactManifests.exposure, buildPublicTrafficArtifactManifest({
+      runDate,
+      stage: 'exposure',
+      sourceUrl: crawlResult.url ?? config.exposureUrl ?? EXPOSURE_SOURCE_URL,
+      dataDate,
+      files: {
+        exposureCumulativeProducts: paths.exposureCumulativeProducts,
+        ...(exposureOverviewWritten ? { exposureOverview: paths.exposureOverview } : {}),
+      },
+    }), log);
 
-    const previous = await loadPreviousCumulative(config.outputDir, runDate);
     if (!previous.found) {
       log.addEvent('商品级曝光历史不足: 跳过商品级日差分');
     }
-    const dailyDelta = previous.found ? computeExposureDailyDelta(dataDate, previous.products, crawlResult.products) : [];
+    const dailyDelta = previous.found ? computeExposureDailyDelta(dataDate, previous.products, crawlResult.products, mapping, { newProductPlatformIds: newGoodsPlatformIds }) : [];
     await writeFile(paths.exposureDailyDelta, JSON.stringify(dailyDelta, null, 2), 'utf8');
-    log.addEvent(`日差分: ${dailyDelta.length} 条, 新品=${dailyDelta.filter((row) => row.flags.includes('new_product')).length}`);
+    log.addEvent(`日差分: ${dailyDelta.length} 条, 新品=${dailyDelta.filter((row) => row.flags.includes('new_product')).length}, 昨日漏抓=${dailyDelta.filter((row) => row.flags.includes('missing_previous_snapshot_row')).length}`);
 
     const sevenDayDeltas = await loadRecentExposureDeltas(config.outputDir, runDate, 7);
     const thirtyDayDeltas = await loadRecentExposureDeltas(config.outputDir, runDate, 30);
-    const sevenDaySummary = aggregateExposureDeltas(sevenDayDeltas);
-    const thirtyDaySummary = aggregateExposureDeltas(thirtyDayDeltas);
+    const sevenDaySummary = aggregateExposureDeltas(sevenDayDeltas, mapping);
+    const thirtyDaySummary = aggregateExposureDeltas(thirtyDayDeltas, mapping);
     await writeFile(paths.exposure7dSummary, JSON.stringify(sevenDaySummary, null, 2), 'utf8');
     await writeFile(paths.exposure30dSummary, JSON.stringify(thirtyDaySummary, null, 2), 'utf8');
     log.addEvent(`7日汇总: ${sevenDaySummary.length} 条商品`);
@@ -261,12 +522,25 @@ export async function runPublicTrafficReportCli(): Promise<void> {
       await writeFile(paths.publicVisitRaw[table.period], JSON.stringify(table, null, 2), 'utf8');
       log.addPeriodStats(table.collection);
     }
+    const oneDayDashboardNotUpdated = rawTables.some((table) => table.period === '1d' && isEmptyDashboardTable(table));
+    await saveArtifactManifestSafely(paths.artifactManifests.dashboard, buildPublicTrafficArtifactManifest({
+      runDate,
+      stage: 'dashboard',
+      sourceUrl: config.targetUrl,
+      dataDate,
+      freshness: oneDayDashboardNotUpdated ? 'not_updated' : 'fresh',
+      notes: oneDayDashboardNotUpdated ? [TODAY_DASHBOARD_NOT_UPDATED_NOTE] : [],
+      files: {
+        '1d': paths.publicVisitRaw['1d'],
+        '7d': paths.publicVisitRaw['7d'],
+        '30d': paths.publicVisitRaw['30d'],
+      },
+    }), log);
     const dashboardRows = normalizeDashboardRowsForReport(rawTables, log);
     const dataQualityNotes = dashboardDataQualityNotes(rawTables);
     for (const note of dataQualityNotes) log.addEvent(note);
     log.addEvent(`后链路数据: ${dashboardRows.length} 条周期商品记录`);
 
-    const mapping = await loadMappingSafely(mappingPath, log);
     const merged = mergePublicTrafficData({
       dashboardRows,
       exposureByPeriod: {
@@ -299,6 +573,16 @@ export async function runPublicTrafficReportCli(): Promise<void> {
       cumulativeProducts: crawlResult.products,
       orderAnalysis,
     });
+    const rawNewProductPoolItems = await loadGoodsManagerNewProductPool(runDate, log);
+    const newProductPoolItems = filterNewLinkPoolByFirstSeen(rawNewProductPoolItems, currentGoodsSnapshot, firstSeenState, runDate);
+    if (rawNewProductPoolItems.length > 0) {
+      log.addEvent(`goods-manager 新链接观察: 原始=${rawNewProductPoolItems.length}, 商品总表近7天首次出现=${newProductPoolItems.length}`);
+    }
+    if (newProductPoolItems.length > 0) {
+      context.newProductPoolItems = newProductPoolItems;
+      context.newProductPoolIds = newProductPoolItems.map((item) => item.productId);
+    }
+    context.agentData = { ...(context.agentData ?? {}), removedLinks: linkLifecycle.removedLinks };
     log.addEvent(
       `规则分析: 曝光不足=${context.lowExposure.length}, 点击弱=${context.weakClick.length}, 转化弱=${context.weakConversion.length}, 高潜力=${context.highPotential.length}, 新品观察=${context.newProductObservation.length}, 生命周期治理=${context.lifecycleGovernance.length}, 建议操作=${context.recommendedActions.length}`,
     );
@@ -308,16 +592,27 @@ export async function runPublicTrafficReportCli(): Promise<void> {
     await writeFile(paths.workbook, writePublicTrafficWorkbookBuffer(context));
     log.addEvent(`报告已生成: ${paths.markdown}`);
 
+    const productNameMap = await loadProductNameMap('config/product-name-map.json', (message) => log.addEvent(message));
     const card = buildPublicTrafficCard(context, {
       markdownPath: paths.markdown,
       workbookPath: paths.workbook,
+    }, {
+      productNameMap,
     });
     const fallbackText = buildPublicTrafficFeishuText(context, {
       markdownPath: paths.markdown,
       workbookPath: paths.workbook,
     });
 
-    await sendFeishuCardSafely(card, fallbackText, log);
+    const firstReportSent = await sendFeishuCardSafely(card, fallbackText, log);
+    await savePublicTrafficRunState(paths.publicTrafficRunState, {
+      date: runDate,
+      firstReportSent,
+      firstReportGeneratedAt: new Date().toISOString(),
+      firstDashboardQuality: assessDashboardQuality(rawTables, context.dataQualityNotes),
+      dashboardRefreshResent: false,
+    });
+    log.addEvent(`首版日报运行状态已记录: ${paths.publicTrafficRunState}`);
 
     console.log(fallbackText);
 
@@ -326,18 +621,23 @@ export async function runPublicTrafficReportCli(): Promise<void> {
     log.addEvent(`错误: ${error instanceof Error ? error.message : String(error)}`);
     throw error;
   } finally {
-    await writeFile(paths.log, log.toText(), 'utf8');
+    const logText = log.toText();
+    await writeFile(paths.log, logText, 'utf8');
+    await mkdir(dirname(paths.latestLog), { recursive: true });
+    await writeFile(paths.latestLog, logText, 'utf8');
   }
 }
 
-async function sendFeishuCardSafely(card: Record<string, unknown>, fallbackText: string, log: ReturnType<typeof createRunLog>): Promise<void> {
+async function sendFeishuCardSafely(card: Record<string, unknown>, fallbackText: string, log: ReturnType<typeof createRunLog>): Promise<boolean> {
   try {
     const sendTo = parseFeishuSendToArg(process.argv);
     const env = sendTo ? { ...process.env, FEISHU_SEND_TO: sendTo } : process.env;
     const feishuResult = await sendFeishuCard(env, card, fallbackText);
     log.addEvent(feishuResult.sent ? '飞书通知已发送' : `飞书通知跳过: ${feishuResult.reason}`);
+    return feishuResult.sent;
   } catch (error) {
     log.addEvent(`飞书通知失败: ${error instanceof Error ? error.message : String(error)}`);
+    return false;
   }
 }
 

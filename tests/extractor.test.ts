@@ -57,10 +57,6 @@ describe('extractor helpers', () => {
         signedOrders: 20,
         reviewedOrders: 10,
         shippedOrders: 5,
-        createdOrderAmount: 0,
-        signedOrderAmount: 0,
-        reviewedOrderAmount: 0,
-        shippedOrderAmount: 0,
       },
     ]);
   });
