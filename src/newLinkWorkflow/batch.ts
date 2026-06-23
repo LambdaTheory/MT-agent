@@ -373,11 +373,16 @@ export async function executeNewLinkBatchConfirmRequest(
   for (let index = 1; index <= request.count; index += 1) {
     try {
       const result = await client.copy(request.sourceProductId);
-      lines.push(`${index}. ${result.ok ? '成功' : '失败'}${result.newProductId ? `：新商品 ${result.newProductId}` : ''}`);
+      const isUnknownCopy = result.status === 'unknown' || result.sideEffectPossible === true;
+      const copyStatusLabel = result.ok ? '成功' : isUnknownCopy ? '状态未知' : '失败';
+      lines.push(`${index}. ${copyStatusLabel}${result.newProductId ? `：新商品 ${result.newProductId}` : ''}`);
       if (!result.ok) {
+        const safetyNote = isUnknownCopy
+          ? '\n注意：本次复制可能已经提交但未拿到新商品ID；为避免重复铺链，请先到后台核对，确认后再决定是否继续，当前确认卡不要直接重试。'
+          : '';
         return {
           ok: false,
-          text: `新链批量复制中断：源商品 ${request.sourceProductId}，已完成 ${newProductIds.length}/${request.count} 条。\n${lines.join('\n')}\n${result.lines.join('\n')}`,
+          text: `新链批量复制中断：源商品 ${request.sourceProductId}，已完成 ${newProductIds.length}/${request.count} 条。\n${lines.join('\n')}\n${result.lines.join('\n')}${safetyNote}`,
           newProductIds,
           completedCount: newProductIds.length,
         };

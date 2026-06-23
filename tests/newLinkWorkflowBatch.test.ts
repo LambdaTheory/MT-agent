@@ -266,4 +266,52 @@ describe('new link batch workflow', () => {
     expect(result).toMatchObject({ ok: true, completedCount: 3, newProductIds: ['new-1', 'new-2', 'new-3'] });
     expect(result.text).toContain('成功 3 条');
   });
+
+  it('stops with an explicit no-retry warning when copy status is unknown after a possible side effect', async () => {
+    const calls: string[] = [];
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run'); },
+      async execute() { throw new Error('execute should not run'); },
+      async copy(productId) {
+        calls.push(productId);
+        return {
+          productId,
+          ok: false,
+          status: 'unknown',
+          newProductId: null,
+          sideEffectPossible: true,
+          retrySafe: false,
+          message: 'Copy may have succeeded but newProductId could not be detected; do not retry automatically',
+          lines: [
+            'copy: unknown',
+            'newProductId: unknown',
+            'message: Copy may have succeeded but newProductId could not be detected; do not retry automatically',
+            'sideEffectPossible: true',
+            'retrySafe: false',
+          ],
+        };
+      },
+      async delist() { throw new Error('delist should not run'); },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+
+    const result = await executeNewLinkBatchConfirmRequest(rentalPriceClient, {
+      safetyVersion: 2,
+      workflowName: 'rental.newLinkBatch',
+      keyword: 'ID844',
+      count: 20,
+      sourceProductId: '844',
+      sourceProductName: '测试商品',
+      dataDate: '2026-06-23',
+      reason: '用户确认',
+    });
+
+    expect(calls).toEqual(['844']);
+    expect(result).toMatchObject({ ok: false, completedCount: 0, newProductIds: [] });
+    expect(result.text).toContain('1. 状态未知');
+    expect(result.text).toContain('可能已经提交');
+    expect(result.text).toContain('不要直接重试');
+  });
 });

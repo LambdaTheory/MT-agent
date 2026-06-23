@@ -1,7 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { parseBotIntent } from '../src/feishuBot/intent.js';
 import { handleBotIntent } from '../src/feishuBot/tools.js';
-import type { RentalPriceSkillClient } from '../src/feishuBot/rentalPrice.js';
+import { createRentalPriceSkillClient, type RentalPriceSkillClient } from '../src/feishuBot/rentalPrice.js';
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 function fakeClient(): RentalPriceSkillClient & { previews: unknown[]; executions: unknown[]; copies: unknown[]; delists: unknown[]; tenancySets: unknown[]; specDiscovers: unknown[]; specAdds: unknown[] } {
   return {
@@ -147,5 +151,43 @@ describe('rental price Feishu integration', () => {
     expect(JSON.stringify(response.card)).toContain('rental_operation_confirm');
     expect(JSON.stringify(response.card)).toContain('spec-add-and-refresh');
     expect(JSON.stringify(response.card)).toContain('128G');
+  });
+});
+
+describe('rental price skill client copy diagnostics', () => {
+  it('keeps daemon copy error details in the bot-facing result', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      status: 'error',
+      message: 'Product not found: 844',
+      currentUrl: 'https://example.test/goods/list',
+    }))));
+    const client = createRentalPriceSkillClient({ daemonUrl: 'http://127.0.0.1:9223', daemonToken: 'test-token' });
+
+    const result = await client.copy('844');
+
+    expect(result.ok).toBe(false);
+    expect(result.status).toBe('error');
+    expect(result.message).toBe('Product not found: 844');
+    expect(result.lines).toContain('message: Product not found: 844');
+    expect(result.lines).toContain('currentUrl: https://example.test/goods/list');
+  });
+
+  it('marks unknown copy results as possible side effects and unsafe to retry automatically', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      status: 'unknown',
+      message: 'Copy may have succeeded but newProductId could not be detected; do not retry automatically',
+      sideEffectPossible: true,
+      retrySafe: false,
+    }))));
+    const client = createRentalPriceSkillClient({ daemonUrl: 'http://127.0.0.1:9223', daemonToken: 'test-token' });
+
+    const result = await client.copy('844');
+
+    expect(result.ok).toBe(false);
+    expect(result.status).toBe('unknown');
+    expect(result.sideEffectPossible).toBe(true);
+    expect(result.retrySafe).toBe(false);
+    expect(result.lines).toContain('sideEffectPossible: true');
+    expect(result.lines).toContain('retrySafe: false');
   });
 });
