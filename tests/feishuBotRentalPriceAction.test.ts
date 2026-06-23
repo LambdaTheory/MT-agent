@@ -1,4 +1,4 @@
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -19,10 +19,10 @@ function fakeSdk(sent: unknown[], registered: Record<string, (data: unknown) => 
   return { Client: FakeClient, WSClient: FakeWSClient, EventDispatcher: FakeEventDispatcher };
 }
 
-async function waitFor(predicate: () => boolean, timeoutMs = 1000): Promise<void> {
+async function waitFor(predicate: () => boolean | Promise<boolean>, timeoutMs = 1000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (predicate()) return;
+    if (await predicate()) return;
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   throw new Error('Timed out waiting for condition');
@@ -57,7 +57,7 @@ describe('rental price card action', () => {
     };
     const registered: Record<string, (data: unknown) => Promise<void>> = {};
     const sent: unknown[] = [];
-    const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', sdk: fakeSdk(sent, registered), rentalPriceClient });
+    const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', outputDir: await mkdtemp(join(tmpdir(), 'mt-agent-sdk-action-')), sdk: fakeSdk(sent, registered), rentalPriceClient });
 
     bot.start();
     await registered['card.action.trigger']({
@@ -95,7 +95,7 @@ describe('rental price card action', () => {
     };
     const registered: Record<string, (data: unknown) => Promise<void>> = {};
     const sent: unknown[] = [];
-    const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', sdk: fakeSdk(sent, registered), rentalPriceClient });
+    const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', outputDir: await mkdtemp(join(tmpdir(), 'mt-agent-sdk-action-')), sdk: fakeSdk(sent, registered), rentalPriceClient });
 
     bot.start();
     await registered['card.action.trigger']({
@@ -132,7 +132,7 @@ describe('rental price card action', () => {
     };
     const registered: Record<string, (data: unknown) => Promise<void>> = {};
     const sent: unknown[] = [];
-    const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', sdk: fakeSdk(sent, registered), rentalPriceClient });
+    const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', outputDir: await mkdtemp(join(tmpdir(), 'mt-agent-sdk-action-')), sdk: fakeSdk(sent, registered), rentalPriceClient });
     const callback = {
       event: {
         context: { open_message_id: 'om-rental-copy-confirm' },
@@ -173,7 +173,7 @@ describe('rental price card action', () => {
     };
     const registered: Record<string, (data: unknown) => Promise<void>> = {};
     const sent: unknown[] = [];
-    const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', sdk: fakeSdk(sent, registered), rentalPriceClient });
+    const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', outputDir: await mkdtemp(join(tmpdir(), 'mt-agent-sdk-action-')), sdk: fakeSdk(sent, registered), rentalPriceClient });
 
     bot.start();
     await registered['card.action.trigger']({
@@ -199,6 +199,92 @@ describe('rental price card action', () => {
     expect(sent.filter((item) => JSON.stringify(item).includes('Agent 操作已完成')).every((item) => JSON.stringify(item).includes('"kind":"patch"'))).toBe(true);
   });
 
+  it('continues from a clarification card selection without executing the selected operation', async () => {
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run from clarification selection'); },
+      async execute() { throw new Error('execute should not run from clarification selection'); },
+      async copy() { throw new Error('copy should not run from clarification selection'); },
+      async delist() { throw new Error('delist should not run from clarification selection'); },
+      async tenancySet() { throw new Error('tenancySet should not run from clarification selection'); },
+      async specDiscover() { throw new Error('specDiscover should not run from clarification selection'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run from clarification selection'); },
+    };
+    const registered: Record<string, (data: unknown) => Promise<void>> = {};
+    const sent: unknown[] = [];
+    const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', outputDir: await mkdtemp(join(tmpdir(), 'mt-agent-sdk-action-')), sdk: fakeSdk(sent, registered), rentalPriceClient });
+
+    bot.start();
+    await registered['card.action.trigger']({
+      event: {
+        context: { open_message_id: 'om-agent-clarify' },
+        action: {
+          value: {
+            action: 'agent_clarify_select',
+            originalMessage: '帮我处理一下 875',
+            selectedMessage: '复制商品 875',
+            label: '复制商品',
+          },
+        },
+      },
+    });
+
+    await waitFor(() => sent.some((item) => JSON.stringify(item).includes('rental_operation_confirm')));
+    expect(sent.some((item) => JSON.stringify(item).includes('Agent 已收到你的选择'))).toBe(true);
+    expect(sent.some((item) => JSON.stringify(item).includes('复制商品'))).toBe(true);
+    expect(sent.some((item) => JSON.stringify(item).includes('rental_operation_confirm'))).toBe(true);
+    expect(sent.some((item) => JSON.stringify(item).includes('复制成功'))).toBe(false);
+  });
+
+  it('continues from a custom clarification input without executing the selected operation', async () => {
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run from custom clarification input'); },
+      async execute() { throw new Error('execute should not run from custom clarification input'); },
+      async copy() { throw new Error('copy should not run from custom clarification input'); },
+      async delist() { throw new Error('delist should not run from custom clarification input'); },
+      async tenancySet() { throw new Error('tenancySet should not run from custom clarification input'); },
+      async specDiscover() { throw new Error('specDiscover should not run from custom clarification input'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run from custom clarification input'); },
+    };
+    const registered: Record<string, (data: unknown) => Promise<void>> = {};
+    const sent: unknown[] = [];
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-sdk-custom-clarify-'));
+    const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', outputDir, sdk: fakeSdk(sent, registered), rentalPriceClient });
+
+    bot.start();
+    await registered['card.action.trigger']({
+      event: {
+        context: { open_message_id: 'om-agent-custom-clarify' },
+        operator: { open_id: 'ou_custom' },
+        action: {
+          value: {
+            action: 'agent_clarify_custom',
+            originalMessage: '帮我处理一下 875',
+          },
+          form_value: { custom_message: '复制商品 875' },
+        },
+      },
+    });
+
+    await waitFor(() => sent.some((item) => JSON.stringify(item).includes('rental_operation_confirm')));
+    expect(sent.some((item) => JSON.stringify(item).includes('Agent 已收到你的补充'))).toBe(true);
+    expect(sent.some((item) => JSON.stringify(item).includes('rental_operation_confirm'))).toBe(true);
+    expect(sent.some((item) => JSON.stringify(item).includes('复制成功'))).toBe(false);
+
+    let learning = '';
+    await waitFor(async () => {
+      try {
+        learning = await readFile(join(outputDir, 'state', 'agent-learning.json'), 'utf8');
+        return learning.includes('clarification_selected');
+      } catch {
+        return false;
+      }
+    });
+    expect(learning).toContain('clarification_selected');
+    expect(learning).toContain('自定义澄清');
+    expect(learning).toContain('复制商品 875');
+    expect(learning).toContain('ou_custom');
+  });
+
   it('executes new-link batch confirmations by copying the selected source repeatedly', async () => {
     const calls: string[] = [];
     const rentalPriceClient: RentalPriceSkillClient = {
@@ -215,7 +301,7 @@ describe('rental price card action', () => {
     };
     const registered: Record<string, (data: unknown) => Promise<void>> = {};
     const sent: unknown[] = [];
-    const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', sdk: fakeSdk(sent, registered), rentalPriceClient });
+    const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', outputDir: await mkdtemp(join(tmpdir(), 'mt-agent-sdk-action-')), sdk: fakeSdk(sent, registered), rentalPriceClient });
 
     bot.start();
     await registered['card.action.trigger']({

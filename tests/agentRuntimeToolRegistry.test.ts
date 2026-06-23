@@ -13,7 +13,11 @@ describe('agent runtime tool registry', () => {
       'productId.lookup',
       'operationsLearning.startQuiz',
       'publicTraffic.runReport',
+      'publicTraffic.resendLatestReport',
+      'publicTraffic.pushLatestReportToGroup',
       'publicTraffic.crawlSources',
+      'closedOrder.syncFeedback',
+      'closedOrder.runObservationReport',
       'rental.pricePreview',
       'rental.operationConfirmRequest',
     ]);
@@ -26,7 +30,7 @@ describe('agent runtime tool registry', () => {
 
     const tools = listAgentTools();
     tools.pop();
-    expect(listAgentTools()).toHaveLength(8);
+    expect(listAgentTools()).toHaveLength(12);
   });
 
   it('returns defensive copies of tool metadata', () => {
@@ -68,7 +72,11 @@ describe('agent runtime tool registry', () => {
   it('makes risk and confirmation metadata explicit', () => {
     expect(findAgentTool('publicTraffic.latestSummary')).toMatchObject({ risk: 'read', requiresConfirmation: false });
     expect(findAgentTool('publicTraffic.runReport')).toMatchObject({ risk: 'write', requiresConfirmation: true });
+    expect(findAgentTool('publicTraffic.resendLatestReport')).toMatchObject({ risk: 'write', requiresConfirmation: true });
+    expect(findAgentTool('publicTraffic.pushLatestReportToGroup')).toMatchObject({ risk: 'write', requiresConfirmation: true });
     expect(findAgentTool('publicTraffic.crawlSources')).toMatchObject({ risk: 'write', requiresConfirmation: true });
+    expect(findAgentTool('closedOrder.syncFeedback')).toMatchObject({ risk: 'write', requiresConfirmation: true });
+    expect(findAgentTool('closedOrder.runObservationReport')).toMatchObject({ risk: 'write', requiresConfirmation: true });
     expect(findAgentTool('rental.pricePreview')).toMatchObject({ risk: 'high', requiresConfirmation: true });
     expect(findAgentTool('rental.operationConfirmRequest')).toMatchObject({ risk: 'high', requiresConfirmation: true });
   });

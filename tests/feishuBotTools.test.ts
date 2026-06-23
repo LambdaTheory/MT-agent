@@ -6,6 +6,8 @@ import type { AgentPlannerProvider } from '../src/agentRuntime/planner.js';
 import type { LlmIntentProposalProvider } from '../src/feishuBot/llmIntentProposal.js';
 import type { LlmToolSelectionProvider } from '../src/feishuBot/llmProvider.js';
 import type { RentalPriceSkillClient } from '../src/feishuBot/rentalPrice.js';
+import { recordAgentLearningEvent } from '../src/agentLearning/store.js';
+import { executeAgentToolRequest } from '../src/feishuBot/agentToolExecutor.js';
 import { handleBotIntent } from '../src/feishuBot/tools.js';
 
 const summary = {
@@ -201,6 +203,7 @@ describe('handleBotIntent', () => {
 
 🎓 运营学习
   运营学习 — 开始运营学习测验
+  Agent学习汇总 — 查看 Agent 澄清与确认学习记录
 
 💰 租赁改价
   改价 761 1天22 10天55 — 指定租期改价（格式：改价 ID 租期1价格1 租期2价格2 ...）
@@ -373,6 +376,54 @@ describe('handleBotIntent', () => {
     expect(response.text).toContain('端内ID 565 iPhone 15');
   });
 
+  it('passes silent learning hints into the generic agent planner', async () => {
+    const outputDir = await writeContext();
+    await recordAgentLearningEvent(outputDir, {
+      type: 'clarification_selected',
+      originalMessage: '帮我处理一下 pocket3',
+      selectedMessage: '帮我铺十条 pocket3 的新链',
+      label: '铺新链',
+      createdAt: '2026-06-23T01:00:00.000Z',
+    });
+    const planner: AgentPlannerProvider = {
+      async proposePlan(request) {
+        expect(request.message).toBe('帮我处理 pocket3');
+        expect(request.learningHints).toEqual([expect.objectContaining({
+          originalMessage: '帮我处理一下 pocket3',
+          selectedMessage: '帮我铺十条 pocket3 的新链',
+          label: '铺新链',
+        })]);
+        return JSON.stringify({
+          goal: '查询商品表现',
+          selectedTool: 'product.query',
+          arguments: { keyword: 'pocket3' },
+          confidence: 0.82,
+          reason: '测试学习提示注入',
+        });
+      },
+    };
+
+    const response = await handleBotIntent({ type: 'unknown', text: '帮我处理 pocket3' }, outputDir, { agentPlannerProvider: planner });
+
+    expect(response.text).toContain('端内ID');
+  });
+
+  it('returns the Agent learning summary on request', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-bot-learning-summary-'));
+    await recordAgentLearningEvent(outputDir, {
+      type: 'clarification_selected',
+      originalMessage: '帮我处理一下 875',
+      selectedMessage: '复制商品 875',
+      label: '复制商品',
+    });
+
+    const response = await handleBotIntent({ type: 'agent_learning_summary' }, outputDir);
+
+    expect(response.text).toContain('Agent 学习汇总');
+    expect(response.text).toContain('澄清选择 1');
+    expect(response.text).toContain('复制商品 875');
+  });
+
   it('turns high-risk generic agent plans into approval cards without side effects', async () => {
     const planner: AgentPlannerProvider = {
       async proposePlan(request) {
@@ -407,6 +458,46 @@ describe('handleBotIntent', () => {
     expect(JSON.stringify(response.card)).toContain('agent_tool_confirm');
     expect(JSON.stringify(response.card)).toContain('delist');
     expect(JSON.stringify(response.card)).toContain('761');
+  });
+
+  it('turns ambiguous generic agent plans into clarification cards', async () => {
+    const planner: AgentPlannerProvider = {
+      async proposePlan(request) {
+        expect(request.message).toBe('帮我处理一下 pocket3');
+        return JSON.stringify({
+          goal: '澄清 pocket3 操作',
+          needsClarification: true,
+          originalMessage: request.message,
+          question: '你想怎么处理 pocket3？',
+          options: [
+            { label: '查询数据', message: '查询 pocket3 的公域数据', description: '只读查询' },
+            { label: '铺新链', message: '帮我铺十条 pocket3 的新链', description: '需要确认后复制' },
+          ],
+          confidence: 0.4,
+          reason: '处理动作不明确',
+        });
+      },
+    };
+
+    const response = await handleBotIntent({ type: 'unknown', text: '帮我处理一下 pocket3' }, 'output', {
+      agentPlannerProvider: planner,
+    });
+
+    expect(response.text).toBe('你想怎么处理 pocket3？');
+    expect(response.card).toBeDefined();
+    expect(JSON.stringify(response.card)).toContain('agent_clarify_select');
+    expect(JSON.stringify(response.card)).toContain('帮我铺十条 pocket3 的新链');
+    expect(JSON.stringify(response.card)).not.toContain('agent_tool_confirm');
+  });
+
+  it('returns confirmation cards for exact report write operations', async () => {
+    const runReport = await handleBotIntent({ type: 'run_public_traffic_report' }, 'output');
+    expect(runReport.text).toContain('请确认 Agent 操作：publicTraffic.runReport');
+    expect(JSON.stringify(runReport.card)).toContain('agent_tool_confirm');
+
+    const resend = await handleBotIntent({ type: 'resend_latest_report', sendTo: 'both' }, 'output');
+    expect(resend.text).toContain('请确认 Agent 操作：publicTraffic.resendLatestReport');
+    expect(JSON.stringify(resend.card)).toContain('"sendTo":"both"');
   });
 
   it('plans new-link batch workflows through LLM without copying before confirmation', async () => {
@@ -542,12 +633,32 @@ describe('handleBotIntent', () => {
     process.env.CLOSED_ORDER_REMARKS_SOURCE_APP_CODE = 'order_dispatch';
 
     const response = await handleBotIntent({ type: 'sync_closed_order_feedback' }, outputDir, { closedOrderFetchImpl: fetchImpl as typeof fetch });
-    expect(response.text).toContain('关单同步完成');
-    expect(response.text).toContain('新增 1 条');
+    expect(response.text).toContain('请确认 Agent 操作：closedOrder.syncFeedback');
+    expect(response.card).toBeDefined();
+    expect(JSON.stringify(response.card)).toContain('agent_tool_confirm');
+    expect(JSON.stringify(response.card)).toContain('closedOrder.syncFeedback');
+
+    const executed = await executeAgentToolRequest(
+      { toolName: 'closedOrder.syncFeedback', arguments: {}, reason: '测试确认同步关单' },
+      outputDir,
+      { closedOrderFetchImpl: fetchImpl as typeof fetch },
+    );
+    expect(executed.text).toContain('关单同步完成');
+    expect(executed.text).toContain('新增 1 条');
     await expect(readFile(join(outputDir, 'state', 'closed-order-feedback-ingest.json'), 'utf8')).resolves.toContain('close:close-1');
   });
 
-  it('returns a closed-order observation card through the bot command', async () => {
+  it('returns a confirmation card before running the closed-order observation report', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-closed-order-bot-report-confirm-'));
+
+    const response = await handleBotIntent({ type: 'run_closed_order_observation_report' }, outputDir);
+    expect(response.text).toContain('请确认 Agent 操作：closedOrder.runObservationReport');
+    expect(response.card).toBeDefined();
+    expect(JSON.stringify(response.card)).toContain('agent_tool_confirm');
+    expect(JSON.stringify(response.card)).toContain('closedOrder.runObservationReport');
+  });
+
+  it('runs a closed-order observation report after Agent confirmation', async () => {
     const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-closed-order-bot-report-'));
     const registryRoot = await mkdtemp(join(tmpdir(), 'mt-agent-closed-order-registry-'));
     const registryPaths = await writeClosedOrderRegistryFixtures(registryRoot);
@@ -578,8 +689,8 @@ describe('handleBotIntent', () => {
       ],
     }), 'utf8');
 
-    const response = await handleBotIntent(
-      { type: 'run_closed_order_observation_report' },
+    const response = await executeAgentToolRequest(
+      { toolName: 'closedOrder.runObservationReport', arguments: {}, reason: '测试确认生成关单观察' },
       outputDir,
       { closedOrderRegistryPaths: registryPaths },
     );
@@ -589,6 +700,8 @@ describe('handleBotIntent', () => {
     expect(JSON.stringify(response.card)).toContain('重点分组');
     expect(JSON.stringify(response.card)).toContain('DJI Pocket 3');
     expect(JSON.stringify(response.card)).toContain('价格信号');
-    await expect(readFile(join(outputDir, 'closed-order-observation', 'closed-order-observation-2026-06-22.md'), 'utf8')).resolves.toContain('关单观察 2026-06-22');
+    const markdownPath = response.text.split('报告已写入：')[1]?.trim();
+    expect(markdownPath).toBeTruthy();
+    await expect(readFile(markdownPath!, 'utf8')).resolves.toContain('关单观察');
   });
 });

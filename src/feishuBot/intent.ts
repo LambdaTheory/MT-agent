@@ -30,6 +30,7 @@ export function parseExactBotIntent(input: string): BotIntent {
   if (/^(同步|拉取|更新).*(关单|关单反馈)/.test(text)) return { type: 'sync_closed_order_feedback' };
   if (/^(跑|生成|执行).*(关单观察|关单报告|关单反馈观察)/.test(text)) return { type: 'run_closed_order_observation_report' };
   if (/(今日|今天|现在).*(咋样|怎么样|概况|数据|日报|看下|看看)/.test(text)) return { type: 'latest_summary' };
+  if (/^(?:Agent|agent|智能体|语义)(?:学习|迭代).*(?:汇总|总结|历史|统计)$|^(?:Agent|agent|智能体|语义)(?:学习|迭代)$/.test(text)) return { type: 'agent_learning_summary' };
   if (/^(运营学习|学习反馈).*(历史|统计)$/.test(text)) return { type: 'operations_learning_history' };
   if (/^(运营学习|学习反馈).*(汇总|总结)$/.test(text)) return { type: 'operations_learning_summary' };
   if (/^(运营学习|学习测验|今日测验|loop测验|运营测验|测验)$|学习\s*loop|运营学习\s*loop/i.test(text)) return { type: 'operations_learning_quiz' };

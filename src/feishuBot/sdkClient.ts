@@ -1,7 +1,9 @@
 import * as lark from '@larksuiteoapi/node-sdk';
 import { createHash } from 'node:crypto';
 import { parseAgentToolConfirmRequest } from '../agentRuntime/approvalCard.js';
+import { parseAgentClarificationCustomSelection, parseAgentClarificationSelection } from '../agentRuntime/clarificationCard.js';
 import type { AgentPlannerProvider } from '../agentRuntime/planner.js';
+import { recordAgentLearningEvent, type AgentLearningEventInput } from '../agentLearning/store.js';
 import { handleOperationsLearningFeedback } from '../operationsLearningLoop/session.js';
 import { findLatestReportContext } from './reportStore.js';
 import { createFeishuMessageDispatcher } from './dispatcher.js';
@@ -279,6 +281,11 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
   }).dispatch;
   const logError = config.logError ?? ((error: unknown, context: { messageId: string; phase: 'reply' | 'dispatch' }) => console.error(`飞书SDK消息处理失败 ${context.phase} ${context.messageId}:`, error));
   const rentalPriceClient = config.rentalPriceClient ?? createRentalPriceSkillClient();
+  const outputDir = config.outputDir ?? 'output';
+
+  function recordLearning(input: AgentLearningEventInput, contextMessageId: string): void {
+    void recordAgentLearningEvent(outputDir, input).catch((error) => logError(error, { messageId: contextMessageId, phase: 'reply' }));
+  }
 
   eventDispatcher.register({
     'im.message.receive_v1': async (data: unknown) => {
@@ -324,6 +331,106 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
           return;
         }
 
+        if (actionName === 'agent_clarify_select') {
+          const selection = parseAgentClarificationSelection(value);
+          if (!selection) {
+            await replyText(client, messageId, 'Agent 澄清选择参数无效，请重新发起。');
+            return;
+          }
+          const claim = claimRentalAction(messageId, actionName, value);
+          if (!claim.claimed) {
+            await replyText(client, messageId, duplicateRentalActionText(claim.claim));
+            return;
+          }
+          recordLearning({
+            type: 'clarification_selected',
+            messageId,
+            actorId: extractCardReviewerId(data),
+            originalMessage: selection.originalMessage,
+            selectedMessage: selection.selectedMessage,
+            label: selection.label,
+          }, messageId);
+          await updateCard(client, messageId, statusCard('Agent 已收到你的选择', `已选择：${selection.label}\n\n正在按新指令继续理解：${selection.selectedMessage}`, 'blue')).catch(() => false);
+          try {
+            const response = await dispatchMessage({
+              messageId: `${messageId}:clarify:${claim.key.slice(0, 16)}`,
+              text: selection.selectedMessage,
+              source: 'sdk',
+              chatType: 'p2p',
+            });
+            setRentalActionStatus(claim.key, 'completed');
+            if (!response.skipped) {
+              if (response.card) await replyCard(client, messageId, response.card);
+              else await replyText(client, messageId, response.text);
+            }
+          } catch (error) {
+            setRentalActionStatus(claim.key, 'failed');
+            await updateCard(client, messageId, statusCard('Agent 澄清处理失败', error instanceof Error ? error.message : String(error), 'red')).catch(() => false);
+            logError(error, { messageId, phase: 'reply' });
+          }
+          return;
+        }
+
+        if (actionName === 'agent_clarify_custom') {
+          const customMessage = readActionFormValue(action, 'custom_message');
+          const selection = parseAgentClarificationCustomSelection(value, customMessage);
+          if (!selection) {
+            await replyText(client, messageId, '请先在澄清输入框里补充你的真实意图。');
+            return;
+          }
+          const claimValue = { ...value, selectedMessage: selection.selectedMessage };
+          const claim = claimRentalAction(messageId, actionName, claimValue);
+          if (!claim.claimed) {
+            await replyText(client, messageId, duplicateRentalActionText(claim.claim));
+            return;
+          }
+          recordLearning({
+            type: 'clarification_selected',
+            messageId,
+            actorId: extractCardReviewerId(data),
+            originalMessage: selection.originalMessage,
+            selectedMessage: selection.selectedMessage,
+            label: selection.label,
+          }, messageId);
+          await updateCard(client, messageId, statusCard('Agent 已收到你的补充', `正在按补充说明继续理解：${selection.selectedMessage}`, 'blue')).catch(() => false);
+          try {
+            const response = await dispatchMessage({
+              messageId: `${messageId}:clarify:${claim.key.slice(0, 16)}`,
+              text: selection.selectedMessage,
+              source: 'sdk',
+              chatType: 'p2p',
+            });
+            setRentalActionStatus(claim.key, 'completed');
+            if (!response.skipped) {
+              if (response.card) await replyCard(client, messageId, response.card);
+              else await replyText(client, messageId, response.text);
+            }
+          } catch (error) {
+            setRentalActionStatus(claim.key, 'failed');
+            await updateCard(client, messageId, statusCard('Agent 澄清处理失败', error instanceof Error ? error.message : String(error), 'red')).catch(() => false);
+            logError(error, { messageId, phase: 'reply' });
+          }
+          return;
+        }
+
+        if (actionName === 'agent_clarify_cancel') {
+          const originalMessage = readString(value?.originalMessage) ?? '未知指令';
+          const claim = claimRentalAction(messageId, actionName, value);
+          if (!claim.claimed) {
+            await replyText(client, messageId, duplicateRentalActionText(claim.claim));
+            return;
+          }
+          setRentalActionStatus(claim.key, 'cancelled');
+          recordLearning({
+            type: 'clarification_cancelled',
+            messageId,
+            actorId: extractCardReviewerId(data),
+            originalMessage,
+          }, messageId);
+          await updateCard(client, messageId, statusCard('Agent 已取消', `已取消澄清：${originalMessage}`, 'grey')).catch(() => false);
+          return;
+        }
+
         if (actionName === 'agent_tool_confirm') {
           const request = parseAgentToolConfirmRequest(value);
           if (!request) {
@@ -335,11 +442,28 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
             await replyText(client, messageId, duplicateRentalActionText(claim.claim));
             return;
           }
+          recordLearning({
+            type: 'tool_confirmed',
+            messageId,
+            actorId: extractCardReviewerId(data),
+            toolName: request.toolName,
+            arguments: request.arguments,
+            reason: request.reason,
+          }, messageId);
           void (async () => {
             await updateCard(client, messageId, statusCard('Agent 操作处理中', `工具 ${request.toolName} 已收到确认，正在执行。`, 'blue')).catch(() => false);
             try {
               const response = await executeAgentToolRequest(request, config.outputDir ?? 'output', { rentalPriceClient });
               setRentalActionStatus(claim.key, 'completed');
+              recordLearning({
+                type: 'tool_completed',
+                messageId,
+                actorId: extractCardReviewerId(data),
+                toolName: request.toolName,
+                arguments: request.arguments,
+                reason: request.reason,
+                resultSummary: response.text,
+              }, messageId);
               if (response.card) {
                 await updateCard(client, messageId, response.card).catch(() => false);
               } else {
@@ -347,6 +471,15 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
               }
             } catch (error) {
               setRentalActionStatus(claim.key, 'failed');
+              recordLearning({
+                type: 'tool_failed',
+                messageId,
+                actorId: extractCardReviewerId(data),
+                toolName: request.toolName,
+                arguments: request.arguments,
+                reason: request.reason,
+                resultSummary: error instanceof Error ? error.message : String(error),
+              }, messageId);
               await updateCard(client, messageId, statusCard('Agent 操作失败', `${request.toolName}\n${error instanceof Error ? error.message : String(error)}`, 'red')).catch(() => false);
               logError(error, { messageId, phase: 'reply' });
             }
@@ -362,6 +495,12 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
             return;
           }
           setRentalActionStatus(claim.key, 'cancelled');
+          recordLearning({
+            type: 'tool_cancelled',
+            messageId,
+            actorId: extractCardReviewerId(data),
+            toolName,
+          }, messageId);
           await updateCard(client, messageId, statusCard('Agent 操作已取消', `工具 ${toolName} 操作已取消。`, 'grey')).catch(() => false);
           return;
         }
@@ -377,14 +516,43 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
             await replyText(client, messageId, duplicateRentalActionText(claim.claim));
             return;
           }
+          recordLearning({
+            type: 'workflow_confirmed',
+            messageId,
+            actorId: extractCardReviewerId(data),
+            workflowName: request.workflowName,
+            originalMessage: request.reason,
+            selectedMessage: `从商品 ${request.sourceProductId} 复制 ${request.count} 条「${request.keyword}」新链`,
+            label: '新链批量复制',
+            arguments: { keyword: request.keyword, count: request.count, sourceProductId: request.sourceProductId },
+            reason: request.reason,
+          }, messageId);
           void (async () => {
             await updateCard(client, messageId, statusCard('新链批量复制处理中', `源商品 ${request.sourceProductId} 已收到确认，准备复制 ${request.count} 条。`, 'blue')).catch(() => false);
             try {
               const result = await executeNewLinkBatchConfirmRequest(rentalPriceClient, request);
               setRentalActionStatus(claim.key, result.ok ? 'completed' : 'failed');
+              recordLearning({
+                type: result.ok ? 'workflow_completed' : 'workflow_failed',
+                messageId,
+                actorId: extractCardReviewerId(data),
+                workflowName: request.workflowName,
+                arguments: { keyword: request.keyword, count: request.count, sourceProductId: request.sourceProductId },
+                reason: request.reason,
+                resultSummary: result.text,
+              }, messageId);
               await updateCard(client, messageId, statusCard(result.ok ? '新链批量复制已完成' : '新链批量复制失败', result.text, result.ok ? 'green' : 'red')).catch(() => false);
             } catch (error) {
               setRentalActionStatus(claim.key, 'failed');
+              recordLearning({
+                type: 'workflow_failed',
+                messageId,
+                actorId: extractCardReviewerId(data),
+                workflowName: request.workflowName,
+                arguments: { keyword: request.keyword, count: request.count, sourceProductId: request.sourceProductId },
+                reason: request.reason,
+                resultSummary: error instanceof Error ? error.message : String(error),
+              }, messageId);
               await updateCard(client, messageId, statusCard('新链批量复制失败', `源商品 ${request.sourceProductId}\n${error instanceof Error ? error.message : String(error)}`, 'red')).catch(() => false);
               logError(error, { messageId, phase: 'reply' });
             }
@@ -400,6 +568,14 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
             return;
           }
           setRentalActionStatus(claim.key, 'cancelled');
+          recordLearning({
+            type: 'workflow_cancelled',
+            messageId,
+            actorId: extractCardReviewerId(data),
+            workflowName: 'rental.newLinkBatch',
+            label: '新链批量复制',
+            arguments: { keyword },
+          }, messageId);
           await updateCard(client, messageId, statusCard('新链批量复制已取消', `「${keyword}」新链批量复制已取消。`, 'grey')).catch(() => false);
           return;
         }
