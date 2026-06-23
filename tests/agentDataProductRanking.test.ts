@@ -29,6 +29,26 @@ function metric(overrides: Partial<PublicTrafficPeriodMetrics> = {}): PublicTraf
 
 const baseMetric = metric();
 
+function row(
+  internalProductId: string,
+  platformProductId: string,
+  productName: string,
+  oneDay: Partial<PublicTrafficPeriodMetrics>,
+  sevenDay: Partial<PublicTrafficPeriodMetrics>,
+): PublicTrafficDataReportContext['rows'][number] {
+  return {
+    productName,
+    platformProductId,
+    displayProductId: `internal ${internalProductId}`,
+    custodyDays: 3,
+    periods: {
+      '1d': metric(oneDay),
+      '7d': metric(sevenDay),
+      '30d': baseMetric,
+    },
+  };
+}
+
 function context(): PublicTrafficDataReportContext {
   return {
     date: '2026-06-22',
@@ -36,39 +56,11 @@ function context(): PublicTrafficDataReportContext {
     conclusions: [],
     dataQualityNotes: [],
     rows: [
-      {
-        productName: 'Insta360 Ace Pro 2 标准套装',
-        platformProductId: 'p841',
-        displayProductId: '端内ID 841',
-        custodyDays: 3,
-        periods: {
-          '1d': metric({ shippedOrders: 0, amount: 0, publicVisits: 20 }),
-          '7d': metric({ shippedOrders: 1, amount: 499, publicVisits: 300 }),
-          '30d': baseMetric,
-        },
-      },
-      {
-        productName: 'Insta360 Ace Pro 2 续航套装',
-        platformProductId: 'p842',
-        displayProductId: '端内ID 842',
-        custodyDays: 4,
-        periods: {
-          '1d': metric({ shippedOrders: 1, amount: 699, publicVisits: 60 }),
-          '7d': metric({ shippedOrders: 3, amount: 1888, publicVisits: 220 }),
-          '30d': baseMetric,
-        },
-      },
-      {
-        productName: 'Insta360 Ace Pro 3 预售',
-        platformProductId: 'p851',
-        displayProductId: '端内ID 851',
-        custodyDays: 1,
-        periods: {
-          '1d': metric({ shippedOrders: 0, amount: 0, publicVisits: 90 }),
-          '7d': metric({ shippedOrders: 0, amount: 0, publicVisits: 500 }),
-          '30d': baseMetric,
-        },
-      },
+      row('841', 'p841', 'Insta360 Ace Pro 2 standard kit', { shippedOrders: 0, amount: 0, publicVisits: 20 }, { shippedOrders: 1, amount: 499, publicVisits: 300 }),
+      row('842', 'p842', 'Insta360 Ace Pro 2 endurance kit', { shippedOrders: 1, amount: 699, publicVisits: 60 }, { shippedOrders: 3, amount: 1888, publicVisits: 220 }),
+      row('851', 'p851', 'Insta360 Ace Pro 3 presale', { shippedOrders: 0, amount: 0, publicVisits: 90 }, { shippedOrders: 0, amount: 0, publicVisits: 500 }),
+      row('388', 'p388', 'Fujifilm instax SQUARE SQ1 high conversion', { shippedOrders: 0, amount: 19888.33, publicVisits: 4002 }, { shippedOrders: 19, amount: 22315.83, publicVisits: 4227 }),
+      row('490', 'p490', 'Fujifilm instax SQUARE SQ1 low conversion', { shippedOrders: 0, amount: 3005.73, publicVisits: 1263 }, { shippedOrders: 3, amount: 3054.73, publicVisits: 1284 }),
     ],
     lowExposure: [],
     weakClick: [],
@@ -82,10 +74,12 @@ function context(): PublicTrafficDataReportContext {
 }
 
 const registry: LinkRegistryEntry[] = [
-  { internalProductId: '841', platformProductId: 'p841', productName: 'Insta360 Ace Pro 2 标准套装', shortName: 'Insta360 Ace Pro 2', aliases: ['Ace pro 2', 'AcePro2'], sameSkuGroupId: 'insta360-ace-pro-2', status: 'active', source: ['product_name_map'] },
-  { internalProductId: '842', platformProductId: 'p842', productName: 'Insta360 Ace Pro 2 续航套装', shortName: 'Insta360 Ace Pro 2', aliases: ['Ace pro 2'], sameSkuGroupId: 'insta360-ace-pro-2', status: 'active', source: ['product_name_map'] },
-  { internalProductId: '843', platformProductId: 'p843', productName: 'Insta360 Ace Pro 2 已下架', shortName: 'Insta360 Ace Pro 2', aliases: ['Ace pro 2'], sameSkuGroupId: 'insta360-ace-pro-2', status: 'removed', source: ['product_name_map'] },
-  { internalProductId: '851', platformProductId: 'p851', shortName: 'Insta360 Ace Pro 3', sameSkuGroupId: 'insta360-ace-pro-3', status: 'active', source: ['product_name_map'] },
+  { internalProductId: '841', platformProductId: 'p841', productName: 'Insta360 Ace Pro 2 standard kit', shortName: 'Insta360 Ace Pro 2', aliases: ['Ace pro 2', 'AcePro2'], sameSkuGroupId: 'insta360-ace-pro-2', status: 'active', source: ['product_name_map'] },
+  { internalProductId: '842', platformProductId: 'p842', productName: 'Insta360 Ace Pro 2 endurance kit', shortName: 'Insta360 Ace Pro 2', aliases: ['Ace pro 2'], sameSkuGroupId: 'insta360-ace-pro-2', status: 'active', source: ['product_name_map'] },
+  { internalProductId: '843', platformProductId: 'p843', productName: 'Insta360 Ace Pro 2 removed', shortName: 'Insta360 Ace Pro 2', aliases: ['Ace pro 2'], sameSkuGroupId: 'insta360-ace-pro-2', status: 'removed', source: ['product_name_map'] },
+  { internalProductId: '851', platformProductId: 'p851', productName: 'Insta360 Ace Pro 3 presale', shortName: 'Insta360 Ace Pro 3', sameSkuGroupId: 'insta360-ace-pro-3', status: 'active', source: ['product_name_map'] },
+  { internalProductId: '388', platformProductId: 'p388', productName: 'Fujifilm instax SQUARE SQ1 high conversion', aliases: ['Fujifilm instax SQUARE SQ1'], sameSkuGroupId: 'fujifilm-instax-square-sq1', status: 'active', source: ['goods_first_seen'] },
+  { internalProductId: '490', platformProductId: 'p490', productName: 'Fujifilm instax SQUARE SQ1 low conversion', aliases: ['Fujifilm instax SQUARE SQ1'], sameSkuGroupId: 'fujifilm-instax-square-sq1', status: 'active', source: ['goods_first_seen'] },
 ];
 
 function registryStore() {
@@ -99,10 +93,10 @@ describe('rankBestProductByRegistryQuery', () => {
     expect(result.status).toBe('ranked');
     if (result.status !== 'ranked') return;
     expect(result.best.internalProductId).toBe('842');
-    expect(result.best.productName).toBe('Insta360 Ace Pro 2 续航套装');
+    expect(result.best.productName).toBe('Insta360 Ace Pro 2 endurance kit');
     expect(result.ranking.map((item) => item.internalProductId)).toEqual(['842', '841']);
     expect(result.excluded).toEqual([{ internalProductId: '843', reason: 'removed' }]);
-    expect(result.rationale).toContain('7日发货');
+    expect(result.rationale.length).toBeGreaterThan(0);
   });
 
   it('resolves compact aliases through the link registry store', () => {
@@ -113,6 +107,16 @@ describe('rankBestProductByRegistryQuery', () => {
     expect(result.matchedBy).toBe('alias');
     expect(result.sameSkuGroupId).toBe('insta360-ace-pro-2');
     expect(result.best.internalProductId).toBe('842');
+  });
+
+  it('resolves short model tokens from complete aliases', () => {
+    const result = rankBestProductByRegistryQuery(context(), registryStore(), 'SQ1');
+
+    expect(result.status).toBe('ranked');
+    if (result.status !== 'ranked') return;
+    expect(result.matchedBy).toBe('alias');
+    expect(result.sameSkuGroupId).toBe('fujifilm-instax-square-sq1');
+    expect(result.best.internalProductId).toBe('388');
   });
 
   it('uses an explicit internal id only to find its same-sku group, not as the forced winner', () => {

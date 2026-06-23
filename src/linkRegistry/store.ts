@@ -49,11 +49,20 @@ function levenshtein(left: string, right: string): number {
   return matrix[left.length]![right.length]!;
 }
 
+function normalizedTokens(value: string): string[] {
+  return value.split(/\s+/).filter(Boolean);
+}
+
+function isShortModelToken(value: string): boolean {
+  return value.length >= 2 && value.length <= 8 && /[a-z]/iu.test(value) && /\d/u.test(value);
+}
+
 function aliasScore(query: ReturnType<typeof normalizeAlias>, candidate: ReturnType<typeof normalizeAlias>): number {
   if (!query || !candidate) return 0;
   if (query.compact === candidate.compact) return 100;
   if (query.brandless && query.brandless === candidate.brandless) return 98;
   if (query.normalized === candidate.normalized) return 96;
+  if (isShortModelToken(query.compact) && normalizedTokens(candidate.normalized).includes(query.compact)) return 88;
   if (query.compact.length >= 4 && (candidate.compact.includes(query.compact) || candidate.brandless.includes(query.compact))) return 86;
   if (query.brandless.length >= 4 && (candidate.compact.includes(query.brandless) || candidate.brandless.includes(query.brandless))) return 84;
   const left = query.brandless || query.compact;
