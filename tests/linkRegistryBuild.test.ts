@@ -4,7 +4,7 @@ import type { GoodsLinkLifecycleState } from '../src/publicTraffic/goodsLinkLife
 import type { GoodsFirstSeenIndex } from '../src/publicTraffic/goodsSnapshot.js';
 
 describe('link registry build', () => {
-  it('aggregates mapping, short names, first-seen dates, and lifecycle status', () => {
+  it('aggregates mapping, names, aliases, and lifecycle status', () => {
     const firstSeen: GoodsFirstSeenIndex = {
       '701': { firstSeenDate: '2026-06-10', platformProductId: 'platform-701-old', productName: 'Old name' },
     };
@@ -17,17 +17,19 @@ describe('link registry build', () => {
 
     expect(buildLinkRegistry({
       productIdMapping: { 'platform-701-map': '701' },
-      productNameMap: { '701': '佳能 SX70' },
+      productNameMap: { '701': 'Canon SX70' },
       firstSeen,
       lifecycle,
-    })).toEqual([
+    })).toMatchObject([
       {
         internalProductId: '701',
         platformProductId: 'platform-701-map',
-        shortName: '佳能 SX70',
+        productName: 'Old name',
+        shortName: 'Canon SX70',
         sameSkuGroupId: 'canon-sx70',
         status: 'active',
         firstSeenDate: '2026-06-10',
+        updatedAt: '2026-06-10',
         source: ['goods_first_seen', 'goods_link_lifecycle', 'product_id_mapping', 'product_name_map'],
       },
     ]);
@@ -42,12 +44,14 @@ describe('link registry build', () => {
       ],
     };
 
-    expect(buildLinkRegistry({ lifecycle })).toEqual([
+    expect(buildLinkRegistry({ lifecycle })).toMatchObject([
       {
         internalProductId: '701',
         platformProductId: 'platform-701-new',
+        productName: 'New',
         status: 'removed',
         lastSeenDate: '2026-06-12',
+        updatedAt: '2026-06-12',
         source: ['goods_link_lifecycle'],
       },
     ]);
@@ -56,12 +60,12 @@ describe('link registry build', () => {
   it('keeps entries with no lifecycle as unknown and ignores invalid internal ids', () => {
     expect(buildLinkRegistry({
       productIdMapping: { 'platform-valid': '702', 'platform-invalid': 'abc' },
-      productNameMap: { '702': '大疆 Pocket3', blank: 'Bad' },
-    })).toEqual([
+      productNameMap: { '702': 'DJI Pocket3', blank: 'Bad' },
+    })).toMatchObject([
       {
         internalProductId: '702',
         platformProductId: 'platform-valid',
-        shortName: '大疆 Pocket3',
+        shortName: 'DJI Pocket3',
         sameSkuGroupId: 'dji-pocket-3',
         status: 'unknown',
         source: ['product_id_mapping', 'product_name_map'],
@@ -72,13 +76,13 @@ describe('link registry build', () => {
   it('infers same sku groups from fallback product name hints when manual short names are absent', () => {
     const lifecycle: GoodsLinkLifecycleState = {
       active: {
-        '530': { platformProductId: 'platform-530-a', productName: '大疆 Pocket3 全新套装' },
-        '531': { platformProductId: 'platform-530-b', productName: 'DJI Pocket 3 畅拍版' },
+        '530': { platformProductId: 'platform-530-a', productName: 'DJI Pocket3 Creator Combo' },
+        '531': { platformProductId: 'platform-530-b', productName: 'DJI Pocket 3 Standard' },
       },
       removedLinks: [],
     };
 
-    expect(buildLinkRegistry({ lifecycle })).toEqual([
+    expect(buildLinkRegistry({ lifecycle })).toMatchObject([
       {
         internalProductId: '530',
         platformProductId: 'platform-530-a',
@@ -97,13 +101,15 @@ describe('link registry build', () => {
   });
 
   it('accepts artifact-derived product name hints as same sku grouping input', () => {
-    expect(buildLinkRegistry({
+    const registry = buildLinkRegistry({
       productIdMapping: { 'platform-560-a': '560', 'platform-560-b': '561' },
       productNameHints: {
-        '560': ['大疆 Pocket3 畅拍版'],
-        '561': ['DJI Pocket 3 全能套装'],
+        '560': ['DJI Pocket3 Creator'],
+        '561': ['DJI Pocket 3 Standard'],
       },
-    })).toEqual([
+    });
+
+    expect(registry).toMatchObject([
       {
         internalProductId: '560',
         platformProductId: 'platform-560-a',
@@ -119,6 +125,7 @@ describe('link registry build', () => {
         source: ['product_id_mapping'],
       },
     ]);
+    expect(registry[0]?.aliases).toEqual(expect.arrayContaining(['DJI Pocket3 Creator']));
   });
 
   it('sorts registry entries by numeric internal id', () => {

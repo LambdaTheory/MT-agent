@@ -15,12 +15,14 @@ export interface BuildLinkRegistryInput {
 interface DraftEntry {
   internalProductId: string;
   platformProductId?: string;
+  productName?: string;
   shortName?: string;
   sameSkuGroupId?: string;
   status?: LinkRegistryStatus;
   firstSeenDate?: string;
   lastSeenDate?: string;
   nameHints: Set<string>;
+  aliases: Set<string>;
   sources: Set<LinkRegistrySource>;
 }
 
@@ -33,7 +35,7 @@ function draftFor(drafts: Map<string, DraftEntry>, internalProductId: string): D
   const existing = drafts.get(internalProductId);
   if (existing) return existing;
 
-  const draft: DraftEntry = { internalProductId, nameHints: new Set<string>(), sources: new Set<LinkRegistrySource>() };
+  const draft: DraftEntry = { internalProductId, nameHints: new Set<string>(), aliases: new Set<string>(), sources: new Set<LinkRegistrySource>() };
   drafts.set(internalProductId, draft);
   return draft;
 }
@@ -43,11 +45,18 @@ function setPlatformProductId(draft: DraftEntry, platformProductId: string): voi
   if (trimmed && !draft.platformProductId) draft.platformProductId = trimmed;
 }
 
+function setProductName(draft: DraftEntry, productName: string): void {
+  const trimmed = productName.trim();
+  if (trimmed && !draft.productName) draft.productName = trimmed;
+}
+
 function addNameHint(draft: DraftEntry, value: string | undefined): void {
   const trimmed = value?.trim();
   if (!trimmed) return;
   const canonical = canonicalProductShortName(trimmed);
   if (canonical) draft.nameHints.add(canonical);
+  draft.aliases.add(trimmed);
+  draft.aliases.add(canonical);
 }
 
 function addProductIdMapping(drafts: Map<string, DraftEntry>, mapping: ProductIdMapping): void {
@@ -82,6 +91,7 @@ function addFirstSeen(drafts: Map<string, DraftEntry>, firstSeen: GoodsFirstSeen
 
     const draft = draftFor(drafts, internalProductId);
     setPlatformProductId(draft, entry.platformProductId);
+    setProductName(draft, entry.productName);
     draft.firstSeenDate = entry.firstSeenDate;
     addNameHint(draft, entry.productName);
     draft.sources.add('goods_first_seen');
@@ -107,6 +117,7 @@ function addLifecycle(drafts: Map<string, DraftEntry>, lifecycle: GoodsLinkLifec
 
     const draft = draftFor(drafts, internalProductId);
     setPlatformProductId(draft, entry.platformProductId);
+    setProductName(draft, entry.productName);
     draft.status = 'active';
     addNameHint(draft, entry.productName);
     draft.sources.add('goods_link_lifecycle');
@@ -115,6 +126,7 @@ function addLifecycle(drafts: Map<string, DraftEntry>, lifecycle: GoodsLinkLifec
   for (const [internalProductId, item] of latestRemovedByInternalId(lifecycle.removedLinks)) {
     const draft = draftFor(drafts, internalProductId);
     setPlatformProductId(draft, item.platformProductId);
+    setProductName(draft, item.productName);
     addNameHint(draft, item.productName);
     if (draft.status !== 'active') {
       draft.status = 'removed';
@@ -195,15 +207,40 @@ function compareInternalProductId(left: LinkRegistryEntry, right: LinkRegistryEn
   return leftNumber - rightNumber || left.internalProductId.localeCompare(right.internalProductId);
 }
 
+function confidenceFor(draft: DraftEntry): number {
+  let score = 0.15;
+  if (draft.platformProductId) score += 0.2;
+  if (draft.productName) score += 0.15;
+  if (draft.shortName) score += 0.2;
+  if (draft.sameSkuGroupId) score += 0.15;
+  if (draft.status && draft.status !== 'unknown') score += 0.1;
+  if (draft.firstSeenDate || draft.lastSeenDate) score += 0.1;
+  if (draft.sources.size >= 3) score += 0.1;
+  return Math.max(0, Math.min(1, Number(score.toFixed(2))));
+}
+
+function updatedAtFor(draft: DraftEntry): string | undefined {
+  return [draft.lastSeenDate, draft.firstSeenDate].find((value) => !!value);
+}
+
 function finalizeEntry(draft: DraftEntry): LinkRegistryEntry {
+  const aliases = [...draft.aliases]
+    .map((value) => value.trim())
+    .filter((value) => !!value)
+    .filter((value, index, values) => values.indexOf(value) === index)
+    .sort();
   return {
     internalProductId: draft.internalProductId,
     ...(draft.platformProductId ? { platformProductId: draft.platformProductId } : {}),
+    ...(draft.productName ? { productName: draft.productName } : {}),
     ...(draft.shortName ? { shortName: draft.shortName } : {}),
+    ...(aliases.length > 0 ? { aliases } : {}),
     ...(draft.sameSkuGroupId ? { sameSkuGroupId: draft.sameSkuGroupId } : {}),
     status: draft.status ?? 'unknown',
     ...(draft.firstSeenDate ? { firstSeenDate: draft.firstSeenDate } : {}),
     ...(draft.lastSeenDate ? { lastSeenDate: draft.lastSeenDate } : {}),
+    confidence: confidenceFor(draft),
+    ...(updatedAtFor(draft) ? { updatedAt: updatedAtFor(draft) } : {}),
     source: [...draft.sources].sort(),
   };
 }
