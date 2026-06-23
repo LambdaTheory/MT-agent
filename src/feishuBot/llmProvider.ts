@@ -1,6 +1,7 @@
 export type LlmReadOnlyToolName =
   | 'get_latest_summary'
   | 'query_product_performance'
+  | 'rank_best_same_sku_product'
   | 'get_new_link_pool'
   | 'get_problem_products'
   | 'get_removed_links'
@@ -32,6 +33,7 @@ export type ParsedLlmToolSelection =
 const readOnlyToolNames = new Set<string>([
   'get_latest_summary',
   'query_product_performance',
+  'rank_best_same_sku_product',
   'get_new_link_pool',
   'get_problem_products',
   'get_removed_links',

@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { findReadOnlyTool, readOnlyTools } from '../src/feishuBot/readOnlyToolRegistry.js';
+import { createLinkRegistry } from '../src/linkRegistry/store.js';
+import type { LinkRegistryEntry } from '../src/linkRegistry/types.js';
 import type { PublicTrafficDataReportContext } from '../src/publicTraffic/types.js';
 
 const metric = {
@@ -38,11 +40,35 @@ const context = {
   emptySectionNotes: { lowExposure: '', weakClick: '', weakConversion: '', highPotential: '', newProductObservation: '', lifecycleGovernance: '', recommendedActions: '' },
 } as unknown as PublicTrafficDataReportContext;
 
+const rankingContext = {
+  ...context,
+  rows: [
+    ...context.rows,
+    {
+      productName: '大疆 Pocket 3 高转化套装',
+      platformProductId: 'p702',
+      displayProductId: '端内ID 702',
+      custodyDays: 2,
+      periods: {
+        '1d': { ...metric, shippedOrders: 1, amount: 188, publicVisits: 22 },
+        '7d': { ...metric, shippedOrders: 4, amount: 888, publicVisits: 80 },
+        '30d': metric,
+      },
+    },
+  ],
+} as unknown as PublicTrafficDataReportContext;
+
+const registry: LinkRegistryEntry[] = [
+  { internalProductId: '701', platformProductId: 'p701', shortName: 'DJI Pocket 3', sameSkuGroupId: 'dji-pocket-3', status: 'active', source: ['product_name_map'] },
+  { internalProductId: '702', platformProductId: 'p702', shortName: 'DJI Pocket 3', sameSkuGroupId: 'dji-pocket-3', status: 'active', source: ['product_name_map'] },
+];
+
 describe('readOnlyTools', () => {
   it('exports stable read-only tool names and lookup helper', () => {
     expect(readOnlyTools.map((tool) => tool.name)).toEqual([
       'overview',
       'product',
+      'best_product_by_same_sku',
       'new_product_pool',
       'tasks',
       'problem_products',
@@ -50,6 +76,7 @@ describe('readOnlyTools', () => {
       'order_summary',
     ]);
     expect(findReadOnlyTool({ type: 'product', keyword: '701' })?.name).toBe('product');
+    expect(findReadOnlyTool({ type: 'best_product_by_same_sku', query: 'Pocket3' })?.name).toBe('best_product_by_same_sku');
     expect(findReadOnlyTool({ type: 'unknown', text: '随便聊聊' })).toBeUndefined();
   });
 
@@ -68,5 +95,15 @@ describe('readOnlyTools', () => {
     await expect(findReadOnlyTool({ type: 'problem_products', problemType: 'weak_conversion' })?.run(context, { type: 'problem_products', problemType: 'weak_conversion' })).resolves.toMatchObject({ text: expect.stringContaining('访问多成交少') });
     await expect(findReadOnlyTool({ type: 'removed_links' })?.run(context, { type: 'removed_links' })).resolves.toMatchObject({ text: expect.stringContaining('2026-06-14') });
     await expect(findReadOnlyTool({ type: 'order_summary' })?.run(context, { type: 'order_summary' })).resolves.toMatchObject({ text: expect.stringContaining('发货订单：12') });
+  });
+
+  it('answers best same-sku product questions only when registry data is available', async () => {
+    await expect(findReadOnlyTool({ type: 'best_product_by_same_sku', query: 'Pocket3' })?.run(rankingContext, { type: 'best_product_by_same_sku', query: 'Pocket3' }, { linkRegistryStore: createLinkRegistry(registry) })).resolves.toMatchObject({
+      text: expect.stringContaining('端内ID 702'),
+    });
+
+    await expect(findReadOnlyTool({ type: 'best_product_by_same_sku', query: 'Pocket3' })?.run(rankingContext, { type: 'best_product_by_same_sku', query: 'Pocket3' })).resolves.toMatchObject({
+      text: expect.stringContaining('需要先读取链接维护档案'),
+    });
   });
 });

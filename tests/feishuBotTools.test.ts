@@ -48,6 +48,17 @@ async function writeContext(): Promise<string> {
     rows: [
       { productName: 'iPhone 15', platformProductId: '2000000000000000000001', displayProductId: '端内ID 565', custodyDays: 10, periods: { '1d': metric, '7d': metric, '30d': metric } },
       { productName: '大疆 Pocket 3', platformProductId: 'p701', displayProductId: '端内ID 701', custodyDays: 1, periods: { '1d': metric, '7d': metric, '30d': metric } },
+      {
+        productName: '大疆 Pocket 3 高转化套装',
+        platformProductId: 'p702',
+        displayProductId: '端内ID 702',
+        custodyDays: 2,
+        periods: {
+          '1d': { ...metric, shippedOrders: 1, amount: 188, publicVisits: 22 },
+          '7d': { ...metric, shippedOrders: 4, amount: 888, publicVisits: 80 },
+          '30d': metric,
+        },
+      },
       { productName: 'vivo X300Ultra 733 长焦演唱会神器', platformProductId: '2000000000000000000733', displayProductId: '端内ID 649', custodyDays: 1, periods: { '1d': metric, '7d': metric, '30d': metric } },
       { productName: '佳能R50微单相机', platformProductId: 'p-841-733', displayProductId: '端内ID 841', custodyDays: 1, periods: { '1d': metric, '7d': metric, '30d': metric } },
       { productName: '大疆DJI Pocket3云台相机128G', platformProductId: 'p-733-target', displayProductId: '端内ID 733', custodyDays: 1, periods: { '1d': metric, '7d': metric, '30d': metric } },
@@ -69,6 +80,28 @@ async function writeContext(): Promise<string> {
     emptySectionNotes: {},
   }));
   return dir;
+}
+
+async function writeRankingRegistryFixtures(rootDir: string, artifactsDir: string): Promise<{
+  productIdMapPath: string;
+  productNameMapPath: string;
+  firstSeenPath: string;
+  lifecyclePath: string;
+  artifactsDir: string;
+}> {
+  const configDir = join(rootDir, 'config');
+  const stateDir = join(rootDir, 'output', 'state');
+  await mkdir(configDir, { recursive: true });
+  await mkdir(stateDir, { recursive: true });
+  await writeFile(join(configDir, 'product-id-map.json'), JSON.stringify({ p701: '701', p702: '702' }), 'utf8');
+  await writeFile(join(configDir, 'product-name-map.json'), JSON.stringify({ '701': 'DJI Pocket 3', '702': 'DJI Pocket 3' }), 'utf8');
+  return {
+    productIdMapPath: join(configDir, 'product-id-map.json'),
+    productNameMapPath: join(configDir, 'product-name-map.json'),
+    firstSeenPath: join(stateDir, 'goods-first-seen.json'),
+    lifecyclePath: join(stateDir, 'goods-link-lifecycle.json'),
+    artifactsDir,
+  };
 }
 
 async function writeClosedOrderRegistryFixtures(rootDir: string): Promise<{
@@ -352,6 +385,28 @@ describe('handleBotIntent', () => {
     const response = await handleBotIntent({ type: 'unknown', text: '帮我看看苹果手机' }, outputDir, { llmToolSelector: selector });
 
     expect(response.text).toContain('端内ID 565 iPhone 15');
+  });
+
+  it('uses the LLM read-only ranking tool with link registry context', async () => {
+    const outputDir = await writeContext();
+    const registryRoot = await mkdtemp(join(tmpdir(), 'mt-agent-ranking-registry-'));
+    const registryPaths = await writeRankingRegistryFixtures(registryRoot, outputDir);
+    const selector: LlmToolSelectionProvider = {
+      async selectTool(request) {
+        expect(request.message).toBe('数据最好的 pocket3 的端内id是多少');
+        expect(request.tools.map((tool) => tool.name)).toContain('rank_best_same_sku_product');
+        return '{"intent":"rank_best","tool":"rank_best_same_sku_product","arguments":{"query":"pocket3"},"confidence":0.92,"reason":"用户要查询同款组中数据最好的端内ID"}';
+      },
+    };
+
+    const response = await handleBotIntent({ type: 'unknown', text: '数据最好的 pocket3 的端内id是多少' }, outputDir, {
+      llmToolSelector: selector,
+      closedOrderRegistryPaths: registryPaths,
+    });
+
+    expect(response.text).toContain('端内ID 702');
+    expect(response.text).toContain('数据日期：2026-06-11');
+    expect(response.text).toContain('7日：发货 4');
   });
 
   it('uses the generic agent planner to run safe registered tools', async () => {

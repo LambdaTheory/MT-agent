@@ -1,6 +1,8 @@
 import { getLatestOverview, getNewProductPool, getProblemProducts, getProductPerformance, getRemovedLinks } from '../agentData/publicTrafficQueries.js';
+import { rankBestProductByRegistryQuery, type ProductRankingResult } from '../agentData/productRanking.js';
 import { buildAgentTaskPool } from '../agentData/taskPool.js';
 import type { AgentIntent, AgentProblemType } from '../agentData/types.js';
+import type { LinkRegistryStore } from '../linkRegistry/store.js';
 import type { PublicTrafficDataReportContext } from '../publicTraffic/types.js';
 import type { LlmReadOnlyToolName } from './llmProvider.js';
 import type { BotResponse } from './types.js';
@@ -15,18 +17,23 @@ export interface ReadOnlyToolLlmMetadata {
   toIntent(argumentsRecord: Record<string, unknown>): ReadOnlyAgentIntent | undefined;
 }
 
+export interface ReadOnlyToolRunOptions {
+  linkRegistryStore?: LinkRegistryStore;
+}
+
 export interface ReadOnlyTool {
   name: ReadOnlyAgentIntent['type'];
   description: string;
   intentType: ReadOnlyAgentIntent['type'];
   llm?: ReadOnlyToolLlmMetadata;
-  run(context: PublicTrafficDataReportContext, intent: AgentIntent): Promise<BotResponse>;
+  run(context: PublicTrafficDataReportContext, intent: AgentIntent, options?: ReadOnlyToolRunOptions): Promise<BotResponse>;
 }
 
 export type LlmBackedReadOnlyTool = ReadOnlyTool & { llm: ReadOnlyToolLlmMetadata };
 
 const noArgumentsSchema = { type: 'object', additionalProperties: false };
 const productArgumentsSchema = { type: 'object', properties: { keyword: { type: 'string' } }, required: ['keyword'], additionalProperties: false };
+const productRankingArgumentsSchema = { type: 'object', properties: { query: { type: 'string' } }, required: ['query'], additionalProperties: false };
 const problemProductsArgumentsSchema = {
   type: 'object',
   properties: { problemType: { enum: ['low_exposure', 'weak_conversion', 'high_potential', 'new_product_pool', 'recommended_action'] } },
@@ -76,6 +83,32 @@ function formatProductAnswer(answer: ReturnType<typeof getProductPerformance>): 
   ].filter(Boolean).join('\n');
 }
 
+function formatMoney(value: number): string {
+  return Number.isInteger(value) ? String(value) : value.toFixed(2);
+}
+
+function formatRankingAnswer(result: ProductRankingResult): string {
+  switch (result.status) {
+    case 'ranked':
+      return [
+        `数据最好的 ${result.query} 是：端内ID ${result.best.internalProductId}（${result.best.productName}）`,
+        `数据日期：${result.date}`,
+        `依据：同款组 ${result.sameSkuGroupId ?? '未知'}，${result.rationale}`,
+        `7日：发货 ${result.best.sevenDayShippedOrders}，成交额 ¥${formatMoney(result.best.sevenDayAmount)}，访问 ${result.best.sevenDayPublicVisits}`,
+        `1日：发货 ${result.best.oneDayShippedOrders}，成交额 ¥${formatMoney(result.best.oneDayAmount)}，访问 ${result.best.oneDayPublicVisits}`,
+      ].join('\n');
+    case 'ambiguous':
+      return [
+        `“${result.query}”匹配到多个可能的同款组，需要你补充具体商品或端内ID：`,
+        ...result.candidates.slice(0, 5).map((candidate, index) => `${index + 1}. ${candidate.shortName ?? candidate.sameSkuGroupId}（${candidate.sameSkuGroupId}，端内ID ${candidate.internalProductIds.join('、')}）`),
+      ].join('\n');
+    case 'not_found':
+      return `链接维护档案未匹配到“${result.query}”，我不会猜测端内ID。可以换成更完整的商品名或直接给端内ID。`;
+    case 'no_metrics':
+      return `已找到“${result.query}”的链接维护档案，但同款组 ${result.sameSkuGroupId || '未知'} 没有可用于排名的公域数据。`;
+  }
+}
+
 function getProductPerformanceForBot(context: PublicTrafficDataReportContext, keyword: string): ReturnType<typeof getProductPerformance> {
   return getProductPerformance(context, keyword) ?? (/^\d+$/.test(keyword) ? getProductPerformance(context, `端内ID ${keyword}`) : null);
 }
@@ -118,6 +151,26 @@ export const readOnlyTools: ReadOnlyTool[] = [
     },
     async run(context, intent) {
       return { text: formatProductAnswer(getProductPerformanceForBot(context, intent.type === 'product' ? intent.keyword : '')) };
+    },
+  },
+  {
+    name: 'best_product_by_same_sku',
+    description: '按链接维护档案解析商品/同款组，并返回公域数据表现最好的端内ID',
+    intentType: 'best_product_by_same_sku',
+    llm: {
+      name: 'rank_best_same_sku_product',
+      description: '查询某个商品或同款组中公域数据表现最好的端内ID。只适用于“数据最好的 X 是哪个端内ID”“表现最好的同款链接”等只读问题。',
+      argumentsSchema: productRankingArgumentsSchema,
+      toIntent: (argumentsRecord) => {
+        const query = readStringArgument(argumentsRecord, 'query');
+        return query ? { type: 'best_product_by_same_sku', query } : undefined;
+      },
+    },
+    async run(context, intent, options = {}) {
+      if (intent.type !== 'best_product_by_same_sku') return { text: '暂无匹配商品。' };
+      const registry = options.linkRegistryStore;
+      if (!registry) return { text: '需要先读取链接维护档案，才能安全判断同款组里哪个端内ID数据最好。' };
+      return { text: formatRankingAnswer(rankBestProductByRegistryQuery(context, registry, intent.query)) };
     },
   },
   {
