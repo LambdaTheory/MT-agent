@@ -266,6 +266,13 @@ function duplicateRentalActionText(claim: RentalActionClaim): string {
   return '该确认卡片已经处理过，请重新发起命令。';
 }
 
+function newLinkBatchClaimStatusCard(claim: RentalActionClaim): FeishuCardPayload {
+  if (claim.status === 'processing') return statusCard('新链批量复制处理中', duplicateRentalActionText(claim), 'blue');
+  if (claim.status === 'completed') return statusCard('新链批量复制已完成', duplicateRentalActionText(claim), 'green');
+  if (claim.status === 'cancelled') return statusCard('新链批量复制已取消', duplicateRentalActionText(claim), 'grey');
+  return statusCard('新链批量复制已处理', duplicateRentalActionText(claim), 'grey');
+}
+
 function statusCard(title: string, content: string, template: 'blue' | 'green' | 'red' | 'grey' = 'blue'): FeishuCardPayload {
   return {
     schema: '2.0',
@@ -576,8 +583,7 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
           }
           const claim = claimRentalAction(messageId, actionName, value);
           if (!claim.claimed) {
-            await replyText(client, messageId, duplicateRentalActionText(claim.claim));
-            return;
+            return cardActionUpdateResponse(newLinkBatchClaimStatusCard(claim.claim));
           }
           recordLearning({
             type: 'workflow_confirmed',
@@ -627,8 +633,7 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
           const keyword = readString(value?.keyword) ?? '未知';
           const claim = claimRentalAction(messageId, actionName, value);
           if (!claim.claimed) {
-            await replyText(client, messageId, duplicateRentalActionText(claim.claim));
-            return;
+            return cardActionUpdateResponse(newLinkBatchClaimStatusCard(claim.claim));
           }
           setRentalActionStatus(claim.key, 'cancelled');
           recordLearning({
@@ -639,8 +644,9 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
             label: '新链批量复制',
             arguments: { keyword },
           }, messageId);
-          await updateCard(client, messageId, statusCard('新链批量复制已取消', `「${keyword}」新链批量复制已取消。`, 'grey')).catch(() => false);
-          return;
+          const card = statusCard('新链批量复制已取消', `「${keyword}」新链批量复制已取消。`, 'grey');
+          void updateCard(client, messageId, card).catch(() => false);
+          return cardActionUpdateResponse(card);
         }
 
         if (actionName === 'rental_price_confirm') {

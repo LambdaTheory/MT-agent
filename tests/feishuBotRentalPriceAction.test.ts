@@ -5,13 +5,13 @@ import { describe, expect, it } from 'vitest';
 import { createFeishuSdkBot } from '../src/feishuBot/sdkClient.js';
 import { createRentalPriceSkillClient, parseRentalOperationConfirmRequest, parseRentalPriceConfirmRequest, type RentalPriceSkillClient } from '../src/feishuBot/rentalPrice.js';
 
-function fakeSdk(sent: unknown[], registered: Record<string, (data: unknown) => Promise<void>>) {
+function fakeSdk(sent: unknown[], registered: Record<string, (data: unknown) => Promise<unknown>>) {
   class FakeClient {
     im = { v1: { message: { reply: async (request: unknown) => sent.push({ kind: 'reply', request }), patch: async (request: unknown) => sent.push({ kind: 'patch', request }) } } };
   }
   class FakeWSClient { start() { return undefined; } }
   class FakeEventDispatcher {
-    register(handlers: Record<string, (data: unknown) => Promise<void>>) {
+    register(handlers: Record<string, (data: unknown) => Promise<unknown>>) {
       Object.assign(registered, handlers);
       return this;
     }
@@ -55,7 +55,7 @@ describe('rental price card action', () => {
         throw new Error('specAddAndRefresh should not run during confirmation');
       },
     };
-    const registered: Record<string, (data: unknown) => Promise<void>> = {};
+    const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
     const sent: unknown[] = [];
     const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', outputDir: await mkdtemp(join(tmpdir(), 'mt-agent-sdk-action-')), sdk: fakeSdk(sent, registered), rentalPriceClient });
 
@@ -93,7 +93,7 @@ describe('rental price card action', () => {
       async specDiscover() { throw new Error('specDiscover should not run for delist confirmation'); },
       async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run for delist confirmation'); },
     };
-    const registered: Record<string, (data: unknown) => Promise<void>> = {};
+    const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
     const sent: unknown[] = [];
     const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', outputDir: await mkdtemp(join(tmpdir(), 'mt-agent-sdk-action-')), sdk: fakeSdk(sent, registered), rentalPriceClient });
 
@@ -365,7 +365,7 @@ describe('rental price card action', () => {
     };
 
     bot.start();
-    await registered['card.action.trigger']({
+    const cancelResult = await registered['card.action.trigger']({
       event: {
         context: { open_message_id: 'om-new-link-batch-cancel' },
         action: {
@@ -374,7 +374,7 @@ describe('rental price card action', () => {
         },
       },
     });
-    await registered['card.action.trigger']({
+    const duplicateResult = await registered['card.action.trigger']({
       event: {
         context: { open_message_id: 'om-new-link-batch-cancel' },
         action: {
@@ -385,8 +385,13 @@ describe('rental price card action', () => {
     });
 
     expect(calls).toEqual([]);
+    expect(cancelResult).toMatchObject({ card: { type: 'raw', data: { schema: '2.0' } } });
+    expect(JSON.stringify(cancelResult)).toContain('新链批量复制已取消');
+    expect(JSON.stringify(cancelResult)).not.toContain('new_link_batch_confirm');
+    expect(duplicateResult).toMatchObject({ card: { type: 'raw', data: { schema: '2.0' } } });
+    expect(JSON.stringify(duplicateResult)).toContain('该确认卡片已经取消');
+    expect(JSON.stringify(duplicateResult)).not.toContain('new_link_batch_confirm');
     expect(sent.some((item) => JSON.stringify(item).includes('已取消'))).toBe(true);
-    expect(sent.some((item) => JSON.stringify(item).includes('已经取消'))).toBe(true);
   });
 
   it('rejects forged rental operation confirmations', () => {
