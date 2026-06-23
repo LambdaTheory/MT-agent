@@ -8,10 +8,17 @@ import { isPreConfirmationPlanningTool } from '../agentRuntime/planningTools.js'
 import { listAgentPlannerTools, schemaAllowsArguments, validateAgentMultiStepPlannerProposal, validateAgentPlannerClarificationProposal, validateAgentPlannerProposal, type AgentPlannerProvider } from '../agentRuntime/planner.js';
 import { findAgentTool } from '../agentRuntime/toolRegistry.js';
 import { buildAgentLearningPlannerHints, summarizeAgentLearning } from '../agentLearning/store.js';
+import { parseAgentDataIntent } from '../agentData/intent.js';
+import { rankBestProductByRegistryQuery } from '../agentData/productRanking.js';
 import { loadClosedOrderRegistryContext, type ClosedOrderRegistryPathsInput } from '../closedOrderFeedback/runtime.js';
 import { queryInventoryStatus } from '../inventoryStatus/query.js';
 import { readInventorySameSkuSnapshotHistory } from '../inventoryStatus/history.js';
 import { readInventorySameSkuSnapshot } from '../inventoryStatus/store.js';
+import {
+  buildNewLinkBatchConfirmCard,
+  buildNewLinkBatchPlan,
+  formatNewLinkBatchPlan,
+} from '../newLinkWorkflow/batch.js';
 import { openLinkRegistryGovernancePrompt } from '../linkRegistry/governanceSession.js';
 import { openLinkRegistryMaintenancePrompt } from '../linkRegistry/maintenanceSession.js';
 import { refreshLinkRegistryForPrompt } from '../linkRegistry/promptRefresh.js';
@@ -558,6 +565,137 @@ function formatRegistryProductRows(productIds: string[], entries: LinkRegistryEn
   return lines.join('\n\n');
 }
 
+interface BestLinkNewLinkComboRequest {
+  keyword: string;
+  count: number;
+}
+
+function readSmallChineseCount(value: string): number | null {
+  const normalized = value.trim().replace(/两/g, '二');
+  const digits: Record<string, number> = {
+    一: 1,
+    二: 2,
+    三: 3,
+    四: 4,
+    五: 5,
+    六: 6,
+    七: 7,
+    八: 8,
+    九: 9,
+  };
+  if (normalized === '十') return 10;
+  const teen = /^十([一二三四五六七八九])$/.exec(normalized);
+  if (teen) return 10 + digits[teen[1]!];
+  const tens = /^([一二三四五六七八九])十([一二三四五六七八九])?$/.exec(normalized);
+  if (tens) return digits[tens[1]!] * 10 + (tens[2] ? digits[tens[2]] : 0);
+  return digits[normalized] ?? null;
+}
+
+function extractNewLinkBatchCount(text: string): number | null {
+  const patterns = [
+    /(?:复制|铺设|铺|新增|新建|创建|生成)\s*(\d{1,3})\s*条/u,
+    /(\d{1,3})\s*条\s*(?:新链|链接)?/u,
+  ];
+  for (const pattern of patterns) {
+    const match = pattern.exec(text);
+    if (match?.[1]) return Number(match[1]);
+  }
+
+  const chinesePatterns = [
+    /(?:复制|铺设|铺|新增|新建|创建|生成)\s*([一二两三四五六七八九十]{1,3})\s*条/u,
+    /([一二两三四五六七八九十]{1,3})\s*条\s*(?:新链|链接)?/u,
+  ];
+  for (const pattern of chinesePatterns) {
+    const match = pattern.exec(text);
+    if (match?.[1]) return readSmallChineseCount(match[1]);
+  }
+  return null;
+}
+
+function cleanBestLinkKeyword(value: string): string | null {
+  const keyword = value
+    .replace(/^[\s，,。；;?？!！]*(?:按|根据|基于|用|以)\s*/u, '')
+    .replace(/\s*(?:的)?\s*(?:端内\s*id|id|链接|商品)\s*(?:是多少|是哪个|是哪条|哪个|哪条)?\s*$/iu, '')
+    .replace(/\s*(?:新链|链接)\s*$/u, '')
+    .trim();
+  return keyword ? keyword : null;
+}
+
+function parseBestLinkKeywordFromSegment(segment: string): string | null {
+  const cleanedSegment = segment
+    .replace(/^[\s，,。；;?？!！]*(?:按|根据|基于|用|以)\s*/u, '')
+    .replace(/\s*(?:链接|商品)\s*$/u, '')
+    .trim();
+  if (!cleanedSegment) return null;
+
+  const dataIntent = parseAgentDataIntent(cleanedSegment);
+  if (dataIntent.type === 'best_product_by_same_sku') return cleanBestLinkKeyword(dataIntent.query);
+
+  const match = /(?:数据|表现)\s*(?:最好|最佳|最优|最强)\s*的?\s*(.+?)(?:\s*的?\s*(?:端内\s*id|id|链接|商品)|[?？,，。；;!！]|按|根据|基于|用|以|给我|帮我|复制|铺设|铺|新增|新建|创建|生成|$)/iu.exec(cleanedSegment);
+  return match?.[1] ? cleanBestLinkKeyword(match[1]) : null;
+}
+
+function parseBestLinkNewLinkComboRequest(text: string): BestLinkNewLinkComboRequest | null {
+  const normalized = text.replace(/\s+/g, ' ').trim();
+  if (!/(数据|表现|同款).*(最好|最佳|最优|最强)|(?:最好|最佳|最优|最强).*(?:链接|端内\s*id|同款)/iu.test(normalized)) return null;
+  if (!/(复制|铺设|铺|新增|新建|创建|生成)/u.test(normalized) || !/(条|新链|链接)/u.test(normalized)) return null;
+
+  const count = extractNewLinkBatchCount(normalized);
+  if (!count) return null;
+
+  const writeMatch = /(复制|铺设|铺|新增|新建|创建|生成)/u.exec(normalized);
+  const prefix = writeMatch?.index !== undefined ? normalized.slice(0, writeMatch.index) : normalized;
+  const beforeBestReference = normalized.split(/按\s*(?:最好|最佳|最优|最强)|根据\s*(?:最好|最佳|最优|最强)|基于\s*(?:最好|最佳|最优|最强)/u)[0] ?? normalized;
+  const segments = [
+    ...prefix.split(/[?？。；;!！]/u),
+    beforeBestReference,
+    normalized,
+  ];
+
+  for (const segment of segments) {
+    const keyword = parseBestLinkKeywordFromSegment(segment);
+    if (keyword && /[,，、]/u.test(keyword)) return null;
+    if (keyword) return { keyword, count };
+  }
+  return null;
+}
+
+async function bestLinkNewLinkComboResponse(
+  message: string,
+  outputDir: string,
+  options: HandleBotIntentOptions,
+): Promise<BotResponse | null> {
+  const request = parseBestLinkNewLinkComboRequest(message);
+  if (!request) return null;
+
+  const [latest, registryContext] = await Promise.all([
+    findLatestReportContext(outputDir),
+    loadClosedOrderRegistryContext(options.closedOrderRegistryPaths),
+  ]);
+  if (!latest) return { text: '还没有找到公域日报上下文，无法选择新链复制源商品。' };
+
+  const registry = createLinkRegistry(registryContext.registry);
+  const ranking = rankBestProductByRegistryQuery(latest.context, registry, request.keyword);
+  if (ranking.status !== 'ranked') {
+    return { text: `没有安全定位到「${request.keyword}」的数据最佳源商品，本次不会生成复制确认卡。可以换成更完整的商品名或直接给端内ID。` };
+  }
+
+  const plan = buildNewLinkBatchPlan(
+    { keyword: request.keyword, count: request.count, sourceProductId: ranking.best.internalProductId },
+    latest.context,
+    registryContext.registry,
+  );
+  const reason = `用户要求先找「${request.keyword}」同款组数据最好的链接，再按该端内ID复制 ${request.count} 条新链。`;
+  const text = [
+    `已识别数据最佳源商品：端内ID ${ranking.best.internalProductId} ${ranking.best.productName}`,
+    formatNewLinkBatchPlan(plan),
+  ].join('\n\n');
+  return {
+    text,
+    ...(plan.status === 'ready' ? { card: buildNewLinkBatchConfirmCard(plan, reason) } : {}),
+  };
+}
+
 function llmReadOnlyToolNeedsLinkRegistry(tool: LlmReadOnlyToolName): boolean {
   return tool === 'rank_best_same_sku_product';
 }
@@ -918,6 +1056,9 @@ export async function handleBotIntent(intent: BotIntent, outputDir = 'output', o
     if (shouldForceClarificationBeforePlanner(intent.text)) {
       return forcedPrePlannerClarification(intent.text, outputDir, options.clarificationDepth);
     }
+
+    const bestLinkCopyResponse = await bestLinkNewLinkComboResponse(intent.text, outputDir, options);
+    if (bestLinkCopyResponse) return bestLinkCopyResponse;
 
     const plannedResponse = await agentPlannerResponse(intent.text, outputDir, options);
     if (plannedResponse) return plannedResponse;

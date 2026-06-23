@@ -4032,6 +4032,33 @@ describe('handleBotIntent', () => {
     expect(JSON.stringify(response.card)).toContain('733');
   });
 
+  it('plans best-link copy combo commands without executing before confirmation', async () => {
+    const { outputDir, registryPaths } = await writeNewLinkWorkflowContext();
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run'); },
+      async execute() { throw new Error('execute should not run'); },
+      async copy() { throw new Error('copy should not run before workflow confirmation'); },
+      async delist() { throw new Error('delist should not run'); },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+
+    const response = await handleBotIntent(
+      { type: 'unknown', text: '数据最好的 pocket3 的端内id是多少?按最好链接的端内id 给我复制5条' },
+      outputDir,
+      { rentalPriceClient, closedOrderRegistryPaths: registryPaths },
+    );
+
+    expect(response.text).toContain('733');
+    expect(response.card).toBeDefined();
+    const cardText = JSON.stringify(response.card);
+    expect(cardText).toContain('new_link_batch_confirm');
+    expect(cardText).toContain('"keyword":"pocket3"');
+    expect(cardText).toContain('"count":5');
+    expect(cardText).toContain('"sourceProductId":"733"');
+  });
+
   it('locks explicit internal product id as the new-link copy source', async () => {
     const { outputDir, registryPaths } = await writeNewLinkWorkflowContext();
     const planner: AgentPlannerProvider = {
