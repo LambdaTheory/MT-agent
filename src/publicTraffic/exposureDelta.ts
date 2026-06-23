@@ -3,6 +3,10 @@ import { resolveFallbackProductId } from './extractProductIdFromInfo.js';
 
 type ProductIdMappingLike = Record<string, string>;
 
+export interface ComputeExposureDailyDeltaOptions {
+  newProductPlatformIds?: Iterable<string>;
+}
+
 function canonicalProductId(platformProductId: string, mapping: ProductIdMappingLike): string {
   return resolveFallbackProductId(platformProductId, mapping) ?? platformProductId;
 }
@@ -11,14 +15,18 @@ function byId(rows: ExposureCumulativeProduct[], mapping: ProductIdMappingLike):
   return new Map(rows.map((row) => [canonicalProductId(row.platformProductId, mapping), row]));
 }
 
-export function computeExposureDailyDelta(date: string, previous: ExposureCumulativeProduct[], current: ExposureCumulativeProduct[], mapping: ProductIdMappingLike = {}): ExposureDailyDelta[] {
+export function computeExposureDailyDelta(date: string, previous: ExposureCumulativeProduct[], current: ExposureCumulativeProduct[], mapping: ProductIdMappingLike = {}, options: ComputeExposureDailyDeltaOptions = {}): ExposureDailyDelta[] {
   const previousById = byId(previous, mapping);
   const currentById = byId(current, mapping);
+  const newProductIds = new Set(Array.from(options.newProductPlatformIds ?? []).map((platformProductId) => canonicalProductId(platformProductId, mapping)));
 
   const deltas: ExposureDailyDelta[] = current.map((row) => {
     const platformProductId = canonicalProductId(row.platformProductId, mapping);
     const old = previousById.get(platformProductId);
     if (!old) {
+      if (!newProductIds.has(platformProductId)) {
+        return { date, productName: row.productName, platformProductId, exposure: 0, visits: 0, amount: 0, custodyDays: row.custodyDays, flags: ['missing_previous_snapshot_row'] };
+      }
       return { date, productName: row.productName, platformProductId, exposure: row.exposure, visits: row.visits, amount: row.amount, custodyDays: row.custodyDays, flags: ['new_product'] };
     }
 

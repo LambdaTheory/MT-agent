@@ -15,13 +15,19 @@ const newRows: ExposureCumulativeProduct[] = [
 ];
 
 describe('computeExposureDailyDelta', () => {
-  it('computes deltas and flags new and reset rows', () => {
+  it('computes deltas and separates goods-table new products from missing previous exposure rows', () => {
     expect(computeExposureDailyDelta('2026-06-09', oldRows, newRows)).toEqual([
       { date: '2026-06-09', productName: 'A', platformProductId: '1001', exposure: 30, visits: 4, amount: 15, custodyDays: 6, flags: [] },
-      { date: '2026-06-09', productName: 'C', platformProductId: '1003', exposure: 8, visits: 1, amount: 0, custodyDays: 1, flags: ['new_product'] },
+      { date: '2026-06-09', productName: 'C', platformProductId: '1003', exposure: 0, visits: 0, amount: 0, custodyDays: 1, flags: ['missing_previous_snapshot_row'] },
       { date: '2026-06-09', productName: 'B', platformProductId: '1002', exposure: 0, visits: 0, amount: 0, custodyDays: 11, flags: ['counter_reset_or_data_error'] },
       { date: '2026-06-09', productName: 'D', platformProductId: '1004', exposure: 0, visits: 0, amount: 0, custodyDays: 20, flags: ['missing'] },
     ]);
+  });
+
+  it('marks new_product only when the goods table first-seen set includes the product', () => {
+    expect(computeExposureDailyDelta('2026-06-09', oldRows, newRows, {}, { newProductPlatformIds: ['1003'] })).toContainEqual(
+      { date: '2026-06-09', productName: 'C', platformProductId: '1003', exposure: 8, visits: 1, amount: 0, custodyDays: 1, flags: ['new_product'] },
+    );
   });
 
   it('canonicalizes polluted historical IDs before computing deltas', () => {
