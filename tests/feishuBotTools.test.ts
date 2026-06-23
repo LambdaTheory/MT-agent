@@ -328,11 +328,15 @@ async function writeNewLinkWorkflowContext(): Promise<{
     'platform-733': '733',
     'platform-875': '875',
     'platform-841': '841',
+    'platform-388': '388',
+    'platform-490': '490',
   }), 'utf8');
   await writeFile(join(configDir, 'product-name-map.json'), JSON.stringify({
     '733': '大疆 Pocket3',
     '875': 'DJI Pocket 3',
     '841': '佳能 R50',
+    '388': 'Fujifilm instax SQUARE SQ1',
+    '490': 'Fujifilm instax SQUARE SQ1',
   }), 'utf8');
   await writeFile(join(outputDir, '2026-06-22', 'report-context.json'), JSON.stringify({
     date: '2026-06-22',
@@ -369,6 +373,28 @@ async function writeNewLinkWorkflowContext(): Promise<{
         periods: {
           '1d': { ...metric, exposure: 100, publicVisits: 10, shippedOrders: 0, amount: 0 },
           '7d': { ...metric, exposure: 1200, publicVisits: 140, shippedOrders: 2, amount: 700 },
+          '30d': { ...metric, exposure: 300, publicVisits: 20, shippedOrders: 0, amount: 0 },
+        },
+      },
+      {
+        productName: 'Fujifilm instax SQUARE SQ1 high conversion',
+        platformProductId: 'platform-388',
+        displayProductId: '端内ID 388',
+        custodyDays: 7,
+        periods: {
+          '1d': { ...metric, exposure: 300, publicVisits: 90, shippedOrders: 0, amount: 1200 },
+          '7d': { ...metric, exposure: 9000, publicVisits: 900, shippedOrders: 6, amount: 4500 },
+          '30d': { ...metric, exposure: 300, publicVisits: 20, shippedOrders: 0, amount: 0 },
+        },
+      },
+      {
+        productName: 'Fujifilm instax SQUARE SQ1 low conversion',
+        platformProductId: 'platform-490',
+        displayProductId: '端内ID 490',
+        custodyDays: 7,
+        periods: {
+          '1d': { ...metric, exposure: 100, publicVisits: 20, shippedOrders: 0, amount: 300 },
+          '7d': { ...metric, exposure: 4000, publicVisits: 320, shippedOrders: 1, amount: 900 },
           '30d': { ...metric, exposure: 300, publicVisits: 20, shippedOrders: 0, amount: 0 },
         },
       },
@@ -870,6 +896,35 @@ describe('handleBotIntent', () => {
     expect(cardText).toContain('"sourceProductId":"875"');
     expect(cardText).toContain('"requestedSourceProductId":"875"');
     expect(cardText).not.toContain('"sourceProductId":"733"');
+  });
+
+  it('turns a best-link follow-up copy command into a new-link confirmation card without executing', async () => {
+    const { outputDir, registryPaths } = await writeNewLinkWorkflowContext();
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run'); },
+      async execute() { throw new Error('execute should not run'); },
+      async copy() { throw new Error('copy should not run before workflow confirmation'); },
+      async delist() { throw new Error('delist should not run'); },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+
+    const response = await handleBotIntent(
+      { type: 'unknown', text: '数据最好的SQ1的端内id是多少?按这个id复制5条新链' },
+      outputDir,
+      { rentalPriceClient, closedOrderRegistryPaths: registryPaths },
+    );
+
+    const cardText = JSON.stringify(response.card);
+    expect(response.text).toContain('新链批量铺设计划：准备复制 5 条「SQ1」新链');
+    expect(response.text).toContain('推荐源商品：388 Fujifilm instax SQUARE SQ1 high conversion');
+    expect(response.card).toBeDefined();
+    expect(cardText).toContain('new_link_batch_confirm');
+    expect(cardText).toContain('"keyword":"SQ1"');
+    expect(cardText).toContain('"count":5');
+    expect(cardText).toContain('"sourceProductId":"388"');
+    expect(cardText).toContain('"requestedSourceProductId":"388"');
   });
 
   it('does not fall through to read-only new product pool when the LLM planner fails a new-link write plan', async () => {

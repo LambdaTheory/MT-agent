@@ -5,6 +5,7 @@ import { validateAgentWorkflowPlannerProposal } from '../agentRuntime/workflowPl
 import { listAgentWorkflows } from '../agentRuntime/workflowRegistry.js';
 import { buildAgentLearningPlannerHints, summarizeAgentLearning } from '../agentLearning/store.js';
 import { parseAgentDataIntent } from '../agentData/intent.js';
+import { rankBestProductByRegistryQuery } from '../agentData/productRanking.js';
 import { loadClosedOrderRegistryContext, type ClosedOrderRegistryPathsInput } from '../closedOrderFeedback/runtime.js';
 import { createLinkRegistry } from '../linkRegistry/store.js';
 import {
@@ -148,6 +149,124 @@ function applyExplicitNewLinkSource(
   if (!request) return null;
   const sourceProductId = extractExplicitNewLinkSourceProductId(message);
   return sourceProductId ? { ...request, sourceProductId } : request;
+}
+
+function parseSmallPositiveInteger(value: string): number | null {
+  const trimmed = value.trim();
+  if (/^\d+$/.test(trimmed)) return Number(trimmed);
+  const digits: Record<string, number> = {
+    一: 1,
+    二: 2,
+    两: 2,
+    三: 3,
+    四: 4,
+    五: 5,
+    六: 6,
+    七: 7,
+    八: 8,
+    九: 9,
+  };
+  if (trimmed === '十') return 10;
+  if (trimmed in digits) return digits[trimmed]!;
+
+  const teen = /^十([一二两三四五六七八九])$/u.exec(trimmed);
+  if (teen?.[1]) return 10 + digits[teen[1]]!;
+
+  const tens = /^([一二两三四五六七八九])十$/u.exec(trimmed);
+  if (tens?.[1]) return digits[tens[1]]! * 10;
+
+  const composed = /^([一二两三四五六七八九])十([一二两三四五六七八九])$/u.exec(trimmed);
+  if (composed?.[1] && composed[2]) return digits[composed[1]]! * 10 + digits[composed[2]]!;
+
+  return null;
+}
+
+function extractNewLinkBatchCount(text: string): number | null {
+  const compact = text.replace(/\s+/g, '');
+  const countToken = '([0-9]+|[一二两三四五六七八九十]{1,3})';
+  const patterns = [
+    new RegExp(`(?:复制|铺设|铺|新增|补|新建|创建|生成|批量)${countToken}(?:条|个|款)?(?:新链接|新链)`, 'u'),
+    new RegExp(`${countToken}(?:条|个|款)(?:新链接|新链)`, 'u'),
+  ];
+  for (const pattern of patterns) {
+    const match = pattern.exec(compact);
+    if (!match?.[1]) continue;
+    const count = parseSmallPositiveInteger(match[1]);
+    if (count !== null) return count;
+  }
+  return null;
+}
+
+function bestProductQueryCandidates(text: string): string[] {
+  const normalized = text.replace(/\s+/g, ' ').trim();
+  const candidates = new Set<string>();
+  const add = (value: string | undefined): void => {
+    const cleaned = value?.replace(/^(?:按|根据|用|以)\s*/u, '').trim();
+    if (cleaned) candidates.add(cleaned);
+  };
+
+  add(normalized.split(/[?？。!！；;，,]/u)[0]);
+  add(normalized.split(/(?:按|根据|用|以)(?:这个|该|此|上面|最好链接的|最好(?:的)?|其)?\s*(?:端内\s*)?id/iu)[0]);
+  add(normalized.split(/(?:给我)?\s*(?:复制|铺设|铺|新增|补|新建|创建|生成|批量)/u)[0]);
+  add(normalized);
+  return [...candidates];
+}
+
+function parseBestProductQueryForNewLinkCopy(text: string): string | null {
+  for (const candidate of bestProductQueryCandidates(text)) {
+    const parsed = parseAgentDataIntent(candidate);
+    if (parsed.type === 'best_product_by_same_sku') return parsed.query;
+  }
+  return null;
+}
+
+function parseBestLinkNewLinkBatchRequest(text: string): { keyword: string; count: number } | null {
+  if (!looksLikeNewLinkWriteIntent(text)) return null;
+  if (!/(数据|表现|同款)/u.test(text) || !/(最好|最佳|最优|最强)/u.test(text)) return null;
+
+  const count = extractNewLinkBatchCount(text);
+  const keyword = parseBestProductQueryForNewLinkCopy(text);
+  return count !== null && keyword ? { keyword, count } : null;
+}
+
+function formatBestLinkCopyPlanFailure(keyword: string, status: ReturnType<typeof rankBestProductByRegistryQuery>): string {
+  if (status.status === 'ambiguous') {
+    const candidates = status.candidates
+      .map((candidate) => `- ${candidate.shortName ?? candidate.sameSkuGroupId ?? '未命名同款组'}：${candidate.internalProductIds.join('、')}`)
+      .join('\n');
+    return `链接维护档案对“${keyword}”匹配到多个同款组，我不会猜测端内ID，也不会复制。\n${candidates}`;
+  }
+  if (status.status === 'no_metrics') return `链接维护档案已匹配到“${keyword}”，但最新公域日报没有可用于排序的数据，我不会复制。`;
+  return `链接维护档案未匹配到“${keyword}”，我不会猜测端内ID，也不会复制。可以换成更完整的商品名或直接给端内ID。`;
+}
+
+async function bestLinkNewLinkBatchResponse(
+  message: string,
+  outputDir: string,
+  options: HandleBotIntentOptions,
+): Promise<BotResponse | null> {
+  const request = parseBestLinkNewLinkBatchRequest(message);
+  if (!request) return null;
+
+  const [latest, registryContext] = await Promise.all([
+    findLatestReportContext(outputDir),
+    loadClosedOrderRegistryContext(options.closedOrderRegistryPaths),
+  ]);
+  if (!latest) return { text: '还没有找到公域日报上下文，无法选择新链复制源商品。' };
+
+  const ranking = rankBestProductByRegistryQuery(latest.context, createLinkRegistry(registryContext.registry), request.keyword);
+  if (ranking.status !== 'ranked') return { text: formatBestLinkCopyPlanFailure(request.keyword, ranking) };
+
+  const plan = buildNewLinkBatchPlan(
+    { keyword: request.keyword, count: request.count, sourceProductId: ranking.best.internalProductId },
+    latest.context,
+    registryContext.registry,
+  );
+  const reason = `用户要求先找“${request.keyword}”数据最好的端内ID，再按该ID复制 ${request.count} 条新链；已选择端内ID ${ranking.best.internalProductId}，写操作需要二次确认。`;
+  return {
+    text: formatNewLinkBatchPlan(plan),
+    ...(plan.status === 'ready' ? { card: buildNewLinkBatchConfirmCard(plan, reason) } : {}),
+  };
 }
 
 function readOnlyIntentNeedsLinkRegistry(intent: ReturnType<typeof parseAgentDataIntent>): boolean {
@@ -355,6 +474,9 @@ export async function handleBotIntent(intent: BotIntent, outputDir = 'output', o
         }
       }
     }
+
+    const bestLinkCopyResponse = await bestLinkNewLinkBatchResponse(intent.text, outputDir, options);
+    if (bestLinkCopyResponse) return bestLinkCopyResponse;
 
     const deterministicDataIntent = parseAgentDataIntent(intent.text);
     if (deterministicDataIntent.type === 'best_product_by_same_sku') {
