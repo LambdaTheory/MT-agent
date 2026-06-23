@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { rankBestProductByRegistryQuery } from '../src/agentData/productRanking.js';
+import { createLinkRegistry } from '../src/linkRegistry/store.js';
 import type { LinkRegistryEntry } from '../src/linkRegistry/types.js';
 import type { PublicTrafficDataReportContext, PublicTrafficPeriodMetrics } from '../src/publicTraffic/types.js';
 
@@ -81,15 +82,19 @@ function context(): PublicTrafficDataReportContext {
 }
 
 const registry: LinkRegistryEntry[] = [
-  { internalProductId: '841', platformProductId: 'p841', shortName: 'Insta360 Ace Pro 2', sameSkuGroupId: 'insta360-ace-pro-2', status: 'active', source: ['product_name_map'] },
-  { internalProductId: '842', platformProductId: 'p842', shortName: 'Insta360 Ace Pro 2', sameSkuGroupId: 'insta360-ace-pro-2', status: 'active', source: ['product_name_map'] },
-  { internalProductId: '843', platformProductId: 'p843', shortName: 'Insta360 Ace Pro 2', sameSkuGroupId: 'insta360-ace-pro-2', status: 'removed', source: ['product_name_map'] },
+  { internalProductId: '841', platformProductId: 'p841', productName: 'Insta360 Ace Pro 2 标准套装', shortName: 'Insta360 Ace Pro 2', aliases: ['Ace pro 2', 'AcePro2'], sameSkuGroupId: 'insta360-ace-pro-2', status: 'active', source: ['product_name_map'] },
+  { internalProductId: '842', platformProductId: 'p842', productName: 'Insta360 Ace Pro 2 续航套装', shortName: 'Insta360 Ace Pro 2', aliases: ['Ace pro 2'], sameSkuGroupId: 'insta360-ace-pro-2', status: 'active', source: ['product_name_map'] },
+  { internalProductId: '843', platformProductId: 'p843', productName: 'Insta360 Ace Pro 2 已下架', shortName: 'Insta360 Ace Pro 2', aliases: ['Ace pro 2'], sameSkuGroupId: 'insta360-ace-pro-2', status: 'removed', source: ['product_name_map'] },
   { internalProductId: '851', platformProductId: 'p851', shortName: 'Insta360 Ace Pro 3', sameSkuGroupId: 'insta360-ace-pro-3', status: 'active', source: ['product_name_map'] },
 ];
 
+function registryStore() {
+  return createLinkRegistry(registry);
+}
+
 describe('rankBestProductByRegistryQuery', () => {
   it('ranks active same-sku links by 7d shipped orders, amount, and visits', () => {
-    const result = rankBestProductByRegistryQuery(context(), registry, 'Ace pro 2');
+    const result = rankBestProductByRegistryQuery(context(), registryStore(), 'Ace pro 2');
 
     expect(result.status).toBe('ranked');
     if (result.status !== 'ranked') return;
@@ -100,8 +105,18 @@ describe('rankBestProductByRegistryQuery', () => {
     expect(result.rationale).toContain('7日发货');
   });
 
+  it('resolves compact aliases through the link registry store', () => {
+    const result = rankBestProductByRegistryQuery(context(), registryStore(), 'AcePro2');
+
+    expect(result.status).toBe('ranked');
+    if (result.status !== 'ranked') return;
+    expect(result.matchedBy).toBe('alias');
+    expect(result.sameSkuGroupId).toBe('insta360-ace-pro-2');
+    expect(result.best.internalProductId).toBe('842');
+  });
+
   it('uses an explicit internal id only to find its same-sku group, not as the forced winner', () => {
-    const result = rankBestProductByRegistryQuery(context(), registry, '841');
+    const result = rankBestProductByRegistryQuery(context(), registryStore(), '841');
 
     expect(result.status).toBe('ranked');
     if (result.status !== 'ranked') return;
@@ -110,7 +125,7 @@ describe('rankBestProductByRegistryQuery', () => {
   });
 
   it('asks for clarification when a fuzzy query matches multiple same-sku groups', () => {
-    const result = rankBestProductByRegistryQuery(context(), registry, 'Ace Pro');
+    const result = rankBestProductByRegistryQuery(context(), registryStore(), 'Ace Pro');
 
     expect(result.status).toBe('ambiguous');
     if (result.status !== 'ambiguous') return;
@@ -118,7 +133,7 @@ describe('rankBestProductByRegistryQuery', () => {
   });
 
   it('does not guess when registry cannot resolve the product query', () => {
-    expect(rankBestProductByRegistryQuery(context(), registry, 'Osmo Action 5')).toEqual({
+    expect(rankBestProductByRegistryQuery(context(), registryStore(), 'Osmo Action 5')).toEqual({
       status: 'not_found',
       query: 'Osmo Action 5',
     });

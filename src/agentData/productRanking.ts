@@ -1,10 +1,11 @@
+import type { LinkRegistryAliasResolutionCandidate, LinkRegistryStore } from '../linkRegistry/store.js';
 import type { LinkRegistryEntry } from '../linkRegistry/types.js';
 import type { PublicTrafficDataReportContext, PublicTrafficProductDataRow } from '../publicTraffic/types.js';
 
-export type ProductRankingMatchMethod = 'internal_id' | 'same_sku_group' | 'short_name';
+export type ProductRankingMatchMethod = 'internal_id' | 'same_sku_group' | 'alias';
 
 export interface ProductRankingCandidate {
-  sameSkuGroupId: string;
+  sameSkuGroupId: string | null;
   shortName?: string;
   internalProductIds: string[];
 }
@@ -26,7 +27,7 @@ export type ProductRankingResult =
       status: 'ranked';
       query: string;
       matchedBy: ProductRankingMatchMethod;
-      sameSkuGroupId: string;
+      sameSkuGroupId: string | null;
       best: RankedProduct;
       ranking: RankedProduct[];
       excluded: Array<{ internalProductId: string; reason: 'removed' | 'missing_metrics' | 'missing_same_sku_group' }>;
@@ -35,49 +36,19 @@ export type ProductRankingResult =
     }
   | { status: 'ambiguous'; query: string; candidates: ProductRankingCandidate[] }
   | { status: 'not_found'; query: string }
-  | { status: 'no_metrics'; query: string; sameSkuGroupId: string; excluded: Array<{ internalProductId: string; reason: 'removed' | 'missing_metrics' | 'missing_same_sku_group' }> };
+  | { status: 'no_metrics'; query: string; sameSkuGroupId: string | null; excluded: Array<{ internalProductId: string; reason: 'removed' | 'missing_metrics' | 'missing_same_sku_group' }> };
 
 interface ResolvedGroup {
   matchedBy: ProductRankingMatchMethod;
-  sameSkuGroupId: string;
+  sameSkuGroupId: string | null;
   entries: LinkRegistryEntry[];
-}
-
-function normalizeText(value: string): string {
-  return value
-    .trim()
-    .toLowerCase()
-    .replace(/[（）()]/g, ' ')
-    .replace(/[^\p{Letter}\p{Number}]+/gu, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function compactText(value: string): string {
-  return normalizeText(value).replace(/\s+/g, '');
-}
-
-function normalizeId(value: string): string {
-  return value.trim();
 }
 
 function extractInternalProductId(displayProductId: string): string | null {
   return /^端内id\s*(\d+)$/i.exec(displayProductId.trim())?.[1] ?? null;
 }
 
-function groupEntriesBySameSku(entries: LinkRegistryEntry[]): Map<string, LinkRegistryEntry[]> {
-  const groups = new Map<string, LinkRegistryEntry[]>();
-  for (const entry of entries) {
-    const sameSkuGroupId = entry.sameSkuGroupId?.trim();
-    if (!sameSkuGroupId) continue;
-    const group = groups.get(sameSkuGroupId) ?? [];
-    group.push(entry);
-    groups.set(sameSkuGroupId, group);
-  }
-  return groups;
-}
-
-function candidateForGroup(sameSkuGroupId: string, entries: LinkRegistryEntry[]): ProductRankingCandidate {
+function candidateForGroup(sameSkuGroupId: string | null, entries: LinkRegistryEntry[]): ProductRankingCandidate {
   const shortName = entries.find((entry) => entry.shortName?.trim())?.shortName?.trim();
   return {
     sameSkuGroupId,
@@ -86,41 +57,40 @@ function candidateForGroup(sameSkuGroupId: string, entries: LinkRegistryEntry[])
   };
 }
 
-function textMatchesQuery(text: string | undefined, query: string): boolean {
-  if (!text?.trim()) return false;
-  const normalized = normalizeText(text);
-  const normalizedQuery = normalizeText(query);
-  if (!normalized || !normalizedQuery) return false;
-  if (normalized.includes(normalizedQuery)) return true;
-  return compactText(normalized).includes(compactText(normalizedQuery));
+function candidateForAlias(candidate: LinkRegistryAliasResolutionCandidate): ProductRankingCandidate {
+  return candidateForGroup(candidate.sameSkuGroupId, candidate.entries);
 }
 
-function resolveGroup(registry: LinkRegistryEntry[], query: string): ResolvedGroup | ProductRankingResult {
+function sameSkuEntries(registry: LinkRegistryStore, sameSkuGroupId: string): LinkRegistryEntry[] {
+  return registry.listBySameSkuGroup(sameSkuGroupId, { includeRemoved: true, includeUnknown: true });
+}
+
+function resolveGroup(registry: LinkRegistryStore, query: string): ResolvedGroup | ProductRankingResult {
   const trimmedQuery = query.trim();
   if (!trimmedQuery) return { status: 'not_found', query };
 
-  const groups = groupEntriesBySameSku(registry);
   if (/^\d+$/.test(trimmedQuery)) {
-    const entry = registry.find((candidate) => normalizeId(candidate.internalProductId) === trimmedQuery);
+    const entry = registry.getByInternalId(trimmedQuery);
     if (!entry) return { status: 'not_found', query };
     const sameSkuGroupId = entry.sameSkuGroupId?.trim();
     if (!sameSkuGroupId) {
       return { status: 'no_metrics', query, sameSkuGroupId: '', excluded: [{ internalProductId: entry.internalProductId, reason: 'missing_same_sku_group' }] };
     }
-    return { matchedBy: 'internal_id', sameSkuGroupId, entries: groups.get(sameSkuGroupId) ?? [entry] };
+    return { matchedBy: 'internal_id', sameSkuGroupId, entries: sameSkuEntries(registry, sameSkuGroupId) };
   }
 
-  const directGroup = groups.get(trimmedQuery);
-  if (directGroup) return { matchedBy: 'same_sku_group', sameSkuGroupId: trimmedQuery, entries: directGroup };
+  const directGroup = sameSkuEntries(registry, trimmedQuery);
+  if (directGroup.length > 0) return { matchedBy: 'same_sku_group', sameSkuGroupId: trimmedQuery, entries: directGroup };
 
-  const matches = [...groups.entries()]
-    .filter(([sameSkuGroupId, entries]) => textMatchesQuery(sameSkuGroupId, trimmedQuery) || entries.some((entry) => textMatchesQuery(entry.shortName, trimmedQuery)))
-    .sort(([left], [right]) => left.localeCompare(right));
-
-  if (matches.length === 0) return { status: 'not_found', query };
-  if (matches.length > 1) return { status: 'ambiguous', query, candidates: matches.map(([sameSkuGroupId, entries]) => candidateForGroup(sameSkuGroupId, entries)) };
-  const [[sameSkuGroupId, entries]] = matches;
-  return { matchedBy: 'short_name', sameSkuGroupId, entries };
+  const alias = registry.resolveAlias(trimmedQuery);
+  if (alias.status === 'not_found') return { status: 'not_found', query };
+  if (alias.status === 'multiple') return { status: 'ambiguous', query, candidates: alias.candidates.map(candidateForAlias) };
+  const sameSkuGroupId = alias.sameSkuGroupId?.trim() ?? null;
+  return {
+    matchedBy: 'alias',
+    sameSkuGroupId,
+    entries: sameSkuGroupId ? sameSkuEntries(registry, sameSkuGroupId) : alias.entries,
+  };
 }
 
 function rowInternalProductId(row: PublicTrafficProductDataRow): string | null {
@@ -165,7 +135,7 @@ function compareRankedProducts(left: RankedProduct, right: RankedProduct): numbe
 
 export function rankBestProductByRegistryQuery(
   context: PublicTrafficDataReportContext,
-  registry: LinkRegistryEntry[],
+  registry: LinkRegistryStore,
   query: string,
 ): ProductRankingResult {
   const resolved = resolveGroup(registry, query);

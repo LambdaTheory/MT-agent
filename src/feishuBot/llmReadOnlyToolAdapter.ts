@@ -1,5 +1,5 @@
 import type { AgentIntent } from '../agentData/types.js';
-import type { LinkRegistryEntry } from '../linkRegistry/types.js';
+import type { LinkRegistryStore } from '../linkRegistry/store.js';
 import type { PublicTrafficDataReportContext } from '../publicTraffic/types.js';
 import type { BotResponse } from './types.js';
 import type { LlmToolSelection } from './llmProvider.js';
@@ -10,7 +10,7 @@ export type RunReadOnlyToolSelectionResult =
   | { ok: false; reason: 'unsupported_tool' | 'invalid_arguments' };
 
 export interface RunReadOnlyToolSelectionOptions {
-  linkRegistryEntries?: LinkRegistryEntry[];
+  linkRegistryStore?: LinkRegistryStore;
 }
 
 export function llmToolSelectionToIntent(selection: LlmToolSelection): AgentIntent | undefined {

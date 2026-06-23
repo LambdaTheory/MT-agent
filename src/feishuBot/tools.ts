@@ -6,6 +6,7 @@ import { listAgentWorkflows } from '../agentRuntime/workflowRegistry.js';
 import { buildAgentLearningPlannerHints, summarizeAgentLearning } from '../agentLearning/store.js';
 import { parseAgentDataIntent } from '../agentData/intent.js';
 import { loadClosedOrderRegistryContext, type ClosedOrderRegistryPathsInput } from '../closedOrderFeedback/runtime.js';
+import { createLinkRegistry } from '../linkRegistry/store.js';
 import {
   buildNewLinkBatchConfirmCard,
   buildNewLinkBatchPlan,
@@ -157,7 +158,7 @@ async function buildReadOnlyToolRunOptions(
 ): Promise<ReadOnlyToolRunOptions> {
   if (!needsLinkRegistry) return {};
   const registryContext = await loadClosedOrderRegistryContext(options.closedOrderRegistryPaths);
-  return { linkRegistryEntries: registryContext.registry };
+  return { linkRegistryStore: createLinkRegistry(registryContext.registry) };
 }
 
 async function agentPlannerResponse(

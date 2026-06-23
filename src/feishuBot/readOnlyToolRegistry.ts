@@ -2,7 +2,7 @@ import { getLatestOverview, getNewProductPool, getProblemProducts, getProductPer
 import { rankBestProductByRegistryQuery, type ProductRankingResult } from '../agentData/productRanking.js';
 import { buildAgentTaskPool } from '../agentData/taskPool.js';
 import type { AgentIntent, AgentProblemType } from '../agentData/types.js';
-import type { LinkRegistryEntry } from '../linkRegistry/types.js';
+import type { LinkRegistryStore } from '../linkRegistry/store.js';
 import type { PublicTrafficDataReportContext } from '../publicTraffic/types.js';
 import type { LlmReadOnlyToolName } from './llmProvider.js';
 import type { BotResponse } from './types.js';
@@ -18,7 +18,7 @@ export interface ReadOnlyToolLlmMetadata {
 }
 
 export interface ReadOnlyToolRunOptions {
-  linkRegistryEntries?: LinkRegistryEntry[];
+  linkRegistryStore?: LinkRegistryStore;
 }
 
 export interface ReadOnlyTool {
@@ -93,7 +93,7 @@ function formatRankingAnswer(result: ProductRankingResult): string {
       return [
         `数据最好的 ${result.query} 是：端内ID ${result.best.internalProductId}（${result.best.productName}）`,
         `数据日期：${result.date}`,
-        `依据：同款组 ${result.sameSkuGroupId}，${result.rationale}`,
+        `依据：同款组 ${result.sameSkuGroupId ?? '未知'}，${result.rationale}`,
         `7日：发货 ${result.best.sevenDayShippedOrders}，成交额 ¥${formatMoney(result.best.sevenDayAmount)}，访问 ${result.best.sevenDayPublicVisits}`,
         `1日：发货 ${result.best.oneDayShippedOrders}，成交额 ¥${formatMoney(result.best.oneDayAmount)}，访问 ${result.best.oneDayPublicVisits}`,
       ].join('\n');
@@ -168,8 +168,8 @@ export const readOnlyTools: ReadOnlyTool[] = [
     },
     async run(context, intent, options = {}) {
       if (intent.type !== 'best_product_by_same_sku') return { text: '暂无匹配商品。' };
-      const registry = options.linkRegistryEntries ?? [];
-      if (registry.length === 0) return { text: '需要先读取链接维护档案，才能安全判断同款组里哪个端内ID数据最好。' };
+      const registry = options.linkRegistryStore;
+      if (!registry) return { text: '需要先读取链接维护档案，才能安全判断同款组里哪个端内ID数据最好。' };
       return { text: formatRankingAnswer(rankBestProductByRegistryQuery(context, registry, intent.query)) };
     },
   },

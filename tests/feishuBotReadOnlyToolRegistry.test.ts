@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { findReadOnlyTool, readOnlyTools } from '../src/feishuBot/readOnlyToolRegistry.js';
+import { createLinkRegistry } from '../src/linkRegistry/store.js';
 import type { LinkRegistryEntry } from '../src/linkRegistry/types.js';
 import type { PublicTrafficDataReportContext } from '../src/publicTraffic/types.js';
 
@@ -97,7 +98,7 @@ describe('readOnlyTools', () => {
   });
 
   it('answers best same-sku product questions only when registry data is available', async () => {
-    await expect(findReadOnlyTool({ type: 'best_product_by_same_sku', query: 'Pocket3' })?.run(rankingContext, { type: 'best_product_by_same_sku', query: 'Pocket3' }, { linkRegistryEntries: registry })).resolves.toMatchObject({
+    await expect(findReadOnlyTool({ type: 'best_product_by_same_sku', query: 'Pocket3' })?.run(rankingContext, { type: 'best_product_by_same_sku', query: 'Pocket3' }, { linkRegistryStore: createLinkRegistry(registry) })).resolves.toMatchObject({
       text: expect.stringContaining('端内ID 702'),
     });
 

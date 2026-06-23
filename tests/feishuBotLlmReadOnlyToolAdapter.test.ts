@@ -4,6 +4,7 @@ import { createLlmToolSelector } from '../src/feishuBot/llmToolSelector.js';
 import { findReadOnlyToolByLlmName } from '../src/feishuBot/readOnlyToolRegistry.js';
 import { runReadOnlyToolSelection } from '../src/feishuBot/llmReadOnlyToolAdapter.js';
 import type { LlmToolSelection } from '../src/feishuBot/llmProvider.js';
+import { createLinkRegistry } from '../src/linkRegistry/store.js';
 import type { LinkRegistryEntry } from '../src/linkRegistry/types.js';
 import type { PublicTrafficDataReportContext } from '../src/publicTraffic/types.js';
 
@@ -85,7 +86,7 @@ describe('LLM read-only tool adapter', () => {
     const result = await runReadOnlyToolSelection(
       rankingContext,
       selection('rank_best_same_sku_product', { query: 'Pocket3' }),
-      { linkRegistryEntries: registry },
+      { linkRegistryStore: createLinkRegistry(registry) },
     );
 
     expect(result).toMatchObject({ ok: true, intent: { type: 'best_product_by_same_sku', query: 'Pocket3' } });
