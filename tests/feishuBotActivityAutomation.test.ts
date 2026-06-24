@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { parseBotIntent } from '../src/feishuBot/intent.js';
 import { handleBotIntent } from '../src/feishuBot/tools.js';
 import {
+  buildActivityAutomationCard,
   buildActivityPriceCallbackConfirmCard,
   parseActivityPriceCallbackConfirmRequest,
   type ActivityAutomationSkillClient,
@@ -52,6 +53,19 @@ describe('differential pricing Feishu integration', () => {
     expect(cardJson).toContain('"tag":"date_picker"');
     expect(cardJson).toContain('"name":"starts_at"');
     expect(cardJson).toContain('"name":"ends_at"');
+  });
+
+  it('builds date picker fields without unsupported label properties', () => {
+    const card = buildActivityAutomationCard();
+    const form = (card.body as { elements: Array<{ tag?: string; elements?: Array<Record<string, unknown>> }> }).elements
+      .find((element) => element.tag === 'form');
+    const datePickers = form?.elements?.filter((element) => element.tag === 'date_picker') ?? [];
+
+    expect(datePickers).toHaveLength(2);
+    for (const picker of datePickers) {
+      expect(picker).not.toHaveProperty('label');
+      expect(picker).not.toHaveProperty('label_position');
+    }
   });
 
   it('builds a callback confirmation card from the submit session summary', () => {
