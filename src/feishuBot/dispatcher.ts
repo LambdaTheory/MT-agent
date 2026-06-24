@@ -92,6 +92,7 @@ function canonicalizeIntent(intent: BotIntent): BotIntent {
     case 'run_closed_order_observation_report':
       return { type: intent.type };
     case 'run_public_traffic_report':
+    case 'refresh_public_traffic_dashboard':
     case 'resend_latest_report':
       return { type: intent.type, sendTo: intent.sendTo };
     case 'query_product':

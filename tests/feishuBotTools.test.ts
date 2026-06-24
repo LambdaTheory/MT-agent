@@ -1039,6 +1039,11 @@ describe('handleBotIntent', () => {
     expect(runReport.text).toContain('请确认 Agent 操作：publicTraffic.runReport');
     expect(JSON.stringify(runReport.card)).toContain('agent_tool_confirm');
 
+    const refreshDashboard = await handleBotIntent({ type: 'refresh_public_traffic_dashboard', sendTo: 'group' }, 'output');
+    expect(refreshDashboard.text).toContain('请确认 Agent 操作：publicTraffic.refreshDashboard');
+    expect(JSON.stringify(refreshDashboard.card)).toContain('agent_tool_confirm');
+    expect(JSON.stringify(refreshDashboard.card)).toContain('"sendTo":"group"');
+
     const resend = await handleBotIntent({ type: 'resend_latest_report', sendTo: 'both' }, 'output');
     expect(resend.text).toContain('请确认 Agent 操作：publicTraffic.resendLatestReport');
     expect(JSON.stringify(resend.card)).toContain('"sendTo":"both"');

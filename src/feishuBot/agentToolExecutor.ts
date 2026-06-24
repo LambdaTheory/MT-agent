@@ -1,6 +1,8 @@
 import { join } from 'node:path';
 import { runPublicTrafficReportCli } from '../cli/publicTrafficReport.js';
 import type { AgentToolConfirmRequest } from '../agentRuntime/approvalCard.js';
+import { loadConfig } from '../config/loadConfig.js';
+import { loadEnv } from '../config/loadEnv.js';
 import { loadClosedOrderIngestState } from '../closedOrderFeedback/ingest.js';
 import { buildClosedOrderObservationReport, writeClosedOrderObservationReportArtifacts } from '../closedOrderFeedback/observation.js';
 import { loadClosedOrderRegistryContext, type ClosedOrderRegistryPathsInput } from '../closedOrderFeedback/runtime.js';
@@ -8,6 +10,7 @@ import { syncClosedOrderFeedbackFromApi } from '../closedOrderFeedback/sync.js';
 import { sendFeishuCard } from '../notify/feishu.js';
 import { buildPublicTrafficCard } from '../publicTraffic/buildPublicTrafficCard.js';
 import { buildPublicTrafficFeishuText } from '../publicTraffic/buildPublicTrafficFeishu.js';
+import { runDashboardRefresh } from '../publicTraffic/dashboardRefresh.js';
 import { startOperationsLearningSession } from '../operationsLearningLoop/session.js';
 import type { BotResponse } from './types.js';
 import type { FeishuSendTo } from './types.js';
@@ -79,6 +82,17 @@ function readSendTo(value: unknown): FeishuSendTo | undefined {
   throw new Error('sendTo must be personal, group, or both');
 }
 
+function readOptionalDate(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  const parsed = readString(value);
+  if (!parsed || !/^\d{4}-\d{2}-\d{2}$/.test(parsed)) throw new Error('date must be YYYY-MM-DD');
+  return parsed;
+}
+
+function today(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
 export async function executeAgentToolRequest(
   request: AgentToolConfirmRequest,
   outputDir = 'output',
@@ -130,6 +144,23 @@ export async function executeAgentToolRequest(
       const result = await sendFeishuCard({ ...process.env, FEISHU_SEND_TO: 'group' }, card, fallbackText);
       return { text: result.sent ? '最新公域日报已推送到群。' : `公域日报推送到群失败：${result.reason}` };
     }
+    case 'publicTraffic.refreshDashboard': {
+      await loadEnv();
+      const config = await loadConfig();
+      const sendTo = readSendTo(request.arguments.sendTo);
+      const date = readOptionalDate(request.arguments.date) ?? today();
+      const result = await runDashboardRefresh({ config, date, sendTo });
+      return {
+        text: [
+          `访问页补抓完成：${result.message}`,
+          `日期：${date}`,
+          '',
+          `补抓结果：${result.refreshQualityText}`,
+          '',
+          `首版状态：${result.firstQualityText}`,
+        ].join('\n'),
+      };
+    }
     case 'rental.operationConfirmRequest': {
       const rentalRequest = parseRentalOperationConfirmRequest({ request: request.arguments });
       if (!rentalRequest) throw new Error('租赁商品操作参数无效，请重新发起。');
@@ -160,8 +191,6 @@ export async function executeAgentToolRequest(
     }
     case 'publicTraffic.crawlSources':
       throw new Error('publicTraffic.crawlSources 当前需要 CLI AgentConfig，尚未接入飞书审批执行。');
-    case 'rental.pricePreview':
-      throw new Error('rental.pricePreview 当前仍使用专用改价预览卡流程。');
     default:
       throw new Error(`Unsupported agent tool: ${request.toolName}`);
   }

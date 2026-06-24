@@ -30,6 +30,7 @@ export function parseExactBotIntent(input: string): BotIntent {
   if (!text) return { type: 'help' };
   if (/^(帮助|help|\/help)$/i.test(text)) return { type: 'help' };
   if (/^(跑|生成|执行).*(公域)?日报/.test(text)) return { type: 'run_public_traffic_report', sendTo: sendTo(text) };
+  if (/^(抓取|补抓|刷新|更新).*(访问页|后链路|访问数据)/.test(text)) return { type: 'refresh_public_traffic_dashboard', sendTo: sendTo(text) };
   if (/^(推送)?(公域)?日报到群$/.test(text)) return { type: 'push_latest_report_to_group' };
   if (/^重发.*(公域)?日报/.test(text)) return { type: 'resend_latest_report', sendTo: sendTo(text) };
   if (/^(同步|拉取|更新).*(关单|关单反馈)/.test(text)) return { type: 'sync_closed_order_feedback' };

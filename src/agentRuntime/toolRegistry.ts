@@ -2,11 +2,17 @@ import type { AgentToolDefinition } from './tool.js';
 
 const noArgumentsSchema = { type: 'object', additionalProperties: false };
 const keywordArgumentsSchema = { type: 'object', properties: { keyword: { type: 'string' } }, required: ['keyword'], additionalProperties: false };
-const productIdArgumentsSchema = { type: 'object', properties: { productId: { type: 'string' } }, required: ['productId'], additionalProperties: false };
-const goodsExportPathArgumentsSchema = { type: 'object', properties: { goodsExportPath: { type: 'string' } }, required: ['goodsExportPath'], additionalProperties: false };
 const optionalSendToArgumentsSchema = {
   type: 'object',
   properties: { sendTo: { type: 'string' } },
+  additionalProperties: false,
+};
+const optionalDashboardRefreshArgumentsSchema = {
+  type: 'object',
+  properties: {
+    date: { type: 'string' },
+    sendTo: { type: 'string' },
+  },
   additionalProperties: false,
 };
 const rentalOperationArgumentsSchema = {
@@ -72,11 +78,11 @@ const agentTools: AgentToolDefinition[] = [
     inputSchema: noArgumentsSchema,
   },
   {
-    name: 'publicTraffic.crawlSources',
-    description: '抓取公域日报所需的商品总表、曝光、后链路与订单分析原始数据',
+    name: 'publicTraffic.refreshDashboard',
+    description: '补抓访问页/后链路数据；自动使用默认配置保存 raw，必要时重建并重发日报',
     risk: 'write',
     requiresConfirmation: true,
-    inputSchema: goodsExportPathArgumentsSchema,
+    inputSchema: optionalDashboardRefreshArgumentsSchema,
   },
   {
     name: 'closedOrder.syncFeedback',
@@ -91,13 +97,6 @@ const agentTools: AgentToolDefinition[] = [
     risk: 'write',
     requiresConfirmation: true,
     inputSchema: noArgumentsSchema,
-  },
-  {
-    name: 'rental.pricePreview',
-    description: '预览租赁商品改价，不直接执行改价',
-    risk: 'high',
-    requiresConfirmation: true,
-    inputSchema: productIdArgumentsSchema,
   },
   {
     name: 'rental.operationConfirmRequest',

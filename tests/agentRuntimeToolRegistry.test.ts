@@ -15,13 +15,14 @@ describe('agent runtime tool registry', () => {
       'publicTraffic.runReport',
       'publicTraffic.resendLatestReport',
       'publicTraffic.pushLatestReportToGroup',
-      'publicTraffic.crawlSources',
+      'publicTraffic.refreshDashboard',
       'closedOrder.syncFeedback',
       'closedOrder.runObservationReport',
-      'rental.pricePreview',
       'rental.operationConfirmRequest',
     ]);
     expect(listAgentTools().map((tool) => tool.name)).not.toContain('rental.newLinkBatchPlan');
+    expect(listAgentTools().map((tool) => tool.name)).not.toContain('rental.pricePreview');
+    expect(listAgentTools().map((tool) => tool.name)).not.toContain('publicTraffic.crawlSources');
   });
 
   it('finds tools by name without exposing mutable registry state', () => {
@@ -30,7 +31,7 @@ describe('agent runtime tool registry', () => {
 
     const tools = listAgentTools();
     tools.pop();
-    expect(listAgentTools()).toHaveLength(12);
+    expect(listAgentTools()).toHaveLength(11);
   });
 
   it('returns defensive copies of tool metadata', () => {
@@ -74,11 +75,21 @@ describe('agent runtime tool registry', () => {
     expect(findAgentTool('publicTraffic.runReport')).toMatchObject({ risk: 'write', requiresConfirmation: true });
     expect(findAgentTool('publicTraffic.resendLatestReport')).toMatchObject({ risk: 'write', requiresConfirmation: true });
     expect(findAgentTool('publicTraffic.pushLatestReportToGroup')).toMatchObject({ risk: 'write', requiresConfirmation: true });
-    expect(findAgentTool('publicTraffic.crawlSources')).toMatchObject({ risk: 'write', requiresConfirmation: true });
+    expect(findAgentTool('publicTraffic.refreshDashboard')).toMatchObject({ risk: 'write', requiresConfirmation: true });
     expect(findAgentTool('closedOrder.syncFeedback')).toMatchObject({ risk: 'write', requiresConfirmation: true });
     expect(findAgentTool('closedOrder.runObservationReport')).toMatchObject({ risk: 'write', requiresConfirmation: true });
-    expect(findAgentTool('rental.pricePreview')).toMatchObject({ risk: 'high', requiresConfirmation: true });
     expect(findAgentTool('rental.operationConfirmRequest')).toMatchObject({ risk: 'high', requiresConfirmation: true });
+  });
+
+  it('describes dashboard refresh as a parameter-light write tool', () => {
+    expect(findAgentTool('publicTraffic.refreshDashboard')?.inputSchema).toMatchObject({
+      type: 'object',
+      properties: {
+        date: { type: 'string' },
+        sendTo: { type: 'string' },
+      },
+      additionalProperties: false,
+    });
   });
 
   it('keeps rental operation metadata atomic instead of workflow-specific', () => {

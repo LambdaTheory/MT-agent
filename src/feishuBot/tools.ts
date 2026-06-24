@@ -540,6 +540,14 @@ export async function handleBotIntent(intent: BotIntent, outputDir = 'output', o
     return agentToolConfirmResponse('publicTraffic.runReport', {}, '明确飞书命令需要二次确认后才能生成并发送公域日报。');
   }
 
+  if (intent.type === 'refresh_public_traffic_dashboard') {
+    return agentToolConfirmResponse(
+      'publicTraffic.refreshDashboard',
+      intent.sendTo ? { sendTo: intent.sendTo } : {},
+      '明确飞书命令需要二次确认后才能补抓访问页数据；若补抓后数据完整，可能重建并重发日报。',
+    );
+  }
+
   if (intent.type === 'push_latest_report_to_group') {
     return agentToolConfirmResponse('publicTraffic.pushLatestReportToGroup', {}, '明确飞书命令需要二次确认后才能把日报推送到群。');
   }
