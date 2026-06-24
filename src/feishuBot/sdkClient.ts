@@ -300,6 +300,11 @@ function statusCard(title: string, content: string, template: 'blue' | 'green' |
   };
 }
 
+function claimStatusCard(title: string, claim: RentalActionClaim): FeishuCardPayload {
+  const template = claim.status === 'processing' ? 'blue' : claim.status === 'completed' ? 'green' : claim.status === 'failed' ? 'red' : 'grey';
+  return statusCard(title, duplicateRentalActionText(claim), template);
+}
+
 function cardActionUpdateResponse(card: FeishuCardPayload): FeishuCardActionResponse {
   return { card: { type: 'raw', data: card } };
 }
@@ -326,6 +331,11 @@ async function updateCard(client: FeishuSdkClient, messageId: string, card: Feis
     data: { content: JSON.stringify(card) },
   });
   return true;
+}
+
+function replaceCard(client: FeishuSdkClient, messageId: string, card: FeishuCardPayload): FeishuCardActionResponse {
+  void updateCard(client, messageId, card).catch(() => false);
+  return cardActionUpdateResponse(card);
 }
 
 export function extractSdkTextMessage(data: unknown): FeishuBotIncomingTextMessage | null {
@@ -429,8 +439,7 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
           }
           const claim = claimRentalAction(messageId, actionName, value);
           if (!claim.claimed) {
-            await replyText(client, messageId, duplicateRentalActionText(claim.claim));
-            return;
+            return cardActionUpdateResponse(claimStatusCard('Agent 澄清已处理', claim.claim));
           }
           recordLearning({
             type: 'clarification_selected',
@@ -471,8 +480,7 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
           const claimValue = { ...value, selectedMessage: selection.selectedMessage };
           const claim = claimRentalAction(messageId, actionName, claimValue);
           if (!claim.claimed) {
-            await replyText(client, messageId, duplicateRentalActionText(claim.claim));
-            return;
+            return cardActionUpdateResponse(claimStatusCard('Agent 澄清已处理', claim.claim));
           }
           recordLearning({
             type: 'clarification_selected',
@@ -507,8 +515,7 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
           const originalMessage = readString(value?.originalMessage) ?? '未知指令';
           const claim = claimRentalAction(messageId, actionName, value);
           if (!claim.claimed) {
-            await replyText(client, messageId, duplicateRentalActionText(claim.claim));
-            return;
+            return cardActionUpdateResponse(claimStatusCard('Agent 澄清已处理', claim.claim));
           }
           setRentalActionStatus(claim.key, 'cancelled');
           recordLearning({
@@ -517,8 +524,7 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
             actorId: extractCardReviewerId(data),
             originalMessage,
           }, messageId);
-          await updateCard(client, messageId, statusCard('Agent 已取消', `已取消澄清：${originalMessage}`, 'grey')).catch(() => false);
-          return;
+          return replaceCard(client, messageId, statusCard('Agent 已取消', `已取消澄清：${originalMessage}`, 'grey'));
         }
 
         if (actionName === 'agent_tool_confirm') {
@@ -529,8 +535,7 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
           }
           const claim = claimRentalAction(messageId, actionName, value);
           if (!claim.claimed) {
-            await replyText(client, messageId, duplicateRentalActionText(claim.claim));
-            return;
+            return cardActionUpdateResponse(claimStatusCard('Agent 操作已处理', claim.claim));
           }
           recordLearning({
             type: 'tool_confirmed',
@@ -581,8 +586,7 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
           const toolName = readString(value?.toolName) ?? '未知工具';
           const claim = claimRentalAction(messageId, actionName, value);
           if (!claim.claimed) {
-            await replyText(client, messageId, duplicateRentalActionText(claim.claim));
-            return;
+            return cardActionUpdateResponse(claimStatusCard('Agent 操作已处理', claim.claim));
           }
           setRentalActionStatus(claim.key, 'cancelled');
           recordLearning({
@@ -591,8 +595,7 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
             actorId: extractCardReviewerId(data),
             toolName,
           }, messageId);
-          await updateCard(client, messageId, statusCard('Agent 操作已取消', `工具 ${toolName} 操作已取消。`, 'grey')).catch(() => false);
-          return;
+          return replaceCard(client, messageId, statusCard('Agent 操作已取消', `工具 ${toolName} 操作已取消。`, 'grey'));
         }
 
         if (actionName === 'new_link_batch_confirm') {
@@ -720,8 +723,7 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
             arguments: { keyword },
           }, messageId);
           const card = statusCard('新链批量复制已取消', `「${keyword}」新链批量复制已取消。`, 'grey');
-          void updateCard(client, messageId, card).catch(() => false);
-          return cardActionUpdateResponse(card);
+          return replaceCard(client, messageId, card);
         }
 
         if (actionName === 'rental_price_confirm') {
@@ -732,8 +734,7 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
           }
           const claim = claimRentalAction(messageId, actionName, value);
           if (!claim.claimed) {
-            await replyText(client, messageId, duplicateRentalActionText(claim.claim));
-            return;
+            return cardActionUpdateResponse(claimStatusCard('租赁商品改价已处理', claim.claim));
           }
           void (async () => {
             await updateCard(client, messageId, statusCard('租赁商品改价处理中', `商品 ${request.productId} 改价已收到确认，正在执行。`, 'blue')).catch(() => false);
@@ -758,8 +759,7 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
           }
           const claim = claimRentalAction(messageId, actionName, value);
           if (!claim.claimed) {
-            await replyText(client, messageId, duplicateRentalActionText(claim.claim));
-            return;
+            return cardActionUpdateResponse(claimStatusCard('差异化定价已处理', claim.claim));
           }
           void (async () => {
             await updateCard(client, messageId, statusCard('差异化定价处理中', `活动时间 ${request.startsAt} -> ${request.endsAt}\n已收到确认，正在执行。`, 'blue')).catch(() => false);
@@ -788,12 +788,10 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
           const productId = readString(value?.productId) ?? '未知';
           const claim = claimRentalAction(messageId, actionName, value);
           if (!claim.claimed) {
-            await replyText(client, messageId, duplicateRentalActionText(claim.claim));
-            return;
+            return cardActionUpdateResponse(claimStatusCard('租赁商品改价已处理', claim.claim));
           }
           setRentalActionStatus(claim.key, 'cancelled');
-          await updateCard(client, messageId, statusCard('租赁商品改价已取消', `商品 ${productId} 改价已取消。`, 'grey')).catch(() => false);
-          return;
+          return replaceCard(client, messageId, statusCard('租赁商品改价已取消', `商品 ${productId} 改价已取消。`, 'grey'));
         }
 
         if (actionName === 'rental_operation_confirm') {
@@ -804,8 +802,7 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
           }
           const claim = claimRentalAction(messageId, actionName, value);
           if (!claim.claimed) {
-            await replyText(client, messageId, duplicateRentalActionText(claim.claim));
-            return;
+            return cardActionUpdateResponse(claimStatusCard('租赁商品操作已处理', claim.claim));
           }
           void (async () => {
             await updateCard(client, messageId, statusCard('租赁商品操作处理中', `商品 ${request.productId} 操作已收到确认，正在执行。`, 'blue')).catch(() => false);
@@ -826,12 +823,10 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
           const productId = readString(value?.productId) ?? '未知';
           const claim = claimRentalAction(messageId, actionName, value);
           if (!claim.claimed) {
-            await replyText(client, messageId, duplicateRentalActionText(claim.claim));
-            return;
+            return cardActionUpdateResponse(claimStatusCard('租赁商品操作已处理', claim.claim));
           }
           setRentalActionStatus(claim.key, 'cancelled');
-          await updateCard(client, messageId, statusCard('租赁商品操作已取消', `商品 ${productId} 操作已取消。`, 'grey')).catch(() => false);
-          return;
+          return replaceCard(client, messageId, statusCard('租赁商品操作已取消', `商品 ${productId} 操作已取消。`, 'grey'));
         }
 
         if (actionName === 'id_lookup') {

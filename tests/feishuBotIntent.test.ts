@@ -75,7 +75,8 @@ describe('parseBotIntent', () => {
   });
 
   it('parses inventory overview card intent', () => {
-    expect(parseBotIntent('库存情况')).toEqual({ type: 'link_registry_overview' });
+    expect(parseBotIntent('库存情况')).toEqual({ type: 'inventory_status_overview' });
+    expect(parseBotIntent('链接档案概览')).toEqual({ type: 'link_registry_overview' });
   });
 
   it('parses explicit product lookup questions', () => {

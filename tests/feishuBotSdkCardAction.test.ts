@@ -125,6 +125,64 @@ async function seedLearningSession(outputDir: string): Promise<void> {
 }
 
 describe('createFeishuSdkBot card.action.trigger', () => {
+  it('returns a replacement status card when cancelling an Agent clarification and suppresses duplicate text replies', async () => {
+    const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
+    const sent: unknown[] = [];
+    const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', outputDir: 'output', sdk: fakeSdk(sent, registered) });
+
+    bot.start();
+    const event = {
+      event: {
+        context: { open_message_id: 'om-agent-clarify-cancel' },
+        operator: { open_id: 'ou_cancel' },
+        action: {
+          tag: 'button',
+          name: 'agent_clarify_cancel',
+          behaviors: [{ type: 'callback', value: { action: 'agent_clarify_cancel', originalMessage: '抓取访问页数据' } }],
+        },
+      },
+    };
+
+    const first = await registered['card.action.trigger'](event);
+    const second = await registered['card.action.trigger'](event);
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ kind: 'patch', request: { path: { message_id: 'om-agent-clarify-cancel' } } });
+    expect(first).toMatchObject({ card: { type: 'raw', data: { schema: '2.0' } } });
+    expect(JSON.stringify((first as any).card.data)).toContain('已取消');
+    expect(second).toMatchObject({ card: { type: 'raw', data: { schema: '2.0' } } });
+    expect(JSON.stringify((second as any).card.data)).toContain('已经取消');
+  });
+
+  it('returns a replacement status card when cancelling an Agent tool confirmation and suppresses duplicate text replies', async () => {
+    const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
+    const sent: unknown[] = [];
+    const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', outputDir: 'output', sdk: fakeSdk(sent, registered) });
+
+    bot.start();
+    const event = {
+      event: {
+        context: { open_message_id: 'om-agent-tool-cancel' },
+        operator: { open_id: 'ou_cancel' },
+        action: {
+          tag: 'button',
+          name: 'agent_tool_cancel_submit',
+          behaviors: [{ type: 'callback', value: { action: 'agent_tool_cancel', toolName: 'publicTraffic.runReport' } }],
+        },
+      },
+    };
+
+    const first = await registered['card.action.trigger'](event);
+    const second = await registered['card.action.trigger'](event);
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ kind: 'patch', request: { path: { message_id: 'om-agent-tool-cancel' } } });
+    expect(first).toMatchObject({ card: { type: 'raw', data: { schema: '2.0' } } });
+    expect(JSON.stringify((first as any).card.data)).toContain('已取消');
+    expect(second).toMatchObject({ card: { type: 'raw', data: { schema: '2.0' } } });
+    expect(JSON.stringify((second as any).card.data)).toContain('已经取消');
+  });
+
   it('executes differential pricing automation from card confirmation and patches status cards', async () => {
     const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
     const sent: unknown[] = [];
