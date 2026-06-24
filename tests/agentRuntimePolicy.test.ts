@@ -31,11 +31,11 @@ describe('agent runtime policy', () => {
   });
 
   it('requires confirmation for high-risk tools even when metadata is misconfigured', () => {
-    expect(decideAgentPolicy({ tool: tool({ name: 'rental.pricePreview', risk: 'high', requiresConfirmation: false }), input: { productId: '761' }, reason: 'rental operation' })).toEqual({
+    expect(decideAgentPolicy({ tool: tool({ name: 'test.highRiskOperation', risk: 'high', requiresConfirmation: false }), input: { productId: '761' }, reason: 'high risk operation' })).toEqual({
       decision: 'confirmation_required',
-      toolName: 'rental.pricePreview',
+      toolName: 'test.highRiskOperation',
       risk: 'high',
-      proposal: { toolName: 'rental.pricePreview', input: { productId: '761' }, reason: 'rental operation' },
+      proposal: { toolName: 'test.highRiskOperation', input: { productId: '761' }, reason: 'high risk operation' },
     });
   });
 });
