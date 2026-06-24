@@ -8,5 +8,7 @@ export * from './productPicker.js';
 export * from './recording.js';
 export * from './scoutAnalysis.js';
 export * from './scout.js';
+export * from './submit.js';
+export * from './submitSession.js';
 export * from './workarounds.js';
 export * from './workflow.js';

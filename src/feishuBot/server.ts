@@ -10,9 +10,13 @@ import { buildIdLookupCard } from './idLookupCard.js';
 import { lookupProductId } from './idLookup.js';
 import { createFeishuMessageDispatcher } from './dispatcher.js';
 import {
+  buildActivityPriceCallbackConfirmCard,
+  buildActivityPriceCallbackRequest,
+  buildActivityPriceCallbackStatusCard,
   createActivityAutomationSkillClient,
   formatActivityAutomationExecutionResult,
   parseActivityAutomationConfirmRequest,
+  parseActivityPriceCallbackConfirmRequest,
   type ActivityAutomationSkillClient,
 } from './activityAutomation.js';
 import { executeAgentToolRequest } from './agentToolExecutor.js';
@@ -119,6 +123,8 @@ function expectedActionForButtonName(name: string | undefined): string | undefin
     rental_price_cancel_submit: 'rental_price_cancel',
     rental_operation_confirm_submit: 'rental_operation_confirm',
     rental_operation_cancel_submit: 'rental_operation_cancel',
+    activity_price_callback_confirm_submit: 'activity_price_callback_confirm',
+    activity_price_callback_cancel_submit: 'activity_price_callback_cancel',
     id_lookup_submit: 'id_lookup',
   };
   if (exact[name]) return exact[name];
@@ -540,7 +546,32 @@ async function handleCardActionTrigger(
     }
     const result = await (config.activityAutomationClient ?? createActivityAutomationSkillClient()).execute(request);
     setServerCardActionStatus(claim.key, result.ok ? 'completed' : 'failed');
+    const callbackRequest = buildActivityPriceCallbackRequest(result);
+    if (callbackRequest) {
+      await replyCard(replyConfig, buildActivityPriceCallbackConfirmCard(callbackRequest));
+      return;
+    }
     await replyText(replyConfig, formatActivityAutomationExecutionResult(result));
+    return;
+  }
+
+  if (actionName === 'activity_price_callback_confirm') {
+    const request = parseActivityPriceCallbackConfirmRequest(value);
+    if (!request) {
+      await replyText(replyConfig, '价格回调确认参数无效，请重新发起。');
+      return;
+    }
+    await replyCard(replyConfig, buildActivityPriceCallbackStatusCard(request, { confirmed: true }));
+    return;
+  }
+
+  if (actionName === 'activity_price_callback_cancel') {
+    const request = parseActivityPriceCallbackConfirmRequest(value);
+    if (!request) {
+      await replyText(replyConfig, '价格回调取消参数无效，请重新发起。');
+      return;
+    }
+    await replyCard(replyConfig, buildActivityPriceCallbackStatusCard(request, { confirmed: false }));
     return;
   }
 
