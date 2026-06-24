@@ -27,6 +27,7 @@ describe('activity automation config', () => {
       browserProfileDir: '.browser-profile',
       headless: false,
       keepBrowserOnFailure: true,
+      confirmSubmit: false,
       pickProducts: false,
       fillDiscounts: true,
       draft: { productIds: [] },
@@ -37,6 +38,11 @@ describe('activity automation config', () => {
   it('can enable automatic product picking from CLI options', () => {
     const config = activityAutomationConfigFromAgentConfig(agentConfig, { pickProducts: true });
     expect(config.pickProducts).toBe(true);
+  });
+
+  it('stays non-submitting by default unless confirmSubmit is explicitly enabled', () => {
+    expect(activityAutomationConfigFromAgentConfig(agentConfig).confirmSubmit).toBe(false);
+    expect(activityAutomationConfigFromAgentConfig(agentConfig, { confirmSubmit: true }).confirmSubmit).toBe(true);
   });
 
   it('can pass date draft values from CLI options', () => {

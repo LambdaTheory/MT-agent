@@ -13,6 +13,7 @@ const config: ActivityAutomationConfig = {
   productIdMappingPath: 'config/product-id-map.json',
   headless: false,
   keepBrowserOnFailure: true,
+  confirmSubmit: false,
   pickProducts: false,
   fillDiscounts: true,
   draft: { productIds: [] },
@@ -70,6 +71,13 @@ const discountFillResult: DifferentialPricingDiscountFillResult = {
   ],
   unrecognizedMaxValues: [],
   filledCount: 4,
+};
+
+const submitResult = {
+  submittedAt: '2026-06-24T08:00:00.000Z',
+  submittedUrl: 'https://example.com/activity/success',
+  clickedControlText: '提交',
+  confirmationText: '创建成功',
 };
 
 describe('runActivityFormAutomation', () => {
@@ -135,5 +143,66 @@ describe('runActivityFormAutomation', () => {
     expect(result.productPickResult).toEqual(pickResult);
     expect(result.dateFillResult).toEqual(dateFillResult);
     expect(result.discountFillResult).toEqual(discountFillResult);
+  });
+
+  it('scouts first, then submits and writes the submit session only when submission is explicitly confirmed', async () => {
+    const steps: string[] = [];
+    const result = await runActivityFormAutomation({} as never, {
+      ...config,
+      confirmSubmit: true,
+      pickProducts: true,
+      draft: {
+        productIds: [],
+        startsAt: '2026-06-23',
+        endsAt: '2026-06-30',
+        discounts: { SS: '8.5', S: '9.0', A: '9.5', B: '9.8' },
+      },
+    }, {
+      waitForActivityFormShell: async () => {
+        steps.push('wait');
+      },
+      pickDifferentialPricingProducts: async () => {
+        steps.push('pick');
+        return pickResult;
+      },
+      fillDifferentialPricingDateRanges: async () => {
+        steps.push('fill-dates');
+        return dateFillResult;
+      },
+      fillMissingDifferentialPricingDiscounts: async () => {
+        steps.push('fill-discounts');
+        return discountFillResult;
+      },
+      scoutActivityFormPage: async () => {
+        steps.push('scout');
+        return {
+          ...scoutResult,
+          productPickSessionPath: 'output/latest/activity-automation/activity-product-pick-session.json',
+          productPickSession: {
+            products: [
+              {
+                ...pickResult.pickedProducts[0]!,
+                internalProductId: '787',
+                mappingSource: 'merchant_product_id',
+              },
+            ],
+            mappedCount: 1,
+            unmappedCount: 0,
+          },
+        };
+      },
+      submitDifferentialPricingActivity: async () => {
+        steps.push('submit');
+        return submitResult;
+      },
+      writeActivitySubmitSession: async () => {
+        steps.push('write-submit-session');
+        return 'output/latest/activity-automation/activity-submit-session.json';
+      },
+    });
+
+    expect(steps).toEqual(['wait', 'pick', 'wait', 'fill-dates', 'fill-discounts', 'scout', 'submit', 'write-submit-session']);
+    expect(result.submitResult).toEqual(submitResult);
+    expect(result.submitSessionPath).toBe('output/latest/activity-automation/activity-submit-session.json');
   });
 });

@@ -11,9 +11,13 @@ import { executeAgentToolRequest } from './agentToolExecutor.js';
 import { buildIdLookupCard } from './idLookupCard.js';
 import { lookupProductId } from './idLookup.js';
 import {
+  buildActivityPriceCallbackConfirmCard,
+  buildActivityPriceCallbackRequest,
+  buildActivityPriceCallbackStatusCard,
   createActivityAutomationSkillClient,
   formatActivityAutomationExecutionResult,
   parseActivityAutomationConfirmRequest,
+  parseActivityPriceCallbackConfirmRequest,
   type ActivityAutomationSkillClient,
 } from './activityAutomation.js';
 import { executeNewLinkBatchConfirmRequest, executeNewLinkBatchMultiConfirmRequest, parseNewLinkBatchConfirmRequest, parseNewLinkBatchMultiConfirmRequest } from '../newLinkWorkflow/batch.js';
@@ -160,6 +164,8 @@ function expectedActionForButtonName(name: string | undefined): string | undefin
     rental_price_cancel_submit: 'rental_price_cancel',
     rental_operation_confirm_submit: 'rental_operation_confirm',
     rental_operation_cancel_submit: 'rental_operation_cancel',
+    activity_price_callback_confirm_submit: 'activity_price_callback_confirm',
+    activity_price_callback_cancel_submit: 'activity_price_callback_cancel',
     id_lookup_submit: 'id_lookup',
   };
   if (exact[name]) return exact[name];
@@ -257,6 +263,7 @@ function actionClaimFamily(actionName: string): string {
   if (actionName.startsWith('new_link_batch_')) return 'new_link_batch';
   if (actionName.startsWith('rental_price_')) return 'rental_price';
   if (actionName.startsWith('rental_operation_')) return 'rental_operation';
+  if (actionName.startsWith('activity_price_callback_')) return 'activity_price_callback';
   return actionName;
 }
 
@@ -765,10 +772,14 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
             await updateCard(client, messageId, statusCard('差异化定价处理中', `活动时间 ${request.startsAt} -> ${request.endsAt}\n已收到确认，正在执行。`, 'blue')).catch(() => false);
             try {
               const result = await activityAutomationClient.execute(request);
+              const callbackRequest = buildActivityPriceCallbackRequest(result);
               setRentalActionStatus(claim.key, result.ok ? 'completed' : 'failed');
               await updateCard(
                 client,
                 messageId,
+                callbackRequest
+                  ? buildActivityPriceCallbackConfirmCard(callbackRequest)
+                  :
                 statusCard(result.ok ? '差异化定价已完成' : '差异化定价失败', formatActivityAutomationExecutionResult(result), result.ok ? 'green' : 'red'),
               ).catch(() => false);
             } catch (error) {
@@ -781,6 +792,38 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
               logError(error, { messageId, phase: 'reply' });
             }
           })();
+          return;
+        }
+
+        if (actionName === 'activity_price_callback_confirm') {
+          const request = parseActivityPriceCallbackConfirmRequest(value);
+          if (!request) {
+            await replyText(client, messageId, '价格回调确认参数无效，请重新发起。');
+            return;
+          }
+          const claim = claimRentalAction(messageId, actionName, value);
+          if (!claim.claimed) {
+            await replyText(client, messageId, duplicateRentalActionText(claim.claim));
+            return;
+          }
+          setRentalActionStatus(claim.key, 'completed');
+          await updateCard(client, messageId, buildActivityPriceCallbackStatusCard(request, { confirmed: true })).catch(() => false);
+          return;
+        }
+
+        if (actionName === 'activity_price_callback_cancel') {
+          const request = parseActivityPriceCallbackConfirmRequest(value);
+          if (!request) {
+            await replyText(client, messageId, '价格回调取消参数无效，请重新发起。');
+            return;
+          }
+          const claim = claimRentalAction(messageId, actionName, value);
+          if (!claim.claimed) {
+            await replyText(client, messageId, duplicateRentalActionText(claim.claim));
+            return;
+          }
+          setRentalActionStatus(claim.key, 'cancelled');
+          await updateCard(client, messageId, buildActivityPriceCallbackStatusCard(request, { confirmed: false })).catch(() => false);
           return;
         }
 

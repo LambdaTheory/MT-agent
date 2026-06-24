@@ -30,8 +30,12 @@ export interface ActivityControlSummary {
   mutating: boolean;
 }
 
+function compact(text: string): string {
+  return text.replace(/\s+/g, '');
+}
+
 export function isKnownMutatingControlText(text: string): boolean {
-  return MUTATING_CONTROL_PATTERNS.some((currentPattern) => currentPattern.test(text.replace(/\s+/g, ' ').trim()));
+  return MUTATING_CONTROL_PATTERNS.some((currentPattern) => currentPattern.test(compact(text)));
 }
 
 function normalized(text: string): string {

@@ -8,6 +8,8 @@ import { fillMissingDifferentialPricingDiscounts, type DifferentialPricingDiscou
 import { waitForActivityFormShell } from './pageModel.js';
 import { pickDifferentialPricingProducts, type DifferentialPricingProductPickResult } from './productPicker.js';
 import { scoutActivityFormPage, type ActivityScoutResult } from './scout.js';
+import { submitDifferentialPricingActivity, type ActivitySubmitResult } from './submit.js';
+import { writeActivitySubmitSession } from './submitSession.js';
 import type { ActivityAutomationConfig } from './config.js';
 
 interface ActivityFormAutomationHooks {
@@ -16,6 +18,8 @@ interface ActivityFormAutomationHooks {
   fillDifferentialPricingDateRanges?: typeof fillDifferentialPricingDateRanges;
   fillMissingDifferentialPricingDiscounts?: typeof fillMissingDifferentialPricingDiscounts;
   scoutActivityFormPage?: typeof scoutActivityFormPage;
+  submitDifferentialPricingActivity?: typeof submitDifferentialPricingActivity;
+  writeActivitySubmitSession?: typeof writeActivitySubmitSession;
 }
 
 export async function runActivityFormAutomation(
@@ -28,6 +32,8 @@ export async function runActivityFormAutomation(
   const fillDates = hooks.fillDifferentialPricingDateRanges ?? fillDifferentialPricingDateRanges;
   const fillDiscounts = hooks.fillMissingDifferentialPricingDiscounts ?? fillMissingDifferentialPricingDiscounts;
   const scoutPage = hooks.scoutActivityFormPage ?? scoutActivityFormPage;
+  const submitActivity = hooks.submitDifferentialPricingActivity ?? submitDifferentialPricingActivity;
+  const writeSubmitSession = hooks.writeActivitySubmitSession ?? writeActivitySubmitSession;
 
   await waitForShell(page);
 
@@ -48,11 +54,21 @@ export async function runActivityFormAutomation(
   }
 
   const result = await scoutPage(page, config, productPickResult);
+
+  let submitResult: ActivitySubmitResult | undefined;
+  let submitSessionPath: string | undefined;
+  if (config.confirmSubmit) {
+    submitResult = await submitActivity(page);
+    submitSessionPath = await writeSubmitSession(config, result, submitResult);
+  }
+
   return {
     ...result,
     productPickResult: productPickResult ?? result.productPickResult,
     dateFillResult,
     discountFillResult,
+    submitResult,
+    submitSessionPath,
   };
 }
 

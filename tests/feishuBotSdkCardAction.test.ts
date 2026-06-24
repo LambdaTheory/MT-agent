@@ -54,6 +54,8 @@ function fakeActivityAutomationClient() {
         mappedCount: 7,
         unmappedCount: 0,
         productPickSessionPath: 'output/latest/activity-automation/activity-product-pick-session.json',
+        submitSessionPath: 'output/latest/activity-automation/activity-submit-session.json',
+        callbackProductIds: ['770', '800', '801'],
         lines: ['自动选品: 7', '活动时间填写: 7', '折扣填写: 28', '已映射端内ID: 7'],
       };
     },
@@ -183,7 +185,7 @@ describe('createFeishuSdkBot card.action.trigger', () => {
     expect(JSON.stringify((second as any).card.data)).toContain('已经取消');
   });
 
-  it('executes differential pricing automation from card confirmation and patches status cards', async () => {
+  it('patches a price callback confirmation card after differential pricing automation completes', async () => {
     const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
     const sent: unknown[] = [];
     const activityAutomationClient = fakeActivityAutomationClient();
@@ -227,9 +229,9 @@ describe('createFeishuSdkBot card.action.trigger', () => {
     expect(sent[0]).toMatchObject({ kind: 'patch', request: { path: { message_id: 'om-activity-automation' } } });
     expect(JSON.stringify(sent[0])).toContain('处理中');
     expect(sent[1]).toMatchObject({ kind: 'patch', request: { path: { message_id: 'om-activity-automation' } } });
-    expect(JSON.stringify(sent[1])).toContain('已完成');
-    expect(JSON.stringify(sent[1])).toContain('活动时间填写: 7');
-    expect(JSON.stringify(sent[1])).toContain('折扣填写: 28');
+    expect(JSON.stringify(sent[1])).toContain('activity_price_callback_confirm');
+    expect(JSON.stringify(sent[1])).toContain('activity-submit-session.json');
+    expect(JSON.stringify(sent[1])).toContain('770');
   });
 
   it('handles id_lookup form submit by returning the updated card', async () => {
