@@ -830,12 +830,10 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
           }
           const claim = claimRentalAction(messageId, actionName, value);
           if (!claim.claimed) {
-            await replyText(client, messageId, duplicateRentalActionText(claim.claim));
-            return;
+            return cardActionUpdateResponse(claimStatusCard('价格回调已处理', claim.claim));
           }
           setRentalActionStatus(claim.key, 'cancelled');
-          await updateCard(client, messageId, buildActivityPriceCallbackStatusCard(request, { confirmed: false })).catch(() => false);
-          return;
+          return replaceCard(client, messageId, buildActivityPriceCallbackStatusCard(request, { confirmed: false }));
         }
 
         if (actionName === 'rental_price_cancel') {

@@ -348,6 +348,42 @@ describe('createFeishuSdkBot card.action.trigger', () => {
     expect(JSON.stringify(sent[0])).toContain('已取消');
   });
 
+  it('returns replacement cards for price callback cancellation and duplicate clicks', async () => {
+    const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
+    const sent: unknown[] = [];
+    const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', outputDir: 'output', sdk: fakeSdk(sent, registered) });
+
+    bot.start();
+    const event = {
+      event: {
+        context: { open_message_id: 'om-activity-price-callback-cancel' },
+        action: {
+          tag: 'button',
+          value: {
+            action: 'activity_price_callback_cancel',
+            request: {
+              submitSessionPath: 'output/latest/activity-automation/activity-submit-session.json',
+              productIds: ['770', '800'],
+              mappedCount: 2,
+              startsAt: '2026-06-24',
+              endsAt: '2026-06-30',
+            },
+          },
+        },
+      },
+    };
+
+    const first = await registered['card.action.trigger'](event);
+    const second = await registered['card.action.trigger'](event);
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ kind: 'patch', request: { path: { message_id: 'om-activity-price-callback-cancel' } } });
+    expect(first).toMatchObject({ card: { type: 'raw', data: { schema: '2.0' } } });
+    expect(JSON.stringify((first as any).card.data)).toContain('已取消');
+    expect(second).toMatchObject({ card: { type: 'raw', data: { schema: '2.0' } } });
+    expect(JSON.stringify((second as any).card.data)).toContain('已经取消');
+  });
+
   it('handles id_lookup form submit by returning the updated card', async () => {
     const outputDir = await writeContext();
     const registered: Record<string, (data: unknown) => Promise<unknown>> = {};

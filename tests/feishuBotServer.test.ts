@@ -599,6 +599,56 @@ describe('startFeishuBotServer', () => {
     }
   });
 
+  it('returns replacement cards for HTTP price callback cancellation and duplicate clicks', async () => {
+    const server = startFeishuBotServer({
+      port: 0,
+      appId: 'app',
+      appSecret: 'secret',
+      outputDir: 'output',
+    });
+    try {
+      await new Promise<void>((resolve) => server.once('listening', resolve));
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+      const body = {
+        header: { event_type: 'card.action.trigger' },
+        event: {
+          context: { open_message_id: 'mid-http-activity-price-callback-cancel' },
+          action: {
+            value: {
+              action: 'activity_price_callback_cancel',
+              request: {
+                submitSessionPath: 'output/latest/activity-automation/activity-submit-session.json',
+                productIds: ['770', '800'],
+                mappedCount: 2,
+                startsAt: '2026-06-24',
+                endsAt: '2026-06-30',
+              },
+            },
+          },
+        },
+      };
+
+      const first = await fetch(`http://127.0.0.1:${address.port}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const second = await fetch(`http://127.0.0.1:${address.port}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+
+      expect(first.status).toBe(200);
+      expect(second.status).toBe(200);
+      expect(JSON.stringify(await first.json())).toContain('已取消');
+      expect(JSON.stringify(await second.json())).toContain('已经取消');
+    } finally {
+      server.close();
+    }
+  });
+
   it('does not execute duplicate HTTP rental operation confirmations from the same card', async () => {
     const replies: Array<{ messageId: string; text: string }> = [];
     const rentalPriceClient = fakeRentalPriceClient();

@@ -582,8 +582,12 @@ async function handleCardActionTrigger(
       await replyText(replyConfig, '价格回调取消参数无效，请重新发起。');
       return;
     }
-    await replyCard(replyConfig, buildActivityPriceCallbackStatusCard(request, { confirmed: false }));
-    return;
+    const claim = claimServerCardAction(messageId, 'activity_price_callback', actionName);
+    if (!claim.claimed) {
+      return claimStatusCard('价格回调已处理', claim.claim);
+    }
+    setServerCardActionStatus(claim.key, 'cancelled');
+    return buildActivityPriceCallbackStatusCard(request, { confirmed: false });
   }
 
   if (actionName === 'rental_price_cancel') {
