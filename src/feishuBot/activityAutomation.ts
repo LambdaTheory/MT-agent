@@ -92,7 +92,9 @@ function readStringFromRecord(value: unknown, keys: string[]): string | null {
 
 function readDate(value: unknown): string | null {
   const raw = readString(value) ?? readStringFromRecord(value, ['date', 'value', 'formatted_date', 'formattedDate']);
-  return raw && /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : null;
+  if (!raw) return null;
+  const match = /^(\d{4}-\d{2}-\d{2})(?:\s+[+-]\d{4})?$/.exec(raw);
+  return match?.[1] ?? null;
 }
 
 function readDiscount(value: unknown): string | null {
