@@ -114,34 +114,46 @@ function addHint(store: Map<string, Set<string>>, internalProductId: string, pro
   store.set(id, current);
 }
 
+async function loadOptionalArtifactJson(path: string): Promise<unknown | null> {
+  try {
+    return JSON.parse(await readFile(path, 'utf8')) as unknown;
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return null;
+    if (error instanceof SyntaxError) return null;
+    throw error;
+  }
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
 async function collectArtifactProductNameHints(outputRoot: string, productIdMapping: ProductIdMapping): Promise<Record<string, string[]>> {
   const hints = new Map<string, Set<string>>();
   const recentDates = (await datedOutputDirs(outputRoot)).slice(0, 7);
 
   for (const date of recentDates) {
     const paths = buildPublicTrafficPaths(outputRoot, date);
-    try {
-      const parsed = JSON.parse(await readFile(paths.reportContext, 'utf8')) as {
-        rows?: Array<{ displayProductId?: string; productName?: string }>;
-      };
-      for (const row of parsed.rows ?? []) {
-        addHint(hints, row.displayProductId?.replace(/^端内ID\s*/, '') ?? '', row.productName);
+    const reportContext = asRecord(await loadOptionalArtifactJson(paths.reportContext));
+    const reportRows = Array.isArray(reportContext?.rows) ? reportContext.rows : [];
+    for (const value of reportRows) {
+      const row = asRecord(value);
+      if (row) {
+        const displayProductId = typeof row.displayProductId === 'string' ? row.displayProductId : '';
+        const productName = typeof row.productName === 'string' ? row.productName : undefined;
+        addHint(hints, displayProductId.replace(/^端内ID\s*/, ''), productName);
       }
-    } catch (error) {
-      if (!(error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT')) throw error;
     }
 
-    try {
-      const parsed = JSON.parse(await readFile(paths.exposureCumulativeProducts, 'utf8')) as Array<{
-        platformProductId?: string;
-        productName?: string;
-      }>;
-      for (const row of parsed) {
-        const internalProductId = row.platformProductId ? productIdMapping[row.platformProductId]?.trim() ?? '' : '';
-        addHint(hints, internalProductId, row.productName);
+    const exposureRows = await loadOptionalArtifactJson(paths.exposureCumulativeProducts);
+    for (const value of Array.isArray(exposureRows) ? exposureRows : []) {
+      const row = asRecord(value);
+      if (row) {
+        const platformProductId = typeof row.platformProductId === 'string' ? row.platformProductId : '';
+        const productName = typeof row.productName === 'string' ? row.productName : undefined;
+        const internalProductId = platformProductId ? productIdMapping[platformProductId]?.trim() ?? '' : '';
+        addHint(hints, internalProductId, productName);
       }
-    } catch (error) {
-      if (!(error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT')) throw error;
     }
   }
 

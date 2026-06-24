@@ -130,7 +130,7 @@ describe('rental price card action', () => {
       async specDiscover() { throw new Error('specDiscover should not run for copy confirmation'); },
       async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run for copy confirmation'); },
     };
-    const registered: Record<string, (data: unknown) => Promise<void>> = {};
+    const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
     const sent: unknown[] = [];
     const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', outputDir: await mkdtemp(join(tmpdir(), 'mt-agent-sdk-action-')), sdk: fakeSdk(sent, registered), rentalPriceClient });
     const callback = {
@@ -143,18 +143,18 @@ describe('rental price card action', () => {
     bot.start();
     await registered['card.action.trigger'](callback);
     await waitFor(() => calls.length === 1);
-    await registered['card.action.trigger'](callback);
+    const processingDuplicate = await registered['card.action.trigger'](callback);
 
     expect(calls).toEqual(['copy:875']);
-    expect(sent.some((item) => JSON.stringify(item).includes('已经在执行中'))).toBe(true);
+    expect(JSON.stringify(processingDuplicate)).toContain('已经在执行中');
 
     releaseCopy?.();
     await waitFor(() => sent.some((item) => JSON.stringify(item).includes('复制成功')));
-    await registered['card.action.trigger'](callback);
+    const completedDuplicate = await registered['card.action.trigger'](callback);
 
     expect(calls).toEqual(['copy:875']);
     expect(sent.filter((item) => JSON.stringify(item).includes('复制成功')).every((item) => JSON.stringify(item).includes('"kind":"patch"'))).toBe(true);
-    expect(sent.some((item) => JSON.stringify(item).includes('已经执行完成'))).toBe(true);
+    expect(JSON.stringify(completedDuplicate)).toContain('已经执行完成');
   });
 
   it('executes generic agent tool confirmations through the decoupled tool module', async () => {
