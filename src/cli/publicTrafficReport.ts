@@ -11,7 +11,7 @@ import { writeProductIdMappingFromExport } from '../mapping/refreshProductIdMapp
 import { sendFeishuCard } from '../notify/feishu.js';
 import { analyzePublicTrafficData } from '../publicTraffic/analyzePublicTrafficData.js';
 import { buildPublicTrafficCard } from '../publicTraffic/buildPublicTrafficCard.js';
-import { assessDashboardQuality } from '../publicTraffic/dashboardQuality.js';
+import { assessDashboardQuality, formatDashboardCrawlSummary } from '../publicTraffic/dashboardQuality.js';
 import { buildPublicTrafficArtifactManifest, savePublicTrafficArtifactManifest, type PublicTrafficArtifactManifest } from '../publicTraffic/artifacts.js';
 import { aggregateExposureDeltas } from '../publicTraffic/exposureAggregate.js';
 import { computeExposureDailyDelta } from '../publicTraffic/exposureDelta.js';
@@ -38,6 +38,15 @@ const EXPOSURE_SOURCE_URL = 'https://b.alipay.com/page/self-operation-center/cus
 const ORDER_ANALYSIS_SOURCE_URL = 'https://b.alipay.com/page/recycle-im/app/assistant-data-analysis/index/order/';
 const MIN_RELIABLE_PREVIOUS_EXPOSURE_PRODUCTS = 200;
 type FeishuSendTo = 'personal' | 'group' | 'both';
+
+export interface PublicTrafficReportCliResult {
+  logPath: string;
+  latestLogPath: string;
+  markdownPath: string;
+  workbookPath: string;
+  dashboardCrawlSummary: string;
+  firstReportSent: boolean;
+}
 
 export function parseFeishuSendToArg(argv: string[]): FeishuSendTo | undefined {
   const flagIndex = argv.indexOf('--send-to');
@@ -410,7 +419,7 @@ async function saveArtifactManifestSafely(path: string, manifest: PublicTrafficA
   }
 }
 
-export async function runPublicTrafficReportCli(): Promise<void> {
+export async function runPublicTrafficReportCli(): Promise<PublicTrafficReportCliResult> {
   await loadEnv();
   const config = await loadConfig();
   const runDate = today();
@@ -536,8 +545,10 @@ export async function runPublicTrafficReportCli(): Promise<void> {
         '30d': paths.publicVisitRaw['30d'],
       },
     }), log);
-    const dashboardRows = normalizeDashboardRowsForReport(rawTables, log);
     const dataQualityNotes = dashboardDataQualityNotes(rawTables);
+    const dashboardCrawlSummary = formatDashboardCrawlSummary(rawTables, dataQualityNotes);
+    for (const line of dashboardCrawlSummary.split('\n')) log.addEvent(line);
+    const dashboardRows = normalizeDashboardRowsForReport(rawTables, log);
     for (const note of dataQualityNotes) log.addEvent(note);
     log.addEvent(`后链路数据: ${dashboardRows.length} 条周期商品记录`);
 
@@ -617,6 +628,14 @@ export async function runPublicTrafficReportCli(): Promise<void> {
     console.log(fallbackText);
 
     console.log(`公域流量报告已生成: ${paths.dir}`);
+    return {
+      logPath: paths.log,
+      latestLogPath: paths.latestLog,
+      markdownPath: paths.markdown,
+      workbookPath: paths.workbook,
+      dashboardCrawlSummary,
+      firstReportSent,
+    };
   } catch (error) {
     log.addEvent(`错误: ${error instanceof Error ? error.message : String(error)}`);
     throw error;

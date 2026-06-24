@@ -348,6 +348,50 @@ describe('runPublicTrafficReportCli public traffic sequencing', () => {
     expect(manifests.orderAnalysis).toMatchObject({ stage: 'order-analysis', capturedAt: '2026-06-10T12:00:00Z', dataDate: '2026-06-09', files: { orderAnalysis: todayPaths.orderAnalysis } });
   });
 
+  it('writes explicit dashboard crawl summary into the run log', async () => {
+    mocks.crawlPublicTrafficSources.mockResolvedValueOnce({
+      goodsExportPath: join(mocks.outputDir, 'goods.xlsx'),
+      exposure: {
+        overview: [{ period: '1d', exposure: 10, visits: 2, amount: 3, conversionRate: 20 }],
+        products: [{ productName: '当前商品', platformProductId: 'p-current', exposure: 1000, visits: 100, amount: 200, custodyDays: null, raw: {} }],
+      },
+      dashboard: (['1d', '7d', '30d'] as const).map((period) => ({
+        period,
+        headers: [],
+        rows: [],
+        collection: {
+          period,
+          actualPageSizes: [],
+          pageCount: 0,
+          rowCount: 0,
+          dedupedRowCount: 0,
+          displayedTotalCount: 0,
+          pageSizeFallback: false,
+          complete: false,
+        },
+      })) satisfies RawTableData[],
+      orderAnalysis: {
+        capturedAt: '2026-06-10T12:00:00Z',
+        pages: {
+          overview: { key: 'overview', label: '标准订单分析', dataDate: '2026-06-09', indicators: [] },
+          delivery: { key: 'delivery', label: '发货分析', dataDate: '2026-06-09', indicators: [] },
+          return: { key: 'return', label: '归还分析', dataDate: '2026-06-09', indicators: [] },
+          customs: { key: 'customs', label: '关单分析', dataDate: '2026-06-09', indicators: [] },
+        },
+      },
+    });
+    const { runPublicTrafficReportCli } = await import('../src/cli/publicTrafficReport.js');
+
+    const result = await runPublicTrafficReportCli();
+
+    const todayPaths = buildPublicTrafficPaths(mocks.outputDir, '2026-06-10');
+    const log = await readFile(todayPaths.log, 'utf8');
+    expect(log).toContain('访问页抓取情况');
+    expect(log).toContain('1日：页数 0，行数 0，去重 0，总数 0，完成 否（collection.complete=false）');
+    expect(result.dashboardCrawlSummary).toContain('访问页抓取情况');
+    expect(result.logPath).toBe(todayPaths.log);
+  });
+
   it('uses the source data date in the report title while keeping output paths on the run date', async () => {
     vi.setSystemTime(new Date('2026-06-11T12:00:00Z'));
     const { runPublicTrafficReportCli } = await import('../src/cli/publicTrafficReport.js');
