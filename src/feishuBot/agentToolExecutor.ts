@@ -29,6 +29,15 @@ export interface AgentToolExecutionOptions {
 
 let publicTrafficReportRunning = false;
 
+function formatPublicTrafficReportRunSuccess(result: Awaited<ReturnType<typeof runPublicTrafficReportCli>>): string {
+  return [
+    '公域日报已生成并发送。',
+    `抓取日志：${result.logPath}`,
+    '',
+    result.dashboardCrawlSummary,
+  ].filter((line) => line !== undefined).join('\n');
+}
+
 function readString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
@@ -98,8 +107,8 @@ export async function executeAgentToolRequest(
       if (publicTrafficReportRunning) return { text: '公域日报正在运行中，请稍后再试。' };
       publicTrafficReportRunning = true;
       try {
-        await runPublicTrafficReportCli();
-        return { text: '公域日报已生成并发送。' };
+        const result = await runPublicTrafficReportCli();
+        return { text: formatPublicTrafficReportRunSuccess(result) };
       } finally {
         publicTrafficReportRunning = false;
       }
