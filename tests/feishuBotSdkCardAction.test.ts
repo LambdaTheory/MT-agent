@@ -275,6 +275,79 @@ describe('createFeishuSdkBot card.action.trigger', () => {
     expect(JSON.stringify(sent[1])).toContain('activity_price_callback_confirm');
   });
 
+  it('accepts nested differential_pricing_form values from differential pricing callbacks', async () => {
+    const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
+    const sent: unknown[] = [];
+    const activityAutomationClient = fakeActivityAutomationClient();
+    const bot = createFeishuSdkBot({
+      appId: 'app',
+      appSecret: 'secret',
+      outputDir: 'output',
+      activityAutomationClient,
+      sdk: fakeSdk(sent, registered),
+    });
+
+    bot.start();
+    await registered['card.action.trigger']({
+      event: {
+        context: { open_message_id: 'om-activity-automation-nested' },
+        action: {
+          tag: 'button',
+          value: { action: 'activity_automation_confirm' },
+          form_value: {
+            differential_pricing_form: {
+              starts_at: '2026-06-24',
+              ends_at: '2026-06-30',
+            },
+          },
+        },
+      },
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(activityAutomationClient.executions).toEqual([
+      {
+        startsAt: '2026-06-24',
+        endsAt: '2026-06-30',
+        discounts: { SS: '8.5', S: '9.0', A: '9.5', B: '9.8' },
+      },
+    ]);
+    expect(sent).toHaveLength(2);
+    expect(sent[1]).toMatchObject({ kind: 'patch', request: { path: { message_id: 'om-activity-automation-nested' } } });
+    expect(JSON.stringify(sent[1])).toContain('activity_price_callback_confirm');
+  });
+
+  it('replaces the differential pricing card when the user cancels', async () => {
+    const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
+    const sent: unknown[] = [];
+    const activityAutomationClient = fakeActivityAutomationClient();
+    const bot = createFeishuSdkBot({
+      appId: 'app',
+      appSecret: 'secret',
+      outputDir: 'output',
+      activityAutomationClient,
+      sdk: fakeSdk(sent, registered),
+    });
+
+    bot.start();
+    const result = await registered['card.action.trigger']({
+      event: {
+        context: { open_message_id: 'om-activity-automation-cancel' },
+        action: {
+          tag: 'button',
+          value: { action: 'activity_automation_cancel' },
+        },
+      },
+    });
+
+    expect(activityAutomationClient.executions).toEqual([]);
+    expect(result).toMatchObject({ card: { type: 'raw', data: { schema: '2.0' } } });
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ kind: 'patch', request: { path: { message_id: 'om-activity-automation-cancel' } } });
+    expect(JSON.stringify(sent[0])).toContain('已取消');
+  });
+
   it('handles id_lookup form submit by returning the updated card', async () => {
     const outputDir = await writeContext();
     const registered: Record<string, (data: unknown) => Promise<unknown>> = {};

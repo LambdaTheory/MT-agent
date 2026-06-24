@@ -76,9 +76,13 @@ function readString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 function readStringFromRecord(value: unknown, keys: string[]): string | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
-  const record = value as Record<string, unknown>;
+  if (!isRecord(value)) return null;
+  const record = value;
   for (const key of keys) {
     const raw = readString(record[key]);
     if (raw) return raw;
@@ -101,6 +105,21 @@ function readStringArray(value: unknown): string[] {
   return value
     .map((item) => (typeof item === 'string' ? item.trim() : ''))
     .filter((item) => item.length > 0);
+}
+
+function hasActivityAutomationFields(value: Record<string, unknown>): boolean {
+  return ['starts_at', 'ends_at', 'discount_ss', 'discount_s', 'discount_a', 'discount_b'].some((key) => key in value);
+}
+
+function unwrapActivityAutomationFormValue(value: unknown): Record<string, unknown> | null {
+  if (!isRecord(value)) return null;
+  if (hasActivityAutomationFields(value)) return value;
+  const nestedForm = value.differential_pricing_form;
+  if (isRecord(nestedForm) && hasActivityAutomationFields(nestedForm)) return nestedForm;
+  for (const candidate of Object.values(value)) {
+    if (isRecord(candidate) && hasActivityAutomationFields(candidate)) return candidate;
+  }
+  return value;
 }
 
 function statusCard(title: string, content: string, template: 'blue' | 'green' | 'red' | 'grey' = 'blue'): FeishuCardPayload {
@@ -183,6 +202,14 @@ export function buildActivityAutomationCard(defaults: Partial<ActivityAutomation
               name: 'activity_automation_confirm_submit',
               behaviors: [{ type: 'callback', value: { action: 'activity_automation_confirm' } }],
             },
+            {
+              tag: 'button',
+              text: { tag: 'plain_text', content: '取消' },
+              type: 'default',
+              form_action_type: 'submit',
+              name: 'activity_automation_cancel_submit',
+              behaviors: [{ type: 'callback', value: { action: 'activity_automation_cancel' } }],
+            },
           ],
         },
       ],
@@ -255,8 +282,8 @@ export function buildActivityPriceCallbackRequest(result: ActivityAutomationExec
 }
 
 export function parseActivityAutomationConfirmRequest(formValue: unknown): ActivityAutomationExecutionRequest | null {
-  if (!formValue || typeof formValue !== 'object' || Array.isArray(formValue)) return null;
-  const values = formValue as Record<string, unknown>;
+  const values = unwrapActivityAutomationFormValue(formValue);
+  if (!values) return null;
   const startsAt = readDate(values.starts_at);
   const endsAt = readDate(values.ends_at);
   const SS = readDiscount(values.discount_ss) ?? DEFAULT_DISCOUNTS.SS;

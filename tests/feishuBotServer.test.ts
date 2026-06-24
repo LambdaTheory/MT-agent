@@ -502,6 +502,103 @@ describe('startFeishuBotServer', () => {
     }
   });
 
+  it('accepts nested differential_pricing_form values in HTTP differential pricing callbacks', async () => {
+    const cards: Array<{ messageId: string; card: unknown }> = [];
+    let resolveReplySent!: () => void;
+    const replySent = new Promise<void>((resolve) => {
+      resolveReplySent = resolve;
+    });
+    const activityAutomationClient = fakeActivityAutomationClient();
+    const server = startFeishuBotServer({
+      port: 0,
+      appId: 'app',
+      appSecret: 'secret',
+      outputDir: 'output',
+      activityAutomationClient,
+      replyCard: async ({ messageId }, card) => {
+        cards.push({ messageId, card });
+        resolveReplySent();
+        return { sent: true, channel: 'app' };
+      },
+      replyText: async () => {
+        throw new Error('replyText should not be called when nested differential pricing values are provided');
+      },
+    });
+    try {
+      await new Promise<void>((resolve) => server.once('listening', resolve));
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+
+      const response = await fetch(`http://127.0.0.1:${address.port}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          header: { event_type: 'card.action.trigger' },
+          event: {
+            context: { open_message_id: 'mid-http-activity-card-nested' },
+            action: {
+              value: { action: 'activity_automation_confirm' },
+              form_value: {
+                differential_pricing_form: {
+                  starts_at: '2026-06-24',
+                  ends_at: '2026-06-30',
+                },
+              },
+            },
+          },
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      await replySent;
+      expect(activityAutomationClient.executions).toEqual([
+        {
+          startsAt: '2026-06-24',
+          endsAt: '2026-06-30',
+          discounts: { SS: '8.5', S: '9.0', A: '9.5', B: '9.8' },
+        },
+      ]);
+      expect(cards).toHaveLength(1);
+      expect(cards[0]?.messageId).toBe('mid-http-activity-card-nested');
+      expect(JSON.stringify(cards[0]?.card)).toContain('activity_price_callback_confirm');
+    } finally {
+      server.close();
+    }
+  });
+
+  it('returns a cancelled status card when the HTTP differential pricing card is cancelled', async () => {
+    const server = startFeishuBotServer({
+      port: 0,
+      appId: 'app',
+      appSecret: 'secret',
+      outputDir: 'output',
+    });
+    try {
+      await new Promise<void>((resolve) => server.once('listening', resolve));
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+
+      const response = await fetch(`http://127.0.0.1:${address.port}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          header: { event_type: 'card.action.trigger' },
+          event: {
+            context: { open_message_id: 'mid-http-activity-card-cancel' },
+            action: {
+              value: { action: 'activity_automation_cancel' },
+            },
+          },
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(JSON.stringify(await response.json())).toContain('已取消');
+    } finally {
+      server.close();
+    }
+  });
+
   it('does not execute duplicate HTTP rental operation confirmations from the same card', async () => {
     const replies: Array<{ messageId: string; text: string }> = [];
     const rentalPriceClient = fakeRentalPriceClient();

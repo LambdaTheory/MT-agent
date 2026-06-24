@@ -535,8 +535,10 @@ async function handleCardActionTrigger(
   }
 
   if (actionName === 'activity_automation_confirm') {
-    const request = parseActivityAutomationConfirmRequest(readActionForm(payload.event?.action));
+    const actionForm = readActionForm(payload.event?.action);
+    const request = parseActivityAutomationConfirmRequest(actionForm);
     if (!request) {
+      console.error('差异化定价参数解析失败', { messageId, actionValue: value, actionForm, action: payload.event?.action });
       await replyText(replyConfig, '差异化定价参数无效，请重新填写卡片后再试。');
       return;
     }
@@ -553,6 +555,15 @@ async function handleCardActionTrigger(
     }
     await replyText(replyConfig, formatActivityAutomationExecutionResult(result));
     return;
+  }
+
+  if (actionName === 'activity_automation_cancel') {
+    const claim = claimServerCardAction(messageId, 'activity_automation', actionName);
+    if (!claim.claimed) {
+      return claimStatusCard('差异化定价已处理', claim.claim);
+    }
+    setServerCardActionStatus(claim.key, 'cancelled');
+    return statusCard('差异化定价已取消', '已取消本次差异化定价。', 'grey');
   }
 
   if (actionName === 'activity_price_callback_confirm') {

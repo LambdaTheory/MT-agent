@@ -759,8 +759,10 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
         }
 
         if (actionName === 'activity_automation_confirm') {
-          const request = parseActivityAutomationConfirmRequest(readActionForm(action));
+          const actionForm = readActionForm(action);
+          const request = parseActivityAutomationConfirmRequest(actionForm);
           if (!request) {
+            console.error('差异化定价参数解析失败', { messageId, actionValue: value, actionForm, action });
             await replyText(client, messageId, '差异化定价参数无效，请重新填写卡片后再试。');
             return;
           }
@@ -793,6 +795,15 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
             }
           })();
           return;
+        }
+
+        if (actionName === 'activity_automation_cancel') {
+          const claim = claimRentalAction(messageId, actionName, value);
+          if (!claim.claimed) {
+            return cardActionUpdateResponse(claimStatusCard('差异化定价已处理', claim.claim));
+          }
+          setRentalActionStatus(claim.key, 'cancelled');
+          return replaceCard(client, messageId, statusCard('差异化定价已取消', '已取消本次差异化定价。', 'grey'));
         }
 
         if (actionName === 'activity_price_callback_confirm') {

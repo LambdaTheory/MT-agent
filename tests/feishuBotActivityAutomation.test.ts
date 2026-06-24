@@ -67,6 +67,7 @@ describe('differential pricing Feishu integration', () => {
       expect(picker).not.toHaveProperty('label');
       expect(picker).not.toHaveProperty('label_position');
     }
+    expect(JSON.stringify(card)).toContain('activity_automation_cancel');
   });
 
   it('builds a callback confirmation card from the submit session summary', () => {
@@ -106,6 +107,19 @@ describe('differential pricing Feishu integration', () => {
       startsAt: '2026-06-24',
       endsAt: '2026-06-30',
       discounts: { SS: '8.1', S: '8.8', A: '9.1', B: '9.6' },
+    });
+  });
+
+  it('parses nested differential_pricing_form payloads from form callbacks', () => {
+    expect(parseActivityAutomationConfirmRequest({
+      differential_pricing_form: {
+        starts_at: '2026-06-24',
+        ends_at: '2026-06-30',
+      },
+    })).toEqual({
+      startsAt: '2026-06-24',
+      endsAt: '2026-06-30',
+      discounts: { SS: '8.5', S: '9.0', A: '9.5', B: '9.8' },
     });
   });
 
