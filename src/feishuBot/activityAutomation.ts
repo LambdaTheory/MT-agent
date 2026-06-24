@@ -66,9 +66,7 @@ function datePicker(name: string, label: string, options: { defaultValue?: strin
   const input: Record<string, unknown> = {
     tag: 'date_picker',
     name,
-    label: { tag: 'plain_text', content: label },
-    label_position: 'top',
-    placeholder: { tag: 'plain_text', content: options.placeholder },
+    placeholder: { tag: 'plain_text', content: `${label} ${options.placeholder}`.trim() },
   };
   if (options.defaultValue !== undefined) input.initial_date = options.defaultValue;
   return input;
