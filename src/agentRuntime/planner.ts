@@ -76,13 +76,15 @@ export function schemaAllowsArguments(schema: unknown, value: Record<string, unk
 }
 
 export function listAgentPlannerTools(): AgentPlannerToolMetadata[] {
-  return listAgentTools().map(({ name, description, risk, requiresConfirmation, inputSchema }) => ({
-    name,
-    description,
-    risk,
-    requiresConfirmation,
-    inputSchema,
-  }));
+  return listAgentTools()
+    .filter((tool) => tool.plannerVisible !== false)
+    .map(({ name, description, risk, requiresConfirmation, inputSchema }) => ({
+      name,
+      description,
+      risk,
+      requiresConfirmation,
+      inputSchema,
+    }));
 }
 
 export function validateAgentToolArguments(toolName: string, value: Record<string, unknown>): boolean {

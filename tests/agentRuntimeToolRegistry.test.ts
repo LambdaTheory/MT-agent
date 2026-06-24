@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { listAgentPlannerTools } from '../src/agentRuntime/planner.js';
 import { findAgentTool, listAgentTools } from '../src/agentRuntime/toolRegistry.js';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -18,6 +19,11 @@ describe('agent runtime tool registry', () => {
       'publicTraffic.refreshDashboard',
       'closedOrder.syncFeedback',
       'closedOrder.runObservationReport',
+      'rental.copy',
+      'rental.delist',
+      'rental.tenancySet',
+      'rental.specDiscover',
+      'rental.specAddAndRefresh',
       'rental.operationConfirmRequest',
     ]);
     expect(listAgentTools().map((tool) => tool.name)).not.toContain('rental.newLinkBatchPlan');
@@ -31,7 +37,7 @@ describe('agent runtime tool registry', () => {
 
     const tools = listAgentTools();
     tools.pop();
-    expect(listAgentTools()).toHaveLength(11);
+    expect(listAgentTools()).toHaveLength(16);
   });
 
   it('returns defensive copies of tool metadata', () => {
@@ -78,6 +84,11 @@ describe('agent runtime tool registry', () => {
     expect(findAgentTool('publicTraffic.refreshDashboard')).toMatchObject({ risk: 'write', requiresConfirmation: true });
     expect(findAgentTool('closedOrder.syncFeedback')).toMatchObject({ risk: 'write', requiresConfirmation: true });
     expect(findAgentTool('closedOrder.runObservationReport')).toMatchObject({ risk: 'write', requiresConfirmation: true });
+    expect(findAgentTool('rental.copy')).toMatchObject({ risk: 'high', requiresConfirmation: true });
+    expect(findAgentTool('rental.delist')).toMatchObject({ risk: 'high', requiresConfirmation: true });
+    expect(findAgentTool('rental.tenancySet')).toMatchObject({ risk: 'high', requiresConfirmation: true });
+    expect(findAgentTool('rental.specDiscover')).toMatchObject({ risk: 'high', requiresConfirmation: true });
+    expect(findAgentTool('rental.specAddAndRefresh')).toMatchObject({ risk: 'high', requiresConfirmation: true });
     expect(findAgentTool('rental.operationConfirmRequest')).toMatchObject({ risk: 'high', requiresConfirmation: true });
   });
 
@@ -92,14 +103,55 @@ describe('agent runtime tool registry', () => {
     });
   });
 
-  it('keeps rental operation metadata atomic instead of workflow-specific', () => {
-    expect(findAgentTool('rental.operationConfirmRequest')?.inputSchema).toMatchObject({
+  it('exposes fine-grained rental operation tools to the planner', () => {
+    const plannerToolNames = listAgentPlannerTools().map((tool) => tool.name);
+
+    expect(plannerToolNames).toEqual([
+      'publicTraffic.latestSummary',
+      'product.query',
+      'productId.lookup',
+      'operationsLearning.startQuiz',
+      'publicTraffic.runReport',
+      'publicTraffic.resendLatestReport',
+      'publicTraffic.pushLatestReportToGroup',
+      'publicTraffic.refreshDashboard',
+      'closedOrder.syncFeedback',
+      'closedOrder.runObservationReport',
+      'rental.copy',
+      'rental.delist',
+      'rental.tenancySet',
+      'rental.specDiscover',
+      'rental.specAddAndRefresh',
+    ]);
+    expect(plannerToolNames).not.toContain('rental.operationConfirmRequest');
+  });
+
+  it('describes rental operation metadata per executable action', () => {
+    expect(findAgentTool('rental.copy')?.inputSchema).toMatchObject({
       properties: {
-        action: { type: 'string' },
         productId: { type: 'string' },
       },
-      required: ['action', 'productId'],
+      required: ['productId'],
       additionalProperties: false,
+    });
+    expect(findAgentTool('rental.tenancySet')?.inputSchema).toMatchObject({
+      properties: {
+        productId: { type: 'string' },
+        days: { type: 'string' },
+      },
+      required: ['productId', 'days'],
+      additionalProperties: false,
+    });
+    expect(findAgentTool('rental.specAddAndRefresh')?.inputSchema).toMatchObject({
+      properties: {
+        productId: { type: 'string' },
+        itemTitle: { type: 'string' },
+      },
+      required: ['productId', 'itemTitle'],
+      additionalProperties: false,
+    });
+    expect(findAgentTool('rental.operationConfirmRequest')?.inputSchema).toMatchObject({
+      required: ['action', 'productId'],
     });
   });
 });

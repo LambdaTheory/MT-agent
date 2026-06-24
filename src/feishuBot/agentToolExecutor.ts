@@ -20,6 +20,7 @@ import {
   createRentalPriceSkillClient,
   executeRentalOperationConfirmRequest,
   parseRentalOperationConfirmRequest,
+  type RentalOperationConfirmRequest,
   type RentalPriceSkillClient,
 } from './rentalPrice.js';
 import { findLatestReportContext, formatLatestSummary, formatProductRows, queryProductRows } from './reportStore.js';
@@ -49,6 +50,43 @@ function requireString(value: unknown, fieldName: string): string {
   const parsed = readString(value);
   if (!parsed) throw new Error(`${fieldName} is required`);
   return parsed;
+}
+
+function requireProductId(value: unknown, fieldName: string): string {
+  const parsed = requireString(value, fieldName);
+  if (!/^\d+$/.test(parsed)) throw new Error(`${fieldName} must be numeric`);
+  return parsed;
+}
+
+function requireTenancyDays(value: unknown, fieldName: string): string {
+  const parsed = requireString(value, fieldName);
+  if (!/^\d+(?:,\d+)*$/.test(parsed)) throw new Error(`${fieldName} must be comma-separated day numbers`);
+  return parsed;
+}
+
+function rentalAgentToolRequest(toolName: string, args: Record<string, unknown>): RentalOperationConfirmRequest | null {
+  switch (toolName) {
+    case 'rental.copy':
+      return { action: 'copy', productId: requireProductId(args.productId, 'productId') };
+    case 'rental.delist':
+      return { action: 'delist', productId: requireProductId(args.productId, 'productId') };
+    case 'rental.tenancySet':
+      return {
+        action: 'tenancy-set',
+        productId: requireProductId(args.productId, 'productId'),
+        days: requireTenancyDays(args.days, 'days'),
+      };
+    case 'rental.specDiscover':
+      return { action: 'spec-discover', productId: requireProductId(args.productId, 'productId') };
+    case 'rental.specAddAndRefresh':
+      return {
+        action: 'spec-add-and-refresh',
+        productId: requireProductId(args.productId, 'productId'),
+        itemTitle: requireString(args.itemTitle, 'itemTitle'),
+      };
+    default:
+      return null;
+  }
 }
 
 function closedOrderIngestStatePath(outputDir: string): string {
@@ -160,6 +198,16 @@ export async function executeAgentToolRequest(
           `首版状态：${result.firstQualityText}`,
         ].join('\n'),
       };
+    }
+    case 'rental.copy':
+    case 'rental.delist':
+    case 'rental.tenancySet':
+    case 'rental.specDiscover':
+    case 'rental.specAddAndRefresh': {
+      const rentalRequest = rentalAgentToolRequest(request.toolName, request.arguments);
+      if (!rentalRequest) throw new Error('租赁商品操作参数无效，请重新发起。');
+      const result = await executeRentalOperationConfirmRequest(options.rentalPriceClient ?? createRentalPriceSkillClient(), rentalRequest);
+      return { text: result.text };
     }
     case 'rental.operationConfirmRequest': {
       const rentalRequest = parseRentalOperationConfirmRequest({ request: request.arguments });

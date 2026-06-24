@@ -971,11 +971,12 @@ describe('handleBotIntent', () => {
   it('turns high-risk generic agent plans into approval cards without side effects', async () => {
     const planner: AgentPlannerProvider = {
       async proposePlan(request) {
-        expect(request.tools.map((tool) => tool.name)).toContain('rental.operationConfirmRequest');
+        expect(request.tools.map((tool) => tool.name)).toContain('rental.delist');
+        expect(request.tools.map((tool) => tool.name)).not.toContain('rental.operationConfirmRequest');
         return JSON.stringify({
           goal: '下架租赁商品',
-          selectedTool: 'rental.operationConfirmRequest',
-          arguments: { action: 'delist', productId: '761' },
+          selectedTool: 'rental.delist',
+          arguments: { productId: '761' },
           confidence: 0.95,
           reason: '用户要求下架商品 761',
           requiresConfirmation: true,
@@ -997,10 +998,10 @@ describe('handleBotIntent', () => {
       rentalPriceClient,
     });
 
-    expect(response.text).toContain('请确认 Agent 操作：rental.operationConfirmRequest');
+    expect(response.text).toContain('请确认 Agent 操作：rental.delist');
     expect(response.card).toBeDefined();
     expect(JSON.stringify(response.card)).toContain('agent_tool_confirm');
-    expect(JSON.stringify(response.card)).toContain('delist');
+    expect(JSON.stringify(response.card)).toContain('rental.delist');
     expect(JSON.stringify(response.card)).toContain('761');
   });
 

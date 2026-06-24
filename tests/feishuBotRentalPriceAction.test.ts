@@ -183,8 +183,8 @@ describe('rental price card action', () => {
           value: {
             action: 'agent_tool_confirm',
             request: {
-              toolName: 'rental.operationConfirmRequest',
-              arguments: { action: 'delist', productId: '761' },
+              toolName: 'rental.delist',
+              arguments: { productId: '761' },
               reason: '用户要求下架商品 761',
             },
           },

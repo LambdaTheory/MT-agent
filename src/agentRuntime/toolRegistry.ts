@@ -15,6 +15,30 @@ const optionalDashboardRefreshArgumentsSchema = {
   },
   additionalProperties: false,
 };
+const productIdArgumentsSchema = {
+  type: 'object',
+  properties: { productId: { type: 'string' } },
+  required: ['productId'],
+  additionalProperties: false,
+};
+const tenancySetArgumentsSchema = {
+  type: 'object',
+  properties: {
+    productId: { type: 'string' },
+    days: { type: 'string' },
+  },
+  required: ['productId', 'days'],
+  additionalProperties: false,
+};
+const specAddAndRefreshArgumentsSchema = {
+  type: 'object',
+  properties: {
+    productId: { type: 'string' },
+    itemTitle: { type: 'string' },
+  },
+  required: ['productId', 'itemTitle'],
+  additionalProperties: false,
+};
 const rentalOperationArgumentsSchema = {
   type: 'object',
   properties: {
@@ -99,10 +123,46 @@ const agentTools: AgentToolDefinition[] = [
     inputSchema: noArgumentsSchema,
   },
   {
+    name: 'rental.copy',
+    description: '复制租赁商品前的确认请求',
+    risk: 'high',
+    requiresConfirmation: true,
+    inputSchema: productIdArgumentsSchema,
+  },
+  {
+    name: 'rental.delist',
+    description: '下架租赁商品前的确认请求',
+    risk: 'high',
+    requiresConfirmation: true,
+    inputSchema: productIdArgumentsSchema,
+  },
+  {
+    name: 'rental.tenancySet',
+    description: '设置租赁商品租期前的确认请求',
+    risk: 'high',
+    requiresConfirmation: true,
+    inputSchema: tenancySetArgumentsSchema,
+  },
+  {
+    name: 'rental.specDiscover',
+    description: '查看租赁商品规格前的确认请求',
+    risk: 'high',
+    requiresConfirmation: true,
+    inputSchema: productIdArgumentsSchema,
+  },
+  {
+    name: 'rental.specAddAndRefresh',
+    description: '添加租赁商品规格并刷新前的确认请求',
+    risk: 'high',
+    requiresConfirmation: true,
+    inputSchema: specAddAndRefreshArgumentsSchema,
+  },
+  {
     name: 'rental.operationConfirmRequest',
     description: '执行租赁商品复制、下架、租期设置、规格查看或规格添加前的确认请求',
     risk: 'high',
     requiresConfirmation: true,
+    plannerVisible: false,
     inputSchema: rentalOperationArgumentsSchema,
   },
 ];
