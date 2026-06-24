@@ -232,6 +232,12 @@ describe('analyzePublicTrafficData', () => {
     expect(report.conclusions[0].text).toContain('较昨日上升 200');
     expect(report.conclusions[1].text).toContain('较昨日上升 30');
     expect(report.conclusions[3].text).toContain('百分点');
+    expect(report.previousSummary).toMatchObject({
+      exposure: 1000,
+      publicVisits: 50,
+      amount: 300,
+      exposureVisitRate: 0.05,
+    });
   });
 
   it('builds baseline conclusions when yesterday summary is missing', () => {

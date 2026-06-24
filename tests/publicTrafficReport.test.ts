@@ -419,6 +419,33 @@ describe('public traffic report outputs', () => {
     expect(JSON.stringify(columnSets[0])).toContain('公域金额\\n**¥300.00**');
   });
 
+  it('renders public funnel date title and previous-day percentages in metric cards', () => {
+    const withPrevious: PublicTrafficDataReportContext = {
+      ...contextWithOrderAnalysis,
+      previousSummary: {
+        exposure: 800,
+        publicVisits: 40,
+        dashboardVisits: 30,
+        createdOrders: 3,
+        shippedOrders: 2,
+        amount: 200,
+        exposureVisitRate: 0.04,
+        visitCreatedOrderRate: 0.1,
+        visitShipmentRate: 0.0667,
+      },
+    };
+
+    const card = buildPublicTrafficCard(withPrevious, { markdownPath: 'report.md', workbookPath: 'report.xlsx' });
+    const json = JSON.stringify(card);
+
+    expect(json).toContain('公域（06-10）');
+    expect(json).not.toContain('公域 1日');
+    expect(json.match(/较前日\+25\.00%/g)).toHaveLength(3);
+    expect(json).toContain('较前日+50.00%');
+    expect(json).toContain('发货率');
+    expect(json).toContain('较前日-44.37%');
+  });
+
   it('renders explanatory notes for empty sections', () => {
     const empty: PublicTrafficDataReportContext = {
       ...context,
@@ -838,7 +865,7 @@ describe('public traffic report outputs', () => {
     const card = buildPublicTrafficCard(contextWithOrderAnalysis, { markdownPath: 'report.md', workbookPath: 'report.xlsx' });
     const json = JSON.stringify(card);
     expect(json).not.toContain('今日漏斗');
-    expect(json).not.toContain('公域（');
+    expect(json).toContain('公域（06-10）');
     expect(json).toContain('订单经营（06-10）');
     expect(json).toContain('发货率');
     expect(json).not.toContain('关单率');

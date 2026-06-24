@@ -191,6 +191,7 @@ export interface PublicTrafficDataReportContext {
   recommendedActions: PublicTrafficReportSectionItem[];
   emptySectionNotes: PublicTrafficEmptySectionNotes;
   orderAnalysis?: OrderAnalysisResult;
+  previousSummary?: PublicTrafficDataSummary;
 }
 
 export interface PublicTrafficDataAnalysisInput extends PublicTrafficDataContext {
