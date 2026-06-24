@@ -8,6 +8,7 @@ import { ensureAuthenticatedMerchantSession } from './merchantSession.js';
 
 const EXPORT_MENU_MATCHERS = [/导出/, /下载/];
 const SELECTED_ONLY_MATCHERS = [/已选/, /选中/];
+const EXPORT_MENU_ITEM_SELECTOR = '.ant-dropdown:not(.ant-dropdown-hidden) .ant-dropdown-menu-item:not(.ant-dropdown-menu-item-disabled), .ant-dropdown:not(.ant-dropdown-hidden) li:not(.ant-dropdown-menu-item-disabled)';
 
 export function findGoodsExportMenuText(texts: string[]): string | null {
   const normalized = texts.map((text) => text.replace(/\s+/g, ' ').trim()).filter(Boolean);
@@ -33,15 +34,34 @@ async function visibleExportMenuTexts(page: Page): Promise<string[]> {
   return visibleTexts(menuItems);
 }
 
-async function clickExportMenuItem(page: Page): Promise<void> {
-  const menuItems = page.locator('.ant-dropdown:not(.ant-dropdown-hidden) .ant-dropdown-menu-item:not(.ant-dropdown-menu-item-disabled), .ant-dropdown:not(.ant-dropdown-hidden) li:not(.ant-dropdown-menu-item-disabled)');
+function isTransientMenuClickError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /Timeout|not stable|not visible|not attached|detached|closed/i.test(message);
+}
+
+export async function clickExportMenuItem(page: Page, reopenDropdown?: () => Promise<void>): Promise<void> {
+  const menuItems = page.locator(EXPORT_MENU_ITEM_SELECTOR);
   const texts = await visibleExportMenuTexts(page);
   const targetText = findGoodsExportMenuText(texts);
   if (!targetText) {
     throw new Error(`Could not find goods export menu item. Visible menu items: ${texts.join(' | ')}`);
   }
 
-  await menuItems.filter({ hasText: targetText }).first().click();
+  const target = menuItems.filter({ hasText: targetText }).first();
+  try {
+    await target.click({ timeout: 5000 });
+    return;
+  } catch (error) {
+    if (!reopenDropdown || !isTransientMenuClickError(error)) throw error;
+  }
+
+  await reopenDropdown();
+  const retryTexts = await visibleExportMenuTexts(page);
+  const retryTargetText = findGoodsExportMenuText(retryTexts);
+  if (!retryTargetText) {
+    throw new Error(`Could not find goods export menu item after reopening dropdown. Visible menu items: ${retryTexts.join(' | ')}`);
+  }
+  await page.locator(EXPORT_MENU_ITEM_SELECTOR).filter({ hasText: retryTargetText }).first().dispatchEvent('click');
 }
 
 async function clickExportDropdown(page: Page): Promise<void> {
@@ -87,7 +107,7 @@ export async function collectGoodsExportPage(config: AgentConfig, browser: Brows
 
   const downloadPromise = page.waitForEvent('download', { timeout: 180000 });
   await clickExportDropdown(page);
-  await clickExportMenuItem(page);
+  await clickExportMenuItem(page, () => clickExportDropdown(page));
   const download = await downloadPromise;
   await download.saveAs(outputPath);
 
