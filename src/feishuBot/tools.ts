@@ -1,3 +1,4 @@
+import { basename, dirname } from 'node:path';
 import { buildAgentToolConfirmCard } from '../agentRuntime/approvalCard.js';
 import { buildAgentClarificationCard } from '../agentRuntime/clarificationCard.js';
 import { listAgentPlannerTools, validateAgentPlannerClarificationProposal, validateAgentPlannerProposal, type AgentPlannerProvider } from '../agentRuntime/planner.js';
@@ -6,6 +7,8 @@ import { listAgentWorkflows } from '../agentRuntime/workflowRegistry.js';
 import { buildAgentLearningPlannerHints, summarizeAgentLearning } from '../agentLearning/store.js';
 import { parseAgentDataIntent } from '../agentData/intent.js';
 import { loadClosedOrderRegistryContext, type ClosedOrderRegistryPathsInput } from '../closedOrderFeedback/runtime.js';
+import { queryInventoryStatus } from '../inventoryStatus/query.js';
+import { readInventorySameSkuSnapshot } from '../inventoryStatus/store.js';
 import { createLinkRegistry } from '../linkRegistry/store.js';
 import {
   buildNewLinkBatchConfirmCard,
@@ -15,11 +18,20 @@ import {
   readNewLinkBatchWorkflowRequest,
 } from '../newLinkWorkflow/batch.js';
 import { startOperationsLearningSession, summarizeOperationsLearningHistory, summarizeOperationsLearningSession } from '../operationsLearningLoop/session.js';
+import { buildPublicTrafficPaths } from '../publicTraffic/paths.js';
 import {
   buildActivityAutomationCard,
   type ActivityAutomationSkillClient,
 } from './activityAutomation.js';
 import { executeAgentToolRequest } from './agentToolExecutor.js';
+import {
+  buildInventoryStatusDetailCard,
+  buildInventoryStatusOverviewCard,
+  formatInventoryStatusAmbiguousText,
+  formatInventoryStatusDetailText,
+  formatInventoryStatusMissingText,
+  formatInventoryStatusOverviewText,
+} from './inventoryStatusCard.js';
 import { formatIdLookupResult, lookupProductId } from './idLookup.js';
 import { buildIdLookupCard } from './idLookupCard.js';
 import { buildLinkRegistryOverviewCard, formatLinkRegistryOverviewText } from './linkRegistryOverviewCard.js';
@@ -167,6 +179,36 @@ async function buildReadOnlyToolRunOptions(
   return { linkRegistryStore: createLinkRegistry(registryContext.registry) };
 }
 
+async function handleInventoryStatusIntent(
+  intent: Extract<BotIntent, { type: 'inventory_status_overview' | 'inventory_status_query' }>,
+  outputDir: string,
+  options: HandleBotIntentOptions,
+): Promise<BotResponse> {
+  const latest = await findLatestReportContext(outputDir);
+  if (!latest) return { text: formatInventoryStatusMissingText({ status: 'snapshot_missing' }) };
+
+  const runDate = basename(dirname(latest.path));
+  const snapshotPath = buildPublicTrafficPaths(outputDir, runDate).sameSkuSnapshot;
+  const [snapshot, registryContext] = await Promise.all([
+    readInventorySameSkuSnapshot(snapshotPath),
+    loadClosedOrderRegistryContext(options.closedOrderRegistryPaths),
+  ]);
+  const result = queryInventoryStatus({
+    snapshot,
+    registryStore: createLinkRegistry(registryContext.registry, registryContext.overrideRisks),
+    query: intent.type === 'inventory_status_query' ? intent.query : '',
+  });
+
+  if (result.status === 'overview') {
+    return { text: formatInventoryStatusOverviewText(result), card: buildInventoryStatusOverviewCard(result) };
+  }
+  if (result.status === 'detail') {
+    return { text: formatInventoryStatusDetailText(result), card: buildInventoryStatusDetailCard(result) };
+  }
+  if (result.status === 'ambiguous') return { text: formatInventoryStatusAmbiguousText(result) };
+  return { text: formatInventoryStatusMissingText(result) };
+}
+
 async function agentPlannerResponse(
   message: string,
   outputDir: string,
@@ -248,6 +290,10 @@ export async function handleBotIntent(intent: BotIntent, outputDir = 'output', o
   if (intent.type === 'latest_summary') {
     const latest = await findLatestReportContext(outputDir);
     return { text: latest ? formatLatestSummary(latest.context) : '还没有找到公域日报上下文。' };
+  }
+
+  if (intent.type === 'inventory_status_overview' || intent.type === 'inventory_status_query') {
+    return handleInventoryStatusIntent(intent, outputDir, options);
   }
 
   if (intent.type === 'query_product') {

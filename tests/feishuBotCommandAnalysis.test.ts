@@ -263,6 +263,11 @@ describe('explicit commands — current parser behavior', () => {
     expect(parseBotIntent('查ID')).toEqual({ type: 'lookup_product_id_card' });
   });
 
+  it('parses inventory status overview and query intents', () => {
+    expect(parseBotIntent('库存情况')).toEqual({ type: 'inventory_status_overview' });
+    expect(parseBotIntent('库存情况 pocket3')).toEqual({ type: 'inventory_status_query', query: 'pocket3' });
+  });
+
   it('parses rental copy command', () => {
     expect(parseBotIntent('复制商品 761')).toEqual({ type: 'rental_copy', productId: '761' });
     expect(parseBotIntent('商品复制 761')).toEqual({ type: 'rental_copy', productId: '761' });

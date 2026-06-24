@@ -176,6 +176,7 @@ async function writeClosedOrderRegistryFixtures(rootDir: string): Promise<{
   productNameMapPath: string;
   firstSeenPath: string;
   lifecyclePath: string;
+  overridesPath: string;
   artifactsDir: string;
 }> {
   const configDir = join(rootDir, 'config');
@@ -185,6 +186,13 @@ async function writeClosedOrderRegistryFixtures(rootDir: string): Promise<{
   await mkdir(join(outputDir, '2026-06-21'), { recursive: true });
   await writeFile(join(configDir, 'product-id-map.json'), JSON.stringify({ 'platform-560': '560', 'platform-561': '561' }), 'utf8');
   await writeFile(join(configDir, 'product-name-map.json'), JSON.stringify({ '560': 'DJI Pocket 3', '561': 'DJI Pocket 3 Creator' }), 'utf8');
+  await writeFile(join(configDir, 'link-registry-overrides.json'), JSON.stringify({
+    version: 1,
+    entries: [
+      { internalProductId: '560', categoryId: 'camera', categoryName: '相机', productType: 'gimbal-camera', shortName: 'DJI Pocket 3', aliases: ['Pocket3'], sameSkuGroupId: 'dji-pocket-3', updatedAt: '2026-06-24' },
+      { internalProductId: '561', categoryId: 'camera', categoryName: '相机', productType: 'gimbal-camera', shortName: 'DJI Pocket 3', aliases: ['Pocket3 Creator'], sameSkuGroupId: 'dji-pocket-3', updatedAt: '2026-06-24' },
+    ],
+  }), 'utf8');
   await writeFile(join(outputDir, '2026-06-21', 'exposure-cumulative-products.json'), JSON.stringify([
     { platformProductId: 'platform-560', productName: 'DJI Pocket 3 Creator Combo' },
     { platformProductId: 'platform-561', productName: 'DJI Pocket 3 Standard' },
@@ -194,6 +202,7 @@ async function writeClosedOrderRegistryFixtures(rootDir: string): Promise<{
     productNameMapPath: join(configDir, 'product-name-map.json'),
     firstSeenPath: join(outputDir, 'state', 'goods-first-seen.json'),
     lifecyclePath: join(outputDir, 'state', 'goods-link-lifecycle.json'),
+    overridesPath: join(configDir, 'link-registry-overrides.json'),
     artifactsDir: outputDir,
   };
 }
@@ -304,6 +313,128 @@ async function writeLinkRegistryOverviewFixtures(rootDir: string): Promise<{
     lifecyclePath: join(outputDir, 'state', 'goods-link-lifecycle.json'),
     overridesPath: join(configDir, 'link-registry-overrides.json'),
     artifactsDir: outputDir,
+  };
+}
+
+async function writeInventoryStatusFixtures(rootDir: string): Promise<{
+  outputDir: string;
+  registryPaths: {
+    productIdMapPath: string;
+    productNameMapPath: string;
+    firstSeenPath: string;
+    lifecyclePath: string;
+    overridesPath: string;
+    artifactsDir: string;
+  };
+}> {
+  const outputDir = join(rootDir, 'output');
+  const configDir = join(rootDir, 'config');
+  const stateDir = join(outputDir, 'state');
+  const runDate = '2026-06-24';
+  const reportDir = join(outputDir, runDate);
+  await mkdir(reportDir, { recursive: true });
+  await mkdir(stateDir, { recursive: true });
+  await mkdir(configDir, { recursive: true });
+
+  await writeFile(join(reportDir, 'report-context.json'), JSON.stringify({
+    date: '2026-06-23',
+    summary: { '1d': summary, '7d': summary, '30d': summary },
+    conclusions: [],
+    rows: [],
+    lowExposure: [],
+    weakClick: [],
+    weakConversion: [],
+    highPotential: [],
+    newProductObservation: [],
+    lifecycleGovernance: [],
+    recommendedActions: [],
+    emptySectionNotes: {},
+  }), 'utf8');
+
+  await writeFile(join(reportDir, '同款组经营快照_2026-06-24.json'), JSON.stringify({
+    date: '2026-06-24',
+    sourceReportDate: '2026-06-23',
+    generatedAt: '2026-06-24T00:00:00.000Z',
+    summary: { sameSkuGroupCount: 2, activeLinkCount: 3, totalLinkCount: 4 },
+    coverage: { groupedLinkCount: 4, ungroupedLinkCount: 0, groupsWithMetrics: 2, groupsWithoutMetrics: 0 },
+    registryAuditSummary: { totalLinks: 4, activeLinks: 3, removedLinks: 1, unknownLinks: 0, overrideRiskCount: 0 },
+    groups: [
+      {
+        sameSkuGroupId: 'dji-pocket-3',
+        groupName: 'DJI Pocket 3',
+        categoryName: '相机',
+        productType: 'gimbal-camera',
+        activeLinkCount: 2,
+        totalLinkCount: 3,
+        mappedRowCount: 2,
+        missingMetricLinkCount: 1,
+        periods: {
+          '1d': { exposure: 300, publicVisits: 30, amount: 120, createdOrders: 3, signedOrders: 3, reviewedOrders: 3, shippedOrders: 2, createdOrderAmount: 140, signedOrderAmount: 125, reviewedOrderAmount: 120, shippedOrderAmount: 110, exposureVisitRate: 0.1, visitCreatedOrderRate: 0.1, visitShipmentRate: 2 / 30 },
+          '7d': { exposure: 2100, publicVisits: 210, amount: 980, createdOrders: 12, signedOrders: 10, reviewedOrders: 10, shippedOrders: 8, createdOrderAmount: 1180, signedOrderAmount: 1080, reviewedOrderAmount: 980, shippedOrderAmount: 930, exposureVisitRate: 0.1, visitCreatedOrderRate: 12 / 210, visitShipmentRate: 8 / 210 },
+          '30d': { exposure: 9000, publicVisits: 720, amount: 3600, createdOrders: 35, signedOrders: 32, reviewedOrders: 30, shippedOrders: 28, createdOrderAmount: 3900, signedOrderAmount: 3720, reviewedOrderAmount: 3600, shippedOrderAmount: 3450, exposureVisitRate: 0.08, visitCreatedOrderRate: 35 / 720, visitShipmentRate: 28 / 720 },
+        },
+        topLinks: [
+          { internalProductId: '560', platformProductId: 'platform-560', productName: 'DJI Pocket 3 创作者套装', shortName: 'DJI Pocket 3', status: 'active', oneDayExposure: 200, oneDayPublicVisits: 20, oneDayAmount: 80 },
+        ],
+        risks: ['组内 1 条链接无日报数据'],
+      },
+      {
+        sameSkuGroupId: 'canon-sx70',
+        groupName: 'Canon SX70 HS',
+        categoryName: '相机',
+        productType: 'camera',
+        activeLinkCount: 1,
+        totalLinkCount: 1,
+        mappedRowCount: 1,
+        missingMetricLinkCount: 0,
+        periods: {
+          '1d': { exposure: 80, publicVisits: 8, amount: 40, createdOrders: 1, signedOrders: 1, reviewedOrders: 1, shippedOrders: 1, createdOrderAmount: 50, signedOrderAmount: 50, reviewedOrderAmount: 40, shippedOrderAmount: 40, exposureVisitRate: 0.1, visitCreatedOrderRate: 0.125, visitShipmentRate: 0.125 },
+          '7d': { exposure: 500, publicVisits: 40, amount: 200, createdOrders: 2, signedOrders: 2, reviewedOrders: 2, shippedOrders: 2, createdOrderAmount: 220, signedOrderAmount: 220, reviewedOrderAmount: 200, shippedOrderAmount: 200, exposureVisitRate: 0.08, visitCreatedOrderRate: 0.05, visitShipmentRate: 0.05 },
+          '30d': { exposure: 2400, publicVisits: 190, amount: 800, createdOrders: 7, signedOrders: 7, reviewedOrders: 7, shippedOrders: 6, createdOrderAmount: 900, signedOrderAmount: 880, reviewedOrderAmount: 800, shippedOrderAmount: 760, exposureVisitRate: 190 / 2400, visitCreatedOrderRate: 7 / 190, visitShipmentRate: 6 / 190 },
+        },
+        topLinks: [],
+        risks: [],
+      },
+    ],
+  }), 'utf8');
+
+  await writeFile(join(configDir, 'product-id-map.json'), JSON.stringify({
+    'platform-560': '560',
+    'platform-561': '561',
+    'platform-562': '562',
+    'platform-580': '580',
+  }), 'utf8');
+  await writeFile(join(configDir, 'product-name-map.json'), JSON.stringify({
+    '560': 'DJI Pocket 3',
+    '561': 'DJI Pocket 3 标准版',
+    '562': 'DJI Pocket 3 Creator',
+    '580': 'Canon SX70 HS',
+  }), 'utf8');
+  await writeFile(join(configDir, 'link-registry-overrides.json'), JSON.stringify({
+    version: 1,
+    entries: [
+      { internalProductId: '560', categoryId: 'camera', categoryName: '相机', productType: 'gimbal-camera', shortName: 'DJI Pocket 3', aliases: ['Pocket3'], sameSkuGroupId: 'dji-pocket-3', updatedAt: '2026-06-24' },
+      { internalProductId: '561', categoryId: 'camera', categoryName: '相机', productType: 'gimbal-camera', shortName: 'DJI Pocket 3', aliases: ['Pocket3 标准版'], sameSkuGroupId: 'dji-pocket-3', updatedAt: '2026-06-24' },
+      { internalProductId: '562', categoryId: 'camera', categoryName: '相机', productType: 'gimbal-camera', shortName: 'DJI Pocket 3', aliases: ['Pocket3 Creator'], sameSkuGroupId: 'dji-pocket-3', updatedAt: '2026-06-24' },
+      { internalProductId: '580', categoryId: 'camera', categoryName: '相机', productType: 'camera', shortName: 'Canon SX70 HS', aliases: ['SX70'], sameSkuGroupId: 'canon-sx70', updatedAt: '2026-06-24' },
+      { internalProductId: '841', categoryId: 'camera', categoryName: '相机', productType: 'action-camera', shortName: 'Ace Pro 2', aliases: ['Ace pro 2', 'AcePro2', 'ace pro'], sameSkuGroupId: 'insta360-ace-pro-2', updatedAt: '2026-06-24' },
+      { internalProductId: '851', categoryId: 'camera', categoryName: '相机', productType: 'action-camera', shortName: 'Ace Pro', aliases: ['Ace pro'], sameSkuGroupId: 'insta360-ace-pro', updatedAt: '2026-06-24' },
+    ],
+    sameSkuGroupAliasRules: [
+      { sameSkuGroupId: 'dji-pocket-3', aliases: ['口袋3', 'pocket 3'] },
+    ],
+  }), 'utf8');
+
+  return {
+    outputDir,
+    registryPaths: {
+      productIdMapPath: join(configDir, 'product-id-map.json'),
+      productNameMapPath: join(configDir, 'product-name-map.json'),
+      firstSeenPath: join(stateDir, 'goods-first-seen.json'),
+      lifecyclePath: join(stateDir, 'goods-link-lifecycle.json'),
+      overridesPath: join(configDir, 'link-registry-overrides.json'),
+      artifactsDir: outputDir,
+    },
   };
 }
 
@@ -461,6 +592,44 @@ describe('handleBotIntent', () => {
     expect(cardText).toContain('DJI Pocket 3');
     expect(cardText).toContain('Canon SX70 HS');
     expect(cardText).toContain('未归类商品');
+  });
+
+  it('returns an inventory status overview card for the new command', async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), 'mt-agent-inventory-status-overview-'));
+    const fixtures = await writeInventoryStatusFixtures(rootDir);
+
+    const response = await handleBotIntent(
+      { type: 'inventory_status_overview' },
+      fixtures.outputDir,
+      { closedOrderRegistryPaths: fixtures.registryPaths },
+    );
+
+    expect(response.text).toContain('库存情况');
+    expect(response.text).toContain('同款组');
+    expect(response.card).toBeDefined();
+    const cardText = JSON.stringify(response.card);
+    expect(cardText).toContain('库存情况');
+    expect(cardText).toContain('重点同款组');
+    expect(cardText).toContain('DJI Pocket 3');
+  });
+
+  it('returns an inventory status detail card for a unique alias query', async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), 'mt-agent-inventory-status-detail-'));
+    const fixtures = await writeInventoryStatusFixtures(rootDir);
+
+    const response = await handleBotIntent(
+      { type: 'inventory_status_query', query: 'pocket3' },
+      fixtures.outputDir,
+      { closedOrderRegistryPaths: fixtures.registryPaths },
+    );
+
+    expect(response.text).toContain('DJI Pocket 3');
+    expect(response.text).toContain('同款组');
+    expect(response.card).toBeDefined();
+    const cardText = JSON.stringify(response.card);
+    expect(cardText).toContain('DJI Pocket 3');
+    expect(cardText).toContain('主力链接');
+    expect(cardText).toContain('1日');
   });
 
   it('answers latest summary from report context', async () => {

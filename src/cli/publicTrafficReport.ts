@@ -3,8 +3,11 @@ import { basename, dirname, isAbsolute, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { loadConfig } from '../config/loadConfig.js';
 import { loadEnv } from '../config/loadEnv.js';
+import { loadClosedOrderRegistryContext } from '../closedOrderFeedback/runtime.js';
 import { crawlPublicTrafficSources } from '../crawler/publicTrafficCrawler.js';
 import { normalizeRowsForPeriod } from '../extractor/normalizeRows.js';
+import { buildInventorySameSkuSnapshot } from '../inventoryStatus/snapshot.js';
+import { writeInventorySameSkuSnapshot } from '../inventoryStatus/store.js';
 import { annotateGoodsExportWorkbookWithInternalId } from '../mapping/annotateGoodsExportWorkbook.js';
 import { loadProductIdMapping, type ProductIdMapping } from '../mapping/productIdMapping.js';
 import { writeProductIdMappingFromExport } from '../mapping/refreshProductIdMapping.js';
@@ -587,7 +590,17 @@ export async function runPublicTrafficReportCli(): Promise<void> {
       `规则分析: 曝光不足=${context.lowExposure.length}, 点击弱=${context.weakClick.length}, 转化弱=${context.weakConversion.length}, 高潜力=${context.highPotential.length}, 新品观察=${context.newProductObservation.length}, 生命周期治理=${context.lifecycleGovernance.length}, 建议操作=${context.recommendedActions.length}`,
     );
 
+    const registryContext = await loadClosedOrderRegistryContext({ artifactsDir: config.outputDir }, process.cwd());
+    const sameSkuSnapshot = buildInventorySameSkuSnapshot({
+      date: runDate,
+      reportDate: context.date,
+      context,
+      registry: registryContext.registry,
+      overrideRisks: registryContext.overrideRisks,
+    });
+
     await writeFile(paths.reportContext, JSON.stringify(context, null, 2), 'utf8');
+    await writeInventorySameSkuSnapshot(sameSkuSnapshot, paths.sameSkuSnapshot);
     await writeFile(paths.markdown, buildPublicTrafficMarkdown(context), 'utf8');
     await writeFile(paths.workbook, writePublicTrafficWorkbookBuffer(context));
     log.addEvent(`报告已生成: ${paths.markdown}`);

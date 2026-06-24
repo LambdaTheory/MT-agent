@@ -19,6 +19,8 @@ export type BotIntent =
   | { type: 'query_product'; keyword: string }
   | { type: 'lookup_product_id_card' }
   | { type: 'link_registry_overview' }
+  | { type: 'inventory_status_overview' }
+  | { type: 'inventory_status_query'; query: string }
   | { type: 'lookup_product_id'; query: string }
   | { type: 'rental_price_change'; productId: string; request: RentalPriceChangeRequest }
   | { type: 'rental_copy'; productId: string }

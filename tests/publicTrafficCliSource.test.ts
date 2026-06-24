@@ -24,9 +24,12 @@ describe('public traffic CLI wiring', () => {
     const text = await source('../src/cli/publicTrafficReport.ts');
     expect(text).toContain("import { loadProductIdMapping, type ProductIdMapping } from '../mapping/productIdMapping.js';");
     expect(text).toContain("import { loadProductNameMap } from '../publicTraffic/productDisplayName.js';");
+    expect(text).toContain("import { buildInventorySameSkuSnapshot } from '../inventoryStatus/snapshot.js';");
+    expect(text).toContain("import { writeInventorySameSkuSnapshot } from '../inventoryStatus/store.js';");
     expect(text).toContain("const productNameMap = await loadProductNameMap('config/product-name-map.json', (message) => log.addEvent(message));");
     expect(text).toContain('buildPublicTrafficCard(context,');
     expect(text).toContain('productNameMap,');
+    expect(text).toContain('await writeInventorySameSkuSnapshot(sameSkuSnapshot, paths.sameSkuSnapshot);');
     expect(text).toContain('const sendTo = parseFeishuSendToArg(process.argv);');
     expect(text).toContain('sendFeishuCard(env, card, fallbackText)');
   });
