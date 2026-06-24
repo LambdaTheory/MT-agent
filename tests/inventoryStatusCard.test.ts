@@ -172,17 +172,24 @@ const snapshot: InventoryStatusSnapshot = {
 };
 
 describe('inventoryStatusCard', () => {
-  it('builds overview card with summary metrics and top groups', () => {
+  it('builds overview card with percentage metrics, charts, and clearer risk copy', () => {
     const result: InventoryStatusOverviewResult = { status: 'overview', snapshot };
     const card = buildInventoryStatusOverviewCard(result);
     const serialized = JSON.stringify(card);
+    const elements = ((card.body as { elements: Array<Record<string, unknown>> }).elements);
+    const charts = elements.filter((element) => element.tag === 'chart');
+
     expect(serialized).toContain('库存情况');
-    expect(serialized).toContain('重点同款组');
+    expect(serialized).toContain('active 占比');
+    expect(serialized).toContain('75.0%');
+    expect(serialized).toContain('有数据组占比');
+    expect(serialized).toContain('风险组占比');
+    expect(serialized).toContain('缺日报数据链接');
     expect(serialized).toContain('Pocket 3');
-    expect(serialized).toContain('异常提醒');
+    expect(charts).toHaveLength(2);
   });
 
-  it('builds detail card with 1d 7d 30d metrics and top links', () => {
+  it('builds detail card with contribution metrics and missing-report explanation', () => {
     const result: InventoryStatusDetailResult = {
       status: 'detail',
       query: 'pocket3',
@@ -193,10 +200,13 @@ describe('inventoryStatusCard', () => {
     };
     const card = buildInventoryStatusDetailCard(result);
     const serialized = JSON.stringify(card);
+
     expect(serialized).toContain('Pocket 3');
-    expect(serialized).toContain('1日');
-    expect(serialized).toContain('7日');
-    expect(serialized).toContain('30日');
+    expect(serialized).toContain('7日金额贡献');
+    expect(serialized).toContain('86.0%');
+    expect(serialized).toContain('7日访问贡献');
+    expect(serialized).toContain('缺日报数据链接');
+    expect(serialized).toContain('链接已在链接档案中');
     expect(serialized).toContain('主力链接');
   });
 
