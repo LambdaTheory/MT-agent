@@ -3,10 +3,20 @@ import { parseActivityAutomationCliOptions } from '../src/cli/activityAutomation
 
 describe('activity automation cli', () => {
   it('parses product picking and date range options', () => {
-    expect(parseActivityAutomationCliOptions(['--pick-products', '--starts-at', '2026-06-23', '--ends-at', '2026-06-30'])).toEqual({
+    expect(parseActivityAutomationCliOptions(['--pick-products', '--confirm-submit', '--starts-at', '2026-06-23', '--ends-at', '2026-06-30'])).toEqual({
+      confirmSubmit: true,
       pickProducts: true,
       startsAt: '2026-06-23',
       endsAt: '2026-06-30',
+    });
+  });
+
+  it('keeps submission disabled unless confirm-submit is present', () => {
+    expect(parseActivityAutomationCliOptions([])).toEqual({
+      confirmSubmit: false,
+      pickProducts: false,
+      startsAt: undefined,
+      endsAt: undefined,
     });
   });
 

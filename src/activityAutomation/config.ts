@@ -13,6 +13,7 @@ export interface ActivityAutomationConfig {
   productIdMappingPath?: string;
   headless: boolean;
   keepBrowserOnFailure: boolean;
+  confirmSubmit: boolean;
   pickProducts: boolean;
   fillDiscounts: boolean;
   draft: DifferentialPricingDraft;
@@ -21,6 +22,7 @@ export interface ActivityAutomationConfig {
 export interface ActivityAutomationCliOptions {
   headless?: boolean;
   keepBrowserOnFailure?: boolean;
+  confirmSubmit?: boolean;
   pickProducts?: boolean;
   fillDiscounts?: boolean;
   draft?: DifferentialPricingDraft;
@@ -38,6 +40,7 @@ export function activityAutomationConfigFromAgentConfig(agentConfig: AgentConfig
     productIdMappingPath: agentConfig.productIdMappingPath,
     headless: options.headless ?? false,
     keepBrowserOnFailure: options.keepBrowserOnFailure ?? true,
+    confirmSubmit: options.confirmSubmit ?? false,
     pickProducts: options.pickProducts ?? false,
     fillDiscounts: options.fillDiscounts ?? true,
     draft: options.draft ?? createEmptyDifferentialPricingDraft(),

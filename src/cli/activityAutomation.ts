@@ -19,7 +19,7 @@ function validateDateFlag(value: string, flag: string): string {
   return value;
 }
 
-export function parseActivityAutomationCliOptions(argv: string[]): { pickProducts: boolean; startsAt?: string; endsAt?: string } {
+export function parseActivityAutomationCliOptions(argv: string[]): { confirmSubmit: boolean; pickProducts: boolean; startsAt?: string; endsAt?: string } {
   const startsAt = readArgValue(argv, '--starts-at');
   const endsAt = readArgValue(argv, '--ends-at');
   if ((startsAt && !endsAt) || (!startsAt && endsAt)) {
@@ -27,6 +27,7 @@ export function parseActivityAutomationCliOptions(argv: string[]): { pickProduct
   }
 
   return {
+    confirmSubmit: argv.includes('--confirm-submit'),
     pickProducts: argv.includes('--pick-products'),
     startsAt: startsAt ? validateDateFlag(startsAt, '--starts-at') : undefined,
     endsAt: endsAt ? validateDateFlag(endsAt, '--ends-at') : undefined,
@@ -38,6 +39,7 @@ export async function runActivityAutomationCli(): Promise<void> {
   const cliOptions = parseActivityAutomationCliOptions(process.argv.slice(2));
   const config = activityAutomationConfigFromAgentConfig(agentConfig, {
     keepBrowserOnFailure: process.env.MT_AGENT_KEEP_BROWSER_ON_FAILURE !== '0',
+    confirmSubmit: cliOptions.confirmSubmit,
     pickProducts: cliOptions.pickProducts,
     draft: {
       ...createEmptyDifferentialPricingDraft(),
@@ -78,6 +80,12 @@ export async function runActivityAutomationCli(): Promise<void> {
                 `\u52fe\u9009\u5546\u54c1\u4ea7\u7269: ${result.productPickSessionPath}`,
                 `\u5df2\u6620\u5c04\u7aef\u5185ID: ${result.productPickSession.mappedCount}`,
                 `\u672a\u6620\u5c04\u7aef\u5185ID: ${result.productPickSession.unmappedCount}`,
+              ]
+            : []),
+          ...(result.submitResult
+            ? [
+                `\u6d3b\u52a8\u63d0\u4ea4: ${result.submitResult.submittedAt}`,
+                ...(result.submitSessionPath ? [`\u4ef7\u683c\u56de\u8c03\u4ea4\u63a5: ${result.submitSessionPath}`] : []),
               ]
             : []),
         ]

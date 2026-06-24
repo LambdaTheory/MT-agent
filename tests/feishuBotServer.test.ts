@@ -64,6 +64,8 @@ function fakeActivityAutomationClient() {
         mappedCount: 7,
         unmappedCount: 0,
         productPickSessionPath: 'output/latest/activity-automation/activity-product-pick-session.json',
+        submitSessionPath: 'output/latest/activity-automation/activity-submit-session.json',
+        callbackProductIds: ['770', '800', '801'],
         lines: ['自动选品: 7', '活动时间填写: 7', '折扣填写: 28', '已映射端内ID: 7'],
       };
     },
@@ -242,8 +244,8 @@ describe('startFeishuBotServer', () => {
     }
   });
 
-  it('executes differential pricing automation for HTTP card action callbacks', async () => {
-    const replies: Array<{ messageId: string; text: string }> = [];
+  it('replies with a price callback confirmation card after differential pricing automation completes', async () => {
+    const cards: Array<{ messageId: string; card: Record<string, unknown> }> = [];
     let resolveReplySent!: () => void;
     const replySent = new Promise<void>((resolve) => {
       resolveReplySent = resolve;
@@ -255,10 +257,13 @@ describe('startFeishuBotServer', () => {
       appSecret: 'secret',
       outputDir: 'output',
       activityAutomationClient,
-      replyText: async ({ messageId }, text) => {
-        replies.push({ messageId, text });
+      replyCard: async ({ messageId }, card) => {
+        cards.push({ messageId, card });
         resolveReplySent();
         return { sent: true, channel: 'app' };
+      },
+      replyText: async () => {
+        throw new Error('replyText should not be called when a callback confirmation card is available');
       },
     });
     try {
@@ -297,12 +302,11 @@ describe('startFeishuBotServer', () => {
           discounts: { SS: '8.5', S: '9.0', A: '9.5', B: '9.8' },
         },
       ]);
-      expect(replies).toEqual([
-        {
-          messageId: 'mid-http-activity-card',
-          text: expect.stringContaining('活动时间填写: 7') as unknown as string,
-        },
-      ]);
+      expect(cards).toHaveLength(1);
+      expect(cards[0]?.messageId).toBe('mid-http-activity-card');
+      expect(JSON.stringify(cards[0]?.card)).toContain('activity_price_callback_confirm');
+      expect(JSON.stringify(cards[0]?.card)).toContain('activity-submit-session.json');
+      expect(JSON.stringify(cards[0]?.card)).toContain('770');
     } finally {
       server.close();
     }

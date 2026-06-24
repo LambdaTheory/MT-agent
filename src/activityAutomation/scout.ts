@@ -11,6 +11,7 @@ import { mapPickedProductsToInternalIds, type ResolvedPickedProductSummary } fro
 import type { DifferentialPricingProductPickResult } from './productPicker.js';
 import { createEmptyActivityRecordingDraft } from './recording.js';
 import { analyzeDifferentialPricingScout, type DifferentialPricingScoutAnalysis, type DifferentialPricingSelectedProduct } from './scoutAnalysis.js';
+import type { ActivitySubmitResult } from './submit.js';
 import { detectActivityFormWorkarounds } from './workarounds.js';
 
 export interface ActivityProductPickSessionReport extends ResolvedPickedProductSummary {
@@ -35,6 +36,8 @@ export interface ActivityScoutResult {
   discountFillResult?: DifferentialPricingDiscountFillResult;
   productPickSessionPath?: string;
   productPickSession?: ActivityProductPickSessionReport;
+  submitResult?: ActivitySubmitResult;
+  submitSessionPath?: string;
 }
 
 async function safeBodyText(page: Page): Promise<string> {
