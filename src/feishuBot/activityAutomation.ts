@@ -76,8 +76,18 @@ function readString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
+function readStringFromRecord(value: unknown, keys: string[]): string | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  for (const key of keys) {
+    const raw = readString(record[key]);
+    if (raw) return raw;
+  }
+  return null;
+}
+
 function readDate(value: unknown): string | null {
-  const raw = readString(value);
+  const raw = readString(value) ?? readStringFromRecord(value, ['date', 'value', 'formatted_date', 'formattedDate']);
   return raw && /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : null;
 }
 
@@ -249,10 +259,10 @@ export function parseActivityAutomationConfirmRequest(formValue: unknown): Activ
   const values = formValue as Record<string, unknown>;
   const startsAt = readDate(values.starts_at);
   const endsAt = readDate(values.ends_at);
-  const SS = readDiscount(values.discount_ss);
-  const S = readDiscount(values.discount_s);
-  const A = readDiscount(values.discount_a);
-  const B = readDiscount(values.discount_b);
+  const SS = readDiscount(values.discount_ss) ?? DEFAULT_DISCOUNTS.SS;
+  const S = readDiscount(values.discount_s) ?? DEFAULT_DISCOUNTS.S;
+  const A = readDiscount(values.discount_a) ?? DEFAULT_DISCOUNTS.A;
+  const B = readDiscount(values.discount_b) ?? DEFAULT_DISCOUNTS.B;
   if (!startsAt || !endsAt || !SS || !S || !A || !B) return null;
   return { startsAt, endsAt, discounts: { SS, S, A, B } };
 }

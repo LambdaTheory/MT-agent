@@ -234,6 +234,47 @@ describe('createFeishuSdkBot card.action.trigger', () => {
     expect(JSON.stringify(sent[1])).toContain('770');
   });
 
+  it('accepts date picker objects and omitted default discounts for differential pricing automation', async () => {
+    const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
+    const sent: unknown[] = [];
+    const activityAutomationClient = fakeActivityAutomationClient();
+    const bot = createFeishuSdkBot({
+      appId: 'app',
+      appSecret: 'secret',
+      outputDir: 'output',
+      activityAutomationClient,
+      sdk: fakeSdk(sent, registered),
+    });
+
+    bot.start();
+    await registered['card.action.trigger']({
+      event: {
+        context: { open_message_id: 'om-activity-automation-defaults' },
+        action: {
+          tag: 'button',
+          value: { action: 'activity_automation_confirm' },
+          form_value: {
+            starts_at: { date: '2026-06-24' },
+            ends_at: { value: '2026-06-30' },
+          },
+        },
+      },
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(activityAutomationClient.executions).toEqual([
+      {
+        startsAt: '2026-06-24',
+        endsAt: '2026-06-30',
+        discounts: { SS: '8.5', S: '9.0', A: '9.5', B: '9.8' },
+      },
+    ]);
+    expect(sent).toHaveLength(2);
+    expect(sent[1]).toMatchObject({ kind: 'patch', request: { path: { message_id: 'om-activity-automation-defaults' } } });
+    expect(JSON.stringify(sent[1])).toContain('activity_price_callback_confirm');
+  });
+
   it('handles id_lookup form submit by returning the updated card', async () => {
     const outputDir = await writeContext();
     const registered: Record<string, (data: unknown) => Promise<unknown>> = {};

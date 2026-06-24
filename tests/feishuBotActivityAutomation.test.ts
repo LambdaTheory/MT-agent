@@ -4,6 +4,7 @@ import { handleBotIntent } from '../src/feishuBot/tools.js';
 import {
   buildActivityAutomationCard,
   buildActivityPriceCallbackConfirmCard,
+  parseActivityAutomationConfirmRequest,
   parseActivityPriceCallbackConfirmRequest,
   type ActivityAutomationSkillClient,
 } from '../src/feishuBot/activityAutomation.js';
@@ -80,6 +81,32 @@ describe('differential pricing Feishu integration', () => {
     expect(JSON.stringify(card)).toContain('activity_price_callback_confirm');
     expect(JSON.stringify(card)).toContain('770');
     expect(JSON.stringify(card)).toContain('activity-submit-session.json');
+  });
+
+  it('parses date picker objects and falls back to default discounts when unchanged', () => {
+    expect(parseActivityAutomationConfirmRequest({
+      starts_at: { date: '2026-06-24' },
+      ends_at: { date: '2026-06-30' },
+    })).toEqual({
+      startsAt: '2026-06-24',
+      endsAt: '2026-06-30',
+      discounts: { SS: '8.5', S: '9.0', A: '9.5', B: '9.8' },
+    });
+  });
+
+  it('parses explicit discounts alongside object-shaped date picker values', () => {
+    expect(parseActivityAutomationConfirmRequest({
+      starts_at: { value: '2026-06-24' },
+      ends_at: { date: '2026-06-30' },
+      discount_ss: '8.1',
+      discount_s: '8.8',
+      discount_a: '9.1',
+      discount_b: '9.6',
+    })).toEqual({
+      startsAt: '2026-06-24',
+      endsAt: '2026-06-30',
+      discounts: { SS: '8.1', S: '8.8', A: '9.1', B: '9.6' },
+    });
   });
 
   it('parses the callback confirmation request from card action values', () => {
