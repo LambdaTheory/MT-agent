@@ -45,6 +45,15 @@ export interface NewLinkBatchConfirmRequest {
   reason: string;
 }
 
+export interface NewLinkBatchMultiConfirmRequest {
+  safetyVersion: typeof NEW_LINK_BATCH_CONFIRMATION_VERSION;
+  workflowName: typeof NEW_LINK_BATCH_WORKFLOW_NAME;
+  mode: 'multi-source';
+  items: NewLinkBatchConfirmRequest[];
+  dataDate: string;
+  reason: string;
+}
+
 export interface NewLinkBatchExecutionResult {
   ok: boolean;
   text: string;
@@ -260,6 +269,41 @@ export function buildNewLinkBatchConfirmRequest(plan: NewLinkBatchPlan, reason: 
   };
 }
 
+export function buildNewLinkBatchMultiConfirmRequest(plans: NewLinkBatchPlan[], reason: string): NewLinkBatchMultiConfirmRequest | null {
+  if (plans.length < 2) return null;
+  const items = plans.map((plan) => buildNewLinkBatchConfirmRequest(plan, reason));
+  if (items.some((item) => item === null)) return null;
+  const requests = items as NewLinkBatchConfirmRequest[];
+  const totalCount = requests.reduce((sum, request) => sum + request.count, 0);
+  if (totalCount > MAX_NEW_LINK_BATCH_COUNT) return null;
+  const dataDate = requests[0]?.dataDate;
+  if (!dataDate || requests.some((request) => request.dataDate !== dataDate)) return null;
+  return {
+    safetyVersion: NEW_LINK_BATCH_CONFIRMATION_VERSION,
+    workflowName: NEW_LINK_BATCH_WORKFLOW_NAME,
+    mode: 'multi-source',
+    items: requests,
+    dataDate,
+    reason,
+  };
+}
+
+export function formatNewLinkBatchMultiPlan(plans: NewLinkBatchPlan[]): string {
+  const lines = plans.map((plan, index) => {
+    const source = plan.selectedSource
+      ? `源商品 ${plan.selectedSource.productId} ${plan.selectedSource.productName}`
+      : '源商品 未找到';
+    const warnings = plan.warnings.length ? `；复核：${plan.warnings.join('；')}` : '';
+    return `${index + 1}. ${plan.request.keyword}：${source}，复制 ${plan.request.count} 条${warnings}`;
+  });
+  return [
+    `多商品新链批量铺设计划：准备分别复制 ${plans.length} 个商品`,
+    ...lines,
+    '',
+    '注意：当前仅生成计划和确认卡，确认前不会复制商品。',
+  ].join('\n');
+}
+
 export function buildNewLinkBatchConfirmCard(plan: NewLinkBatchPlan, reason: string): FeishuCardPayload | undefined {
   const request = buildNewLinkBatchConfirmRequest(plan, reason);
   if (!request || !plan.selectedSource) return undefined;
@@ -321,9 +365,72 @@ export function buildNewLinkBatchConfirmCard(plan: NewLinkBatchPlan, reason: str
   };
 }
 
-export function parseNewLinkBatchConfirmRequest(value: unknown): NewLinkBatchConfirmRequest | null {
-  if (!isRecord(value) || !isRecord(value.request)) return null;
-  const request = value.request;
+export function buildNewLinkBatchMultiConfirmCard(plans: NewLinkBatchPlan[], reason: string): FeishuCardPayload | undefined {
+  const request = buildNewLinkBatchMultiConfirmRequest(plans, reason);
+  if (!request) return undefined;
+  const totalCount = request.items.reduce((sum, item) => sum + item.count, 0);
+  return {
+    schema: '2.0',
+    config: { wide_screen_mode: true },
+    header: { title: { tag: 'plain_text', content: '多商品新链批量复制确认' }, template: 'orange' },
+    body: {
+      elements: [
+        {
+          tag: 'markdown',
+          content: [
+            `**是否分别为 ${request.items.length} 个商品复制新链？总计 ${totalCount} 条。**`,
+            '',
+            ...request.items.flatMap((item, index) => [
+              `${index + 1}. ${item.keyword}`,
+              `源商品：${item.sourceProductId} ${item.sourceProductName}`,
+              `复制数量：${item.count} 条`,
+            ]),
+            '',
+            `数据日期：${request.dataDate}`,
+            `理解原因：${reason}`,
+          ].join('\n'),
+        },
+        {
+          tag: 'form',
+          name: 'new_link_batch_multi_confirm_form',
+          elements: [
+            {
+              tag: 'button',
+              text: { tag: 'plain_text', content: '确认分别复制' },
+              type: 'primary',
+              form_action_type: 'submit',
+              name: 'new_link_batch_multi_confirm_submit',
+              behaviors: [{ type: 'callback', value: { action: 'new_link_batch_multi_confirm', request } }],
+            },
+          ],
+        },
+        {
+          tag: 'form',
+          name: 'new_link_batch_cancel_form',
+          elements: [
+            {
+              tag: 'button',
+              text: { tag: 'plain_text', content: '取消' },
+              type: 'default',
+              form_action_type: 'submit',
+              name: 'new_link_batch_cancel_submit',
+              behaviors: [{
+                type: 'callback',
+                value: {
+                  action: 'new_link_batch_cancel',
+                  keyword: request.items.map((item) => item.keyword).join('、'),
+                  safetyVersion: NEW_LINK_BATCH_CONFIRMATION_VERSION,
+                },
+              }],
+            },
+          ],
+        },
+      ],
+    },
+  };
+}
+
+function readNewLinkBatchConfirmRequestRecord(request: Record<string, unknown>): NewLinkBatchConfirmRequest | null {
   const safetyVersion = readPositiveInteger(request.safetyVersion);
   const workflowName = readString(request.workflowName);
   const keyword = readString(request.keyword);
@@ -358,6 +465,37 @@ export function parseNewLinkBatchConfirmRequest(value: unknown): NewLinkBatchCon
     sourceProductId,
     ...(requestedSourceProductId ? { requestedSourceProductId } : {}),
     sourceProductName,
+    dataDate,
+    reason,
+  };
+}
+
+export function parseNewLinkBatchConfirmRequest(value: unknown): NewLinkBatchConfirmRequest | null {
+  if (!isRecord(value) || !isRecord(value.request)) return null;
+  return readNewLinkBatchConfirmRequestRecord(value.request);
+}
+
+export function parseNewLinkBatchMultiConfirmRequest(value: unknown): NewLinkBatchMultiConfirmRequest | null {
+  if (!isRecord(value) || !isRecord(value.request)) return null;
+  const request = value.request;
+  const safetyVersion = readPositiveInteger(request.safetyVersion);
+  const workflowName = readString(request.workflowName);
+  const mode = readString(request.mode);
+  const dataDate = readString(request.dataDate);
+  const reason = readString(request.reason);
+  const rawItems = Array.isArray(request.items) ? request.items : [];
+  if (safetyVersion !== NEW_LINK_BATCH_CONFIRMATION_VERSION || workflowName !== NEW_LINK_BATCH_WORKFLOW_NAME || mode !== 'multi-source' || !dataDate || !reason || rawItems.length < 2) return null;
+  const items = rawItems.map((item) => isRecord(item) ? readNewLinkBatchConfirmRequestRecord(item) : null);
+  if (items.some((item) => item === null)) return null;
+  const parsedItems = items as NewLinkBatchConfirmRequest[];
+  if (parsedItems.some((item) => item.dataDate !== dataDate || item.reason !== reason)) return null;
+  const totalCount = parsedItems.reduce((sum, item) => sum + item.count, 0);
+  if (totalCount > MAX_NEW_LINK_BATCH_COUNT) return null;
+  return {
+    safetyVersion: NEW_LINK_BATCH_CONFIRMATION_VERSION,
+    workflowName,
+    mode: 'multi-source',
+    items: parsedItems,
     dataDate,
     reason,
   };
@@ -404,5 +542,37 @@ export async function executeNewLinkBatchConfirmRequest(
     text: `新链批量复制完成：源商品 ${request.sourceProductId}，成功 ${request.count} 条。${ids}`,
     newProductIds,
     completedCount: request.count,
+  };
+}
+
+export async function executeNewLinkBatchMultiConfirmRequest(
+  client: RentalPriceSkillClient,
+  request: NewLinkBatchMultiConfirmRequest,
+): Promise<NewLinkBatchExecutionResult> {
+  const newProductIds: string[] = [];
+  const lines: string[] = [];
+  let completedCount = 0;
+
+  for (const item of request.items) {
+    const result = await executeNewLinkBatchConfirmRequest(client, item);
+    newProductIds.push(...result.newProductIds);
+    completedCount += result.completedCount;
+    lines.push(`【${item.keyword} / 源商品 ${item.sourceProductId}】${result.ok ? '完成' : '失败'}`);
+    lines.push(result.text);
+    if (!result.ok) {
+      return {
+        ok: false,
+        text: `多商品新链批量复制中断，已完成 ${completedCount}/${request.items.reduce((sum, next) => sum + next.count, 0)} 条。\n${lines.join('\n')}`,
+        newProductIds,
+        completedCount,
+      };
+    }
+  }
+
+  return {
+    ok: true,
+    text: `多商品新链批量复制完成：${request.items.length} 个商品，成功 ${completedCount} 条。\n${lines.join('\n')}`,
+    newProductIds,
+    completedCount,
   };
 }

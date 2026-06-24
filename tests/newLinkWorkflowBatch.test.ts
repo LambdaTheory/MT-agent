@@ -4,8 +4,12 @@ import {
   buildNewLinkBatchConfirmCard,
   buildNewLinkBatchConfirmRequest,
   buildNewLinkBatchPlan,
+  buildNewLinkBatchMultiConfirmCard,
+  buildNewLinkBatchMultiConfirmRequest,
   executeNewLinkBatchConfirmRequest,
+  executeNewLinkBatchMultiConfirmRequest,
   formatNewLinkBatchPlan,
+  parseNewLinkBatchMultiConfirmRequest,
   parseNewLinkBatchConfirmRequest,
 } from '../src/newLinkWorkflow/batch.js';
 import type { RentalPriceSkillClient } from '../src/feishuBot/rentalPrice.js';
@@ -234,6 +238,45 @@ describe('new link batch workflow', () => {
         reason: 'mismatched source',
       },
     })).toBeNull();
+  });
+
+  it('builds and executes one confirmation for multiple best-link copy plans', async () => {
+    const left = buildNewLinkBatchPlan({ keyword: 'wide 300', count: 5, sourceProductId: '733' }, context(), registry());
+    const right = buildNewLinkBatchPlan({ keyword: 'wide 400', count: 5, sourceProductId: '841' }, context(), registry());
+    const request = buildNewLinkBatchMultiConfirmRequest([left, right], '用户要求分别复制');
+
+    expect(request).toMatchObject({
+      safetyVersion: 2,
+      workflowName: 'rental.newLinkBatch',
+      mode: 'multi-source',
+      items: [
+        expect.objectContaining({ keyword: 'wide 300', count: 5, sourceProductId: '733' }),
+        expect.objectContaining({ keyword: 'wide 400', count: 5, sourceProductId: '841' }),
+      ],
+    });
+    expect(JSON.stringify(buildNewLinkBatchMultiConfirmCard([left, right], '用户要求分别复制'))).toContain('new_link_batch_multi_confirm');
+    expect(parseNewLinkBatchMultiConfirmRequest({ request })).toEqual(request);
+
+    const calls: string[] = [];
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run'); },
+      async execute() { throw new Error('execute should not run'); },
+      async copy(productId) {
+        calls.push(productId);
+        return { productId, ok: true, newProductId: `new-${calls.length}`, lines: ['copy: ok'] };
+      },
+      async delist() { throw new Error('delist should not run'); },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+
+    const result = await executeNewLinkBatchMultiConfirmRequest(rentalPriceClient, request!);
+
+    expect(calls).toEqual(['733', '733', '733', '733', '733', '841', '841', '841', '841', '841']);
+    expect(result).toMatchObject({ ok: true, completedCount: 10 });
+    expect(result.text).toContain('wide 300');
+    expect(result.text).toContain('wide 400');
   });
 
   it('copies the selected source once per requested new link after confirmation', async () => {

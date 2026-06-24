@@ -330,6 +330,10 @@ async function writeNewLinkWorkflowContext(): Promise<{
     'platform-841': '841',
     'platform-388': '388',
     'platform-490': '490',
+    'platform-301': '301',
+    'platform-302': '302',
+    'platform-401': '401',
+    'platform-402': '402',
   }), 'utf8');
   await writeFile(join(configDir, 'product-name-map.json'), JSON.stringify({
     '733': '大疆 Pocket3',
@@ -337,6 +341,10 @@ async function writeNewLinkWorkflowContext(): Promise<{
     '841': '佳能 R50',
     '388': 'Fujifilm instax SQUARE SQ1',
     '490': 'Fujifilm instax SQUARE SQ1',
+    '301': 'Wide 300',
+    '302': 'Wide 300',
+    '401': 'Wide 400',
+    '402': 'Wide 400',
   }), 'utf8');
   await writeFile(join(outputDir, '2026-06-22', 'report-context.json'), JSON.stringify({
     date: '2026-06-22',
@@ -395,6 +403,50 @@ async function writeNewLinkWorkflowContext(): Promise<{
         periods: {
           '1d': { ...metric, exposure: 100, publicVisits: 20, shippedOrders: 0, amount: 300 },
           '7d': { ...metric, exposure: 4000, publicVisits: 320, shippedOrders: 1, amount: 900 },
+          '30d': { ...metric, exposure: 300, publicVisits: 20, shippedOrders: 0, amount: 0 },
+        },
+      },
+      {
+        productName: 'Wide 300 standard source',
+        platformProductId: 'platform-301',
+        displayProductId: '端内ID 301',
+        custodyDays: 7,
+        periods: {
+          '1d': { ...metric, exposure: 100, publicVisits: 10, shippedOrders: 0, amount: 0 },
+          '7d': { ...metric, exposure: 4000, publicVisits: 200, shippedOrders: 1, amount: 800 },
+          '30d': { ...metric, exposure: 300, publicVisits: 20, shippedOrders: 0, amount: 0 },
+        },
+      },
+      {
+        productName: 'Wide 300 best source',
+        platformProductId: 'platform-302',
+        displayProductId: '端内ID 302',
+        custodyDays: 7,
+        periods: {
+          '1d': { ...metric, exposure: 200, publicVisits: 40, shippedOrders: 0, amount: 200 },
+          '7d': { ...metric, exposure: 8000, publicVisits: 700, shippedOrders: 4, amount: 3200 },
+          '30d': { ...metric, exposure: 300, publicVisits: 20, shippedOrders: 0, amount: 0 },
+        },
+      },
+      {
+        productName: 'Wide 400 standard source',
+        platformProductId: 'platform-401',
+        displayProductId: '端内ID 401',
+        custodyDays: 7,
+        periods: {
+          '1d': { ...metric, exposure: 90, publicVisits: 8, shippedOrders: 0, amount: 0 },
+          '7d': { ...metric, exposure: 3000, publicVisits: 160, shippedOrders: 1, amount: 700 },
+          '30d': { ...metric, exposure: 300, publicVisits: 20, shippedOrders: 0, amount: 0 },
+        },
+      },
+      {
+        productName: 'Wide 400 best source',
+        platformProductId: 'platform-402',
+        displayProductId: '端内ID 402',
+        custodyDays: 7,
+        periods: {
+          '1d': { ...metric, exposure: 190, publicVisits: 30, shippedOrders: 0, amount: 100 },
+          '7d': { ...metric, exposure: 7500, publicVisits: 650, shippedOrders: 3, amount: 2800 },
           '30d': { ...metric, exposure: 300, publicVisits: 20, shippedOrders: 0, amount: 0 },
         },
       },
@@ -925,6 +977,36 @@ describe('handleBotIntent', () => {
     expect(cardText).toContain('"count":5');
     expect(cardText).toContain('"sourceProductId":"388"');
     expect(cardText).toContain('"requestedSourceProductId":"388"');
+  });
+
+  it('turns multiple best-link follow-up copy commands into one multi-source confirmation card without executing', async () => {
+    const { outputDir, registryPaths } = await writeNewLinkWorkflowContext();
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run'); },
+      async execute() { throw new Error('execute should not run'); },
+      async copy() { throw new Error('copy should not run before workflow confirmation'); },
+      async delist() { throw new Error('delist should not run'); },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+
+    const response = await handleBotIntent(
+      { type: 'unknown', text: '数据最好的wide 300,wide 400的端内id是多少?分别按这个id复制5条新。' },
+      outputDir,
+      { rentalPriceClient, closedOrderRegistryPaths: registryPaths },
+    );
+
+    const cardText = JSON.stringify(response.card);
+    expect(response.text).toContain('多商品新链批量铺设计划：准备分别复制 2 个商品');
+    expect(response.text).toContain('wide 300：源商品 302 Wide 300 best source，复制 5 条');
+    expect(response.text).toContain('wide 400：源商品 402 Wide 400 best source，复制 5 条');
+    expect(response.card).toBeDefined();
+    expect(cardText).toContain('new_link_batch_multi_confirm');
+    expect(cardText).toContain('"keyword":"wide 300"');
+    expect(cardText).toContain('"sourceProductId":"302"');
+    expect(cardText).toContain('"keyword":"wide 400"');
+    expect(cardText).toContain('"sourceProductId":"402"');
   });
 
   it('does not fall through to read-only new product pool when the LLM planner fails a new-link write plan', async () => {

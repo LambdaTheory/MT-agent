@@ -10,8 +10,10 @@ import { loadClosedOrderRegistryContext, type ClosedOrderRegistryPathsInput } fr
 import { createLinkRegistry } from '../linkRegistry/store.js';
 import {
   buildNewLinkBatchConfirmCard,
+  buildNewLinkBatchMultiConfirmCard,
   buildNewLinkBatchPlan,
   formatNewLinkBatchPlan,
+  formatNewLinkBatchMultiPlan,
   NEW_LINK_BATCH_WORKFLOW_NAME,
   readNewLinkBatchWorkflowRequest,
 } from '../newLinkWorkflow/batch.js';
@@ -120,7 +122,7 @@ function agentToolConfirmResponse(toolName: string, args: Record<string, unknown
 
 function looksLikeNewLinkWriteIntent(text: string): boolean {
   const compact = text.toLowerCase().replace(/\s+/g, '');
-  const hasNewLink = /新链|新链接/.test(compact);
+  const hasNewLink = /新链|新链接|(?:条|个|款)新(?=$|[?？。!！；;,，、])/.test(compact);
   const hasWriteVerb = /铺|补|新建|创建|生成|新增|复制|批量/.test(compact);
   return hasNewLink && hasWriteVerb;
 }
@@ -184,9 +186,10 @@ function parseSmallPositiveInteger(value: string): number | null {
 function extractNewLinkBatchCount(text: string): number | null {
   const compact = text.replace(/\s+/g, '');
   const countToken = '([0-9]+|[一二两三四五六七八九十]{1,3})';
+  const newLinkToken = '(?:新链接|新链|新(?=$|[?？。!！；;,，、]))';
   const patterns = [
-    new RegExp(`(?:复制|铺设|铺|新增|补|新建|创建|生成|批量)${countToken}(?:条|个|款)?(?:新链接|新链)`, 'u'),
-    new RegExp(`${countToken}(?:条|个|款)(?:新链接|新链)`, 'u'),
+    new RegExp(`(?:复制|铺设|铺|新增|补|新建|创建|生成|批量)${countToken}(?:条|个|款)?${newLinkToken}`, 'u'),
+    new RegExp(`${countToken}(?:条|个|款)${newLinkToken}`, 'u'),
   ];
   for (const pattern of patterns) {
     const match = pattern.exec(compact);
@@ -204,12 +207,31 @@ function bestProductQueryCandidates(text: string): string[] {
     const cleaned = value?.replace(/^(?:按|根据|用|以)\s*/u, '').trim();
     if (cleaned) candidates.add(cleaned);
   };
+  const beforeFollowUpWrite = normalized.split(/[?？。!！；;]\s*(?:分别)?(?:按|根据|用|以)(?:这个|该|此|上面|最好链接的|最好(?:的)?|其)?\s*(?:端内\s*)?id/iu)[0];
 
-  add(normalized.split(/[?？。!！；;，,]/u)[0]);
+  add(beforeFollowUpWrite);
+  add(normalized.split(/[?？。!！；;]/u)[0]);
   add(normalized.split(/(?:按|根据|用|以)(?:这个|该|此|上面|最好链接的|最好(?:的)?|其)?\s*(?:端内\s*)?id/iu)[0]);
   add(normalized.split(/(?:给我)?\s*(?:复制|铺设|铺|新增|补|新建|创建|生成|批量)/u)[0]);
+  add(normalized.split(/[?？。!！；;，,]/u)[0]);
   add(normalized);
   return [...candidates];
+}
+
+function splitRankingQueryList(query: string): string[] {
+  const values = query
+    .split(/\s*(?:,|，|、|和|及|与)\s*/u)
+    .map((value) => value.replace(/\s*(?:的)?(?:端内\s*id|id|链接)?\s*(?:是多少)?$/iu, '').trim())
+    .filter((value) => !!value);
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const value of values) {
+    const key = value.toLowerCase().replace(/\s+/g, '');
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(value);
+  }
+  return unique;
 }
 
 function parseBestProductQueryForNewLinkCopy(text: string): string | null {
@@ -220,13 +242,24 @@ function parseBestProductQueryForNewLinkCopy(text: string): string | null {
   return null;
 }
 
-function parseBestLinkNewLinkBatchRequest(text: string): { keyword: string; count: number } | null {
+function parseBestProductQueriesForNewLinkCopy(text: string): string[] {
+  for (const candidate of bestProductQueryCandidates(text)) {
+    const parsed = parseAgentDataIntent(candidate);
+    if (parsed.type !== 'best_product_by_same_sku') continue;
+    const queries = splitRankingQueryList(parsed.query);
+    if (queries.length > 0) return queries;
+  }
+  const single = parseBestProductQueryForNewLinkCopy(text);
+  return single ? [single] : [];
+}
+
+function parseBestLinkNewLinkBatchRequest(text: string): { keywords: string[]; count: number } | null {
   if (!looksLikeNewLinkWriteIntent(text)) return null;
   if (!/(数据|表现|同款)/u.test(text) || !/(最好|最佳|最优|最强)/u.test(text)) return null;
 
   const count = extractNewLinkBatchCount(text);
-  const keyword = parseBestProductQueryForNewLinkCopy(text);
-  return count !== null && keyword ? { keyword, count } : null;
+  const keywords = parseBestProductQueriesForNewLinkCopy(text);
+  return count !== null && keywords.length > 0 ? { keywords, count } : null;
 }
 
 function formatBestLinkCopyPlanFailure(keyword: string, status: ReturnType<typeof rankBestProductByRegistryQuery>): string {
@@ -254,15 +287,31 @@ async function bestLinkNewLinkBatchResponse(
   ]);
   if (!latest) return { text: '还没有找到公域日报上下文，无法选择新链复制源商品。' };
 
-  const ranking = rankBestProductByRegistryQuery(latest.context, createLinkRegistry(registryContext.registry), request.keyword);
-  if (ranking.status !== 'ranked') return { text: formatBestLinkCopyPlanFailure(request.keyword, ranking) };
+  const registry = createLinkRegistry(registryContext.registry);
+  const ranked = request.keywords.map((keyword) => ({
+    keyword,
+    ranking: rankBestProductByRegistryQuery(latest.context, registry, keyword),
+  }));
+  const failed = ranked.find((item) => item.ranking.status !== 'ranked');
+  if (failed) return { text: formatBestLinkCopyPlanFailure(failed.keyword, failed.ranking) };
 
-  const plan = buildNewLinkBatchPlan(
-    { keyword: request.keyword, count: request.count, sourceProductId: ranking.best.internalProductId },
+  const plans = ranked.map((item) => buildNewLinkBatchPlan(
+    { keyword: item.keyword, count: request.count, sourceProductId: item.ranking.status === 'ranked' ? item.ranking.best.internalProductId : '' },
     latest.context,
     registryContext.registry,
-  );
-  const reason = `用户要求先找“${request.keyword}”数据最好的端内ID，再按该ID复制 ${request.count} 条新链；已选择端内ID ${ranking.best.internalProductId}，写操作需要二次确认。`;
+  ));
+
+  if (plans.length > 1) {
+    const reason = `用户要求先分别找“${request.keywords.join('、')}”数据最好的端内ID，再按各自ID分别复制 ${request.count} 条新链；写操作需要二次确认。`;
+    return {
+      text: formatNewLinkBatchMultiPlan(plans),
+      ...(plans.every((plan) => plan.status === 'ready') ? { card: buildNewLinkBatchMultiConfirmCard(plans, reason) } : {}),
+    };
+  }
+
+  const plan = plans[0]!;
+  const selectedSourceId = plan.selectedSource?.productId ?? '';
+  const reason = `用户要求先找“${plan.request.keyword}”数据最好的端内ID，再按该ID复制 ${request.count} 条新链；已选择端内ID ${selectedSourceId}，写操作需要二次确认。`;
   return {
     text: formatNewLinkBatchPlan(plan),
     ...(plan.status === 'ready' ? { card: buildNewLinkBatchConfirmCard(plan, reason) } : {}),

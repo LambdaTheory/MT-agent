@@ -16,7 +16,7 @@ import {
   type ActivityAutomationSkillClient,
 } from './activityAutomation.js';
 import { executeAgentToolRequest } from './agentToolExecutor.js';
-import { executeNewLinkBatchConfirmRequest, parseNewLinkBatchConfirmRequest } from '../newLinkWorkflow/batch.js';
+import { executeNewLinkBatchConfirmRequest, executeNewLinkBatchMultiConfirmRequest, parseNewLinkBatchConfirmRequest, parseNewLinkBatchMultiConfirmRequest } from '../newLinkWorkflow/batch.js';
 import { createRentalPriceSkillClient, executeRentalOperationConfirmRequest, parseRentalOperationConfirmRequest, parseRentalPriceConfirmRequest, type RentalPriceSkillClient } from './rentalPrice.js';
 import type { LlmIntentProposalProvider } from './llmIntentProposal.js';
 import type { BotIntent, BotResponse, FeishuBotDispatchResult, FeishuBotIncomingTextMessage, FeishuMessageEvent } from './types.js';
@@ -110,8 +110,10 @@ function expectedActionForButtonName(name: string | undefined): string | undefin
     agent_tool_confirm_submit: 'agent_tool_confirm',
     agent_tool_cancel_submit: 'agent_tool_cancel',
     new_link_batch_confirm_submit: 'new_link_batch_confirm',
+    new_link_batch_multi_confirm_submit: 'new_link_batch_multi_confirm',
     new_link_batch_cancel_submit: 'new_link_batch_cancel',
     new_link_batch_confirm_form: 'new_link_batch_confirm',
+    new_link_batch_multi_confirm_form: 'new_link_batch_multi_confirm',
     new_link_batch_cancel_form: 'new_link_batch_cancel',
     rental_price_confirm_submit: 'rental_price_confirm',
     rental_price_cancel_submit: 'rental_price_cancel',
@@ -413,6 +415,43 @@ async function handleCardActionTrigger(
       actorId,
       workflowName: request.workflowName,
       arguments: { keyword: request.keyword, count: request.count, sourceProductId: request.sourceProductId },
+      reason: request.reason,
+      resultSummary: result.text,
+    });
+    await replyText(replyConfig, result.text);
+    return;
+  }
+
+  if (actionName === 'new_link_batch_multi_confirm') {
+    const request = parseNewLinkBatchMultiConfirmRequest(value);
+    if (!request) {
+      await replyText(replyConfig, '多商品新链批量复制确认参数无效，请重新发起。');
+      return;
+    }
+    const claim = claimServerCardAction(messageId, 'new_link_batch', actionName);
+    if (!claim.claimed) {
+      await replyText(replyConfig, duplicateServerCardActionText(claim.claim));
+      return;
+    }
+    await recordAgentLearningEvent(outputDir, {
+      type: 'workflow_confirmed',
+      messageId,
+      actorId,
+      workflowName: request.workflowName,
+      originalMessage: request.reason,
+      selectedMessage: request.items.map((item) => `从商品 ${item.sourceProductId} 复制 ${item.count} 条「${item.keyword}」新链`).join('；'),
+      label: '多商品新链批量复制',
+      arguments: { items: request.items.map((item) => ({ keyword: item.keyword, count: item.count, sourceProductId: item.sourceProductId })) },
+      reason: request.reason,
+    });
+    const result = await executeNewLinkBatchMultiConfirmRequest(config.rentalPriceClient ?? createRentalPriceSkillClient(), request);
+    setServerCardActionStatus(claim.key, result.ok ? 'completed' : 'failed');
+    await recordAgentLearningEvent(outputDir, {
+      type: result.ok ? 'workflow_completed' : 'workflow_failed',
+      messageId,
+      actorId,
+      workflowName: request.workflowName,
+      arguments: { items: request.items.map((item) => ({ keyword: item.keyword, count: item.count, sourceProductId: item.sourceProductId })) },
       reason: request.reason,
       resultSummary: result.text,
     });

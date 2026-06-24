@@ -16,7 +16,7 @@ import {
   parseActivityAutomationConfirmRequest,
   type ActivityAutomationSkillClient,
 } from './activityAutomation.js';
-import { executeNewLinkBatchConfirmRequest, parseNewLinkBatchConfirmRequest } from '../newLinkWorkflow/batch.js';
+import { executeNewLinkBatchConfirmRequest, executeNewLinkBatchMultiConfirmRequest, parseNewLinkBatchConfirmRequest, parseNewLinkBatchMultiConfirmRequest } from '../newLinkWorkflow/batch.js';
 import { createRentalPriceSkillClient, executeRentalOperationConfirmRequest, parseRentalOperationConfirmRequest, parseRentalPriceConfirmRequest, type RentalPriceSkillClient } from './rentalPrice.js';
 import type { LlmToolSelectionProvider } from './llmProvider.js';
 import type { LlmIntentProposalProvider } from './llmIntentProposal.js';
@@ -151,8 +151,10 @@ function expectedActionForButtonName(name: string | undefined): string | undefin
     agent_tool_confirm_submit: 'agent_tool_confirm',
     agent_tool_cancel_submit: 'agent_tool_cancel',
     new_link_batch_confirm_submit: 'new_link_batch_confirm',
+    new_link_batch_multi_confirm_submit: 'new_link_batch_multi_confirm',
     new_link_batch_cancel_submit: 'new_link_batch_cancel',
     new_link_batch_confirm_form: 'new_link_batch_confirm',
+    new_link_batch_multi_confirm_form: 'new_link_batch_multi_confirm',
     new_link_batch_cancel_form: 'new_link_batch_cancel',
     rental_price_confirm_submit: 'rental_price_confirm',
     rental_price_cancel_submit: 'rental_price_cancel',
@@ -641,6 +643,61 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
                 resultSummary: error instanceof Error ? error.message : String(error),
               }, messageId);
               await updateCard(client, messageId, statusCard('新链批量复制失败', `源商品 ${request.sourceProductId}\n${error instanceof Error ? error.message : String(error)}`, 'red')).catch(() => false);
+              logError(error, { messageId, phase: 'reply' });
+            }
+          })();
+          return;
+        }
+
+        if (actionName === 'new_link_batch_multi_confirm') {
+          const request = parseNewLinkBatchMultiConfirmRequest(value);
+          if (!request) {
+            await replyText(client, messageId, '多商品新链批量复制确认参数无效，请重新发起。');
+            return;
+          }
+          const claim = claimRentalAction(messageId, actionName, value);
+          if (!claim.claimed) {
+            return cardActionUpdateResponse(newLinkBatchClaimStatusCard(claim.claim));
+          }
+          const selectedMessage = request.items.map((item) => `从商品 ${item.sourceProductId} 复制 ${item.count} 条「${item.keyword}」新链`).join('；');
+          recordLearning({
+            type: 'workflow_confirmed',
+            messageId,
+            actorId: extractCardReviewerId(data),
+            workflowName: request.workflowName,
+            originalMessage: request.reason,
+            selectedMessage,
+            label: '多商品新链批量复制',
+            arguments: { items: request.items.map((item) => ({ keyword: item.keyword, count: item.count, sourceProductId: item.sourceProductId })) },
+            reason: request.reason,
+          }, messageId);
+          void (async () => {
+            await updateCard(client, messageId, statusCard('多商品新链批量复制处理中', `已收到确认，准备分别复制 ${request.items.length} 个商品。`, 'blue')).catch(() => false);
+            try {
+              const result = await executeNewLinkBatchMultiConfirmRequest(rentalPriceClient, request);
+              setRentalActionStatus(claim.key, result.ok ? 'completed' : 'failed');
+              recordLearning({
+                type: result.ok ? 'workflow_completed' : 'workflow_failed',
+                messageId,
+                actorId: extractCardReviewerId(data),
+                workflowName: request.workflowName,
+                arguments: { items: request.items.map((item) => ({ keyword: item.keyword, count: item.count, sourceProductId: item.sourceProductId })) },
+                reason: request.reason,
+                resultSummary: result.text,
+              }, messageId);
+              await updateCard(client, messageId, statusCard(result.ok ? '多商品新链批量复制已完成' : '多商品新链批量复制失败', result.text, result.ok ? 'green' : 'red')).catch(() => false);
+            } catch (error) {
+              setRentalActionStatus(claim.key, 'failed');
+              recordLearning({
+                type: 'workflow_failed',
+                messageId,
+                actorId: extractCardReviewerId(data),
+                workflowName: request.workflowName,
+                arguments: { items: request.items.map((item) => ({ keyword: item.keyword, count: item.count, sourceProductId: item.sourceProductId })) },
+                reason: request.reason,
+                resultSummary: error instanceof Error ? error.message : String(error),
+              }, messageId);
+              await updateCard(client, messageId, statusCard('多商品新链批量复制失败', error instanceof Error ? error.message : String(error), 'red')).catch(() => false);
               logError(error, { messageId, phase: 'reply' });
             }
           })();
