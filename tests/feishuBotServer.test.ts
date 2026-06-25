@@ -4,6 +4,10 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { extractTextMessage, startFeishuBotServer } from '../src/feishuBot/server.js';
 import type { ActivityAutomationSkillClient } from '../src/feishuBot/activityAutomation.js';
+import { openLinkRegistryGovernancePrompt } from '../src/linkRegistry/governanceSession.js';
+import { openLinkRegistryMaintenancePrompt } from '../src/linkRegistry/maintenanceSession.js';
+import type { LinkRegistryOverrideRisk } from '../src/linkRegistry/overrides.js';
+import type { LinkRegistryEntry } from '../src/linkRegistry/types.js';
 import type { RentalPriceSkillClient } from '../src/feishuBot/rentalPrice.js';
 import type { FeishuBotIncomingTextMessage } from '../src/feishuBot/types.js';
 
@@ -48,6 +52,68 @@ async function writeLearningContext(): Promise<string> {
     emptySectionNotes: {},
   }));
   return dir;
+}
+
+const linkMaintenanceRegistry: LinkRegistryEntry[] = [
+  {
+    internalProductId: '701',
+    platformProductId: 'platform-701',
+    productName: 'DJI Pocket 3 标准版',
+    shortName: 'Pocket 3',
+    sameSkuGroupId: 'dji-pocket-3',
+    categoryId: 'camera',
+    categoryName: '相机',
+    productType: 'gimbal-camera',
+    status: 'active',
+    source: ['product_id_mapping', 'link_registry_override'],
+  },
+  {
+    internalProductId: '702',
+    platformProductId: 'platform-702',
+    productName: 'DJI Pocket3 创作者套装',
+    shortName: 'Pocket3',
+    status: 'active',
+    firstSeenDate: '2026-06-24',
+    updatedAt: '2026-06-24',
+    source: ['goods_first_seen'],
+  },
+];
+
+async function seedLinkMaintenanceSession(outputDir: string): Promise<void> {
+  await openLinkRegistryMaintenancePrompt(outputDir, {
+    date: '2026-06-24',
+    registry: linkMaintenanceRegistry,
+    referenceDate: '2026-06-24',
+    overridesPath: join(outputDir, 'config', 'link-registry-overrides.json'),
+  });
+}
+
+const linkGovernanceRegistry: LinkRegistryEntry[] = [
+  {
+    internalProductId: '801',
+    platformProductId: 'platform-801',
+    productName: 'Wide300 单机身',
+    shortName: 'Wide300',
+    sameSkuGroupId: 'instax-wide300',
+    categoryId: 'camera',
+    categoryName: '相机',
+    productType: 'instant-camera',
+    status: 'active',
+    source: ['product_id_mapping'],
+  },
+];
+
+const linkGovernanceRisks: LinkRegistryOverrideRisk[] = [
+  { type: 'unknown_internal_product_id', message: 'Override target not found: 999', internalProductId: '999' },
+];
+
+async function seedLinkGovernanceSession(outputDir: string): Promise<void> {
+  await openLinkRegistryGovernancePrompt(outputDir, {
+    date: '2026-06-24',
+    registry: linkGovernanceRegistry,
+    overrideRisks: linkGovernanceRisks,
+    referenceDate: '2026-06-24',
+  });
 }
 
 function fakeActivityAutomationClient() {
@@ -863,6 +929,108 @@ describe('startFeishuBotServer', () => {
       expect(cards).toHaveLength(1);
       expect(cards[0]?.messageId).toBe('mid-http-loop-behavior');
       expect(JSON.stringify(cards[0]?.card)).toContain('运营学习 loop 测验 2/2');
+    } finally {
+      server.close();
+    }
+  });
+
+  it('routes HTTP proactive link maintenance start callbacks to the first review card', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-link-maintenance-http-'));
+    await seedLinkMaintenanceSession(outputDir);
+    const cards: Array<{ messageId: string; card: Record<string, unknown> }> = [];
+    let resolveReplySent!: () => void;
+    const replySent = new Promise<void>((resolve) => {
+      resolveReplySent = resolve;
+    });
+    const server = startFeishuBotServer({
+      port: 0,
+      appId: 'app',
+      appSecret: 'secret',
+      outputDir,
+      replyCard: async ({ messageId }, card) => {
+        cards.push({ messageId, card });
+        resolveReplySent();
+        return { sent: true, channel: 'app' };
+      },
+    });
+    try {
+      await new Promise<void>((resolve) => server.once('listening', resolve));
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+
+      const response = await fetch(`http://127.0.0.1:${address.port}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          header: { event_type: 'card.action.trigger' },
+          event: {
+            context: { open_message_id: 'mid-http-link-maintenance-start' },
+            action: { value: { action: 'link_registry_maintenance_start', date: '2026-06-24' } },
+          },
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      await replySent;
+      expect(cards).toHaveLength(1);
+      expect(cards[0]?.messageId).toBe('mid-http-link-maintenance-start');
+      expect(JSON.stringify(cards[0]?.card)).toContain('链接维护 1/1');
+      expect(JSON.stringify(cards[0]?.card)).toContain('Pocket3');
+    } finally {
+      server.close();
+    }
+  });
+
+  it('routes HTTP governance submit callbacks and persists the governance decision', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-link-governance-http-'));
+    await seedLinkGovernanceSession(outputDir);
+    const cards: Array<{ messageId: string; card: Record<string, unknown> }> = [];
+    let resolveReplySent!: () => void;
+    const replySent = new Promise<void>((resolve) => {
+      resolveReplySent = resolve;
+    });
+    const server = startFeishuBotServer({
+      port: 0,
+      appId: 'app',
+      appSecret: 'secret',
+      outputDir,
+      replyCard: async ({ messageId }, card) => {
+        cards.push({ messageId, card });
+        resolveReplySent();
+        return { sent: true, channel: 'app' };
+      },
+    });
+    try {
+      await new Promise<void>((resolve) => server.once('listening', resolve));
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+
+      const response = await fetch(`http://127.0.0.1:${address.port}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          header: { event_type: 'card.action.trigger' },
+          event: {
+            context: { open_message_id: 'mid-http-link-governance-submit' },
+            operator: { open_id: 'ou_http_governance' },
+            action: {
+              value: { action: 'link_registry_governance_submit', date: '2026-06-24', reviewIndex: 1 },
+              form_value: {
+                decision: 'resolved',
+                note: 'Wide300 组已确认纳入下一轮补齐。',
+              },
+            },
+          },
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      await replySent;
+      expect(cards).toHaveLength(1);
+      expect(cards[0]?.messageId).toBe('mid-http-link-governance-submit');
+      expect(JSON.stringify(cards[0]?.card)).toContain('组级治理 2/2');
+      await expect(readFile(join(outputDir, '2026-06-24', 'link-registry-governance-session.json'), 'utf8')).resolves.toContain('Wide300 组已确认纳入下一轮补齐。');
+      await expect(readFile(join(outputDir, '2026-06-24', 'link-registry-governance-session.json'), 'utf8')).resolves.toContain('ou_http_governance');
     } finally {
       server.close();
     }

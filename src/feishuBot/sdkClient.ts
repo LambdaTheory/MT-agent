@@ -4,6 +4,8 @@ import { parseAgentToolConfirmRequest } from '../agentRuntime/approvalCard.js';
 import { parseAgentClarificationCustomSelection, parseAgentClarificationSelection } from '../agentRuntime/clarificationCard.js';
 import type { AgentPlannerProvider } from '../agentRuntime/planner.js';
 import { recordAgentLearningEvent, type AgentLearningEventInput } from '../agentLearning/store.js';
+import { handleLinkRegistryGovernanceCardAction } from '../linkRegistry/governanceSession.js';
+import { handleLinkRegistryMaintenanceCardAction } from '../linkRegistry/maintenanceSession.js';
 import { handleOperationsLearningFeedback } from '../operationsLearningLoop/session.js';
 import { findLatestReportContext } from './reportStore.js';
 import { createFeishuMessageDispatcher } from './dispatcher.js';
@@ -431,6 +433,59 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
             feedback,
             questionIndex,
             suggestion: readActionFormValue(action, 'suggested_action'),
+            reviewerId: extractCardReviewerId(data),
+          });
+          if (response.card) await replyCard(client, messageId, response.card);
+          else await replyText(client, messageId, response.text);
+          return;
+        }
+
+        if (
+          actionName === 'link_registry_maintenance_start'
+          || actionName === 'link_registry_maintenance_snooze'
+          || actionName === 'link_registry_maintenance_ignore'
+          || actionName === 'link_registry_maintenance_submit'
+        ) {
+          const response = await handleLinkRegistryMaintenanceCardAction(outputDir, {
+            date: readString(value?.date) ?? '',
+            action:
+              actionName === 'link_registry_maintenance_start' ? 'start'
+                : actionName === 'link_registry_maintenance_snooze' ? 'snooze'
+                  : actionName === 'link_registry_maintenance_ignore' ? 'ignore'
+                    : 'submit',
+            internalProductId: readString(value?.internalProductId),
+            reviewIndex: readNumber(value?.reviewIndex),
+            decision: readString(readActionForm(action)?.decision) as 'accept' | 'accept_with_edit' | 'ignore' | undefined,
+            sameSkuGroupId: readString(readActionForm(action)?.same_sku_group_id_custom) ?? readString(readActionForm(action)?.same_sku_group_id),
+            categoryId: readString(readActionForm(action)?.category_id),
+            productType: readString(readActionForm(action)?.product_type),
+            shortName: readString(readActionForm(action)?.short_name),
+            reviewerId: extractCardReviewerId(data),
+          });
+          if (response.card) await replyCard(client, messageId, response.card);
+          else await replyText(client, messageId, response.text);
+          return;
+        }
+
+        if (
+          actionName === 'link_registry_governance_start'
+          || actionName === 'link_registry_governance_advance'
+          || actionName === 'link_registry_governance_submit'
+          || actionName === 'link_registry_governance_snooze'
+          || actionName === 'link_registry_governance_ignore'
+        ) {
+          const form = readActionForm(action);
+          const response = await handleLinkRegistryGovernanceCardAction(outputDir, {
+            date: readString(value?.date) ?? '',
+            action:
+              actionName === 'link_registry_governance_start' ? 'start'
+                : actionName === 'link_registry_governance_advance' ? 'advance'
+                  : actionName === 'link_registry_governance_submit' ? 'submit'
+                  : actionName === 'link_registry_governance_snooze' ? 'snooze'
+                    : 'ignore',
+            reviewIndex: readNumber(value?.reviewIndex),
+            decision: readString(form?.decision) as 'resolved' | 'watch' | 'ignored' | undefined,
+            note: readString(form?.note),
             reviewerId: extractCardReviewerId(data),
           });
           if (response.card) await replyCard(client, messageId, response.card);

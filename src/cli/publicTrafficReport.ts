@@ -8,6 +8,8 @@ import { crawlPublicTrafficSources } from '../crawler/publicTrafficCrawler.js';
 import { normalizeRowsForPeriod } from '../extractor/normalizeRows.js';
 import { buildInventorySameSkuSnapshot } from '../inventoryStatus/snapshot.js';
 import { writeInventorySameSkuSnapshot } from '../inventoryStatus/store.js';
+import { openLinkRegistryGovernancePrompt } from '../linkRegistry/governanceSession.js';
+import { openLinkRegistryMaintenancePrompt } from '../linkRegistry/maintenanceSession.js';
 import { annotateGoodsExportWorkbookWithInternalId } from '../mapping/annotateGoodsExportWorkbook.js';
 import { loadProductIdMapping, type ProductIdMapping } from '../mapping/productIdMapping.js';
 import { writeProductIdMappingFromExport } from '../mapping/refreshProductIdMapping.js';
@@ -629,6 +631,20 @@ export async function runPublicTrafficReportCli(): Promise<PublicTrafficReportCl
     });
 
     const firstReportSent = await sendFeishuCardSafely(card, fallbackText, log);
+    await sendLinkRegistryMaintenancePromptSafely(
+      config.outputDir,
+      runDate,
+      registryContext.registry,
+      registryContext.resolvedPaths.overridesPath,
+      log,
+    );
+    await sendLinkRegistryGovernancePromptSafely(
+      config.outputDir,
+      runDate,
+      registryContext.registry,
+      registryContext.overrideRisks,
+      log,
+    );
     await savePublicTrafficRunState(paths.publicTrafficRunState, {
       date: runDate,
       firstReportSent,
@@ -669,6 +685,64 @@ async function sendFeishuCardSafely(card: Record<string, unknown>, fallbackText:
     return feishuResult.sent;
   } catch (error) {
     log.addEvent(`飞书通知失败: ${error instanceof Error ? error.message : String(error)}`);
+    return false;
+  }
+}
+
+async function sendLinkRegistryMaintenancePromptSafely(
+  outputDir: string,
+  runDate: string,
+  registry: Parameters<typeof openLinkRegistryMaintenancePrompt>[1]['registry'],
+  overridesPath: string,
+  log: ReturnType<typeof createRunLog>,
+): Promise<boolean> {
+  try {
+    const prompt = await openLinkRegistryMaintenancePrompt(outputDir, {
+      date: runDate,
+      registry,
+      referenceDate: runDate,
+      overridesPath,
+    });
+    if (!prompt?.card) {
+      log.addEvent('链接维护提醒：当前没有需要主动发起的维护项');
+      return false;
+    }
+    const sendTo = parseFeishuSendToArg(process.argv);
+    const env = sendTo ? { ...process.env, FEISHU_SEND_TO: sendTo } : process.env;
+    const feishuResult = await sendFeishuCard(env, prompt.card, prompt.text);
+    log.addEvent(feishuResult.sent ? '链接维护提醒卡已发送' : `链接维护提醒卡跳过: ${feishuResult.reason}`);
+    return feishuResult.sent;
+  } catch (error) {
+    log.addEvent(`链接维护提醒发送失败: ${error instanceof Error ? error.message : String(error)}`);
+    return false;
+  }
+}
+
+async function sendLinkRegistryGovernancePromptSafely(
+  outputDir: string,
+  runDate: string,
+  registry: Parameters<typeof openLinkRegistryGovernancePrompt>[1]['registry'],
+  overrideRisks: Parameters<typeof openLinkRegistryGovernancePrompt>[1]['overrideRisks'],
+  log: ReturnType<typeof createRunLog>,
+): Promise<boolean> {
+  try {
+    const prompt = await openLinkRegistryGovernancePrompt(outputDir, {
+      date: runDate,
+      registry,
+      overrideRisks,
+      referenceDate: runDate,
+    });
+    if (!prompt?.card) {
+      log.addEvent('链接档案治理提醒：当前没有需要主动发起的组级问题');
+      return false;
+    }
+    const sendTo = parseFeishuSendToArg(process.argv);
+    const env = sendTo ? { ...process.env, FEISHU_SEND_TO: sendTo } : process.env;
+    const feishuResult = await sendFeishuCard(env, prompt.card, prompt.text);
+    log.addEvent(feishuResult.sent ? '链接档案治理提醒卡已发送' : `链接档案治理提醒卡跳过: ${feishuResult.reason}`);
+    return feishuResult.sent;
+  } catch (error) {
+    log.addEvent(`链接档案治理提醒发送失败: ${error instanceof Error ? error.message : String(error)}`);
     return false;
   }
 }
