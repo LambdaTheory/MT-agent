@@ -4,6 +4,10 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createFeishuSdkBot } from '../src/feishuBot/sdkClient.js';
 import type { ActivityAutomationSkillClient } from '../src/feishuBot/activityAutomation.js';
+import { openLinkRegistryGovernancePrompt } from '../src/linkRegistry/governanceSession.js';
+import type { LinkRegistryEntry } from '../src/linkRegistry/types.js';
+import { openLinkRegistryMaintenancePrompt } from '../src/linkRegistry/maintenanceSession.js';
+import type { LinkRegistryOverrideRisk } from '../src/linkRegistry/overrides.js';
 
 const metric = {
   exposure: 10,
@@ -124,6 +128,70 @@ async function seedLearningSession(outputDir: string): Promise<void> {
     feedbacks: [],
     learnedSignals: { acceptedReasons: {}, rejectedReasons: {}, rejectedOperations: {}, nonRepresentativeProducts: [] },
   }));
+}
+
+const linkMaintenanceRegistry: LinkRegistryEntry[] = [
+  {
+    internalProductId: '701',
+    platformProductId: 'platform-701',
+    productName: 'DJI Pocket 3 标准版',
+    shortName: 'Pocket 3',
+    sameSkuGroupId: 'dji-pocket-3',
+    categoryId: 'camera',
+    categoryName: '相机',
+    productType: 'gimbal-camera',
+    status: 'active',
+    source: ['product_id_mapping', 'link_registry_override'],
+  },
+  {
+    internalProductId: '702',
+    platformProductId: 'platform-702',
+    productName: 'DJI Pocket3 创作者套装',
+    shortName: 'Pocket3',
+    status: 'active',
+    firstSeenDate: '2026-06-24',
+    updatedAt: '2026-06-24',
+    source: ['goods_first_seen'],
+  },
+];
+
+async function seedLinkMaintenanceSession(outputDir: string): Promise<string> {
+  const overridesPath = join(outputDir, 'config', 'link-registry-overrides.json');
+  await openLinkRegistryMaintenancePrompt(outputDir, {
+    date: '2026-06-24',
+    registry: linkMaintenanceRegistry,
+    referenceDate: '2026-06-24',
+    overridesPath,
+  });
+  return overridesPath;
+}
+
+const linkGovernanceRegistry: LinkRegistryEntry[] = [
+  {
+    internalProductId: '801',
+    platformProductId: 'platform-801',
+    productName: 'Wide300 单机身',
+    shortName: 'Wide300',
+    sameSkuGroupId: 'instax-wide300',
+    categoryId: 'camera',
+    categoryName: '相机',
+    productType: 'instant-camera',
+    status: 'active',
+    source: ['product_id_mapping'],
+  },
+];
+
+const linkGovernanceRisks: LinkRegistryOverrideRisk[] = [
+  { type: 'unknown_internal_product_id', message: 'Override target not found: 999', internalProductId: '999' },
+];
+
+async function seedLinkGovernanceSession(outputDir: string): Promise<void> {
+  await openLinkRegistryGovernancePrompt(outputDir, {
+    date: '2026-06-24',
+    registry: linkGovernanceRegistry,
+    overrideRisks: linkGovernanceRisks,
+    referenceDate: '2026-06-24',
+  });
 }
 
 describe('createFeishuSdkBot card.action.trigger', () => {
@@ -511,5 +579,109 @@ describe('createFeishuSdkBot card.action.trigger', () => {
     expect(sent).toHaveLength(1);
     expect(sent[0]).toMatchObject({ kind: 'reply', request: { path: { message_id: 'om-feedback-flat' }, data: { msg_type: 'interactive' } } });
     await expect(readFile(join(outputDir, '2026-06-11', 'operations-learning-session.json'), 'utf8')).resolves.toContain('reasonable');
+  });
+
+  it('starts link registry maintenance review from the proactive reminder card', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-link-maintenance-sdk-'));
+    await seedLinkMaintenanceSession(outputDir);
+    const registered: Record<string, (data: unknown) => Promise<void>> = {};
+    const sent: unknown[] = [];
+    const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', outputDir, sdk: fakeSdk(sent, registered) });
+
+    bot.start();
+    await registered['card.action.trigger']({
+      event: {
+        context: { open_message_id: 'om-link-maintenance-start' },
+        action: { tag: 'button', value: { action: 'link_registry_maintenance_start', date: '2026-06-24' } },
+      },
+    });
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ kind: 'reply', request: { path: { message_id: 'om-link-maintenance-start' }, data: { msg_type: 'interactive' } } });
+    expect(JSON.stringify(sent[0])).toContain('链接维护 1/1');
+    expect(JSON.stringify(sent[0])).toContain('Pocket3');
+  });
+
+  it('submits link registry maintenance edits and persists overrides', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-link-maintenance-sdk-submit-'));
+    const overridesPath = await seedLinkMaintenanceSession(outputDir);
+    const registered: Record<string, (data: unknown) => Promise<void>> = {};
+    const sent: unknown[] = [];
+    const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', outputDir, sdk: fakeSdk(sent, registered) });
+
+    bot.start();
+    await registered['card.action.trigger']({
+      event: {
+        context: { open_message_id: 'om-link-maintenance-submit' },
+        operator: { open_id: 'ou_link_reviewer' },
+        action: {
+          tag: 'button',
+          value: { action: 'link_registry_maintenance_submit', date: '2026-06-24', internalProductId: '702', reviewIndex: 1 },
+          form_value: {
+            decision: 'accept_with_edit',
+            same_sku_group_id_custom: 'dji-pocket-3',
+            category_id: 'camera',
+            product_type: 'gimbal-camera',
+            short_name: 'DJI Pocket 3',
+          },
+        },
+      },
+    });
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ kind: 'reply', request: { path: { message_id: 'om-link-maintenance-submit' }, data: { msg_type: 'text' } } });
+    expect(JSON.stringify(sent[0])).toContain('链接维护已处理完成');
+    await expect(readFile(overridesPath, 'utf8')).resolves.toContain('"internalProductId": "702"');
+    await expect(readFile(overridesPath, 'utf8')).resolves.toContain('"sameSkuGroupId": "dji-pocket-3"');
+  });
+
+  it('starts link registry governance review from the proactive governance card', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-link-governance-sdk-'));
+    await seedLinkGovernanceSession(outputDir);
+    const registered: Record<string, (data: unknown) => Promise<void>> = {};
+    const sent: unknown[] = [];
+    const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', outputDir, sdk: fakeSdk(sent, registered) });
+
+    bot.start();
+    await registered['card.action.trigger']({
+      event: {
+        context: { open_message_id: 'om-link-governance-start' },
+        action: { tag: 'button', value: { action: 'link_registry_governance_start', date: '2026-06-24' } },
+      },
+    });
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ kind: 'reply', request: { path: { message_id: 'om-link-governance-start' }, data: { msg_type: 'interactive' } } });
+    expect(JSON.stringify(sent[0])).toContain('组级治理 1/2');
+  });
+
+  it('submits link registry governance decisions from the review card', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-link-governance-sdk-submit-'));
+    await seedLinkGovernanceSession(outputDir);
+    const registered: Record<string, (data: unknown) => Promise<void>> = {};
+    const sent: unknown[] = [];
+    const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', outputDir, sdk: fakeSdk(sent, registered) });
+
+    bot.start();
+    await registered['card.action.trigger']({
+      event: {
+        context: { open_message_id: 'om-link-governance-submit' },
+        operator: { open_id: 'ou_link_governance' },
+        action: {
+          tag: 'button',
+          value: { action: 'link_registry_governance_submit', date: '2026-06-24', reviewIndex: 1 },
+          form_value: {
+            decision: 'resolved',
+            note: 'Pocket 3 组已完成样本补齐。',
+          },
+        },
+      },
+    });
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ kind: 'reply', request: { path: { message_id: 'om-link-governance-submit' }, data: { msg_type: 'interactive' } } });
+    expect(JSON.stringify(sent[0])).toContain('组级治理 2/2');
+    await expect(readFile(join(outputDir, '2026-06-24', 'link-registry-governance-session.json'), 'utf8')).resolves.toContain('Pocket 3 组已完成样本补齐。');
+    await expect(readFile(join(outputDir, '2026-06-24', 'link-registry-governance-session.json'), 'utf8')).resolves.toContain('ou_link_governance');
   });
 });

@@ -1,7 +1,8 @@
 import { readFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
-import { buildLinkRegistry } from '../linkRegistry/buildRegistry.js';
 import { buildLinkRegistryAudit, type LinkRegistryAudit } from '../linkRegistry/audit.js';
+import { buildLinkRegistry } from '../linkRegistry/buildRegistry.js';
+import { buildLinkRegistryMaintenanceReport, type LinkRegistryMaintenanceReport } from '../linkRegistry/maintenance.js';
 import { applyLinkRegistryOverrides, parseLinkRegistryOverrides } from '../linkRegistry/overrides.js';
 import type { LinkRegistryEntry } from '../linkRegistry/types.js';
 import type { ProductIdMapping } from '../mapping/productIdMapping.js';
@@ -69,7 +70,12 @@ function parseLifecycle(value: unknown): GoodsLinkLifecycleState | null {
   }
   const removedLinks = value.removedLinks.filter((item): item is GoodsLinkLifecycleState['removedLinks'][number] => {
     if (!isRecord(item)) return false;
-    return typeof item.productId === 'string' && typeof item.platformProductId === 'string' && typeof item.productName === 'string' && typeof item.removedDate === 'string' && item.reason === '商品总表缺失' && item.source === 'goods_snapshot_diff';
+    return typeof item.productId === 'string'
+      && typeof item.platformProductId === 'string'
+      && typeof item.productName === 'string'
+      && typeof item.removedDate === 'string'
+      && item.reason === '商品总表缺失'
+      && item.source === 'goods_snapshot_diff';
   });
   return { active, removedLinks };
 }
@@ -77,7 +83,12 @@ function parseLifecycle(value: unknown): GoodsLinkLifecycleState | null {
 function parseRegistryEntries(value: unknown): LinkRegistryEntry[] {
   if (!Array.isArray(value)) throw new Error('Registry file must contain a LinkRegistryEntry array');
   return value.map((item) => {
-    if (!isRecord(item) || typeof item.internalProductId !== 'string' || (item.status !== 'active' && item.status !== 'removed' && item.status !== 'unknown') || !Array.isArray(item.source)) {
+    if (
+      !isRecord(item)
+      || typeof item.internalProductId !== 'string'
+      || (item.status !== 'active' && item.status !== 'removed' && item.status !== 'unknown')
+      || !Array.isArray(item.source)
+    ) {
       throw new Error('Invalid LinkRegistryEntry in registry file');
     }
     return item as unknown as LinkRegistryEntry;
@@ -99,16 +110,40 @@ async function buildEntriesFromInputs(argv: string[]): Promise<LinkRegistryEntry
   return buildLinkRegistry({ productIdMapping, productNameMap, firstSeen, lifecycle });
 }
 
-async function buildAuditFromArgs(argv: string[]): Promise<LinkRegistryAudit> {
+interface AuditBuildResult {
+  audit: LinkRegistryAudit;
+  maintenance: LinkRegistryMaintenanceReport;
+}
+
+async function buildReportsFromArgs(argv: string[]): Promise<AuditBuildResult> {
   const entries = await buildEntriesFromInputs(argv);
   const overridesPath = readArg(argv, '--overrides') ?? 'config/link-registry-overrides.json';
   const rawOverrides = await readOptionalJson(overridesPath);
-  if (rawOverrides === null) return buildLinkRegistryAudit(entries);
+  const referenceDate = readArg(argv, '--reference-date') ?? new Date().toISOString().slice(0, 10);
+  if (rawOverrides === null) {
+    return {
+      audit: buildLinkRegistryAudit(entries),
+      maintenance: buildLinkRegistryMaintenanceReport(entries, [], { referenceDate }),
+    };
+  }
   const overrideResult = applyLinkRegistryOverrides(entries, parseLinkRegistryOverrides(rawOverrides));
-  return buildLinkRegistryAudit(overrideResult.entries, overrideResult.risks);
+  return {
+    audit: buildLinkRegistryAudit(overrideResult.entries, overrideResult.risks),
+    maintenance: buildLinkRegistryMaintenanceReport(overrideResult.entries, overrideResult.risks, { referenceDate }),
+  };
 }
 
-function printSummary(audit: LinkRegistryAudit): void {
+function percent(value: number): string {
+  return `${(value * 100).toFixed(1)}%`;
+}
+
+function readyPercent(maintenance: LinkRegistryMaintenanceReport): string {
+  const { readyCount, totalEntries } = maintenance.summary;
+  if (totalEntries <= 0) return '0.0%';
+  return percent(readyCount / totalEntries);
+}
+
+function printSummary(audit: LinkRegistryAudit, maintenance: LinkRegistryMaintenanceReport): void {
   console.log(`现有链接档案盘点: total=${audit.total} active=${audit.active} removed=${audit.removed} unknown=${audit.unknown}`);
   console.log('品类:');
   for (const category of audit.categories) {
@@ -120,15 +155,26 @@ function printSummary(audit: LinkRegistryAudit): void {
   console.log(`分类不明链接: ${audit.unknownEntries.length}`);
   console.log(`同款样本不足分组: ${audit.sameSkuGroups.filter((group) => group.sampleInsufficient).length}`);
   console.log(`风险: ${audit.risks.length}`);
+  console.log('维护覆盖率:');
+  console.log(`- 完整就绪: ${maintenance.summary.readyCount}/${maintenance.summary.totalEntries} (${readyPercent(maintenance)})`);
+  console.log(`- 已归组: ${maintenance.coverage.grouped.ready}/${maintenance.coverage.grouped.total} (${percent(maintenance.coverage.grouped.ratio)})`);
+  console.log(`- 已分类: ${maintenance.coverage.classified.ready}/${maintenance.coverage.classified.total} (${percent(maintenance.coverage.classified.ratio)})`);
+  console.log(`- 已映射: ${maintenance.coverage.mapped.ready}/${maintenance.coverage.mapped.total} (${percent(maintenance.coverage.mapped.ratio)})`);
+  console.log(`待维护队列: ${maintenance.summary.pendingCount}`);
+  for (const [index, item] of maintenance.queue.slice(0, 5).entries()) {
+    const subject = item.internalProductId ?? item.sameSkuGroupId ?? item.message ?? '未命名项';
+    const name = item.productName ?? item.shortName ?? '';
+    console.log(`${index + 1}. [${item.priority.toUpperCase()}] ${subject}${name ? ` ${name}` : ''} | ${item.reasonLabels.join('、')}`);
+  }
 }
 
 export async function runLinkRegistryAuditCli(argv = process.argv.slice(2)): Promise<void> {
-  const audit = await buildAuditFromArgs(argv);
+  const reports = await buildReportsFromArgs(argv);
   if (hasFlag(argv, '--json')) {
-    console.log(JSON.stringify(audit, null, 2));
+    console.log(JSON.stringify({ ...reports.audit, maintenance: reports.maintenance }, null, 2));
     return;
   }
-  printSummary(audit);
+  printSummary(reports.audit, reports.maintenance);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

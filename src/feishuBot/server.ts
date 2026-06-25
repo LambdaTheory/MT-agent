@@ -3,6 +3,8 @@ import { parseAgentToolConfirmRequest } from '../agentRuntime/approvalCard.js';
 import { parseAgentClarificationCustomSelection, parseAgentClarificationSelection } from '../agentRuntime/clarificationCard.js';
 import type { AgentPlannerProvider } from '../agentRuntime/planner.js';
 import { recordAgentLearningEvent } from '../agentLearning/store.js';
+import { handleLinkRegistryGovernanceCardAction } from '../linkRegistry/governanceSession.js';
+import { handleLinkRegistryMaintenanceCardAction } from '../linkRegistry/maintenanceSession.js';
 import { replyFeishuMessageCard, replyFeishuMessageText, type FeishuAppSendResult, type FeishuCardPayload, type FeishuReplyConfig } from '../notify/feishuApp.js';
 import { handleOperationsLearningFeedback } from '../operationsLearningLoop/session.js';
 import { findLatestReportContext } from './reportStore.js';
@@ -290,6 +292,60 @@ async function handleCardActionTrigger(
       feedback,
       questionIndex,
       suggestion: readActionFormValue(payload.event?.action, 'suggested_action'),
+      reviewerId: extractCardReviewerId(payload),
+    });
+    if (response.card) await replyCard(replyConfig, response.card);
+    else await replyText(replyConfig, response.text);
+    return;
+  }
+
+  if (
+    actionName === 'link_registry_maintenance_start'
+    || actionName === 'link_registry_maintenance_snooze'
+    || actionName === 'link_registry_maintenance_ignore'
+    || actionName === 'link_registry_maintenance_submit'
+  ) {
+    const form = readActionForm(payload.event?.action);
+    const response = await handleLinkRegistryMaintenanceCardAction(outputDir, {
+      date: readString(value?.date) ?? '',
+      action:
+        actionName === 'link_registry_maintenance_start' ? 'start'
+          : actionName === 'link_registry_maintenance_snooze' ? 'snooze'
+            : actionName === 'link_registry_maintenance_ignore' ? 'ignore'
+              : 'submit',
+      internalProductId: readString(value?.internalProductId),
+      reviewIndex: readNumber(value?.reviewIndex),
+      decision: readString(form?.decision) as 'accept' | 'accept_with_edit' | 'ignore' | undefined,
+      sameSkuGroupId: readString(form?.same_sku_group_id_custom) ?? readString(form?.same_sku_group_id),
+      categoryId: readString(form?.category_id),
+      productType: readString(form?.product_type),
+      shortName: readString(form?.short_name),
+      reviewerId: extractCardReviewerId(payload),
+    });
+    if (response.card) await replyCard(replyConfig, response.card);
+    else await replyText(replyConfig, response.text);
+    return;
+  }
+
+  if (
+    actionName === 'link_registry_governance_start'
+    || actionName === 'link_registry_governance_advance'
+    || actionName === 'link_registry_governance_submit'
+    || actionName === 'link_registry_governance_snooze'
+    || actionName === 'link_registry_governance_ignore'
+  ) {
+    const form = readActionForm(payload.event?.action);
+    const response = await handleLinkRegistryGovernanceCardAction(outputDir, {
+      date: readString(value?.date) ?? '',
+      action:
+        actionName === 'link_registry_governance_start' ? 'start'
+          : actionName === 'link_registry_governance_advance' ? 'advance'
+            : actionName === 'link_registry_governance_submit' ? 'submit'
+            : actionName === 'link_registry_governance_snooze' ? 'snooze'
+              : 'ignore',
+      reviewIndex: readNumber(value?.reviewIndex),
+      decision: readString(form?.decision) as 'resolved' | 'watch' | 'ignored' | undefined,
+      note: readString(form?.note),
       reviewerId: extractCardReviewerId(payload),
     });
     if (response.card) await replyCard(replyConfig, response.card);
