@@ -159,6 +159,32 @@ function optionalElement(element: Record<string, unknown> | null): Record<string
   return element ? [element] : [];
 }
 
+type DataSourceHeaderTemplate = 'green' | 'blue' | 'orange' | 'red';
+
+interface DataSourceStatus {
+  template: DataSourceHeaderTemplate;
+  text: string;
+}
+
+function hasOneDaySourceData(context: PublicTrafficDataReportContext, source: 'hasExposureData' | 'hasDashboardData'): boolean {
+  return context.rows.some((row) => row.periods['1d']?.[source] === true);
+}
+
+function dataSourceStatus(context: PublicTrafficDataReportContext): DataSourceStatus {
+  const exposureReady = hasOneDaySourceData(context, 'hasExposureData');
+  const dashboardReady = hasOneDaySourceData(context, 'hasDashboardData');
+  const template: DataSourceHeaderTemplate = exposureReady && dashboardReady
+    ? 'green'
+    : exposureReady
+      ? 'blue'
+      : dashboardReady
+        ? 'orange'
+        : 'red';
+  const exposureText = exposureReady ? '曝光页已抓取' : '曝光页未更新/异常';
+  const dashboardText = dashboardReady ? '访问页已抓取' : '访问页未更新/异常';
+  return { template, text: `数据源状态：${exposureText}；${dashboardText}` };
+}
+
 function funnelColumnSet(context: PublicTrafficDataReportContext): Record<string, unknown> {
   return { tag: 'column_set', element_id: 'funnel_summary', flex_mode: 'stretch', horizontal_spacing: '8px', columns: [
     nestedMetricColumn(`公域（${shortDataDate(context.date)}）`, publicFunnelMetrics(context), 4),
@@ -475,15 +501,17 @@ function metricTables(context: PublicTrafficDataReportContext, productNameMap: P
 export function buildPublicTrafficCard(context: PublicTrafficDataReportContext, _paths: PublicTrafficReportPaths, options: PublicTrafficCardOptions = {}): FeishuCardPayload {
   const one = context.summary['1d'];
   const productNameMap = options.productNameMap ?? {};
+  const sourceStatus = dataSourceStatus(context);
   return {
     schema: '2.0',
     config: { update_multi: true },
     header: {
       title: { tag: 'plain_text', content: `公域数据日报 ${context.date}` },
-      template: 'blue',
+      template: sourceStatus.template,
     },
     body: {
       elements: [
+        { tag: 'markdown', content: sourceStatus.text },
         ...funnelElements(context),
         { tag: 'hr' },
         ...metricTables(context, productNameMap),

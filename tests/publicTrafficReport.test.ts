@@ -269,6 +269,32 @@ describe('public traffic report outputs', () => {
     expect(serialized).not.toContain('report.xlsx');
   });
 
+  it.each([
+    { hasExposureData: true, hasDashboardData: true, template: 'green', text: '数据源状态：曝光页已抓取；访问页已抓取' },
+    { hasExposureData: true, hasDashboardData: false, template: 'blue', text: '数据源状态：曝光页已抓取；访问页未更新/异常' },
+    { hasExposureData: false, hasDashboardData: true, template: 'orange', text: '数据源状态：曝光页未更新/异常；访问页已抓取' },
+    { hasExposureData: false, hasDashboardData: false, template: 'red', text: '数据源状态：曝光页未更新/异常；访问页未更新/异常' },
+  ])('renders source status as $template when exposure=$hasExposureData dashboard=$hasDashboardData', ({ hasExposureData, hasDashboardData, template, text }) => {
+    const sourceContext = makeDataReportContext({
+      rows: context.rows.map((row) => ({
+        ...row,
+        periods: {
+          ...row.periods,
+          '1d': {
+            ...row.periods['1d'],
+            hasExposureData,
+            hasDashboardData,
+          },
+        },
+      })),
+    });
+
+    const card = buildPublicTrafficCard(sourceContext, { markdownPath: 'report.md', workbookPath: 'report.xlsx' });
+
+    expect(card.header).toMatchObject({ template });
+    expect(JSON.stringify(card)).toContain(text);
+  });
+
   it('keeps removed-link Agent data out of visible Markdown and Feishu card outputs', () => {
     const withRemovedLinks: PublicTrafficDataReportContext = {
       ...context,
