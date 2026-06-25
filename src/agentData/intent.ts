@@ -49,6 +49,9 @@ function parseBestProductBySameSkuQuery(text: string): SameSkuBestIntent | null 
   const leadingPeriodBest = /^近\s*\d+\s*天\s*(?:数据|表现|金额|成交额|曝光|发货)?\s*(?:最好|最佳|最优|最强)的?\s*(.+?)\s*(?:是\s*)?(?:(?:哪个|哪条|哪一个|哪款|什么)\s*)?(?:端内\s*id|id|链接)?\s*(?:是多少)?$/iu.exec(text);
   if (leadingPeriodBest?.[1]) return buildBestProductIntent(text, cleanupRankingQuery(leadingPeriodBest[1]));
 
+  const productFirstBestLink = /^(.+?)\s*(?:数据|表现)\s*(?:最好|最佳|最优|最强)的?\s*(?:链接|端内\s*id|id)?\s*(?:是)?\s*(?:哪(?:个|条|一个|款)|什么|多少)?[?？。！!]*$/iu.exec(text);
+  if (productFirstBestLink?.[1]) return buildBestProductIntent(text, cleanupRankingQuery(productFirstBestLink[1]));
+
   const leadingBest = /^(?:数据|表现)\s*(?:最好|最佳|最优|最强)的?\s*(.+?)\s*(?:是\s*)?(?:(?:哪个|哪条|哪一个|哪款|什么)\s*)?(?:端内\s*id|id|链接)?\s*(?:是多少)?$/iu.exec(text);
   if (leadingBest?.[1]) return buildBestProductIntent(text, cleanupRankingQuery(leadingBest[1]));
 

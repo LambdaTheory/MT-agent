@@ -21,6 +21,7 @@ describe('parseAgentDataIntent', () => {
 
   it('maps best-link questions to same-sku ranking intents before product lookup', () => {
     expect(parseAgentDataIntent('数据最好的X200Ultra是哪个id?')).toEqual({ type: 'best_product_by_same_sku', query: 'X200Ultra' });
+    expect(parseAgentDataIntent('sx70数据最好的链接是哪条?')).toEqual({ type: 'best_product_by_same_sku', query: 'sx70' });
     expect(parseAgentDataIntent('数据最好的 X200Ultra 是哪个 id')).toEqual({ type: 'best_product_by_same_sku', query: 'X200Ultra' });
     expect(parseAgentDataIntent('数据最好的 pocket3 的端内id是多少')).toEqual({ type: 'best_product_by_same_sku', query: 'pocket3' });
     expect(parseAgentDataIntent('X200Ultra 数据最好的是哪个id')).toEqual({ type: 'best_product_by_same_sku', query: 'X200Ultra' });
