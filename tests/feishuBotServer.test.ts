@@ -934,14 +934,11 @@ describe('startFeishuBotServer', () => {
     }
   });
 
-  it('routes HTTP proactive link maintenance start callbacks to the first review card', async () => {
+
+  it('returns the first maintenance review card directly for HTTP callbacks', async () => {
     const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-link-maintenance-http-'));
     await seedLinkMaintenanceSession(outputDir);
     const cards: Array<{ messageId: string; card: Record<string, unknown> }> = [];
-    let resolveReplySent!: () => void;
-    const replySent = new Promise<void>((resolve) => {
-      resolveReplySent = resolve;
-    });
     const server = startFeishuBotServer({
       port: 0,
       appId: 'app',
@@ -949,7 +946,6 @@ describe('startFeishuBotServer', () => {
       outputDir,
       replyCard: async ({ messageId }, card) => {
         cards.push({ messageId, card });
-        resolveReplySent();
         return { sent: true, channel: 'app' };
       },
     });
@@ -971,24 +967,61 @@ describe('startFeishuBotServer', () => {
       });
 
       expect(response.status).toBe(200);
-      await replySent;
-      expect(cards).toHaveLength(1);
-      expect(cards[0]?.messageId).toBe('mid-http-link-maintenance-start');
-      expect(JSON.stringify(cards[0]?.card)).toContain('链接维护 1/1');
-      expect(JSON.stringify(cards[0]?.card)).toContain('Pocket3');
+      expect(cards).toEqual([]);
+      const card = await response.json();
+      expect(JSON.stringify(card)).toContain('link_registry_maintenance_form');
+      expect(JSON.stringify(card)).toContain('Pocket3');
     } finally {
       server.close();
     }
   });
 
-  it('routes HTTP governance submit callbacks and persists the governance decision', async () => {
+  it('returns a non-clickable ignored maintenance status card for HTTP callbacks', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-link-maintenance-http-ignore-'));
+    await seedLinkMaintenanceSession(outputDir);
+    const replies: Array<{ messageId: string; text: string }> = [];
+    const server = startFeishuBotServer({
+      port: 0,
+      appId: 'app',
+      appSecret: 'secret',
+      outputDir,
+      replyText: async ({ messageId }, text) => {
+        replies.push({ messageId, text });
+        return { sent: true, channel: 'app' };
+      },
+    });
+    try {
+      await new Promise<void>((resolve) => server.once('listening', resolve));
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+
+      const response = await fetch(`http://127.0.0.1:${address.port}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          header: { event_type: 'card.action.trigger' },
+          event: {
+            context: { open_message_id: 'mid-http-link-maintenance-ignore' },
+            action: { value: { action: 'link_registry_maintenance_ignore', date: '2026-06-24' } },
+          },
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(replies).toEqual([]);
+      const card = await response.json();
+      expect(JSON.stringify(card)).not.toContain('link_registry_maintenance_start');
+      expect(JSON.stringify(card)).not.toContain('\"tag\":\"button\"');
+    } finally {
+      server.close();
+    }
+  });
+
+
+  it('returns the next governance review card directly for HTTP callbacks and persists the decision', async () => {
     const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-link-governance-http-'));
     await seedLinkGovernanceSession(outputDir);
     const cards: Array<{ messageId: string; card: Record<string, unknown> }> = [];
-    let resolveReplySent!: () => void;
-    const replySent = new Promise<void>((resolve) => {
-      resolveReplySent = resolve;
-    });
     const server = startFeishuBotServer({
       port: 0,
       appId: 'app',
@@ -996,7 +1029,6 @@ describe('startFeishuBotServer', () => {
       outputDir,
       replyCard: async ({ messageId }, card) => {
         cards.push({ messageId, card });
-        resolveReplySent();
         return { sent: true, channel: 'app' };
       },
     });
@@ -1017,7 +1049,7 @@ describe('startFeishuBotServer', () => {
               value: { action: 'link_registry_governance_submit', date: '2026-06-24', reviewIndex: 1 },
               form_value: {
                 decision: 'resolved',
-                note: 'Wide300 组已确认纳入下一轮补齐。',
+                note: 'Wide300 next-round backlog confirmed',
               },
             },
           },
@@ -1025,17 +1057,15 @@ describe('startFeishuBotServer', () => {
       });
 
       expect(response.status).toBe(200);
-      await replySent;
-      expect(cards).toHaveLength(1);
-      expect(cards[0]?.messageId).toBe('mid-http-link-governance-submit');
-      expect(JSON.stringify(cards[0]?.card)).toContain('组级治理 2/2');
-      await expect(readFile(join(outputDir, '2026-06-24', 'link-registry-governance-session.json'), 'utf8')).resolves.toContain('Wide300 组已确认纳入下一轮补齐。');
+      expect(cards).toEqual([]);
+      const card = await response.json();
+      expect(JSON.stringify(card)).toContain('link_registry_governance_form');
+      await expect(readFile(join(outputDir, '2026-06-24', 'link-registry-governance-session.json'), 'utf8')).resolves.toContain('Wide300 next-round backlog confirmed');
       await expect(readFile(join(outputDir, '2026-06-24', 'link-registry-governance-session.json'), 'utf8')).resolves.toContain('ou_http_governance');
     } finally {
       server.close();
     }
   });
-
   it('does not reply when dispatcher skips a duplicate message', async () => {
     const replies: Array<{ messageId: string; text: string }> = [];
     let resolveDispatchCalled!: () => void;

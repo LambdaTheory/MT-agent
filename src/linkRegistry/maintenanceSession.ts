@@ -106,6 +106,24 @@ function plainText(content: string): { tag: 'plain_text'; content: string } {
   return { tag: 'plain_text', content };
 }
 
+function statusCard(
+  title: string,
+  content: string,
+  template: 'blue' | 'green' | 'grey' = 'blue',
+): FeishuCardPayload {
+  return {
+    schema: '2.0',
+    config: { update_multi: true, wide_screen_mode: true },
+    header: {
+      title: plainText(title),
+      template,
+    },
+    body: {
+      elements: [markdown(content)],
+    },
+  };
+}
+
 function compactName(item: { shortName?: string; productName?: string; internalProductId: string }): string {
   return item.shortName?.trim() || item.productName?.trim() || item.internalProductId;
 }
@@ -425,13 +443,28 @@ function buildReviewCard(
 }
 
 function completionText(session: LinkRegistryMaintenanceSession): string {
-  return `链接维护已处理完成 ${session.date}\n已处理 ${session.reviewRecords.length}/${session.queue.length}`;
+  return `??????????????${session.date}
+?????${session.reviewRecords.length}/${session.queue.length}`;
+}
+
+function completionCard(session: LinkRegistryMaintenanceSession): FeishuCardPayload {
+  return statusCard(
+    '链接维护已处理完成',
+    `日期 ${session.date}
+已处理 ${session.reviewRecords.length}/${session.queue.length} 条待维护链接。`,
+    'green',
+  );
 }
 
 function currentReviewResponse(session: LinkRegistryMaintenanceSession): LinkRegistryMaintenanceResponse {
   const reviewIndex = nextQueueIndex(session);
   const item = session.queue[reviewIndex - 1];
-  if (!item) return { text: completionText(session) };
+  if (!item) {
+    return {
+      text: completionText(session),
+      card: completionCard(session),
+    };
+  }
   return {
     text: `链接维护 ${reviewIndex}/${session.queue.length}，${compactName(item)}`,
     card: buildReviewCard(session, item, reviewIndex),
@@ -546,7 +579,10 @@ export async function handleLinkRegistryMaintenanceCardAction(
     session.updatedAt = new Date().toISOString();
     await saveSession(path, session);
     await saveReminderStatus(outputDir, session, session.status);
-    return { text: `链接维护已暂缓 ${session.date}` };
+    return {
+      text: `链接维护已暂缓 ${session.date}`,
+      card: statusCard('链接维护已暂缓', `已暂缓本次链接维护提醒，日期 ${session.date}。`, 'grey'),
+    };
   }
 
   if (input.action === 'ignore') {
@@ -554,7 +590,10 @@ export async function handleLinkRegistryMaintenanceCardAction(
     session.updatedAt = new Date().toISOString();
     await saveSession(path, session);
     await saveReminderStatus(outputDir, session, session.status);
-    return { text: `链接维护已忽略 ${session.date}` };
+    return {
+      text: `链接维护已忽略 ${session.date}`,
+      card: statusCard('链接维护本次忽略', `已忽略本次链接维护提醒，日期 ${session.date}。`, 'grey'),
+    };
   }
 
   const reviewIndex = safeReviewIndex(input.reviewIndex);

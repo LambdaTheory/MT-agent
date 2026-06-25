@@ -687,8 +687,11 @@ describe('handleBotIntent', () => {
     expect(response.card).toBeDefined();
     const cardText = JSON.stringify(response.card);
     expect(cardText).toContain('库存情况');
-    expect(cardText).toContain('重点同款组');
+    expect(cardText).toContain('链接维护概览');
+    expect(cardText).toContain('待核查同款组');
     expect(cardText).toContain('DJI Pocket 3');
+    expect(cardText).not.toContain('7日总金额');
+    expect(cardText).not.toContain('7日总访问');
   });
 
   it('returns an inventory status detail card for a unique alias query', async () => {

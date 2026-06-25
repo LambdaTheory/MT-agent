@@ -462,9 +462,8 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
             shortName: readString(readActionForm(action)?.short_name),
             reviewerId: extractCardReviewerId(data),
           });
-          if (response.card) await replyCard(client, messageId, response.card);
-          else await replyText(client, messageId, response.text);
-          return;
+          if (response.card) return replaceCard(client, messageId, response.card);
+          return replaceCard(client, messageId, statusCard('\u94fe\u63a5\u7ef4\u62a4', response.text, 'grey'));
         }
 
         if (
@@ -488,9 +487,8 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
             note: readString(form?.note),
             reviewerId: extractCardReviewerId(data),
           });
-          if (response.card) await replyCard(client, messageId, response.card);
-          else await replyText(client, messageId, response.text);
-          return;
+          if (response.card) return replaceCard(client, messageId, response.card);
+          return replaceCard(client, messageId, statusCard('\u7ec4\u7ea7\u6cbb\u7406', response.text, 'grey'));
         }
 
         if (actionName === 'agent_clarify_select') {

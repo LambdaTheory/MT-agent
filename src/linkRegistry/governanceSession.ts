@@ -79,6 +79,24 @@ function plainText(content: string): { tag: 'plain_text'; content: string } {
   return { tag: 'plain_text', content };
 }
 
+function statusCard(
+  title: string,
+  content: string,
+  template: 'blue' | 'green' | 'grey' = 'blue',
+): FeishuCardPayload {
+  return {
+    schema: '2.0',
+    config: { update_multi: true, wide_screen_mode: true },
+    header: {
+      title: plainText(title),
+      template,
+    },
+    body: {
+      elements: [markdown(content)],
+    },
+  };
+}
+
 function selectOption(label: string, value: string): Record<string, unknown> {
   return { text: plainText(label), value };
 }
@@ -273,7 +291,12 @@ function currentReviewResponse(
 ): LinkRegistryGovernanceResponse {
   const item = session.queue[reviewIndex - 1];
   if (!item) {
-    return { text: `组级治理已处理完成 ${session.date}\n已处理 ${session.reviewRecords.length}/${session.queue.length}` };
+    return {
+      text: `??????????????${session.date}
+?????${session.reviewRecords.length}/${session.queue.length}`,
+      card: statusCard('组级治理已处理完成', `日期 ${session.date}
+已处理 ${session.reviewRecords.length}/${session.queue.length} 条治理事项。`, 'green'),
+    };
   }
   return {
     text: `组级治理 ${reviewIndex}/${session.queue.length}，${item.title}`,
@@ -340,7 +363,10 @@ export async function handleLinkRegistryGovernanceCardAction(
     session.updatedAt = new Date().toISOString();
     await saveSession(path, session);
     await saveReminderStatus(outputDir, session, session.status);
-    return { text: `组级治理已暂缓 ${session.date}` };
+    return {
+      text: `组级治理已暂缓 ${session.date}`,
+      card: statusCard('组级治理已暂缓', `已暂缓本次组级治理提醒，日期 ${session.date}。`, 'grey'),
+    };
   }
 
   if (input.action === 'ignore') {
@@ -348,7 +374,10 @@ export async function handleLinkRegistryGovernanceCardAction(
     session.updatedAt = new Date().toISOString();
     await saveSession(path, session);
     await saveReminderStatus(outputDir, session, session.status);
-    return { text: `组级治理已忽略 ${session.date}` };
+    return {
+      text: `组级治理已忽略 ${session.date}`,
+      card: statusCard('组级治理本次忽略', `已忽略本次组级治理提醒，日期 ${session.date}。`, 'grey'),
+    };
   }
 
   if (input.action === 'start') {

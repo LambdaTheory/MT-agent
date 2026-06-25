@@ -322,9 +322,8 @@ async function handleCardActionTrigger(
       shortName: readString(form?.short_name),
       reviewerId: extractCardReviewerId(payload),
     });
-    if (response.card) await replyCard(replyConfig, response.card);
-    else await replyText(replyConfig, response.text);
-    return;
+    if (response.card) return response.card;
+    return statusCard('\u94fe\u63a5\u7ef4\u62a4', response.text, 'grey');
   }
 
   if (
@@ -348,9 +347,8 @@ async function handleCardActionTrigger(
       note: readString(form?.note),
       reviewerId: extractCardReviewerId(payload),
     });
-    if (response.card) await replyCard(replyConfig, response.card);
-    else await replyText(replyConfig, response.text);
-    return;
+    if (response.card) return response.card;
+    return statusCard('\u7ec4\u7ea7\u6cbb\u7406', response.text, 'grey');
   }
 
   if (actionName === 'agent_clarify_select') {

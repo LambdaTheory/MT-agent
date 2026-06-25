@@ -172,24 +172,28 @@ const snapshot: InventoryStatusSnapshot = {
 };
 
 describe('inventoryStatusCard', () => {
-  it('builds overview card with percentage metrics, charts, and clearer risk copy', () => {
+  it('builds an overview card focused on link archive maintenance state', () => {
     const result: InventoryStatusOverviewResult = { status: 'overview', snapshot };
     const card = buildInventoryStatusOverviewCard(result);
     const serialized = JSON.stringify(card);
-    const elements = ((card.body as { elements: Array<Record<string, unknown>> }).elements);
+    const elements = (card.body as { elements: Array<Record<string, unknown>> }).elements;
     const charts = elements.filter((element) => element.tag === 'chart');
 
     expect(serialized).toContain('库存情况');
-    expect(serialized).toContain('active 占比');
-    expect(serialized).toContain('75.0%');
-    expect(serialized).toContain('有数据组占比');
-    expect(serialized).toContain('风险组占比');
-    expect(serialized).toContain('缺日报数据链接');
+    expect(serialized).toContain('链接维护概览');
+    expect(serialized).toContain('已归组链接占比');
+    expect(serialized).toContain('有数据同款组占比');
+    expect(serialized).toContain('待核查同款组占比');
+    expect(serialized).toContain('缺数据链接');
+    expect(serialized).toContain('有数据同款组是什么意思');
     expect(serialized).toContain('Pocket 3');
-    expect(charts).toHaveLength(2);
+    expect(serialized).not.toContain('7日总金额');
+    expect(serialized).not.toContain('7日总访问');
+    expect(serialized).not.toContain('active 占比');
+    expect(charts).toHaveLength(1);
   });
 
-  it('builds detail card with contribution metrics and missing-report explanation', () => {
+  it('builds a detail card with Chinese metric labels and explanation', () => {
     const result: InventoryStatusDetailResult = {
       status: 'detail',
       query: 'pocket3',
@@ -202,11 +206,10 @@ describe('inventoryStatusCard', () => {
     const serialized = JSON.stringify(card);
 
     expect(serialized).toContain('Pocket 3');
-    expect(serialized).toContain('7日金额贡献');
-    expect(serialized).toContain('86.0%');
-    expect(serialized).toContain('7日访问贡献');
-    expect(serialized).toContain('缺日报数据链接');
-    expect(serialized).toContain('链接已在链接档案中');
+    expect(serialized).toContain('近7日金额占比');
+    expect(serialized).toContain('近7日访问占比');
+    expect(serialized).toContain('缺数据链接');
+    expect(serialized).toContain('这些指标反映的是同款组经营快照');
     expect(serialized).toContain('主力链接');
   });
 

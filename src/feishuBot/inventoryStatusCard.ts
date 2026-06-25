@@ -10,13 +10,38 @@ import type { InventoryStatusGroupSnapshot, InventoryStatusPeriodMetrics, Invent
 type CardElement = Record<string, unknown>;
 
 interface SnapshotTotals {
-  riskGroupCount: number;
-  totalExposure1d: number;
+  reviewGroupCount: number;
+  missingMetricLinkCount: number;
   totalVisits7d: number;
   totalAmount1d: number;
   totalAmount7d: number;
   totalAmount30d: number;
 }
+
+const ZH = {
+  inventory: '\u5e93\u5b58\u60c5\u51b5',
+  overview: '\u94fe\u63a5\u7ef4\u62a4\u6982\u89c8',
+  groupedRatio: '\u5df2\u5f52\u7ec4\u94fe\u63a5\u5360\u6bd4',
+  metricGroupsRatio: '\u6709\u6570\u636e\u540c\u6b3e\u7ec4\u5360\u6bd4',
+  reviewGroupsRatio: '\u5f85\u6838\u67e5\u540c\u6b3e\u7ec4\u5360\u6bd4',
+  missingLinks: '\u7f3a\u6570\u636e\u94fe\u63a5',
+  focusGroups: '\u91cd\u70b9\u5173\u6ce8\u540c\u6b3e\u7ec4',
+  activeLinks: '\u6d3b\u8dc3\u94fe\u63a5',
+  amountShare7d: '\u8fd17\u65e5\u91d1\u989d\u5360\u6bd4',
+  visitShare7d: '\u8fd17\u65e5\u8bbf\u95ee\u5360\u6bd4',
+  category: '\u5206\u7c7b',
+  productType: '\u7c7b\u578b',
+  explanation: '\u8fd9\u4e9b\u6307\u6807\u53cd\u6620\u7684\u662f\u540c\u6b3e\u7ec4\u7ecf\u8425\u5feb\u7167',
+  topLinks: '\u4e3b\u529b\u94fe\u63a5',
+  riskTips: '\u98ce\u9669\u63d0\u793a',
+  missingExplainTitle: '\u7f3a\u6570\u636e\u94fe\u63a5\u8bf4\u660e',
+  ambiguousNeedClarify: '\u9700\u8981\u4f60\u6f84\u6e05',
+  notFound: '\u6ca1\u6709\u627e\u5230',
+  snapshotMissing: '\u8fd8\u6ca1\u6709\u53ef\u7528\u7684\u5e93\u5b58\u60c5\u51b5\u5feb\u7167\uff0c\u8bf7\u5148\u751f\u6210\u6700\u65b0\u65e5\u62a5/\u5feb\u7167\u3002',
+  sameSkuGroup: '\u540c\u6b3e\u7ec4',
+  internalId: '\u7aef\u5185 ID',
+  periodNote: '\u9ed8\u8ba4\u5c55\u793a active \u53e3\u5f84',
+};
 
 function markdown(content: string): CardElement {
   return { tag: 'markdown', content };
@@ -68,8 +93,8 @@ function sumGroups(snapshot: InventoryStatusSnapshot, pick: (group: InventorySta
 
 function snapshotTotals(snapshot: InventoryStatusSnapshot): SnapshotTotals {
   return {
-    riskGroupCount: snapshot.groups.filter((group) => group.risks.length > 0 || group.missingMetricLinkCount > 0).length,
-    totalExposure1d: sumGroups(snapshot, (group) => group.periods['1d'].exposure),
+    reviewGroupCount: snapshot.groups.filter((group) => group.risks.length > 0 || group.missingMetricLinkCount > 0).length,
+    missingMetricLinkCount: sumGroups(snapshot, (group) => group.missingMetricLinkCount),
     totalVisits7d: sumGroups(snapshot, (group) => group.periods['7d'].publicVisits),
     totalAmount1d: sumGroups(snapshot, (group) => group.periods['1d'].amount),
     totalAmount7d: sumGroups(snapshot, (group) => group.periods['7d'].amount),
@@ -85,16 +110,16 @@ function structureChart(snapshot: InventoryStatusSnapshot): CardElement {
     height: '260px',
     chart_spec: {
       type: 'pie',
-      title: { text: '链接结构分布' },
+      title: { text: '\u94fe\u63a5\u6863\u6848\u72b6\u6001\u5206\u5e03' },
       data: {
         values: [
-          { type: 'active', value: snapshot.registryAuditSummary.activeLinks },
-          { type: 'removed', value: snapshot.registryAuditSummary.removedLinks },
-          { type: 'unknown', value: snapshot.registryAuditSummary.unknownLinks },
+          { label: '\u542f\u7528\u4e2d', value: snapshot.registryAuditSummary.activeLinks },
+          { label: '\u5df2\u4e0b\u67b6', value: snapshot.registryAuditSummary.removedLinks },
+          { label: '\u5f85\u786e\u8ba4', value: snapshot.registryAuditSummary.unknownLinks },
         ],
       },
       valueField: 'value',
-      categoryField: 'type',
+      categoryField: 'label',
       outerRadius: 0.9,
       innerRadius: 0.35,
       legends: { visible: true, orient: 'right' },
@@ -103,104 +128,53 @@ function structureChart(snapshot: InventoryStatusSnapshot): CardElement {
   };
 }
 
-function topAmountShareChart(snapshot: InventoryStatusSnapshot): CardElement {
-  const totalAmount7d = sumGroups(snapshot, (group) => group.periods['7d'].amount);
-  const values = snapshot.groups
-    .filter((group) => group.periods['7d'].amount > 0)
-    .slice()
-    .sort((left, right) => right.periods['7d'].amount - left.periods['7d'].amount)
-    .slice(0, 5)
-    .map((group) => ({
-      group: group.groupName,
-      value: Number((ratio(group.periods['7d'].amount, totalAmount7d) * 100).toFixed(1)),
-    }));
-
-  return {
-    tag: 'chart',
-    element_id: 'inventory_status_top_amount_chart',
-    aspect_ratio: '4:3',
-    height: '280px',
-    chart_spec: {
-      type: 'bar',
-      title: { text: '同款组 7日金额占比' },
-      data: { values },
-      direction: 'horizontal',
-      xField: 'value',
-      yField: 'group',
-      label: { visible: true },
-      axes: [
-        { orient: 'left', label: { visible: true } },
-        { orient: 'bottom', title: { visible: true, text: '占全局 7日金额 %' } },
-      ],
-    },
-  };
-}
-
 function periodBlock(label: string, period: InventoryStatusPeriodMetrics): string {
   return [
     `**${label}**`,
-    `曝光 ${period.exposure} | 访问 ${period.publicVisits} | 金额 ${amount(period.amount)}`,
-    `创建 ${period.createdOrders} | 发货 ${period.shippedOrders} | 曝光-访问率 ${percent(period.exposureVisitRate)} | 访问-下单率 ${percent(period.visitCreatedOrderRate)} | 访问-发货率 ${percent(period.visitShipmentRate)}`,
+    `\u66dd\u5149 ${period.exposure} | \u8bbf\u95ee ${period.publicVisits} | \u91d1\u989d ${amount(period.amount)}`,
+    `\u521b\u5efa ${period.createdOrders} | \u53d1\u8d27 ${period.shippedOrders} | \u66dd\u5149-\u8bbf\u95ee\u7387 ${percent(period.exposureVisitRate)} | \u8bbf\u95ee-\u4e0b\u5355\u7387 ${percent(period.visitCreatedOrderRate)} | \u8bbf\u95ee-\u53d1\u8d27\u7387 ${percent(period.visitShipmentRate)}`,
   ].join('\n');
 }
 
-function topGroupLines(result: InventoryStatusOverviewResult): string {
-  const totalAmount7d = sumGroups(result.snapshot, (group) => group.periods['7d'].amount);
+function focusGroupLines(result: InventoryStatusOverviewResult): string {
   const lines = result.snapshot.groups
     .slice()
-    .sort((left, right) => right.periods['7d'].amount - left.periods['7d'].amount || right.periods['1d'].amount - left.periods['1d'].amount)
+    .sort((left, right) => right.missingMetricLinkCount - left.missingMetricLinkCount || right.periods['7d'].amount - left.periods['7d'].amount)
     .slice(0, 5)
-    .map((group, index) => {
-      const share = contributionText(group.periods['7d'].amount, totalAmount7d);
-      return `${index + 1}. ${group.groupName} | 7日金额 ${amount(group.periods['7d'].amount)} | 占全局 ${share} | active ${group.activeLinkCount}/${group.totalLinkCount}`;
-    });
-  return lines.join('\n') || '暂无同款组快照。';
-}
-
-function formatRisk(risk: string): string {
-  return risk.replace(/(\d+)\s*条链接无日报数据/g, '$1 条缺日报数据链接');
-}
-
-function abnormalGroupLines(result: InventoryStatusOverviewResult): string {
-  const lines = result.snapshot.groups
-    .filter((group) => group.risks.length > 0 || group.missingMetricLinkCount > 0)
-    .slice()
-    .sort((left, right) => right.missingMetricLinkCount - left.missingMetricLinkCount || right.risks.length - left.risks.length)
-    .slice(0, 5)
-    .map((group) => `- ${group.groupName} | 风险 ${group.risks.length} | 缺日报数据链接 ${group.missingMetricLinkCount}`);
-  return lines.join('\n') || '暂无异常组。';
+    .map((group, index) => `${index + 1}. ${group.groupName} | active ${group.activeLinkCount}/${group.totalLinkCount} | ${ZH.missingLinks} ${group.missingMetricLinkCount}`);
+  return lines.join('\n') || '\u6682\u65e0\u9700\u8981\u5173\u6ce8\u7684\u540c\u6b3e\u7ec4\u3002';
 }
 
 function topLinkLines(group: InventoryStatusGroupSnapshot): string {
   const lines = group.topLinks.map((link, index) =>
-    `${index + 1}. ${link.internalProductId} ${link.productName} | 1日金额 ${amount(link.oneDayAmount)} | 访问 ${link.oneDayPublicVisits}`,
+    `${index + 1}. ${link.internalProductId} ${link.productName} | 1\u65e5\u91d1\u989d ${amount(link.oneDayAmount)} | \u8bbf\u95ee ${link.oneDayPublicVisits}`,
   );
-  return lines.join('\n') || '暂无主力链接。';
+  return lines.join('\n') || '\u6682\u65e0\u4e3b\u529b\u94fe\u63a5\u3002';
 }
 
 function riskLines(group: InventoryStatusGroupSnapshot): string {
-  return group.risks.length > 0 ? group.risks.map((risk) => `- ${formatRisk(risk)}`).join('\n') : '暂无异常提醒。';
+  return group.risks.length > 0 ? group.risks.map((risk) => `- ${risk}`).join('\n') : '\u6682\u65e0\u5f02\u5e38\u63d0\u9192\u3002';
 }
 
 function matchedByLabel(result: InventoryStatusDetailResult): string {
-  if (result.matchedBy === 'internal_id') return `按端内 ID ${result.query} 命中`;
-  if (result.matchedBy === 'same_sku_group') return `按同款组 ${result.sameSkuGroupId} 命中`;
-  return `按别名 ${result.query} 命中`;
+  if (result.matchedBy === 'internal_id') return `\u6309${ZH.internalId} ${result.query} \u547d\u4e2d`;
+  if (result.matchedBy === 'same_sku_group') return `\u6309${ZH.sameSkuGroup} ${result.sameSkuGroupId} \u547d\u4e2d`;
+  return `\u6309\u522b\u540d ${result.query} \u547d\u4e2d`;
 }
 
 function missingReportExplanation(missingCount: number): string {
-  if (missingCount <= 0) return '当前同款组链接已在链接档案中，且本次日报都匹配到了经营数据。';
-  return `这表示链接已在链接档案中，但本次日报上下文没有匹配到对应经营数据。当前共有 ${missingCount} 条缺日报数据链接；常见原因是当天没抓到、端内 ID / 平台 ID 没映射上，或链接已是 removed / unknown 状态。`;
+  if (missingCount <= 0) return '\u5f53\u524d\u540c\u6b3e\u7ec4\u91cc\u7684\u94fe\u63a5\u90fd\u5df2\u7ecf\u5339\u914d\u5230\u672c\u6b21\u65e5\u62a5\u5feb\u7167\uff0c\u6ca1\u6709\u7f3a\u6570\u636e\u94fe\u63a5\u3002';
+  return `\u5f53\u524d\u5171\u6709 ${missingCount} \u6761${ZH.missingLinks}\uff0c\u8868\u793a\u94fe\u63a5\u5df2\u5728\u6863\u6848\u91cc\uff0c\u4f46\u8fd9\u6b21\u65e5\u62a5\u4e0a\u4e0b\u6587\u6ca1\u6709\u5339\u914d\u5230\u5bf9\u5e94\u7ecf\u8425\u6570\u636e\uff0c\u901a\u5e38\u9700\u8981\u7ee7\u7eed\u6838\u5bf9\u6293\u53d6\u3001\u6620\u5c04\u6216\u94fe\u63a5\u72b6\u6001\u3002`;
 }
 
 export function formatInventoryStatusOverviewText(result: InventoryStatusOverviewResult): string {
-  const activeRatio = contributionText(result.snapshot.summary.activeLinkCount, result.snapshot.summary.totalLinkCount);
-  return `库存情况 ${result.snapshot.date}：同款组 ${result.snapshot.summary.sameSkuGroupCount} 个，active 链接 ${result.snapshot.summary.activeLinkCount}/${result.snapshot.summary.totalLinkCount}（${activeRatio}），有数据组 ${result.snapshot.coverage.groupsWithMetrics}/${result.snapshot.summary.sameSkuGroupCount}。`;
+  const totals = snapshotTotals(result.snapshot);
+  return `${ZH.inventory} ${result.snapshot.date}\uff1a${ZH.sameSkuGroup} ${result.snapshot.summary.sameSkuGroupCount} \u4e2a\uff0c${ZH.groupedRatio} ${result.snapshot.coverage.groupedLinkCount}/${result.snapshot.summary.totalLinkCount}\uff0c${ZH.reviewGroupsRatio} ${totals.reviewGroupCount}/${result.snapshot.summary.sameSkuGroupCount}\u3002`;
 }
 
 export function formatInventoryStatusDetailText(result: InventoryStatusDetailResult): string {
   const totals = snapshotTotals(result.snapshot);
-  return `库存情况 ${result.group.groupName}：同款组 ${result.sameSkuGroupId}，1日金额 ${amount(result.group.periods['1d'].amount)}，7日金额 ${amount(result.group.periods['7d'].amount)}（贡献 ${contributionText(result.group.periods['7d'].amount, totals.totalAmount7d)}）。`;
+  return `${ZH.inventory} ${result.group.groupName}\uff1a${ZH.sameSkuGroup} ${result.sameSkuGroupId}\uff0c${ZH.amountShare7d} ${contributionText(result.group.periods['7d'].amount, totals.totalAmount7d)}\uff0c${ZH.missingLinks} ${result.group.missingMetricLinkCount}\u3002`;
 }
 
 export function buildInventoryStatusOverviewCard(result: InventoryStatusOverviewResult): FeishuCardPayload {
@@ -209,45 +183,61 @@ export function buildInventoryStatusOverviewCard(result: InventoryStatusOverview
   return {
     schema: '2.0',
     header: {
-      title: { tag: 'plain_text', content: '库存情况' },
-      template: totals.riskGroupCount > 0 ? 'orange' : 'green',
+      title: { tag: 'plain_text', content: ZH.inventory },
+      template: totals.reviewGroupCount > 0 ? 'orange' : 'green',
     },
     body: {
       elements: [
-        markdown(`快照日期 ${snapshot.date} | 日报口径 ${snapshot.sourceReportDate}`),
+        markdown(`\u5feb\u7167\u65e5\u671f ${snapshot.date} | \u65e5\u62a5\u53e3\u5f84 ${snapshot.sourceReportDate}`),
+        markdown(`**${ZH.overview}**`),
         metricRow([
           {
-            label: 'active 占比',
-            value: percent(ratio(snapshot.summary.activeLinkCount, snapshot.summary.totalLinkCount)),
-            note: `${snapshot.summary.activeLinkCount} / ${snapshot.summary.totalLinkCount}`,
-          },
-          {
-            label: '已归组覆盖率',
+            label: ZH.groupedRatio,
             value: percent(ratio(snapshot.coverage.groupedLinkCount, snapshot.summary.totalLinkCount)),
             note: `${snapshot.coverage.groupedLinkCount} / ${snapshot.summary.totalLinkCount}`,
           },
           {
-            label: '有数据组占比',
+            label: ZH.metricGroupsRatio,
             value: percent(ratio(snapshot.coverage.groupsWithMetrics, snapshot.summary.sameSkuGroupCount)),
             note: `${snapshot.coverage.groupsWithMetrics} / ${snapshot.summary.sameSkuGroupCount}`,
           },
           {
-            label: '风险组占比',
-            value: percent(ratio(totals.riskGroupCount, snapshot.summary.sameSkuGroupCount)),
-            note: `${totals.riskGroupCount} / ${snapshot.summary.sameSkuGroupCount}`,
+            label: ZH.reviewGroupsRatio,
+            value: percent(ratio(totals.reviewGroupCount, snapshot.summary.sameSkuGroupCount)),
+            note: `${totals.reviewGroupCount} / ${snapshot.summary.sameSkuGroupCount}`,
           },
-        ], 'inventory_status_overview_health'),
+          {
+            label: ZH.missingLinks,
+            value: String(totals.missingMetricLinkCount),
+            note: totals.missingMetricLinkCount > 0 ? '\u9700\u7ee7\u7eed\u6838\u5bf9\u65e5\u62a5\u6620\u5c04' : '\u672c\u6b21\u5df2\u5339\u914d\u9f50',
+          },
+        ], 'inventory_status_overview_maintenance'),
         metricRow([
-          { label: '7日总金额', value: amount(totals.totalAmount7d), note: `1日 ${amount(totals.totalAmount1d)}` },
-          { label: '7日总访问', value: String(totals.totalVisits7d), note: `1日曝光 ${totals.totalExposure1d}` },
-          { label: 'removed 链接', value: String(snapshot.registryAuditSummary.removedLinks), note: `unknown ${snapshot.registryAuditSummary.unknownLinks}` },
-          { label: 'override 风险', value: String(snapshot.registryAuditSummary.overrideRiskCount), note: '人工覆盖待核对' },
-        ], 'inventory_status_overview_volume'),
+          {
+            label: 'active \u94fe\u63a5',
+            value: String(snapshot.registryAuditSummary.activeLinks),
+            note: `\u603b\u94fe\u63a5 ${snapshot.registryAuditSummary.totalLinks}`,
+          },
+          {
+            label: 'removed \u94fe\u63a5',
+            value: String(snapshot.registryAuditSummary.removedLinks),
+            note: '\u9ed8\u8ba4\u4e0d\u53c2\u4e0e active \u67e5\u8be2',
+          },
+          {
+            label: 'unknown \u94fe\u63a5',
+            value: String(snapshot.registryAuditSummary.unknownLinks),
+            note: '\u5efa\u8bae\u5c3d\u5feb\u786e\u8ba4\u72b6\u6001',
+          },
+          {
+            label: 'override \u98ce\u9669',
+            value: String(snapshot.registryAuditSummary.overrideRiskCount),
+            note: '\u9700\u8981\u4eba\u5de5\u590d\u6838',
+          },
+        ], 'inventory_status_overview_registry'),
         structureChart(snapshot),
-        topAmountShareChart(snapshot),
-        markdown('**缺日报数据链接是什么意思？**\n链接已在链接档案中，但这一次日报上下文没有匹配到对应经营数据。它不是缺货，更多是在提示抓取、映射或链接状态需要继续核查。'),
-        markdown(`**重点同款组**\n${topGroupLines(result)}`),
-        markdown(`**异常提醒**\n${abnormalGroupLines(result)}`),
+        markdown(`**\u6709\u6570\u636e${ZH.sameSkuGroup}\u662f\u4ec0\u4e48\u610f\u601d\uff1f**\n\u8868\u793a\u8fd9\u4e2a${ZH.sameSkuGroup}\u81f3\u5c11\u6709\u4e00\u6761\u94fe\u63a5\u6210\u529f\u547d\u4e2d\u4e86\u672c\u6b21\u65e5\u62a5\u5feb\u7167\uff0c\u6240\u4ee5\u540e\u7eed\u53ef\u4ee5\u7ee7\u7eed\u770b\u7ec4\u7ea7\u7ecf\u8425\u6570\u636e\u3002`),
+        markdown(`**${ZH.missingLinks}\u662f\u4ec0\u4e48\u610f\u601d\uff1f**\n\u8868\u793a\u94fe\u63a5\u5df2\u7ecf\u5728\u94fe\u63a5\u6863\u6848\u91cc\uff0c\u4f46\u8fd9\u6b21\u65e5\u62a5\u5feb\u7167\u6ca1\u6709\u5339\u914d\u5230\u5bf9\u5e94\u7ecf\u8425\u6570\u636e\u3002\u5b83\u4e0d\u662f\u201c\u7f3a\u8d27\u201d\uff0c\u800c\u662f\u63d0\u793a\u6211\u4eec\u7ee7\u7eed\u6838\u5bf9\u6293\u53d6\u3001\u6620\u5c04\u6216\u94fe\u63a5\u72b6\u6001\u3002`),
+        markdown(`**${ZH.focusGroups}**\n${focusGroupLines(result)}`),
       ],
     },
   };
@@ -259,65 +249,66 @@ export function buildInventoryStatusDetailCard(result: InventoryStatusDetailResu
   return {
     schema: '2.0',
     header: {
-      title: { tag: 'plain_text', content: `库存情况 · ${group.groupName}` },
-      template: group.risks.length > 0 ? 'orange' : 'blue',
+      title: { tag: 'plain_text', content: `${ZH.inventory} ? ${group.groupName}` },
+      template: group.risks.length > 0 || group.missingMetricLinkCount > 0 ? 'orange' : 'blue',
     },
     body: {
       elements: [
-        markdown(`${matchedByLabel(result)} | 同款组 ${result.sameSkuGroupId}`),
+        markdown(`${matchedByLabel(result)} | ${ZH.sameSkuGroup} ${result.sameSkuGroupId}`),
         markdown([
-          group.categoryName ? `分类 ${group.categoryName}` : null,
-          group.productType ? `类型 ${group.productType}` : null,
+          group.categoryName ? `${ZH.category} ${group.categoryName}` : null,
+          group.productType ? `${ZH.productType} ${group.productType}` : null,
           `active ${group.activeLinkCount}/${group.totalLinkCount}`,
         ].filter(Boolean).join(' | ')),
         metricRow([
           {
-            label: '1日金额',
-            value: amount(group.periods['1d'].amount),
-            note: `贡献 ${contributionText(group.periods['1d'].amount, totals.totalAmount1d)}`,
-          },
-          {
-            label: '7日金额',
-            value: amount(group.periods['7d'].amount),
-            note: `贡献 ${contributionText(group.periods['7d'].amount, totals.totalAmount7d)}`,
-          },
-          {
-            label: '30日金额',
-            value: amount(group.periods['30d'].amount),
-            note: `贡献 ${contributionText(group.periods['30d'].amount, totals.totalAmount30d)}`,
-          },
-          {
-            label: '缺日报数据链接',
-            value: String(group.missingMetricLinkCount),
-            note: group.missingMetricLinkCount > 0 ? '需检查日报映射' : '本次已匹配',
-          },
-        ], 'inventory_status_detail_summary'),
-        metricRow([
-          {
-            label: '7日访问贡献',
-            value: contributionText(group.periods['7d'].publicVisits, totals.totalVisits7d),
-            note: `${group.periods['7d'].publicVisits} / ${totals.totalVisits7d}`,
-          },
-          {
-            label: '7日金额贡献',
+            label: ZH.amountShare7d,
             value: contributionText(group.periods['7d'].amount, totals.totalAmount7d),
             note: `${amount(group.periods['7d'].amount)} / ${amount(totals.totalAmount7d)}`,
           },
           {
-            label: '7日访问-下单率',
-            value: percent(group.periods['7d'].visitCreatedOrderRate),
-            note: `创建 ${group.periods['7d'].createdOrders}`,
+            label: ZH.visitShare7d,
+            value: contributionText(group.periods['7d'].publicVisits, totals.totalVisits7d),
+            note: `${group.periods['7d'].publicVisits} / ${totals.totalVisits7d}`,
           },
           {
-            label: '7日访问-发货率',
-            value: percent(group.periods['7d'].visitShipmentRate),
-            note: `发货 ${group.periods['7d'].shippedOrders}`,
+            label: ZH.missingLinks,
+            value: String(group.missingMetricLinkCount),
+            note: group.missingMetricLinkCount > 0 ? '\u5efa\u8bae\u6838\u5bf9\u65e5\u62a5\u6620\u5c04' : '\u672c\u6b21\u5df2\u5339\u914d\u9f50',
           },
-        ], 'inventory_status_detail_contribution'),
-        markdown(`${periodBlock('1日', group.periods['1d'])}\n\n${periodBlock('7日', group.periods['7d'])}\n\n${periodBlock('30日', group.periods['30d'])}`),
-        markdown(`**缺日报数据链接说明**\n${missingReportExplanation(group.missingMetricLinkCount)}`),
-        markdown(`**主力链接**\n${topLinkLines(group)}`),
-        markdown(`**风险提示**\n${riskLines(group)}`),
+          {
+            label: ZH.activeLinks,
+            value: `${group.activeLinkCount}/${group.totalLinkCount}`,
+            note: ZH.periodNote,
+          },
+        ], 'inventory_status_detail_summary'),
+        metricRow([
+          {
+            label: '1\u65e5\u91d1\u989d',
+            value: amount(group.periods['1d'].amount),
+            note: `\u8d21\u732e ${contributionText(group.periods['1d'].amount, totals.totalAmount1d)}`,
+          },
+          {
+            label: '7\u65e5\u91d1\u989d',
+            value: amount(group.periods['7d'].amount),
+            note: `\u8bbf\u95ee-\u4e0b\u5355\u7387 ${percent(group.periods['7d'].visitCreatedOrderRate)}`,
+          },
+          {
+            label: '30\u65e5\u91d1\u989d',
+            value: amount(group.periods['30d'].amount),
+            note: `\u8d21\u732e ${contributionText(group.periods['30d'].amount, totals.totalAmount30d)}`,
+          },
+          {
+            label: '7\u65e5\u8bbf\u95ee-\u53d1\u8d27\u7387',
+            value: percent(group.periods['7d'].visitShipmentRate),
+            note: `\u53d1\u8d27 ${group.periods['7d'].shippedOrders}`,
+          },
+        ], 'inventory_status_detail_periods'),
+        markdown(`**\u8bf4\u660e**\n${ZH.explanation}\uff0c\u4e0d\u662f\u5355\u6761\u94fe\u63a5\u7ed3\u8bba\uff1b\u5b83\u66f4\u9002\u5408\u5e2e\u52a9\u6211\u4eec\u5224\u65ad\u8fd9\u4e2a\u7ec4\u5f53\u524d\u6709\u6ca1\u6709\u7f3a\u6863\u3001\u7f3a\u6570\u6216\u9700\u8981\u7ee7\u7eed\u62c6\u5206\u7ef4\u62a4\u3002`),
+        markdown(`${periodBlock('1\u65e5', group.periods['1d'])}\n\n${periodBlock('7\u65e5', group.periods['7d'])}\n\n${periodBlock('30\u65e5', group.periods['30d'])}`),
+        markdown(`**${ZH.missingExplainTitle}**\n${missingReportExplanation(group.missingMetricLinkCount)}`),
+        markdown(`**${ZH.topLinks}**\n${topLinkLines(group)}`),
+        markdown(`**${ZH.riskTips}**\n${riskLines(group)}`),
       ],
     },
   };
@@ -325,12 +316,12 @@ export function buildInventoryStatusDetailCard(result: InventoryStatusDetailResu
 
 export function formatInventoryStatusAmbiguousText(result: InventoryStatusAmbiguousResult): string {
   const lines = result.candidates.map((candidate, index) =>
-    `${index + 1}. ${candidate.shortName ?? candidate.sameSkuGroupId ?? '未命名同款组'} | 同款组 ${candidate.sameSkuGroupId ?? '未分组'} | 端内ID ${candidate.internalProductIds.join(', ')}`,
+    `${index + 1}. ${candidate.shortName ?? '\u672a\u547d\u540d\u540c\u6b3e\u7ec4'} | ${ZH.sameSkuGroup} ${candidate.sameSkuGroupId ?? '\u672a\u5206\u7ec4'} | \u7aef\u5185ID ${candidate.internalProductIds.join(', ')}`,
   );
-  return [`库存情况需要你澄清：${result.query}`, ...lines].join('\n');
+  return [`${ZH.inventory}${ZH.ambiguousNeedClarify}\uff1a${result.query}`, ...lines].join('\n');
 }
 
 export function formatInventoryStatusMissingText(result: Extract<InventoryStatusQueryResult, { status: 'not_found' | 'snapshot_missing' }>): string {
-  if (result.status === 'snapshot_missing') return '还没有可用的库存情况快照，请先生成最新日报/快照。';
-  return `没有找到 ${result.query} 对应的同款组，请换个叫法或提供端内 ID。`;
+  if (result.status === 'snapshot_missing') return ZH.snapshotMissing;
+  return `${ZH.notFound} ${result.query} \u5bf9\u5e94\u7684${ZH.sameSkuGroup}\uff0c\u8bf7\u6362\u4e2a\u53eb\u6cd5\u6216\u63d0\u4f9b${ZH.internalId}\u3002`;
 }
