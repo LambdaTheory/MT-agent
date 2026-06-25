@@ -68,6 +68,7 @@ describe('parseBotIntent', () => {
     expect(parseBotIntent('查商品 721')).toEqual({ type: 'query_product', keyword: '721' });
     expect(parseBotIntent('商品 iPhone')).toEqual({ type: 'query_product', keyword: 'iPhone' });
     expect(parseBotIntent('查 433, 798, 872')).toEqual({ type: 'query_product', keyword: '433, 798, 872' });
+    expect(parseBotIntent('查 433, 798, 872;')).toEqual({ type: 'query_product', keyword: '433, 798, 872' });
   });
 
   it('keeps explicit ID lookup intent distinct from operations learning', () => {

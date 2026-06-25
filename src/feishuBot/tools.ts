@@ -11,6 +11,7 @@ import { loadClosedOrderRegistryContext, type ClosedOrderRegistryPathsInput } fr
 import { queryInventoryStatus } from '../inventoryStatus/query.js';
 import { readInventorySameSkuSnapshot } from '../inventoryStatus/store.js';
 import { createLinkRegistry } from '../linkRegistry/store.js';
+import type { LinkRegistryEntry } from '../linkRegistry/types.js';
 import {
   buildNewLinkBatchConfirmCard,
   buildNewLinkBatchMultiConfirmCard,
@@ -51,7 +52,7 @@ import {
 } from './rentalPrice.js';
 import { findReadOnlyTool } from './readOnlyToolRegistry.js';
 import type { ReadOnlyToolRunOptions } from './readOnlyToolRegistry.js';
-import { findLatestReportContext, formatLatestSummary, formatProductRows, queryProductRows } from './reportStore.js';
+import { findLatestReportContext, formatLatestSummary, formatProductRows, parseNumericProductIdList, queryProductRows } from './reportStore.js';
 import type { BotIntent, BotResponse } from './types.js';
 
 const UNKNOWN_GUIDANCE = '我现在可以查：今日概况、商品、新链接池、待处理任务、转化差、曝光低、高潜力、下架链接、订单情况。你可以问“新链接池怎么样”或“查一下721”。';
@@ -334,6 +335,24 @@ function readOnlyIntentNeedsLinkRegistry(intent: ReturnType<typeof parseAgentDat
   return intent.type === 'best_product_by_same_sku';
 }
 
+function formatLinkRegistryStatus(status: LinkRegistryEntry['status']): string {
+  if (status === 'active') return '在架';
+  if (status === 'removed') return '已下架';
+  return '未知';
+}
+
+function formatRegistryProductRows(productIds: string[], entries: LinkRegistryEntry[]): string {
+  const entryById = new Map(entries.map((entry) => [entry.internalProductId, entry]));
+  const lines = productIds.map((productId) => {
+    const entry = entryById.get(productId);
+    if (!entry) return `端内ID ${productId}\n未在链接档案中找到`;
+    const name = entry.productName ?? entry.shortName ?? '未命名商品';
+    const platform = entry.platformProductId ? `平台商品ID ${entry.platformProductId}` : '平台商品ID 未记录';
+    return `端内ID ${entry.internalProductId} ${name}\n${platform}，状态 ${formatLinkRegistryStatus(entry.status)}`;
+  });
+  return lines.join('\n\n');
+}
+
 function llmReadOnlyToolNeedsLinkRegistry(tool: LlmReadOnlyToolName): boolean {
   return tool === 'rank_best_same_sku_product';
 }
@@ -465,8 +484,19 @@ export async function handleBotIntent(intent: BotIntent, outputDir = 'output', o
   }
 
   if (intent.type === 'query_product') {
+    const productIds = parseNumericProductIdList(intent.keyword);
     const latest = await findLatestReportContext(outputDir);
-    return { text: latest ? formatProductRows(queryProductRows(latest.context, intent.keyword)) : '还没有找到公域日报上下文。' };
+    if (latest) {
+      const rows = queryProductRows(latest.context, intent.keyword);
+      if (rows.length > 0) return { text: formatProductRows(rows) };
+    }
+    if (productIds.length > 0) {
+      const registryContext = await loadClosedOrderRegistryContext(options.closedOrderRegistryPaths);
+      return { text: formatRegistryProductRows(productIds, registryContext.registry) };
+    }
+    if (!latest) return { text: '还没有找到公域日报上下文。' };
+
+    return { text: formatProductRows([]) };
   }
 
   if (intent.type === 'lookup_product_id') {

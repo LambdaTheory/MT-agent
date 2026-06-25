@@ -45,8 +45,12 @@ function matchesExactNumericProductId(row: PublicTrafficProductDataRow, normaliz
   );
 }
 
-function parseNumericProductIdList(keyword: string): string[] {
-  const tokens = keyword.split(/[,\uFF0C\u3001\s]+/).filter(Boolean);
+export function parseNumericProductIdList(keyword: string): string[] {
+  const tokens = keyword
+    .trim()
+    .replace(/[;；。]+$/g, '')
+    .split(/[,\uFF0C\u3001\s;；]+/)
+    .filter(Boolean);
   if (tokens.length < 2 || tokens.some((token) => !/^\d+$/.test(token))) return [];
   return tokens;
 }

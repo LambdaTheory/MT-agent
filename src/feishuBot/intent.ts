@@ -7,6 +7,7 @@ import {
   parseSpecDiscoverCommand,
   parseTenancySetCommand,
 } from './rentalPrice.js';
+import { parseNumericProductIdList } from './reportStore.js';
 import { resolveSemanticAlias } from './semanticAlias.js';
 
 function normalize(text: string): string {
@@ -25,16 +26,11 @@ function looksLikeNewLinkWriteIntent(text: string): boolean {
   return /(新链|新链接)/.test(compact) && /(链|铺设|新建|创建|生成|新增|复制|批量)/.test(compact);
 }
 
-function isNumericProductIdList(value: string): boolean {
-  const tokens = value.trim().split(/[,\uFF0C\u3001\s]+/).filter(Boolean);
-  return tokens.length >= 2 && tokens.every((token) => /^\d+$/.test(token));
-}
-
 function parseShortMultiProductQuery(text: string): string | null {
   const match = /^查\s*(.+)$/.exec(text);
   if (!match) return null;
-  const keyword = match[1].trim();
-  return isNumericProductIdList(keyword) ? keyword : null;
+  const productIds = parseNumericProductIdList(match[1]);
+  return productIds.length > 0 ? productIds.join(', ') : null;
 }
 
 export function parseExactBotIntent(input: string): BotIntent {

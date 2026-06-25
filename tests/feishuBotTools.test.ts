@@ -744,6 +744,24 @@ describe('handleBotIntent', () => {
     expect(response.text).not.toContain('没有找到匹配商品');
   });
 
+  it('falls back to link registry for comma separated product ids missing from report rows', async () => {
+    const outputDir = await writeContext();
+    const registryRoot = await mkdtemp(join(tmpdir(), 'mt-agent-bot-registry-query-'));
+    const registryPaths = await writeLinkRegistryOverviewFixtures(registryRoot);
+
+    const response = await handleBotIntent(
+      { type: 'query_product', keyword: '560, 561;' },
+      outputDir,
+      { closedOrderRegistryPaths: registryPaths },
+    );
+
+    expect(response.text).toContain('端内ID 560 DJI Pocket 3 全能套装');
+    expect(response.text).toContain('平台商品ID platform-560');
+    expect(response.text).toContain('端内ID 561 DJI Pocket 3 标准版');
+    expect(response.text).toContain('平台商品ID platform-561');
+    expect(response.text).not.toContain('没有找到匹配商品');
+  });
+
   it('returns an operations learning question card', async () => {
     const outputDir = await writeContext();
     const response = await handleBotIntent({ type: 'operations_learning_quiz' }, outputDir);

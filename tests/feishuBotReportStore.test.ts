@@ -100,7 +100,7 @@ describe('feishu bot report store', () => {
       ],
     };
 
-    expect(queryProductRows(reportContext as any, '433, 798, 872').map((row) => row.displayProductId)).toEqual([
+    expect(queryProductRows(reportContext as any, '433, 798, 872;').map((row) => row.displayProductId)).toEqual([
       '端内ID 433',
       '端内ID 798',
       '端内ID 872',
