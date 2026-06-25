@@ -86,6 +86,7 @@ describe('rental price Feishu integration', () => {
   it('parses global discount commands', () => {
     expect(parseBotIntent('改价 商品761 全局打折 0.9')).toEqual({ type: 'rental_price_change', productId: '761', request: { mode: 'global_discount', productId: '761', discount: 0.9, scope: 'rent_fields' } });
     expect(parseBotIntent('改价 商品761 全局改价 0.9')).toEqual({ type: 'rental_price_change', productId: '761', request: { mode: 'global_discount', productId: '761', discount: 0.9, scope: 'rent_fields' } });
+    expect(parseBotIntent('876 全局改价 0.9')).toEqual({ type: 'rental_price_change', productId: '876', request: { mode: 'global_discount', productId: '876', discount: 0.9, scope: 'rent_fields' } });
     expect(parseBotIntent('改价 商品761 全局折扣 0.9')).toEqual({ type: 'rental_price_change', productId: '761', request: { mode: 'global_discount', productId: '761', discount: 0.9, scope: 'rent_fields' } });
     expect(parseBotIntent('改价 商品761 全局调价 0.9')).toEqual({ type: 'rental_price_change', productId: '761', request: { mode: 'global_discount', productId: '761', discount: 0.9, scope: 'rent_fields' } });
     expect(parseBotIntent('改价 商品761 全部租金九折')).toEqual({ type: 'rental_price_change', productId: '761', request: { mode: 'global_discount', productId: '761', discount: 0.9, scope: 'rent_fields' } });
@@ -159,6 +160,19 @@ describe('rental price Feishu integration', () => {
     expect(JSON.stringify(response.card)).not.toContain('rental_price_confirm');
     expect(response.text).toContain('审计存在错误');
     expect(response.text).not.toContain('rental_price_confirm');
+  });
+
+  it('returns a confirmation card for id-first global price changes without executing', async () => {
+    const client = fakeClient();
+    const intent = parseBotIntent('876 全局改价 0.9');
+    const response = await handleBotIntent(intent, 'output', { rentalPriceClient: client });
+
+    expect(client.previews).toEqual([{ mode: 'global_discount', productId: '876', discount: 0.9, scope: 'rent_fields' }]);
+    expect(client.executions).toHaveLength(0);
+    expect(response.text).toContain('改价预览：1 个端内ID');
+    expect(response.text).toContain('端内ID：876');
+    expect(JSON.stringify(response.card)).toContain('确认执行');
+    expect(JSON.stringify(response.card)).toContain('agent_tool_confirm');
   });
 
   it('parses copy product commands and returns a confirmation card without executing', async () => {

@@ -484,7 +484,8 @@ function hasValidConfirmationKey(value: Record<string, unknown>, request: Record
 
 export function parseRentalPriceChange(text: string): RentalPriceChangeRequest | null {
   const normalized = text.split(/\r?\n/, 1)[0]?.replace(/\s+/g, ' ').trim() ?? '';
-  const command = /^改价\s+(?:商品)?(\d+)\s+(.+)$/.exec(normalized);
+  const command = /^改价\s+(?:商品)?(\d+)\s+(.+)$/.exec(normalized)
+    ?? /^(?:商品)?(\d+)\s+((?=.*(?:改价|调价|打折|折扣|租金|价格)).+)$/.exec(normalized);
   if (!command) return null;
 
   const productId = command[1];
