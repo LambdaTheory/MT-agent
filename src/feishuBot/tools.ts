@@ -6,7 +6,6 @@ import { validateAgentWorkflowPlannerProposal } from '../agentRuntime/workflowPl
 import { listAgentWorkflows } from '../agentRuntime/workflowRegistry.js';
 import { buildAgentLearningPlannerHints, summarizeAgentLearning } from '../agentLearning/store.js';
 import { parseAgentDataIntent } from '../agentData/intent.js';
-import { rankBestProductByRegistryQuery } from '../agentData/productRanking.js';
 import { loadClosedOrderRegistryContext, type ClosedOrderRegistryPathsInput } from '../closedOrderFeedback/runtime.js';
 import { queryInventoryStatus } from '../inventoryStatus/query.js';
 import { readInventorySameSkuSnapshot } from '../inventoryStatus/store.js';
@@ -20,6 +19,7 @@ import {
   formatNewLinkBatchMultiPlan,
   NEW_LINK_BATCH_WORKFLOW_NAME,
   readNewLinkBatchWorkflowRequest,
+  readNewLinkBatchWorkflowRequests,
 } from '../newLinkWorkflow/batch.js';
 import { startOperationsLearningSession, summarizeOperationsLearningHistory, summarizeOperationsLearningSession } from '../operationsLearningLoop/session.js';
 import { buildPublicTrafficPaths } from '../publicTraffic/paths.js';
@@ -185,169 +185,14 @@ function applyExplicitNewLinkSource(
   return sourceProductId ? { ...request, sourceProductId } : request;
 }
 
-function parseSmallPositiveInteger(value: string): number | null {
-  const trimmed = value.trim();
-  if (/^\d+$/.test(trimmed)) return Number(trimmed);
-  const digits: Record<string, number> = {
-    一: 1,
-    二: 2,
-    两: 2,
-    三: 3,
-    四: 4,
-    五: 5,
-    六: 6,
-    七: 7,
-    八: 8,
-    九: 9,
-  };
-  if (trimmed === '十') return 10;
-  if (trimmed in digits) return digits[trimmed]!;
-
-  const teen = /^十([一二两三四五六七八九])$/u.exec(trimmed);
-  if (teen?.[1]) return 10 + digits[teen[1]]!;
-
-  const tens = /^([一二两三四五六七八九])十$/u.exec(trimmed);
-  if (tens?.[1]) return digits[tens[1]]! * 10;
-
-  const composed = /^([一二两三四五六七八九])十([一二两三四五六七八九])$/u.exec(trimmed);
-  if (composed?.[1] && composed[2]) return digits[composed[1]]! * 10 + digits[composed[2]]!;
-
-  return null;
-}
-
-function extractNewLinkBatchCount(text: string): number | null {
-  const compact = text.replace(/\s+/g, '');
-  const countToken = '([0-9]+|[一二两三四五六七八九十]{1,3})';
-  const newLinkToken = '(?:新链接|新链|新(?=$|[?？。!！；;,，、]))';
-  const patterns = [
-    new RegExp(`(?:复制|铺设|铺|新增|补|新建|创建|生成|批量)${countToken}(?:条|个|款)?${newLinkToken}`, 'u'),
-    new RegExp(`${countToken}(?:条|个|款)${newLinkToken}`, 'u'),
-  ];
-  for (const pattern of patterns) {
-    const match = pattern.exec(compact);
-    if (!match?.[1]) continue;
-    const count = parseSmallPositiveInteger(match[1]);
-    if (count !== null) return count;
-  }
-  return null;
-}
-
-function bestProductQueryCandidates(text: string): string[] {
-  const normalized = text.replace(/\s+/g, ' ').trim();
-  const candidates = new Set<string>();
-  const add = (value: string | undefined): void => {
-    const cleaned = value?.replace(/^(?:按|根据|用|以)\s*/u, '').trim();
-    if (cleaned) candidates.add(cleaned);
-  };
-  const beforeFollowUpWrite = normalized.split(/[?？。!！；;]\s*(?:分别)?(?:按|根据|用|以)(?:这个|该|此|上面|最好链接的|最好(?:的)?|其)?\s*(?:端内\s*)?id/iu)[0];
-
-  add(beforeFollowUpWrite);
-  add(normalized.split(/[?？。!！；;]/u)[0]);
-  add(normalized.split(/(?:按|根据|用|以)(?:这个|该|此|上面|最好链接的|最好(?:的)?|其)?\s*(?:端内\s*)?id/iu)[0]);
-  add(normalized.split(/(?:给我)?\s*(?:复制|铺设|铺|新增|补|新建|创建|生成|批量)/u)[0]);
-  add(normalized.split(/[?？。!！；;，,]/u)[0]);
-  add(normalized);
-  return [...candidates];
-}
-
-function splitRankingQueryList(query: string): string[] {
-  const values = query
-    .split(/\s*(?:,|，|、|和|及|与)\s*/u)
-    .map((value) => value.replace(/\s*(?:的)?(?:端内\s*id|id|链接)?\s*(?:是多少)?$/iu, '').trim())
-    .filter((value) => !!value);
-  const seen = new Set<string>();
-  const unique: string[] = [];
-  for (const value of values) {
-    const key = value.toLowerCase().replace(/\s+/g, '');
-    if (seen.has(key)) continue;
-    seen.add(key);
-    unique.push(value);
-  }
-  return unique;
-}
-
-function parseBestProductQueryForNewLinkCopy(text: string): string | null {
-  for (const candidate of bestProductQueryCandidates(text)) {
-    const parsed = parseAgentDataIntent(candidate);
-    if (parsed.type === 'best_product_by_same_sku') return parsed.query;
-  }
-  return null;
-}
-
-function parseBestProductQueriesForNewLinkCopy(text: string): string[] {
-  for (const candidate of bestProductQueryCandidates(text)) {
-    const parsed = parseAgentDataIntent(candidate);
-    if (parsed.type !== 'best_product_by_same_sku') continue;
-    const queries = splitRankingQueryList(parsed.query);
-    if (queries.length > 0) return queries;
-  }
-  const single = parseBestProductQueryForNewLinkCopy(text);
-  return single ? [single] : [];
-}
-
-function parseBestLinkNewLinkBatchRequest(text: string): { keywords: string[]; count: number } | null {
-  if (!looksLikeNewLinkWriteIntent(text)) return null;
-  if (!/(数据|表现|同款)/u.test(text) || !/(最好|最佳|最优|最强)/u.test(text)) return null;
-
-  const count = extractNewLinkBatchCount(text);
-  const keywords = parseBestProductQueriesForNewLinkCopy(text);
-  return count !== null && keywords.length > 0 ? { keywords, count } : null;
-}
-
-function formatBestLinkCopyPlanFailure(keyword: string, status: ReturnType<typeof rankBestProductByRegistryQuery>): string {
-  if (status.status === 'ambiguous') {
-    const candidates = status.candidates
-      .map((candidate) => `- ${candidate.shortName ?? candidate.sameSkuGroupId ?? '未命名同款组'}：${candidate.internalProductIds.join('、')}`)
-      .join('\n');
-    return `链接维护档案对“${keyword}”匹配到多个同款组，我不会猜测端内ID，也不会复制。\n${candidates}`;
-  }
-  if (status.status === 'no_metrics') return `链接维护档案已匹配到“${keyword}”，但最新公域日报没有可用于排序的数据，我不会复制。`;
-  return `链接维护档案未匹配到“${keyword}”，我不会猜测端内ID，也不会复制。可以换成更完整的商品名或直接给端内ID。`;
-}
-
-async function bestLinkNewLinkBatchResponse(
+function applyExplicitNewLinkSourceToRequests(
   message: string,
-  outputDir: string,
-  options: HandleBotIntentOptions,
-): Promise<BotResponse | null> {
-  const request = parseBestLinkNewLinkBatchRequest(message);
-  if (!request) return null;
-
-  const [latest, registryContext] = await Promise.all([
-    findLatestReportContext(outputDir),
-    loadClosedOrderRegistryContext(options.closedOrderRegistryPaths),
-  ]);
-  if (!latest) return { text: '还没有找到公域日报上下文，无法选择新链复制源商品。' };
-
-  const registry = createLinkRegistry(registryContext.registry);
-  const ranked = request.keywords.map((keyword) => ({
-    keyword,
-    ranking: rankBestProductByRegistryQuery(latest.context, registry, keyword),
-  }));
-  const failed = ranked.find((item) => item.ranking.status !== 'ranked');
-  if (failed) return { text: formatBestLinkCopyPlanFailure(failed.keyword, failed.ranking) };
-
-  const plans = ranked.map((item) => buildNewLinkBatchPlan(
-    { keyword: item.keyword, count: request.count, sourceProductId: item.ranking.status === 'ranked' ? item.ranking.best.internalProductId : '' },
-    latest.context,
-    registryContext.registry,
-  ));
-
-  if (plans.length > 1) {
-    const reason = `用户要求先分别找“${request.keywords.join('、')}”数据最好的端内ID，再按各自ID分别复制 ${request.count} 条新链；写操作需要二次确认。`;
-    return {
-      text: formatNewLinkBatchMultiPlan(plans),
-      ...(plans.every((plan) => plan.status === 'ready') ? { card: buildNewLinkBatchMultiConfirmCard(plans, reason) } : {}),
-    };
-  }
-
-  const plan = plans[0]!;
-  const selectedSourceId = plan.selectedSource?.productId ?? '';
-  const reason = `用户要求先找“${plan.request.keyword}”数据最好的端内ID，再按该ID复制 ${request.count} 条新链；已选择端内ID ${selectedSourceId}，写操作需要二次确认。`;
-  return {
-    text: formatNewLinkBatchPlan(plan),
-    ...(plan.status === 'ready' ? { card: buildNewLinkBatchConfirmCard(plan, reason) } : {}),
-  };
+  requests: ReturnType<typeof readNewLinkBatchWorkflowRequests>,
+): ReturnType<typeof readNewLinkBatchWorkflowRequests> {
+  if (!requests) return null;
+  if (requests.length !== 1) return requests;
+  const request = applyExplicitNewLinkSource(message, requests[0] ?? null);
+  return request ? [request] : null;
 }
 
 function readOnlyIntentNeedsLinkRegistry(intent: ReturnType<typeof parseAgentDataIntent>): boolean {
@@ -438,8 +283,8 @@ async function agentPlannerResponse(
         : null;
     }
     if (workflowParsed.proposal.selectedWorkflow !== NEW_LINK_BATCH_WORKFLOW_NAME) return null;
-    const workflowRequest = applyExplicitNewLinkSource(message, readNewLinkBatchWorkflowRequest(workflowParsed.proposal.arguments));
-    if (!workflowRequest) return { text: '新链批量铺设参数无效：需要 keyword 和 count。' };
+    const workflowRequests = applyExplicitNewLinkSourceToRequests(message, readNewLinkBatchWorkflowRequests(workflowParsed.proposal.arguments));
+    if (!workflowRequests) return { text: '新链批量铺设参数无效：需要 keyword 和 count，或 items 数组。' };
 
     const [latest, registryContext] = await Promise.all([
       findLatestReportContext(outputDir),
@@ -447,10 +292,18 @@ async function agentPlannerResponse(
     ]);
     if (!latest) return { text: '还没有找到公域日报上下文，无法选择新链复制源商品。' };
 
-    const plan = buildNewLinkBatchPlan(workflowRequest, latest.context, registryContext.registry);
-    const text = formatNewLinkBatchPlan(plan);
+    const plans = workflowRequests.map((request) => buildNewLinkBatchPlan(request, latest.context, registryContext.registry));
+    if (plans.length > 1) {
+      const text = formatNewLinkBatchMultiPlan(plans);
+      return {
+        text,
+        ...(plans.every((plan) => plan.status === 'ready') ? { card: buildNewLinkBatchMultiConfirmCard(plans, workflowParsed.proposal.reason) } : {}),
+      };
+    }
+
+    const plan = plans[0]!;
     return {
-      text,
+      text: formatNewLinkBatchPlan(plan),
       ...(plan.status === 'ready' ? { card: buildNewLinkBatchConfirmCard(plan, workflowParsed.proposal.reason) } : {}),
     };
   }
@@ -624,6 +477,12 @@ export async function handleBotIntent(intent: BotIntent, outputDir = 'output', o
     const rollbackResponse = rollbackTaskConfirmResponse(intent.text);
     if (rollbackResponse) return rollbackResponse;
 
+    const plannedResponse = await agentPlannerResponse(intent.text, outputDir, options);
+    if (plannedResponse) return plannedResponse;
+    if (options.agentPlannerProvider && looksLikeNewLinkWriteIntent(intent.text)) {
+      return { text: NEW_LINK_WRITE_INTENT_PLAN_FAILED };
+    }
+
     if (options.llmIntentProposalProvider) {
       const rawProposal = await options.llmIntentProposalProvider.proposeIntent({ message: intent.text, intents: getSupportedLlmIntentProposals() });
       const parsedProposal = parseLlmIntentProposal(rawProposal);
@@ -641,41 +500,37 @@ export async function handleBotIntent(intent: BotIntent, outputDir = 'output', o
       }
     }
 
-    const bestLinkCopyResponse = await bestLinkNewLinkBatchResponse(intent.text, outputDir, options);
-    if (bestLinkCopyResponse) return bestLinkCopyResponse;
+    if (looksLikeNewLinkWriteIntent(intent.text)) {
+      return { text: NEW_LINK_WRITE_INTENT_NEEDS_LLM };
+    }
+
+    const latest = await findLatestReportContext(outputDir);
+    const hasLlmRouting = Boolean(options.agentPlannerProvider || options.llmIntentProposalProvider || options.llmToolSelector);
+    if (options.llmToolSelector) {
+      if (!latest) return { text: '还没有找到公域日报上下文。' };
+      const rawSelection = await options.llmToolSelector.selectTool({ message: intent.text, tools: getRegistryBackedLlmTools() });
+      const parsed = parseLlmToolSelection(rawSelection);
+      if (parsed.ok && parsed.selection.tool !== 'none' && parsed.selection.tool !== 'get_supported_questions') {
+        const result = await runReadOnlyToolSelection(
+          latest.context,
+          parsed.selection,
+          await buildReadOnlyToolRunOptions(options, llmReadOnlyToolNeedsLinkRegistry(parsed.selection.tool)),
+        );
+        return result.ok ? result.response : { text: UNKNOWN_GUIDANCE };
+      }
+      return { text: UNKNOWN_GUIDANCE };
+    }
+
+    if (hasLlmRouting) return { text: UNKNOWN_GUIDANCE };
 
     const deterministicDataIntent = parseAgentDataIntent(intent.text);
-    if (deterministicDataIntent.type === 'best_product_by_same_sku') {
-      const tool = findReadOnlyTool(deterministicDataIntent);
+    const tool = findReadOnlyTool(deterministicDataIntent);
+    if (tool) {
       const latest = await findLatestReportContext(outputDir);
-      if (tool && latest) return tool.run(latest.context, deterministicDataIntent, await buildReadOnlyToolRunOptions(options, true));
-      if (tool) return { text: '还没有找到公域日报上下文。' };
+      if (latest) return tool.run(latest.context, deterministicDataIntent, await buildReadOnlyToolRunOptions(options, readOnlyIntentNeedsLinkRegistry(deterministicDataIntent)));
+      return { text: '还没有找到公域日报上下文。' };
     }
-
-    const plannedResponse = await agentPlannerResponse(intent.text, outputDir, options);
-    if (plannedResponse) return plannedResponse;
-    if (looksLikeNewLinkWriteIntent(intent.text)) {
-      return { text: options.agentPlannerProvider ? NEW_LINK_WRITE_INTENT_PLAN_FAILED : NEW_LINK_WRITE_INTENT_NEEDS_LLM };
-    }
-
-    const dataIntent = deterministicDataIntent;
-    const tool = findReadOnlyTool(dataIntent);
-    const latest = await findLatestReportContext(outputDir);
-    if (tool && latest) return tool.run(latest.context, dataIntent, await buildReadOnlyToolRunOptions(options, readOnlyIntentNeedsLinkRegistry(dataIntent)));
-
-    if (tool) return { text: '还没有找到公域日报上下文。' };
-    if (!options.llmToolSelector) return { text: UNKNOWN_GUIDANCE };
-    if (!latest) return { text: '还没有找到公域日报上下文。' };
-
-    const rawSelection = await options.llmToolSelector.selectTool({ message: intent.text, tools: getRegistryBackedLlmTools() });
-    const parsed = parseLlmToolSelection(rawSelection);
-    if (!parsed.ok || parsed.selection.tool === 'none' || parsed.selection.tool === 'get_supported_questions') return { text: UNKNOWN_GUIDANCE };
-    const result = await runReadOnlyToolSelection(
-      latest.context,
-      parsed.selection,
-      await buildReadOnlyToolRunOptions(options, llmReadOnlyToolNeedsLinkRegistry(parsed.selection.tool)),
-    );
-    return result.ok ? result.response : { text: UNKNOWN_GUIDANCE };
+    return { text: UNKNOWN_GUIDANCE };
   }
 
   return { text: UNKNOWN_GUIDANCE };

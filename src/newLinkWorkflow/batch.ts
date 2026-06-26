@@ -87,6 +87,16 @@ export function readNewLinkBatchWorkflowRequest(value: Record<string, unknown>):
   return keyword && count ? { keyword, count, ...(sourceProductId ? { sourceProductId } : {}) } : null;
 }
 
+export function readNewLinkBatchWorkflowRequests(value: Record<string, unknown>): NewLinkBatchWorkflowRequest[] | null {
+  if (Array.isArray(value.items)) {
+    const requests = value.items.map((item) => (isRecord(item) ? readNewLinkBatchWorkflowRequest(item) : null));
+    if (requests.length === 0 || requests.some((request) => request === null)) return null;
+    return requests as NewLinkBatchWorkflowRequest[];
+  }
+  const request = readNewLinkBatchWorkflowRequest(value);
+  return request ? [request] : null;
+}
+
 function compact(value: string): string {
   return value.toLowerCase().replace(/\s+/g, '').replace(/[\-_]/g, '');
 }

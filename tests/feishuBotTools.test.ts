@@ -132,6 +132,7 @@ async function writeRankingRegistryFixtures(rootDir: string, artifactsDir: strin
   productNameMapPath: string;
   firstSeenPath: string;
   lifecyclePath: string;
+  overridesPath: string;
   artifactsDir: string;
 }> {
   const configDir = join(rootDir, 'config');
@@ -140,11 +141,13 @@ async function writeRankingRegistryFixtures(rootDir: string, artifactsDir: strin
   await mkdir(stateDir, { recursive: true });
   await writeFile(join(configDir, 'product-id-map.json'), JSON.stringify({ p701: '701', p702: '702' }), 'utf8');
   await writeFile(join(configDir, 'product-name-map.json'), JSON.stringify({ '701': 'DJI Pocket 3', '702': 'DJI Pocket 3' }), 'utf8');
+  await writeFile(join(configDir, 'link-registry-overrides.json'), JSON.stringify({ version: 1, entries: [] }), 'utf8');
   return {
     productIdMapPath: join(configDir, 'product-id-map.json'),
     productNameMapPath: join(configDir, 'product-name-map.json'),
     firstSeenPath: join(stateDir, 'goods-first-seen.json'),
     lifecyclePath: join(stateDir, 'goods-link-lifecycle.json'),
+    overridesPath: join(configDir, 'link-registry-overrides.json'),
     artifactsDir,
   };
 }
@@ -154,6 +157,7 @@ async function writeX200RankingRegistryFixtures(rootDir: string, artifactsDir: s
   productNameMapPath: string;
   firstSeenPath: string;
   lifecyclePath: string;
+  overridesPath: string;
   artifactsDir: string;
 }> {
   const configDir = join(rootDir, 'config');
@@ -162,12 +166,47 @@ async function writeX200RankingRegistryFixtures(rootDir: string, artifactsDir: s
   await mkdir(stateDir, { recursive: true });
   await writeFile(join(configDir, 'product-id-map.json'), JSON.stringify({ p362: '362', p372: '372' }), 'utf8');
   await writeFile(join(configDir, 'product-name-map.json'), JSON.stringify({ '362': 'vivo X200 Ultra', '372': 'vivo 蔡司增距镜' }), 'utf8');
+  await writeFile(join(configDir, 'link-registry-overrides.json'), JSON.stringify({ version: 1, entries: [] }), 'utf8');
   return {
     productIdMapPath: join(configDir, 'product-id-map.json'),
     productNameMapPath: join(configDir, 'product-name-map.json'),
     firstSeenPath: join(stateDir, 'goods-first-seen.json'),
     lifecyclePath: join(stateDir, 'goods-link-lifecycle.json'),
+    overridesPath: join(configDir, 'link-registry-overrides.json'),
     artifactsDir,
+  };
+}
+
+async function writeX200PriceSnapshotRegistryFixtures(rootDir: string): Promise<{
+  productIdMapPath: string;
+  productNameMapPath: string;
+  firstSeenPath: string;
+  lifecyclePath: string;
+  overridesPath: string;
+  artifactsDir: string;
+}> {
+  const configDir = join(rootDir, 'config');
+  const outputDir = join(rootDir, 'output');
+  const stateDir = join(outputDir, 'state');
+  await mkdir(configDir, { recursive: true });
+  await mkdir(stateDir, { recursive: true });
+  await writeFile(join(configDir, 'product-id-map.json'), JSON.stringify({ p362: '362', p363: '363' }), 'utf8');
+  await writeFile(join(configDir, 'product-name-map.json'), JSON.stringify({ '362': 'vivo X200 Ultra 黑色', '363': 'vivo X200 Ultra 蓝色' }), 'utf8');
+  await writeFile(join(configDir, 'link-registry-overrides.json'), JSON.stringify({
+    version: 1,
+    entries: [
+      { internalProductId: '362', productName: 'vivo X200 Ultra 黑色', shortName: 'vivo X200 Ultra', aliases: ['x200u', 'X200U'], sameSkuGroupId: 'vivo-x200-ultra', updatedAt: '2026-06-26' },
+      { internalProductId: '363', productName: 'vivo X200 Ultra 蓝色', shortName: 'vivo X200 Ultra', aliases: ['x200u', 'X200U'], sameSkuGroupId: 'vivo-x200-ultra', updatedAt: '2026-06-26' },
+    ],
+    sameSkuGroupAliasRules: [{ sameSkuGroupId: 'vivo-x200-ultra', aliases: ['x200u', 'X200U'] }],
+  }), 'utf8');
+  return {
+    productIdMapPath: join(configDir, 'product-id-map.json'),
+    productNameMapPath: join(configDir, 'product-name-map.json'),
+    firstSeenPath: join(stateDir, 'goods-first-seen.json'),
+    lifecyclePath: join(stateDir, 'goods-link-lifecycle.json'),
+    overridesPath: join(configDir, 'link-registry-overrides.json'),
+    artifactsDir: outputDir,
   };
 }
 
@@ -445,6 +484,7 @@ async function writeNewLinkWorkflowContext(): Promise<{
     productNameMapPath: string;
     firstSeenPath: string;
     lifecyclePath: string;
+    overridesPath: string;
     artifactsDir: string;
   };
 }> {
@@ -477,6 +517,7 @@ async function writeNewLinkWorkflowContext(): Promise<{
     '401': 'Wide 400',
     '402': 'Wide 400',
   }), 'utf8');
+  await writeFile(join(configDir, 'link-registry-overrides.json'), JSON.stringify({ version: 1, entries: [] }), 'utf8');
   await writeFile(join(outputDir, '2026-06-22', 'report-context.json'), JSON.stringify({
     date: '2026-06-22',
     summary: { '1d': summary, '7d': summary, '30d': summary },
@@ -598,6 +639,7 @@ async function writeNewLinkWorkflowContext(): Promise<{
       productNameMapPath: join(configDir, 'product-name-map.json'),
       firstSeenPath: join(stateDir, 'goods-first-seen.json'),
       lifecyclePath: join(stateDir, 'goods-link-lifecycle.json'),
+      overridesPath: join(configDir, 'link-registry-overrides.json'),
       artifactsDir: outputDir,
     },
   };
@@ -888,13 +930,17 @@ describe('handleBotIntent', () => {
     expect(response.text).toContain('7日：发货 4');
   });
 
-  it('routes best-id questions to registry ranking before legacy product keyword lookup', async () => {
+  it('uses the LLM read-only ranking selector instead of legacy product lookup for best-id questions', async () => {
     const outputDir = await writeX200RankingContext();
     const registryRoot = await mkdtemp(join(tmpdir(), 'mt-agent-x200-ranking-registry-'));
     const registryPaths = await writeX200RankingRegistryFixtures(registryRoot, outputDir);
+    let selectorCalled = false;
     const selector: LlmToolSelectionProvider = {
-      async selectTool() {
-        throw new Error('LLM selector should not run for deterministic best-link questions');
+      async selectTool(request) {
+        selectorCalled = true;
+        expect(request.message).toBe('数据最好的X200Ultra是哪个id?');
+        expect(request.tools.map((tool) => tool.name)).toContain('rank_best_same_sku_product');
+        return '{"intent":"rank_best","tool":"rank_best_same_sku_product","arguments":{"query":"X200Ultra"},"confidence":0.93,"reason":"用户要找同款组中表现最好的端内ID"}';
       },
     };
 
@@ -903,18 +949,30 @@ describe('handleBotIntent', () => {
       closedOrderRegistryPaths: registryPaths,
     });
 
+    expect(selectorCalled).toBe(true);
     expect(response.text).toContain('端内ID 362');
     expect(response.text).toContain('同款组 vivo-x200-ultra');
     expect(response.text).not.toContain('端内ID 372');
   });
 
-  it('routes deterministic best same-sku questions before the generic agent planner', async () => {
+  it('lets the Agent planner choose the best same-sku ranking tool', async () => {
     const outputDir = await writeContext();
     const registryRoot = await mkdtemp(join(tmpdir(), 'mt-agent-ranking-registry-'));
     const registryPaths = await writeRankingRegistryFixtures(registryRoot, outputDir);
+    let plannerCalled = false;
     const planner: AgentPlannerProvider = {
-      async proposePlan() {
-        throw new Error('generic planner should not run for deterministic best-link questions');
+      async proposePlan(request) {
+        plannerCalled = true;
+        expect(request.message).toBe('数据最好的 pocket3 的端内id是多少');
+        expect(request.tools.map((tool) => tool.name)).toContain('product.rankBestSameSku');
+        expect(request.tools.map((tool) => tool.name)).toContain('product.query');
+        return JSON.stringify({
+          goal: '查询 pocket3 同款组数据最好的端内ID',
+          selectedTool: 'product.rankBestSameSku',
+          arguments: { query: 'pocket3' },
+          confidence: 0.94,
+          reason: '用户明确要找同款组里表现最好的端内ID',
+        });
       },
     };
 
@@ -923,6 +981,7 @@ describe('handleBotIntent', () => {
       closedOrderRegistryPaths: registryPaths,
     });
 
+    expect(plannerCalled).toBe(true);
     expect(response.text).toContain('端内ID 702');
     expect(response.text).toContain('同款组 dji-pocket-3');
     expect(response.text).not.toContain('端内ID 701\n1日');
@@ -948,6 +1007,70 @@ describe('handleBotIntent', () => {
     const response = await handleBotIntent({ type: 'unknown', text: '帮我看看苹果手机' }, outputDir, { agentPlannerProvider: planner });
 
     expect(response.text).toContain('端内ID 565 iPhone 15');
+  });
+
+  it('lets the Agent planner summarize same-sku rental price snapshots', async () => {
+    const outputDir = await writeContext();
+    const registryRoot = await mkdtemp(join(tmpdir(), 'mt-agent-x200-price-registry-'));
+    const registryPaths = await writeX200PriceSnapshotRegistryFixtures(registryRoot);
+    const planner: AgentPlannerProvider = {
+      async proposePlan(request) {
+        expect(request.message).toBe('x200u的定价情况怎么样');
+        expect(request.tools.map((tool) => tool.name)).toContain('rental.priceSnapshot');
+        expect(request.tools.map((tool) => tool.name)).toContain('rental.priceChange');
+        return JSON.stringify({
+          goal: '查询 x200u 同款组 SKU 定价情况',
+          selectedTool: 'rental.priceSnapshot',
+          arguments: { query: 'x200u' },
+          confidence: 0.92,
+          reason: '用户询问定价情况，是只读价格快照，不是改价',
+        });
+      },
+    };
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async read(productId) {
+        const valuesByProduct: Record<string, Record<string, Record<string, string>>> = {
+          '362': {
+            'sku-64': { rent1day: '10', rent7day: '60' },
+            'sku-128': { rent1day: '14', rent7day: '88' },
+          },
+          '363': {
+            'sku-64': { rent1day: '12', rent7day: '70' },
+            'sku-128': { rent1day: '16', rent7day: '92' },
+          },
+        };
+        return {
+          productId,
+          ok: true,
+          specs: [
+            { specId: 'sku-64', title: '黑色 64G' },
+            { specId: 'sku-128', title: '黑色 128G' },
+          ],
+          values: valuesByProduct[productId] ?? {},
+          lines: ['read: ok', '2 specs'],
+        };
+      },
+      async preview() { throw new Error('preview should not run for price snapshot'); },
+      async execute() { throw new Error('execute should not run for price snapshot'); },
+      async copy() { throw new Error('copy should not run for price snapshot'); },
+      async delist() { throw new Error('delist should not run for price snapshot'); },
+      async tenancySet() { throw new Error('tenancySet should not run for price snapshot'); },
+      async specDiscover() { throw new Error('specDiscover should not run for price snapshot'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run for price snapshot'); },
+    };
+
+    const response = await handleBotIntent({ type: 'unknown', text: 'x200u的定价情况怎么样' }, outputDir, {
+      agentPlannerProvider: planner,
+      rentalPriceClient,
+      closedOrderRegistryPaths: registryPaths,
+    });
+
+    expect(response.text).toContain('定价情况：x200u');
+    expect(response.text).toContain('同款组：vivo-x200-ultra');
+    expect(response.text).toContain('黑色 64G：1天 ¥11');
+    expect(response.text).toContain('7天 ¥65');
+    expect(response.text).toContain('黑色 128G：1天 ¥15');
+    expect(response.text).toContain('读取商品：成功 2/2');
   });
 
   it('passes silent learning hints into the generic agent planner', async () => {
@@ -1157,6 +1280,19 @@ describe('handleBotIntent', () => {
 
   it('turns a best-link follow-up copy command into a new-link confirmation card without executing', async () => {
     const { outputDir, registryPaths } = await writeNewLinkWorkflowContext();
+    const planner: AgentPlannerProvider = {
+      async proposePlan(request) {
+        expect(request.message).toBe('数据最好的SQ1的端内id是多少?按这个id复制5条新链');
+        return JSON.stringify({
+          goal: '按 SQ1 最佳链接复制 5 条新链',
+          selectedWorkflow: 'rental.newLinkBatch',
+          arguments: { keyword: 'SQ1', count: 5 },
+          confidence: 0.95,
+          reason: '用户要求先找到 SQ1 表现最好的链接，再按该链接复制 5 条新链',
+          requiresConfirmation: true,
+        });
+      },
+    };
     const rentalPriceClient: RentalPriceSkillClient = {
       async preview() { throw new Error('preview should not run'); },
       async execute() { throw new Error('execute should not run'); },
@@ -1170,7 +1306,7 @@ describe('handleBotIntent', () => {
     const response = await handleBotIntent(
       { type: 'unknown', text: '数据最好的SQ1的端内id是多少?按这个id复制5条新链' },
       outputDir,
-      { rentalPriceClient, closedOrderRegistryPaths: registryPaths },
+      { agentPlannerProvider: planner, rentalPriceClient, closedOrderRegistryPaths: registryPaths },
     );
 
     const cardText = JSON.stringify(response.card);
@@ -1181,11 +1317,23 @@ describe('handleBotIntent', () => {
     expect(cardText).toContain('"keyword":"SQ1"');
     expect(cardText).toContain('"count":5');
     expect(cardText).toContain('"sourceProductId":"388"');
-    expect(cardText).toContain('"requestedSourceProductId":"388"');
   });
 
   it('turns multiple best-link follow-up copy commands into one multi-source confirmation card without executing', async () => {
     const { outputDir, registryPaths } = await writeNewLinkWorkflowContext();
+    const planner: AgentPlannerProvider = {
+      async proposePlan(request) {
+        expect(request.message).toBe('数据最好的wide 300,wide 400的端内id是多少?分别按这个id复制5条新。');
+        return JSON.stringify({
+          goal: '分别按 wide 300 和 wide 400 最佳链接复制新链',
+          selectedWorkflow: 'rental.newLinkBatch',
+          arguments: { items: [{ keyword: 'wide 300', count: 5 }, { keyword: 'wide 400', count: 5 }] },
+          confidence: 0.95,
+          reason: '用户要求分别找到 wide 300、wide 400 的最佳链接，并各复制 5 条新链',
+          requiresConfirmation: true,
+        });
+      },
+    };
     const rentalPriceClient: RentalPriceSkillClient = {
       async preview() { throw new Error('preview should not run'); },
       async execute() { throw new Error('execute should not run'); },
@@ -1199,7 +1347,7 @@ describe('handleBotIntent', () => {
     const response = await handleBotIntent(
       { type: 'unknown', text: '数据最好的wide 300,wide 400的端内id是多少?分别按这个id复制5条新。' },
       outputDir,
-      { rentalPriceClient, closedOrderRegistryPaths: registryPaths },
+      { agentPlannerProvider: planner, rentalPriceClient, closedOrderRegistryPaths: registryPaths },
     );
 
     const cardText = JSON.stringify(response.card);

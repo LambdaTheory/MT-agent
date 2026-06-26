@@ -69,6 +69,16 @@ export interface RentalPriceRollbackResult {
   audit?: { taskId?: string; status: 'rolled_back' | 'rollback_failed' | 'rollback_verify_failed' | 'untracked'; resultFile?: string; rollbackFile?: string };
 }
 
+export interface RentalPriceReadResult {
+  productId: string;
+  ok: boolean;
+  specs: { specId: string; title: string }[];
+  values: Record<string, Record<string, string>>;
+  lines: string[];
+  warnings?: Array<{ level?: string; specId?: string; field?: string; message?: string }>;
+  missingFields?: Array<{ specId?: string; field?: string; message?: string }>;
+}
+
 export interface RentalPriceCopyResult {
   productId: string;
   ok: boolean;
@@ -111,6 +121,7 @@ export interface RentalPriceSkillClient {
   preview(request: RentalPriceChangeRequest): Promise<RentalPricePreview>;
   execute(request: Extract<RentalPriceChangeRequest, { mode: 'explicit_fields' }>): Promise<RentalPriceExecutionResult>;
   rollback?(request: RentalPriceRollbackRequest): Promise<RentalPriceRollbackResult>;
+  read?(productId: string): Promise<RentalPriceReadResult>;
   copy(productId: string): Promise<RentalPriceCopyResult>;
   delist(productId: string): Promise<RentalPriceDelistResult>;
   tenancySet(productId: string, days: string): Promise<RentalPriceTenancySetResult>;
@@ -631,6 +642,24 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
   }
 
   return {
+    async read(productId) {
+      const result = await send({ action: 'read', productId });
+      const status = commandStatus(result);
+      const specs = normalizeReadSpecs(result.specs);
+      const values = normalizeReadValues(result.values);
+      const warnings = normalizeReadDiagnostics(result.warnings);
+      const missingFields = normalizeReadDiagnostics(result.missingFields);
+      const message = optionalString(result, 'message');
+      return {
+        productId,
+        ok: status === 'ok' || status === 'partial',
+        specs,
+        values,
+        lines: [`read: ${status}`, `${specs.length} specs`, ...(message ? [message] : [])],
+        ...(warnings ? { warnings } : {}),
+        ...(missingFields ? { missingFields } : {}),
+      };
+    },
     async preview(request) {
       const current = await send({ action: 'read', productId: request.productId });
       const values = isRecord(current.values) ? current.values : {};
@@ -905,6 +934,47 @@ export function rentalPriceChangeRequestFromToolArguments(args: Record<string, u
   }
 
   return null;
+}
+
+function normalizeReadSpecs(value: unknown): RentalPriceReadResult['specs'] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => {
+      if (!isRecord(item)) return null;
+      const specId = readString(item.specId);
+      const title = readString(item.title);
+      return specId ? { specId, title: title ?? specId } : null;
+    })
+    .filter((item): item is { specId: string; title: string } => Boolean(item));
+}
+
+function normalizeReadValues(value: unknown): Record<string, Record<string, string>> {
+  if (!isRecord(value)) return {};
+  const normalized: Record<string, Record<string, string>> = {};
+  for (const [specId, rawFields] of Object.entries(value)) {
+    if (!isRecord(rawFields)) continue;
+    const fields: Record<string, string> = {};
+    for (const [field, raw] of Object.entries(rawFields)) {
+      if (typeof raw === 'string' || typeof raw === 'number') fields[field] = String(raw).trim();
+    }
+    normalized[specId] = fields;
+  }
+  return normalized;
+}
+
+function normalizeReadDiagnostics(value: unknown): Array<{ level?: string; specId?: string; field?: string; message?: string }> | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const items = value
+    .map((item) => {
+      if (!isRecord(item)) return null;
+      const level = readString(item.level);
+      const specId = readString(item.specId);
+      const field = readString(item.field);
+      const message = readString(item.message);
+      return level || specId || field || message ? { ...(level ? { level } : {}), ...(specId ? { specId } : {}), ...(field ? { field } : {}), ...(message ? { message } : {}) } : null;
+    })
+    .filter((item): item is { level?: string; specId?: string; field?: string; message?: string } => Boolean(item));
+  return items.length ? items : undefined;
 }
 
 export function rentalPriceRollbackRequestFromToolArguments(args: Record<string, unknown>): RentalPriceRollbackRequest | null {

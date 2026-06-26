@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseBotIntent } from '../src/feishuBot/intent.js';
+import { parseAgentFirstBotIntent, parseBotIntent } from '../src/feishuBot/intent.js';
 
 describe('parseBotIntent', () => {
   it('parses help intent', () => {
@@ -116,5 +116,21 @@ describe('parseBotIntent', () => {
 
   it('falls back to unknown intent', () => {
     expect(parseBotIntent('随便聊聊')).toEqual({ type: 'unknown', text: '随便聊聊' });
+  });
+});
+
+describe('parseAgentFirstBotIntent', () => {
+  it('keeps natural commands unknown so the Agent planner chooses tools', () => {
+    expect(parseAgentFirstBotIntent('查 565')).toEqual({ type: 'unknown', text: '查 565' });
+    expect(parseAgentFirstBotIntent('跑日报')).toEqual({ type: 'unknown', text: '跑日报' });
+    expect(parseAgentFirstBotIntent('发个日报')).toEqual({ type: 'unknown', text: '发个日报' });
+    expect(parseAgentFirstBotIntent('s23最好的链接是哪条?')).toEqual({ type: 'unknown', text: 's23最好的链接是哪条?' });
+  });
+
+  it('keeps local UI and management intents deterministic', () => {
+    expect(parseAgentFirstBotIntent('帮助')).toEqual({ type: 'help' });
+    expect(parseAgentFirstBotIntent('商品ID互查')).toEqual({ type: 'lookup_product_id_card' });
+    expect(parseAgentFirstBotIntent('库存情况')).toEqual({ type: 'inventory_status_overview' });
+    expect(parseAgentFirstBotIntent('Agent学习汇总')).toEqual({ type: 'agent_learning_summary' });
   });
 });

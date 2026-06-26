@@ -11,8 +11,14 @@ describe('agent runtime tool registry', () => {
     expect(listAgentTools().map((tool) => tool.name)).toEqual([
       'publicTraffic.latestSummary',
       'product.query',
+      'product.rankBestSameSku',
       'productId.lookup',
       'operationsLearning.startQuiz',
+      'publicTraffic.newLinkPool',
+      'publicTraffic.taskPool',
+      'publicTraffic.problemProducts',
+      'publicTraffic.removedLinks',
+      'publicTraffic.orderSummary',
       'publicTraffic.runReport',
       'publicTraffic.resendLatestReport',
       'publicTraffic.pushLatestReportToGroup',
@@ -25,6 +31,7 @@ describe('agent runtime tool registry', () => {
       'rental.specDiscover',
       'rental.specAddAndRefresh',
       'rental.priceChange',
+      'rental.priceSnapshot',
       'rental.priceRollback',
       'rental.operationConfirmRequest',
     ]);
@@ -39,7 +46,7 @@ describe('agent runtime tool registry', () => {
 
     const tools = listAgentTools();
     tools.pop();
-    expect(listAgentTools()).toHaveLength(18);
+    expect(listAgentTools()).toHaveLength(25);
   });
 
   it('returns defensive copies of tool metadata', () => {
@@ -80,6 +87,12 @@ describe('agent runtime tool registry', () => {
 
   it('makes risk and confirmation metadata explicit', () => {
     expect(findAgentTool('publicTraffic.latestSummary')).toMatchObject({ risk: 'read', requiresConfirmation: false });
+    expect(findAgentTool('product.rankBestSameSku')).toMatchObject({ risk: 'read', requiresConfirmation: false });
+    expect(findAgentTool('publicTraffic.newLinkPool')).toMatchObject({ risk: 'read', requiresConfirmation: false });
+    expect(findAgentTool('publicTraffic.taskPool')).toMatchObject({ risk: 'read', requiresConfirmation: false });
+    expect(findAgentTool('publicTraffic.problemProducts')).toMatchObject({ risk: 'read', requiresConfirmation: false });
+    expect(findAgentTool('publicTraffic.removedLinks')).toMatchObject({ risk: 'read', requiresConfirmation: false });
+    expect(findAgentTool('publicTraffic.orderSummary')).toMatchObject({ risk: 'read', requiresConfirmation: false });
     expect(findAgentTool('publicTraffic.runReport')).toMatchObject({ risk: 'write', requiresConfirmation: true });
     expect(findAgentTool('publicTraffic.resendLatestReport')).toMatchObject({ risk: 'write', requiresConfirmation: true });
     expect(findAgentTool('publicTraffic.pushLatestReportToGroup')).toMatchObject({ risk: 'write', requiresConfirmation: true });
@@ -92,6 +105,7 @@ describe('agent runtime tool registry', () => {
     expect(findAgentTool('rental.specDiscover')).toMatchObject({ risk: 'high', requiresConfirmation: true });
     expect(findAgentTool('rental.specAddAndRefresh')).toMatchObject({ risk: 'high', requiresConfirmation: true });
     expect(findAgentTool('rental.priceChange')).toMatchObject({ risk: 'high', requiresConfirmation: true });
+    expect(findAgentTool('rental.priceSnapshot')).toMatchObject({ risk: 'read', requiresConfirmation: false });
     expect(findAgentTool('rental.priceRollback')).toMatchObject({ risk: 'high', requiresConfirmation: true });
     expect(findAgentTool('rental.operationConfirmRequest')).toMatchObject({ risk: 'high', requiresConfirmation: true });
   });
@@ -113,8 +127,14 @@ describe('agent runtime tool registry', () => {
     expect(plannerToolNames).toEqual([
       'publicTraffic.latestSummary',
       'product.query',
+      'product.rankBestSameSku',
       'productId.lookup',
       'operationsLearning.startQuiz',
+      'publicTraffic.newLinkPool',
+      'publicTraffic.taskPool',
+      'publicTraffic.problemProducts',
+      'publicTraffic.removedLinks',
+      'publicTraffic.orderSummary',
       'publicTraffic.runReport',
       'publicTraffic.resendLatestReport',
       'publicTraffic.pushLatestReportToGroup',
@@ -127,6 +147,7 @@ describe('agent runtime tool registry', () => {
       'rental.specDiscover',
       'rental.specAddAndRefresh',
       'rental.priceChange',
+      'rental.priceSnapshot',
       'rental.priceRollback',
     ]);
     expect(plannerToolNames).not.toContain('rental.operationConfirmRequest');
@@ -164,6 +185,13 @@ describe('agent runtime tool registry', () => {
         scope: { type: 'string' },
       },
       required: ['productId'],
+      additionalProperties: false,
+    });
+    expect(findAgentTool('rental.priceSnapshot')?.inputSchema).toMatchObject({
+      properties: {
+        query: { type: 'string' },
+      },
+      required: ['query'],
       additionalProperties: false,
     });
     expect(findAgentTool('rental.priceRollback')?.inputSchema).toMatchObject({
