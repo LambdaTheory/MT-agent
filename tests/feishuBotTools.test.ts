@@ -176,6 +176,7 @@ async function writeClosedOrderRegistryFixtures(rootDir: string): Promise<{
   productNameMapPath: string;
   firstSeenPath: string;
   lifecyclePath: string;
+  overridesPath: string;
   artifactsDir: string;
 }> {
   const configDir = join(rootDir, 'config');
@@ -185,6 +186,13 @@ async function writeClosedOrderRegistryFixtures(rootDir: string): Promise<{
   await mkdir(join(outputDir, '2026-06-21'), { recursive: true });
   await writeFile(join(configDir, 'product-id-map.json'), JSON.stringify({ 'platform-560': '560', 'platform-561': '561' }), 'utf8');
   await writeFile(join(configDir, 'product-name-map.json'), JSON.stringify({ '560': 'DJI Pocket 3', '561': 'DJI Pocket 3 Creator' }), 'utf8');
+  await writeFile(join(configDir, 'link-registry-overrides.json'), JSON.stringify({
+    version: 1,
+    entries: [
+      { internalProductId: '560', categoryId: 'camera', categoryName: '相机', productType: 'gimbal-camera', shortName: 'DJI Pocket 3', aliases: ['Pocket3'], sameSkuGroupId: 'dji-pocket-3', updatedAt: '2026-06-24' },
+      { internalProductId: '561', categoryId: 'camera', categoryName: '相机', productType: 'gimbal-camera', shortName: 'DJI Pocket 3', aliases: ['Pocket3 Creator'], sameSkuGroupId: 'dji-pocket-3', updatedAt: '2026-06-24' },
+    ],
+  }), 'utf8');
   await writeFile(join(outputDir, '2026-06-21', 'exposure-cumulative-products.json'), JSON.stringify([
     { platformProductId: 'platform-560', productName: 'DJI Pocket 3 Creator Combo' },
     { platformProductId: 'platform-561', productName: 'DJI Pocket 3 Standard' },
@@ -194,6 +202,7 @@ async function writeClosedOrderRegistryFixtures(rootDir: string): Promise<{
     productNameMapPath: join(configDir, 'product-name-map.json'),
     firstSeenPath: join(outputDir, 'state', 'goods-first-seen.json'),
     lifecyclePath: join(outputDir, 'state', 'goods-link-lifecycle.json'),
+    overridesPath: join(configDir, 'link-registry-overrides.json'),
     artifactsDir: outputDir,
   };
 }
@@ -307,6 +316,128 @@ async function writeLinkRegistryOverviewFixtures(rootDir: string): Promise<{
   };
 }
 
+async function writeInventoryStatusFixtures(rootDir: string): Promise<{
+  outputDir: string;
+  registryPaths: {
+    productIdMapPath: string;
+    productNameMapPath: string;
+    firstSeenPath: string;
+    lifecyclePath: string;
+    overridesPath: string;
+    artifactsDir: string;
+  };
+}> {
+  const outputDir = join(rootDir, 'output');
+  const configDir = join(rootDir, 'config');
+  const stateDir = join(outputDir, 'state');
+  const runDate = '2026-06-24';
+  const reportDir = join(outputDir, runDate);
+  await mkdir(reportDir, { recursive: true });
+  await mkdir(stateDir, { recursive: true });
+  await mkdir(configDir, { recursive: true });
+
+  await writeFile(join(reportDir, 'report-context.json'), JSON.stringify({
+    date: '2026-06-23',
+    summary: { '1d': summary, '7d': summary, '30d': summary },
+    conclusions: [],
+    rows: [],
+    lowExposure: [],
+    weakClick: [],
+    weakConversion: [],
+    highPotential: [],
+    newProductObservation: [],
+    lifecycleGovernance: [],
+    recommendedActions: [],
+    emptySectionNotes: {},
+  }), 'utf8');
+
+  await writeFile(join(reportDir, '同款组经营快照_2026-06-24.json'), JSON.stringify({
+    date: '2026-06-24',
+    sourceReportDate: '2026-06-23',
+    generatedAt: '2026-06-24T00:00:00.000Z',
+    summary: { sameSkuGroupCount: 2, activeLinkCount: 3, totalLinkCount: 4 },
+    coverage: { groupedLinkCount: 4, ungroupedLinkCount: 0, groupsWithMetrics: 2, groupsWithoutMetrics: 0 },
+    registryAuditSummary: { totalLinks: 4, activeLinks: 3, removedLinks: 1, unknownLinks: 0, overrideRiskCount: 0 },
+    groups: [
+      {
+        sameSkuGroupId: 'dji-pocket-3',
+        groupName: 'DJI Pocket 3',
+        categoryName: '相机',
+        productType: 'gimbal-camera',
+        activeLinkCount: 2,
+        totalLinkCount: 3,
+        mappedRowCount: 2,
+        missingMetricLinkCount: 1,
+        periods: {
+          '1d': { exposure: 300, publicVisits: 30, amount: 120, createdOrders: 3, signedOrders: 3, reviewedOrders: 3, shippedOrders: 2, createdOrderAmount: 140, signedOrderAmount: 125, reviewedOrderAmount: 120, shippedOrderAmount: 110, exposureVisitRate: 0.1, visitCreatedOrderRate: 0.1, visitShipmentRate: 2 / 30 },
+          '7d': { exposure: 2100, publicVisits: 210, amount: 980, createdOrders: 12, signedOrders: 10, reviewedOrders: 10, shippedOrders: 8, createdOrderAmount: 1180, signedOrderAmount: 1080, reviewedOrderAmount: 980, shippedOrderAmount: 930, exposureVisitRate: 0.1, visitCreatedOrderRate: 12 / 210, visitShipmentRate: 8 / 210 },
+          '30d': { exposure: 9000, publicVisits: 720, amount: 3600, createdOrders: 35, signedOrders: 32, reviewedOrders: 30, shippedOrders: 28, createdOrderAmount: 3900, signedOrderAmount: 3720, reviewedOrderAmount: 3600, shippedOrderAmount: 3450, exposureVisitRate: 0.08, visitCreatedOrderRate: 35 / 720, visitShipmentRate: 28 / 720 },
+        },
+        topLinks: [
+          { internalProductId: '560', platformProductId: 'platform-560', productName: 'DJI Pocket 3 创作者套装', shortName: 'DJI Pocket 3', status: 'active', oneDayExposure: 200, oneDayPublicVisits: 20, oneDayAmount: 80 },
+        ],
+        risks: ['组内 1 条链接无日报数据'],
+      },
+      {
+        sameSkuGroupId: 'canon-sx70',
+        groupName: 'Canon SX70 HS',
+        categoryName: '相机',
+        productType: 'camera',
+        activeLinkCount: 1,
+        totalLinkCount: 1,
+        mappedRowCount: 1,
+        missingMetricLinkCount: 0,
+        periods: {
+          '1d': { exposure: 80, publicVisits: 8, amount: 40, createdOrders: 1, signedOrders: 1, reviewedOrders: 1, shippedOrders: 1, createdOrderAmount: 50, signedOrderAmount: 50, reviewedOrderAmount: 40, shippedOrderAmount: 40, exposureVisitRate: 0.1, visitCreatedOrderRate: 0.125, visitShipmentRate: 0.125 },
+          '7d': { exposure: 500, publicVisits: 40, amount: 200, createdOrders: 2, signedOrders: 2, reviewedOrders: 2, shippedOrders: 2, createdOrderAmount: 220, signedOrderAmount: 220, reviewedOrderAmount: 200, shippedOrderAmount: 200, exposureVisitRate: 0.08, visitCreatedOrderRate: 0.05, visitShipmentRate: 0.05 },
+          '30d': { exposure: 2400, publicVisits: 190, amount: 800, createdOrders: 7, signedOrders: 7, reviewedOrders: 7, shippedOrders: 6, createdOrderAmount: 900, signedOrderAmount: 880, reviewedOrderAmount: 800, shippedOrderAmount: 760, exposureVisitRate: 190 / 2400, visitCreatedOrderRate: 7 / 190, visitShipmentRate: 6 / 190 },
+        },
+        topLinks: [],
+        risks: [],
+      },
+    ],
+  }), 'utf8');
+
+  await writeFile(join(configDir, 'product-id-map.json'), JSON.stringify({
+    'platform-560': '560',
+    'platform-561': '561',
+    'platform-562': '562',
+    'platform-580': '580',
+  }), 'utf8');
+  await writeFile(join(configDir, 'product-name-map.json'), JSON.stringify({
+    '560': 'DJI Pocket 3',
+    '561': 'DJI Pocket 3 标准版',
+    '562': 'DJI Pocket 3 Creator',
+    '580': 'Canon SX70 HS',
+  }), 'utf8');
+  await writeFile(join(configDir, 'link-registry-overrides.json'), JSON.stringify({
+    version: 1,
+    entries: [
+      { internalProductId: '560', categoryId: 'camera', categoryName: '相机', productType: 'gimbal-camera', shortName: 'DJI Pocket 3', aliases: ['Pocket3'], sameSkuGroupId: 'dji-pocket-3', updatedAt: '2026-06-24' },
+      { internalProductId: '561', categoryId: 'camera', categoryName: '相机', productType: 'gimbal-camera', shortName: 'DJI Pocket 3', aliases: ['Pocket3 标准版'], sameSkuGroupId: 'dji-pocket-3', updatedAt: '2026-06-24' },
+      { internalProductId: '562', categoryId: 'camera', categoryName: '相机', productType: 'gimbal-camera', shortName: 'DJI Pocket 3', aliases: ['Pocket3 Creator'], sameSkuGroupId: 'dji-pocket-3', updatedAt: '2026-06-24' },
+      { internalProductId: '580', categoryId: 'camera', categoryName: '相机', productType: 'camera', shortName: 'Canon SX70 HS', aliases: ['SX70'], sameSkuGroupId: 'canon-sx70', updatedAt: '2026-06-24' },
+      { internalProductId: '841', categoryId: 'camera', categoryName: '相机', productType: 'action-camera', shortName: 'Ace Pro 2', aliases: ['Ace pro 2', 'AcePro2', 'ace pro'], sameSkuGroupId: 'insta360-ace-pro-2', updatedAt: '2026-06-24' },
+      { internalProductId: '851', categoryId: 'camera', categoryName: '相机', productType: 'action-camera', shortName: 'Ace Pro', aliases: ['Ace pro'], sameSkuGroupId: 'insta360-ace-pro', updatedAt: '2026-06-24' },
+    ],
+    sameSkuGroupAliasRules: [
+      { sameSkuGroupId: 'dji-pocket-3', aliases: ['口袋3', 'pocket 3'] },
+    ],
+  }), 'utf8');
+
+  return {
+    outputDir,
+    registryPaths: {
+      productIdMapPath: join(configDir, 'product-id-map.json'),
+      productNameMapPath: join(configDir, 'product-name-map.json'),
+      firstSeenPath: join(stateDir, 'goods-first-seen.json'),
+      lifecyclePath: join(stateDir, 'goods-link-lifecycle.json'),
+      overridesPath: join(configDir, 'link-registry-overrides.json'),
+      artifactsDir: outputDir,
+    },
+  };
+}
+
 async function writeNewLinkWorkflowContext(): Promise<{
   outputDir: string;
   registryPaths: {
@@ -328,11 +459,23 @@ async function writeNewLinkWorkflowContext(): Promise<{
     'platform-733': '733',
     'platform-875': '875',
     'platform-841': '841',
+    'platform-388': '388',
+    'platform-490': '490',
+    'platform-301': '301',
+    'platform-302': '302',
+    'platform-401': '401',
+    'platform-402': '402',
   }), 'utf8');
   await writeFile(join(configDir, 'product-name-map.json'), JSON.stringify({
     '733': '大疆 Pocket3',
     '875': 'DJI Pocket 3',
     '841': '佳能 R50',
+    '388': 'Fujifilm instax SQUARE SQ1',
+    '490': 'Fujifilm instax SQUARE SQ1',
+    '301': 'Wide 300',
+    '302': 'Wide 300',
+    '401': 'Wide 400',
+    '402': 'Wide 400',
   }), 'utf8');
   await writeFile(join(outputDir, '2026-06-22', 'report-context.json'), JSON.stringify({
     date: '2026-06-22',
@@ -369,6 +512,72 @@ async function writeNewLinkWorkflowContext(): Promise<{
         periods: {
           '1d': { ...metric, exposure: 100, publicVisits: 10, shippedOrders: 0, amount: 0 },
           '7d': { ...metric, exposure: 1200, publicVisits: 140, shippedOrders: 2, amount: 700 },
+          '30d': { ...metric, exposure: 300, publicVisits: 20, shippedOrders: 0, amount: 0 },
+        },
+      },
+      {
+        productName: 'Fujifilm instax SQUARE SQ1 high conversion',
+        platformProductId: 'platform-388',
+        displayProductId: '端内ID 388',
+        custodyDays: 7,
+        periods: {
+          '1d': { ...metric, exposure: 300, publicVisits: 90, shippedOrders: 0, amount: 1200 },
+          '7d': { ...metric, exposure: 9000, publicVisits: 900, shippedOrders: 6, amount: 4500 },
+          '30d': { ...metric, exposure: 300, publicVisits: 20, shippedOrders: 0, amount: 0 },
+        },
+      },
+      {
+        productName: 'Fujifilm instax SQUARE SQ1 low conversion',
+        platformProductId: 'platform-490',
+        displayProductId: '端内ID 490',
+        custodyDays: 7,
+        periods: {
+          '1d': { ...metric, exposure: 100, publicVisits: 20, shippedOrders: 0, amount: 300 },
+          '7d': { ...metric, exposure: 4000, publicVisits: 320, shippedOrders: 1, amount: 900 },
+          '30d': { ...metric, exposure: 300, publicVisits: 20, shippedOrders: 0, amount: 0 },
+        },
+      },
+      {
+        productName: 'Wide 300 standard source',
+        platformProductId: 'platform-301',
+        displayProductId: '端内ID 301',
+        custodyDays: 7,
+        periods: {
+          '1d': { ...metric, exposure: 100, publicVisits: 10, shippedOrders: 0, amount: 0 },
+          '7d': { ...metric, exposure: 4000, publicVisits: 200, shippedOrders: 1, amount: 800 },
+          '30d': { ...metric, exposure: 300, publicVisits: 20, shippedOrders: 0, amount: 0 },
+        },
+      },
+      {
+        productName: 'Wide 300 best source',
+        platformProductId: 'platform-302',
+        displayProductId: '端内ID 302',
+        custodyDays: 7,
+        periods: {
+          '1d': { ...metric, exposure: 200, publicVisits: 40, shippedOrders: 0, amount: 200 },
+          '7d': { ...metric, exposure: 8000, publicVisits: 700, shippedOrders: 4, amount: 3200 },
+          '30d': { ...metric, exposure: 300, publicVisits: 20, shippedOrders: 0, amount: 0 },
+        },
+      },
+      {
+        productName: 'Wide 400 standard source',
+        platformProductId: 'platform-401',
+        displayProductId: '端内ID 401',
+        custodyDays: 7,
+        periods: {
+          '1d': { ...metric, exposure: 90, publicVisits: 8, shippedOrders: 0, amount: 0 },
+          '7d': { ...metric, exposure: 3000, publicVisits: 160, shippedOrders: 1, amount: 700 },
+          '30d': { ...metric, exposure: 300, publicVisits: 20, shippedOrders: 0, amount: 0 },
+        },
+      },
+      {
+        productName: 'Wide 400 best source',
+        platformProductId: 'platform-402',
+        displayProductId: '端内ID 402',
+        custodyDays: 7,
+        periods: {
+          '1d': { ...metric, exposure: 190, publicVisits: 30, shippedOrders: 0, amount: 100 },
+          '7d': { ...metric, exposure: 7500, publicVisits: 650, shippedOrders: 3, amount: 2800 },
           '30d': { ...metric, exposure: 300, publicVisits: 20, shippedOrders: 0, amount: 0 },
         },
       },
@@ -463,6 +672,47 @@ describe('handleBotIntent', () => {
     expect(cardText).toContain('未归类商品');
   });
 
+  it('returns an inventory status overview card for the new command', async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), 'mt-agent-inventory-status-overview-'));
+    const fixtures = await writeInventoryStatusFixtures(rootDir);
+
+    const response = await handleBotIntent(
+      { type: 'inventory_status_overview' },
+      fixtures.outputDir,
+      { closedOrderRegistryPaths: fixtures.registryPaths },
+    );
+
+    expect(response.text).toContain('库存情况');
+    expect(response.text).toContain('同款组');
+    expect(response.card).toBeDefined();
+    const cardText = JSON.stringify(response.card);
+    expect(cardText).toContain('库存情况');
+    expect(cardText).toContain('链接维护概览');
+    expect(cardText).toContain('待核查同款组');
+    expect(cardText).toContain('DJI Pocket 3');
+    expect(cardText).not.toContain('7日总金额');
+    expect(cardText).not.toContain('7日总访问');
+  });
+
+  it('returns an inventory status detail card for a unique alias query', async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), 'mt-agent-inventory-status-detail-'));
+    const fixtures = await writeInventoryStatusFixtures(rootDir);
+
+    const response = await handleBotIntent(
+      { type: 'inventory_status_query', query: 'pocket3' },
+      fixtures.outputDir,
+      { closedOrderRegistryPaths: fixtures.registryPaths },
+    );
+
+    expect(response.text).toContain('DJI Pocket 3');
+    expect(response.text).toContain('同款组');
+    expect(response.card).toBeDefined();
+    const cardText = JSON.stringify(response.card);
+    expect(cardText).toContain('DJI Pocket 3');
+    expect(cardText).toContain('主力链接');
+    expect(cardText).toContain('1日');
+  });
+
   it('answers latest summary from report context', async () => {
     const outputDir = await writeContext();
     const response = await handleBotIntent({ type: 'latest_summary' }, outputDir);
@@ -483,6 +733,33 @@ describe('handleBotIntent', () => {
     expect(response.text).toContain('端内ID 733 大疆DJI Pocket3云台相机128G');
     expect(response.text).not.toContain('端内ID 649');
     expect(response.text).not.toContain('端内ID 841');
+  });
+
+  it('answers comma separated product id queries from report context', async () => {
+    const outputDir = await writeContext();
+    const response = await handleBotIntent({ type: 'query_product', keyword: '565, 701, 733' }, outputDir);
+    expect(response.text).toContain('端内ID 565 iPhone 15');
+    expect(response.text).toContain('端内ID 701 大疆 Pocket 3');
+    expect(response.text).toContain('端内ID 733 大疆DJI Pocket3云台相机128G');
+    expect(response.text).not.toContain('没有找到匹配商品');
+  });
+
+  it('falls back to link registry for comma separated product ids missing from report rows', async () => {
+    const outputDir = await writeContext();
+    const registryRoot = await mkdtemp(join(tmpdir(), 'mt-agent-bot-registry-query-'));
+    const registryPaths = await writeLinkRegistryOverviewFixtures(registryRoot);
+
+    const response = await handleBotIntent(
+      { type: 'query_product', keyword: '560, 561;' },
+      outputDir,
+      { closedOrderRegistryPaths: registryPaths },
+    );
+
+    expect(response.text).toContain('端内ID 560 DJI Pocket 3 全能套装');
+    expect(response.text).toContain('平台商品ID platform-560');
+    expect(response.text).toContain('端内ID 561 DJI Pocket 3 标准版');
+    expect(response.text).toContain('平台商品ID platform-561');
+    expect(response.text).not.toContain('没有找到匹配商品');
   });
 
   it('returns an operations learning question card', async () => {
@@ -724,11 +1001,12 @@ describe('handleBotIntent', () => {
   it('turns high-risk generic agent plans into approval cards without side effects', async () => {
     const planner: AgentPlannerProvider = {
       async proposePlan(request) {
-        expect(request.tools.map((tool) => tool.name)).toContain('rental.operationConfirmRequest');
+        expect(request.tools.map((tool) => tool.name)).toContain('rental.delist');
+        expect(request.tools.map((tool) => tool.name)).not.toContain('rental.operationConfirmRequest');
         return JSON.stringify({
           goal: '下架租赁商品',
-          selectedTool: 'rental.operationConfirmRequest',
-          arguments: { action: 'delist', productId: '761' },
+          selectedTool: 'rental.delist',
+          arguments: { productId: '761' },
           confidence: 0.95,
           reason: '用户要求下架商品 761',
           requiresConfirmation: true,
@@ -750,10 +1028,10 @@ describe('handleBotIntent', () => {
       rentalPriceClient,
     });
 
-    expect(response.text).toContain('请确认 Agent 操作：rental.operationConfirmRequest');
+    expect(response.text).toContain('请确认 Agent 操作：rental.delist');
     expect(response.card).toBeDefined();
     expect(JSON.stringify(response.card)).toContain('agent_tool_confirm');
-    expect(JSON.stringify(response.card)).toContain('delist');
+    expect(JSON.stringify(response.card)).toContain('rental.delist');
     expect(JSON.stringify(response.card)).toContain('761');
   });
 
@@ -791,6 +1069,11 @@ describe('handleBotIntent', () => {
     const runReport = await handleBotIntent({ type: 'run_public_traffic_report' }, 'output');
     expect(runReport.text).toContain('请确认 Agent 操作：publicTraffic.runReport');
     expect(JSON.stringify(runReport.card)).toContain('agent_tool_confirm');
+
+    const refreshDashboard = await handleBotIntent({ type: 'refresh_public_traffic_dashboard', sendTo: 'group' }, 'output');
+    expect(refreshDashboard.text).toContain('请确认 Agent 操作：publicTraffic.refreshDashboard');
+    expect(JSON.stringify(refreshDashboard.card)).toContain('agent_tool_confirm');
+    expect(JSON.stringify(refreshDashboard.card)).toContain('"sendTo":"group"');
 
     const resend = await handleBotIntent({ type: 'resend_latest_report', sendTo: 'both' }, 'output');
     expect(resend.text).toContain('请确认 Agent 操作：publicTraffic.resendLatestReport');
@@ -870,6 +1153,65 @@ describe('handleBotIntent', () => {
     expect(cardText).toContain('"sourceProductId":"875"');
     expect(cardText).toContain('"requestedSourceProductId":"875"');
     expect(cardText).not.toContain('"sourceProductId":"733"');
+  });
+
+  it('turns a best-link follow-up copy command into a new-link confirmation card without executing', async () => {
+    const { outputDir, registryPaths } = await writeNewLinkWorkflowContext();
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run'); },
+      async execute() { throw new Error('execute should not run'); },
+      async copy() { throw new Error('copy should not run before workflow confirmation'); },
+      async delist() { throw new Error('delist should not run'); },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+
+    const response = await handleBotIntent(
+      { type: 'unknown', text: '数据最好的SQ1的端内id是多少?按这个id复制5条新链' },
+      outputDir,
+      { rentalPriceClient, closedOrderRegistryPaths: registryPaths },
+    );
+
+    const cardText = JSON.stringify(response.card);
+    expect(response.text).toContain('新链批量铺设计划：准备复制 5 条「SQ1」新链');
+    expect(response.text).toContain('推荐源商品：388 Fujifilm instax SQUARE SQ1 high conversion');
+    expect(response.card).toBeDefined();
+    expect(cardText).toContain('new_link_batch_confirm');
+    expect(cardText).toContain('"keyword":"SQ1"');
+    expect(cardText).toContain('"count":5');
+    expect(cardText).toContain('"sourceProductId":"388"');
+    expect(cardText).toContain('"requestedSourceProductId":"388"');
+  });
+
+  it('turns multiple best-link follow-up copy commands into one multi-source confirmation card without executing', async () => {
+    const { outputDir, registryPaths } = await writeNewLinkWorkflowContext();
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run'); },
+      async execute() { throw new Error('execute should not run'); },
+      async copy() { throw new Error('copy should not run before workflow confirmation'); },
+      async delist() { throw new Error('delist should not run'); },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+
+    const response = await handleBotIntent(
+      { type: 'unknown', text: '数据最好的wide 300,wide 400的端内id是多少?分别按这个id复制5条新。' },
+      outputDir,
+      { rentalPriceClient, closedOrderRegistryPaths: registryPaths },
+    );
+
+    const cardText = JSON.stringify(response.card);
+    expect(response.text).toContain('多商品新链批量铺设计划：准备分别复制 2 个商品');
+    expect(response.text).toContain('wide 300：源商品 302 Wide 300 best source，复制 5 条');
+    expect(response.text).toContain('wide 400：源商品 402 Wide 400 best source，复制 5 条');
+    expect(response.card).toBeDefined();
+    expect(cardText).toContain('new_link_batch_multi_confirm');
+    expect(cardText).toContain('"keyword":"wide 300"');
+    expect(cardText).toContain('"sourceProductId":"302"');
+    expect(cardText).toContain('"keyword":"wide 400"');
+    expect(cardText).toContain('"sourceProductId":"402"');
   });
 
   it('does not fall through to read-only new product pool when the LLM planner fails a new-link write plan', async () => {

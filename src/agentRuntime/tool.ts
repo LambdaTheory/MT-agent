@@ -10,6 +10,7 @@ export interface AgentToolDefinition<Input = unknown, Output = unknown> {
   description: string;
   risk: AgentToolRisk;
   requiresConfirmation: boolean;
+  plannerVisible?: boolean;
   inputSchema?: unknown;
   execute?: (input: Input, context: AgentToolContext) => Promise<Output>;
 }

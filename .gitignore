@@ -1,15 +1,39 @@
+# Dependencies
 node_modules/
 .npm-cache/
+
+# Build and test outputs
 dist/
+coverage/
+playwright-report/
+test-results/
+*.tsbuildinfo
+
+# Runtime outputs
 output/
 .browser-profile/
 *.log
+
+# Local environment files
 .env
 .env.*
 !.env.example
+
+# Local workspace/tool state
 .worktrees/
+.agents/
+.codex/
+.omo/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+
+# Local config artifacts
 config/product-id-map.json
 config/product-id-map.backup.json
+
+# Vendor rental-price-agent local state
 vendor/rental-price-agent/.browser-data/
 vendor/rental-price-agent/tasks/
 vendor/rental-price-agent/.daemon.pid

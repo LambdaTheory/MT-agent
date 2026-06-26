@@ -88,4 +88,22 @@ describe('feishu bot report store', () => {
 
     expect(queryProductRows(reportContext as any, '733').map((row) => row.displayProductId)).toEqual(['端内ID 733']);
   });
+
+  it('queries multiple comma separated internal product ids exactly in requested order', () => {
+    const reportContext = {
+      ...context,
+      rows: [
+        productRow('端内ID 798', 'Canon R50', 'platform-798'),
+        productRow('端内ID 433', 'DJI Pocket 3', 'platform-433'),
+        productRow('端内ID 872', 'Canon SX70', 'platform-872'),
+        productRow('端内ID 900', 'Noise product 433 798 872', 'platform-900'),
+      ],
+    };
+
+    expect(queryProductRows(reportContext as any, '433, 798, 872;').map((row) => row.displayProductId)).toEqual([
+      '端内ID 433',
+      '端内ID 798',
+      '端内ID 872',
+    ]);
+  });
 });

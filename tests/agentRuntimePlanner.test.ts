@@ -26,22 +26,22 @@ describe('agent runtime planner proposal validation', () => {
     expect(validateAgentPlannerProposal('{"goal":"查询商品表现","selectedTool":"product.query","arguments":{"keyword":"565","extra":true},"confidence":0.88,"reason":"多余字段"}')).toEqual({ ok: false, reason: 'invalid_arguments' });
   });
 
-  it('gates high-risk proposals behind confirmation and does not execute tools', () => {
-    expect(validateAgentPlannerProposal('{"goal":"预览租赁改价","selectedTool":"rental.pricePreview","arguments":{"productId":"761"},"confidence":0.91,"reason":"用户想看改价影响","requiresConfirmation":false}')).toEqual({
+  it('gates dashboard refresh write proposals behind confirmation and does not execute tools', () => {
+    expect(validateAgentPlannerProposal('{"goal":"补抓访问页数据","selectedTool":"publicTraffic.refreshDashboard","arguments":{},"confidence":0.91,"reason":"用户要求抓取访问页数据","requiresConfirmation":false}')).toEqual({
       ok: true,
       proposal: {
-        goal: '预览租赁改价',
-        selectedTool: 'rental.pricePreview',
-        arguments: { productId: '761' },
+        goal: '补抓访问页数据',
+        selectedTool: 'publicTraffic.refreshDashboard',
+        arguments: {},
         confidence: 0.91,
-        reason: '用户想看改价影响',
+        reason: '用户要求抓取访问页数据',
         requiresConfirmation: false,
       },
       policy: {
         decision: 'confirmation_required',
-        toolName: 'rental.pricePreview',
-        risk: 'high',
-        proposal: { toolName: 'rental.pricePreview', input: { productId: '761' }, reason: '用户想看改价影响' },
+        toolName: 'publicTraffic.refreshDashboard',
+        risk: 'write',
+        proposal: { toolName: 'publicTraffic.refreshDashboard', input: {}, reason: '用户要求抓取访问页数据' },
       },
     });
   });

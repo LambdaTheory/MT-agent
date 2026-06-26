@@ -86,16 +86,20 @@ function canonicalizeIntent(intent: BotIntent): BotIntent {
     case 'agent_learning_summary':
     case 'lookup_product_id_card':
     case 'link_registry_overview':
+    case 'inventory_status_overview':
     case 'push_latest_report_to_group':
     case 'sync_closed_order_feedback':
     case 'run_closed_order_observation_report':
       return { type: intent.type };
     case 'run_public_traffic_report':
+    case 'refresh_public_traffic_dashboard':
     case 'resend_latest_report':
       return { type: intent.type, sendTo: intent.sendTo };
     case 'query_product':
       return { type: intent.type, keyword: intent.keyword };
     case 'lookup_product_id':
+      return { type: intent.type, query: intent.query };
+    case 'inventory_status_query':
       return { type: intent.type, query: intent.query };
     case 'rental_price_change':
       return { type: intent.type, productId: intent.productId, request: intent.request };

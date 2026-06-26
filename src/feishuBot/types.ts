@@ -7,6 +7,7 @@ export type BotIntent =
   | { type: 'help' }
   | { type: 'differential_pricing_card' }
   | { type: 'run_public_traffic_report'; sendTo?: FeishuSendTo }
+  | { type: 'refresh_public_traffic_dashboard'; sendTo?: FeishuSendTo }
   | { type: 'resend_latest_report'; sendTo?: FeishuSendTo }
   | { type: 'push_latest_report_to_group' }
   | { type: 'sync_closed_order_feedback' }
@@ -19,6 +20,8 @@ export type BotIntent =
   | { type: 'query_product'; keyword: string }
   | { type: 'lookup_product_id_card' }
   | { type: 'link_registry_overview' }
+  | { type: 'inventory_status_overview' }
+  | { type: 'inventory_status_query'; query: string }
   | { type: 'lookup_product_id'; query: string }
   | { type: 'rental_price_change'; productId: string; request: RentalPriceChangeRequest }
   | { type: 'rental_copy'; productId: string }

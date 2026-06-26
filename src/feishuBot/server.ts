@@ -3,6 +3,8 @@ import { parseAgentToolConfirmRequest } from '../agentRuntime/approvalCard.js';
 import { parseAgentClarificationCustomSelection, parseAgentClarificationSelection } from '../agentRuntime/clarificationCard.js';
 import type { AgentPlannerProvider } from '../agentRuntime/planner.js';
 import { recordAgentLearningEvent } from '../agentLearning/store.js';
+import { handleLinkRegistryGovernanceCardAction } from '../linkRegistry/governanceSession.js';
+import { handleLinkRegistryMaintenanceCardAction } from '../linkRegistry/maintenanceSession.js';
 import { replyFeishuMessageCard, replyFeishuMessageText, type FeishuAppSendResult, type FeishuCardPayload, type FeishuReplyConfig } from '../notify/feishuApp.js';
 import { handleOperationsLearningFeedback } from '../operationsLearningLoop/session.js';
 import { findLatestReportContext } from './reportStore.js';
@@ -10,13 +12,17 @@ import { buildIdLookupCard } from './idLookupCard.js';
 import { lookupProductId } from './idLookup.js';
 import { createFeishuMessageDispatcher } from './dispatcher.js';
 import {
+  buildActivityPriceCallbackConfirmCard,
+  buildActivityPriceCallbackRequest,
+  buildActivityPriceCallbackStatusCard,
   createActivityAutomationSkillClient,
   formatActivityAutomationExecutionResult,
   parseActivityAutomationConfirmRequest,
+  parseActivityPriceCallbackConfirmRequest,
   type ActivityAutomationSkillClient,
 } from './activityAutomation.js';
 import { executeAgentToolRequest } from './agentToolExecutor.js';
-import { executeNewLinkBatchConfirmRequest, parseNewLinkBatchConfirmRequest } from '../newLinkWorkflow/batch.js';
+import { executeNewLinkBatchConfirmRequest, executeNewLinkBatchMultiConfirmRequest, parseNewLinkBatchConfirmRequest, parseNewLinkBatchMultiConfirmRequest } from '../newLinkWorkflow/batch.js';
 import { createRentalPriceSkillClient, executeRentalOperationConfirmRequest, parseRentalOperationConfirmRequest, parseRentalPriceConfirmRequest, type RentalPriceSkillClient } from './rentalPrice.js';
 import type { LlmIntentProposalProvider } from './llmIntentProposal.js';
 import type { BotIntent, BotResponse, FeishuBotDispatchResult, FeishuBotIncomingTextMessage, FeishuMessageEvent } from './types.js';
@@ -110,13 +116,17 @@ function expectedActionForButtonName(name: string | undefined): string | undefin
     agent_tool_confirm_submit: 'agent_tool_confirm',
     agent_tool_cancel_submit: 'agent_tool_cancel',
     new_link_batch_confirm_submit: 'new_link_batch_confirm',
+    new_link_batch_multi_confirm_submit: 'new_link_batch_multi_confirm',
     new_link_batch_cancel_submit: 'new_link_batch_cancel',
     new_link_batch_confirm_form: 'new_link_batch_confirm',
+    new_link_batch_multi_confirm_form: 'new_link_batch_multi_confirm',
     new_link_batch_cancel_form: 'new_link_batch_cancel',
     rental_price_confirm_submit: 'rental_price_confirm',
     rental_price_cancel_submit: 'rental_price_cancel',
     rental_operation_confirm_submit: 'rental_operation_confirm',
     rental_operation_cancel_submit: 'rental_operation_cancel',
+    activity_price_callback_confirm_submit: 'activity_price_callback_confirm',
+    activity_price_callback_cancel_submit: 'activity_price_callback_cancel',
     id_lookup_submit: 'id_lookup',
   };
   if (exact[name]) return exact[name];
@@ -200,6 +210,20 @@ function duplicateServerCardActionText(claim: ServerCardActionClaim): string {
   return '该确认卡片已经处理过，请重新发起命令。';
 }
 
+function statusCard(title: string, content: string, template: 'blue' | 'green' | 'red' | 'grey' = 'blue'): FeishuCardPayload {
+  return {
+    schema: '2.0',
+    config: { wide_screen_mode: true },
+    header: { title: { tag: 'plain_text', content: title }, template },
+    body: { elements: [{ tag: 'markdown', content }] },
+  };
+}
+
+function claimStatusCard(title: string, claim: ServerCardActionClaim): FeishuCardPayload {
+  const template = claim.status === 'processing' ? 'blue' : claim.status === 'completed' ? 'green' : claim.status === 'failed' ? 'red' : 'grey';
+  return statusCard(title, duplicateServerCardActionText(claim), template);
+}
+
 function readActionFormValue(action: FeishuCardAction | undefined, name: string): string | undefined {
   if (!isRecord(action)) return undefined;
   const actionRecord = action as Record<string, unknown>;
@@ -275,11 +299,67 @@ async function handleCardActionTrigger(
     return;
   }
 
+  if (
+    actionName === 'link_registry_maintenance_start'
+    || actionName === 'link_registry_maintenance_snooze'
+    || actionName === 'link_registry_maintenance_ignore'
+    || actionName === 'link_registry_maintenance_submit'
+  ) {
+    const form = readActionForm(payload.event?.action);
+    const response = await handleLinkRegistryMaintenanceCardAction(outputDir, {
+      date: readString(value?.date) ?? '',
+      action:
+        actionName === 'link_registry_maintenance_start' ? 'start'
+          : actionName === 'link_registry_maintenance_snooze' ? 'snooze'
+            : actionName === 'link_registry_maintenance_ignore' ? 'ignore'
+              : 'submit',
+      internalProductId: readString(value?.internalProductId),
+      reviewIndex: readNumber(value?.reviewIndex),
+      decision: readString(form?.decision) as 'accept' | 'accept_with_edit' | 'ignore' | undefined,
+      sameSkuGroupId: readString(form?.same_sku_group_id_custom) ?? readString(form?.same_sku_group_id),
+      categoryId: readString(form?.category_id),
+      productType: readString(form?.product_type),
+      shortName: readString(form?.short_name),
+      reviewerId: extractCardReviewerId(payload),
+    });
+    if (response.card) return response.card;
+    return statusCard('\u94fe\u63a5\u7ef4\u62a4', response.text, 'grey');
+  }
+
+  if (
+    actionName === 'link_registry_governance_start'
+    || actionName === 'link_registry_governance_advance'
+    || actionName === 'link_registry_governance_submit'
+    || actionName === 'link_registry_governance_snooze'
+    || actionName === 'link_registry_governance_ignore'
+  ) {
+    const form = readActionForm(payload.event?.action);
+    const response = await handleLinkRegistryGovernanceCardAction(outputDir, {
+      date: readString(value?.date) ?? '',
+      action:
+        actionName === 'link_registry_governance_start' ? 'start'
+          : actionName === 'link_registry_governance_advance' ? 'advance'
+            : actionName === 'link_registry_governance_submit' ? 'submit'
+            : actionName === 'link_registry_governance_snooze' ? 'snooze'
+              : 'ignore',
+      reviewIndex: readNumber(value?.reviewIndex),
+      decision: readString(form?.decision) as 'resolved' | 'watch' | 'ignored' | undefined,
+      note: readString(form?.note),
+      reviewerId: extractCardReviewerId(payload),
+    });
+    if (response.card) return response.card;
+    return statusCard('\u7ec4\u7ea7\u6cbb\u7406', response.text, 'grey');
+  }
+
   if (actionName === 'agent_clarify_select') {
     const selection = parseAgentClarificationSelection(value);
     if (!selection) {
       await replyText(replyConfig, 'Agent 澄清选择参数无效，请重新发起。');
       return;
+    }
+    const claim = claimServerCardAction(messageId, 'agent_clarify', actionName);
+    if (!claim.claimed) {
+      return claimStatusCard('Agent 澄清已处理', claim.claim);
     }
     await recordAgentLearningEvent(outputDir, {
       type: 'clarification_selected',
@@ -295,6 +375,7 @@ async function handleCardActionTrigger(
       source: 'http',
       chatType: 'p2p',
     });
+    setServerCardActionStatus(claim.key, 'completed');
     if (!response.skipped) {
       if (response.card) await replyCard(replyConfig, response.card);
       else await replyText(replyConfig, response.text);
@@ -307,6 +388,10 @@ async function handleCardActionTrigger(
     if (!selection) {
       await replyText(replyConfig, '请先在澄清输入框里补充你的真实意图。');
       return;
+    }
+    const claim = claimServerCardAction(messageId, 'agent_clarify', actionName);
+    if (!claim.claimed) {
+      return claimStatusCard('Agent 澄清已处理', claim.claim);
     }
     await recordAgentLearningEvent(outputDir, {
       type: 'clarification_selected',
@@ -322,6 +407,7 @@ async function handleCardActionTrigger(
       source: 'http',
       chatType: 'p2p',
     });
+    setServerCardActionStatus(claim.key, 'completed');
     if (!response.skipped) {
       if (response.card) await replyCard(replyConfig, response.card);
       else await replyText(replyConfig, response.text);
@@ -330,14 +416,18 @@ async function handleCardActionTrigger(
   }
 
   if (actionName === 'agent_clarify_cancel') {
+    const claim = claimServerCardAction(messageId, 'agent_clarify', actionName);
+    if (!claim.claimed) {
+      return claimStatusCard('Agent 澄清已处理', claim.claim);
+    }
+    setServerCardActionStatus(claim.key, 'cancelled');
     await recordAgentLearningEvent(outputDir, {
       type: 'clarification_cancelled',
       messageId,
       actorId,
       originalMessage: readString(value?.originalMessage),
     });
-    await replyText(replyConfig, '已取消 Agent 澄清。');
-    return;
+    return statusCard('Agent 已取消', `已取消澄清：${readString(value?.originalMessage) ?? '未知指令'}`, 'grey');
   }
 
   if (actionName === 'agent_tool_confirm') {
@@ -345,6 +435,10 @@ async function handleCardActionTrigger(
     if (!request) {
       await replyText(replyConfig, 'Agent 操作确认参数无效，请重新发起。');
       return;
+    }
+    const claim = claimServerCardAction(messageId, 'agent_tool', actionName);
+    if (!claim.claimed) {
+      return claimStatusCard('Agent 操作已处理', claim.claim);
     }
     await recordAgentLearningEvent(outputDir, {
       type: 'tool_confirmed',
@@ -357,6 +451,7 @@ async function handleCardActionTrigger(
     const response = await executeAgentToolRequest(request, config.outputDir ?? 'output', {
       rentalPriceClient: config.rentalPriceClient,
     });
+    setServerCardActionStatus(claim.key, 'completed');
     await recordAgentLearningEvent(outputDir, {
       type: 'tool_completed',
       messageId,
@@ -373,14 +468,18 @@ async function handleCardActionTrigger(
 
   if (actionName === 'agent_tool_cancel') {
     const toolName = readString(value?.toolName) ?? '未知工具';
+    const claim = claimServerCardAction(messageId, 'agent_tool', actionName);
+    if (!claim.claimed) {
+      return claimStatusCard('Agent 操作已处理', claim.claim);
+    }
+    setServerCardActionStatus(claim.key, 'cancelled');
     await recordAgentLearningEvent(outputDir, {
       type: 'tool_cancelled',
       messageId,
       actorId,
       toolName,
     });
-    await replyText(replyConfig, `已取消 Agent 操作：${toolName}`);
-    return;
+    return statusCard('Agent 操作已取消', `工具 ${toolName} 操作已取消。`, 'grey');
   }
 
   if (actionName === 'new_link_batch_confirm') {
@@ -391,8 +490,7 @@ async function handleCardActionTrigger(
     }
     const claim = claimServerCardAction(messageId, 'new_link_batch', actionName);
     if (!claim.claimed) {
-      await replyText(replyConfig, duplicateServerCardActionText(claim.claim));
-      return;
+      return claimStatusCard('新链批量复制已处理', claim.claim);
     }
     await recordAgentLearningEvent(outputDir, {
       type: 'workflow_confirmed',
@@ -420,12 +518,47 @@ async function handleCardActionTrigger(
     return;
   }
 
+  if (actionName === 'new_link_batch_multi_confirm') {
+    const request = parseNewLinkBatchMultiConfirmRequest(value);
+    if (!request) {
+      await replyText(replyConfig, '多商品新链批量复制确认参数无效，请重新发起。');
+      return;
+    }
+    const claim = claimServerCardAction(messageId, 'new_link_batch', actionName);
+    if (!claim.claimed) {
+      return claimStatusCard('新链批量复制已处理', claim.claim);
+    }
+    await recordAgentLearningEvent(outputDir, {
+      type: 'workflow_confirmed',
+      messageId,
+      actorId,
+      workflowName: request.workflowName,
+      originalMessage: request.reason,
+      selectedMessage: request.items.map((item) => `从商品 ${item.sourceProductId} 复制 ${item.count} 条「${item.keyword}」新链`).join('；'),
+      label: '多商品新链批量复制',
+      arguments: { items: request.items.map((item) => ({ keyword: item.keyword, count: item.count, sourceProductId: item.sourceProductId })) },
+      reason: request.reason,
+    });
+    const result = await executeNewLinkBatchMultiConfirmRequest(config.rentalPriceClient ?? createRentalPriceSkillClient(), request);
+    setServerCardActionStatus(claim.key, result.ok ? 'completed' : 'failed');
+    await recordAgentLearningEvent(outputDir, {
+      type: result.ok ? 'workflow_completed' : 'workflow_failed',
+      messageId,
+      actorId,
+      workflowName: request.workflowName,
+      arguments: { items: request.items.map((item) => ({ keyword: item.keyword, count: item.count, sourceProductId: item.sourceProductId })) },
+      reason: request.reason,
+      resultSummary: result.text,
+    });
+    await replyText(replyConfig, result.text);
+    return;
+  }
+
   if (actionName === 'new_link_batch_cancel') {
     const keyword = readString(value?.keyword) ?? '未知';
     const claim = claimServerCardAction(messageId, 'new_link_batch', actionName);
     if (!claim.claimed) {
-      await replyText(replyConfig, duplicateServerCardActionText(claim.claim));
-      return;
+      return claimStatusCard('新链批量复制已处理', claim.claim);
     }
     setServerCardActionStatus(claim.key, 'cancelled');
     await recordAgentLearningEvent(outputDir, {
@@ -436,8 +569,7 @@ async function handleCardActionTrigger(
       label: '新链批量复制',
       arguments: { keyword },
     });
-    await replyText(replyConfig, `已取消新链批量复制：「${keyword}」`);
-    return;
+    return statusCard('新链批量复制已取消', `「${keyword}」新链批量复制已取消。`, 'grey');
   }
 
   if (actionName === 'rental_price_confirm') {
@@ -446,26 +578,80 @@ async function handleCardActionTrigger(
       await replyText(replyConfig, '改价确认参数无效，请重新发起改价。');
       return;
     }
+    const claim = claimServerCardAction(messageId, 'rental_price', actionName);
+    if (!claim.claimed) {
+      return claimStatusCard('租赁商品改价已处理', claim.claim);
+    }
     const result = await (config.rentalPriceClient ?? createRentalPriceSkillClient()).execute(request);
+    setServerCardActionStatus(claim.key, result.ok ? 'completed' : 'failed');
     await replyText(replyConfig, `${result.ok ? '改价执行成功' : '改价执行失败'}：商品 ${result.productId}\n${result.lines.join('\n')}`);
     return;
   }
 
   if (actionName === 'activity_automation_confirm') {
-    const request = parseActivityAutomationConfirmRequest(readActionForm(payload.event?.action));
+    const actionForm = readActionForm(payload.event?.action);
+    const request = parseActivityAutomationConfirmRequest(actionForm);
     if (!request) {
+      console.error('差异化定价参数解析失败', { messageId, actionValue: value, actionForm, action: payload.event?.action });
       await replyText(replyConfig, '差异化定价参数无效，请重新填写卡片后再试。');
       return;
     }
+    const claim = claimServerCardAction(messageId, 'activity_automation', actionName);
+    if (!claim.claimed) {
+      return claimStatusCard('差异化定价已处理', claim.claim);
+    }
     const result = await (config.activityAutomationClient ?? createActivityAutomationSkillClient()).execute(request);
+    setServerCardActionStatus(claim.key, result.ok ? 'completed' : 'failed');
+    const callbackRequest = buildActivityPriceCallbackRequest(result);
+    if (callbackRequest) {
+      await replyCard(replyConfig, buildActivityPriceCallbackConfirmCard(callbackRequest));
+      return;
+    }
     await replyText(replyConfig, formatActivityAutomationExecutionResult(result));
     return;
   }
 
+  if (actionName === 'activity_automation_cancel') {
+    const claim = claimServerCardAction(messageId, 'activity_automation', actionName);
+    if (!claim.claimed) {
+      return claimStatusCard('差异化定价已处理', claim.claim);
+    }
+    setServerCardActionStatus(claim.key, 'cancelled');
+    return statusCard('差异化定价已取消', '已取消本次差异化定价。', 'grey');
+  }
+
+  if (actionName === 'activity_price_callback_confirm') {
+    const request = parseActivityPriceCallbackConfirmRequest(value);
+    if (!request) {
+      await replyText(replyConfig, '价格回调确认参数无效，请重新发起。');
+      return;
+    }
+    await replyCard(replyConfig, buildActivityPriceCallbackStatusCard(request, { confirmed: true }));
+    return;
+  }
+
+  if (actionName === 'activity_price_callback_cancel') {
+    const request = parseActivityPriceCallbackConfirmRequest(value);
+    if (!request) {
+      await replyText(replyConfig, '价格回调取消参数无效，请重新发起。');
+      return;
+    }
+    const claim = claimServerCardAction(messageId, 'activity_price_callback', actionName);
+    if (!claim.claimed) {
+      return claimStatusCard('价格回调已处理', claim.claim);
+    }
+    setServerCardActionStatus(claim.key, 'cancelled');
+    return buildActivityPriceCallbackStatusCard(request, { confirmed: false });
+  }
+
   if (actionName === 'rental_price_cancel') {
     const productId = readString(value?.productId) ?? '未知';
-    await replyText(replyConfig, `已取消改价：商品 ${productId}`);
-    return;
+    const claim = claimServerCardAction(messageId, 'rental_price', actionName);
+    if (!claim.claimed) {
+      return claimStatusCard('租赁商品改价已处理', claim.claim);
+    }
+    setServerCardActionStatus(claim.key, 'cancelled');
+    return statusCard('租赁商品改价已取消', `商品 ${productId} 改价已取消。`, 'grey');
   }
 
   if (actionName === 'rental_operation_confirm') {
@@ -474,15 +660,24 @@ async function handleCardActionTrigger(
       await replyText(replyConfig, '租赁商品操作确认参数无效，请重新发起。');
       return;
     }
+    const claim = claimServerCardAction(messageId, 'rental_operation', actionName);
+    if (!claim.claimed) {
+      return claimStatusCard('租赁商品操作已处理', claim.claim);
+    }
     const result = await executeRentalOperationConfirmRequest(config.rentalPriceClient ?? createRentalPriceSkillClient(), request);
+    setServerCardActionStatus(claim.key, result.ok ? 'completed' : 'failed');
     await replyText(replyConfig, result.text);
     return;
   }
 
   if (actionName === 'rental_operation_cancel') {
     const productId = readString(value?.productId) ?? '未知';
-    await replyText(replyConfig, `已取消租赁商品操作：商品 ${productId}`);
-    return;
+    const claim = claimServerCardAction(messageId, 'rental_operation', actionName);
+    if (!claim.claimed) {
+      return claimStatusCard('租赁商品操作已处理', claim.claim);
+    }
+    setServerCardActionStatus(claim.key, 'cancelled');
+    return statusCard('租赁商品操作已取消', `商品 ${productId} 操作已取消。`, 'grey');
   }
 
   if (actionName === 'id_lookup') {

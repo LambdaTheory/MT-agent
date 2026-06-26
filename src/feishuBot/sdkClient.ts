@@ -4,6 +4,8 @@ import { parseAgentToolConfirmRequest } from '../agentRuntime/approvalCard.js';
 import { parseAgentClarificationCustomSelection, parseAgentClarificationSelection } from '../agentRuntime/clarificationCard.js';
 import type { AgentPlannerProvider } from '../agentRuntime/planner.js';
 import { recordAgentLearningEvent, type AgentLearningEventInput } from '../agentLearning/store.js';
+import { handleLinkRegistryGovernanceCardAction } from '../linkRegistry/governanceSession.js';
+import { handleLinkRegistryMaintenanceCardAction } from '../linkRegistry/maintenanceSession.js';
 import { handleOperationsLearningFeedback } from '../operationsLearningLoop/session.js';
 import { findLatestReportContext } from './reportStore.js';
 import { createFeishuMessageDispatcher } from './dispatcher.js';
@@ -11,12 +13,16 @@ import { executeAgentToolRequest } from './agentToolExecutor.js';
 import { buildIdLookupCard } from './idLookupCard.js';
 import { lookupProductId } from './idLookup.js';
 import {
+  buildActivityPriceCallbackConfirmCard,
+  buildActivityPriceCallbackRequest,
+  buildActivityPriceCallbackStatusCard,
   createActivityAutomationSkillClient,
   formatActivityAutomationExecutionResult,
   parseActivityAutomationConfirmRequest,
+  parseActivityPriceCallbackConfirmRequest,
   type ActivityAutomationSkillClient,
 } from './activityAutomation.js';
-import { executeNewLinkBatchConfirmRequest, parseNewLinkBatchConfirmRequest } from '../newLinkWorkflow/batch.js';
+import { executeNewLinkBatchConfirmRequest, executeNewLinkBatchMultiConfirmRequest, parseNewLinkBatchConfirmRequest, parseNewLinkBatchMultiConfirmRequest } from '../newLinkWorkflow/batch.js';
 import { createRentalPriceSkillClient, executeRentalOperationConfirmRequest, parseRentalOperationConfirmRequest, parseRentalPriceConfirmRequest, type RentalPriceSkillClient } from './rentalPrice.js';
 import type { LlmToolSelectionProvider } from './llmProvider.js';
 import type { LlmIntentProposalProvider } from './llmIntentProposal.js';
@@ -151,13 +157,17 @@ function expectedActionForButtonName(name: string | undefined): string | undefin
     agent_tool_confirm_submit: 'agent_tool_confirm',
     agent_tool_cancel_submit: 'agent_tool_cancel',
     new_link_batch_confirm_submit: 'new_link_batch_confirm',
+    new_link_batch_multi_confirm_submit: 'new_link_batch_multi_confirm',
     new_link_batch_cancel_submit: 'new_link_batch_cancel',
     new_link_batch_confirm_form: 'new_link_batch_confirm',
+    new_link_batch_multi_confirm_form: 'new_link_batch_multi_confirm',
     new_link_batch_cancel_form: 'new_link_batch_cancel',
     rental_price_confirm_submit: 'rental_price_confirm',
     rental_price_cancel_submit: 'rental_price_cancel',
     rental_operation_confirm_submit: 'rental_operation_confirm',
     rental_operation_cancel_submit: 'rental_operation_cancel',
+    activity_price_callback_confirm_submit: 'activity_price_callback_confirm',
+    activity_price_callback_cancel_submit: 'activity_price_callback_cancel',
     id_lookup_submit: 'id_lookup',
   };
   if (exact[name]) return exact[name];
@@ -255,6 +265,7 @@ function actionClaimFamily(actionName: string): string {
   if (actionName.startsWith('new_link_batch_')) return 'new_link_batch';
   if (actionName.startsWith('rental_price_')) return 'rental_price';
   if (actionName.startsWith('rental_operation_')) return 'rental_operation';
+  if (actionName.startsWith('activity_price_callback_')) return 'activity_price_callback';
   return actionName;
 }
 
@@ -298,6 +309,11 @@ function statusCard(title: string, content: string, template: 'blue' | 'green' |
   };
 }
 
+function claimStatusCard(title: string, claim: RentalActionClaim): FeishuCardPayload {
+  const template = claim.status === 'processing' ? 'blue' : claim.status === 'completed' ? 'green' : claim.status === 'failed' ? 'red' : 'grey';
+  return statusCard(title, duplicateRentalActionText(claim), template);
+}
+
 function cardActionUpdateResponse(card: FeishuCardPayload): FeishuCardActionResponse {
   return { card: { type: 'raw', data: card } };
 }
@@ -324,6 +340,11 @@ async function updateCard(client: FeishuSdkClient, messageId: string, card: Feis
     data: { content: JSON.stringify(card) },
   });
   return true;
+}
+
+function replaceCard(client: FeishuSdkClient, messageId: string, card: FeishuCardPayload): FeishuCardActionResponse {
+  void updateCard(client, messageId, card).catch(() => false);
+  return cardActionUpdateResponse(card);
 }
 
 export function extractSdkTextMessage(data: unknown): FeishuBotIncomingTextMessage | null {
@@ -419,6 +440,57 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
           return;
         }
 
+        if (
+          actionName === 'link_registry_maintenance_start'
+          || actionName === 'link_registry_maintenance_snooze'
+          || actionName === 'link_registry_maintenance_ignore'
+          || actionName === 'link_registry_maintenance_submit'
+        ) {
+          const response = await handleLinkRegistryMaintenanceCardAction(outputDir, {
+            date: readString(value?.date) ?? '',
+            action:
+              actionName === 'link_registry_maintenance_start' ? 'start'
+                : actionName === 'link_registry_maintenance_snooze' ? 'snooze'
+                  : actionName === 'link_registry_maintenance_ignore' ? 'ignore'
+                    : 'submit',
+            internalProductId: readString(value?.internalProductId),
+            reviewIndex: readNumber(value?.reviewIndex),
+            decision: readString(readActionForm(action)?.decision) as 'accept' | 'accept_with_edit' | 'ignore' | undefined,
+            sameSkuGroupId: readString(readActionForm(action)?.same_sku_group_id_custom) ?? readString(readActionForm(action)?.same_sku_group_id),
+            categoryId: readString(readActionForm(action)?.category_id),
+            productType: readString(readActionForm(action)?.product_type),
+            shortName: readString(readActionForm(action)?.short_name),
+            reviewerId: extractCardReviewerId(data),
+          });
+          if (response.card) return replaceCard(client, messageId, response.card);
+          return replaceCard(client, messageId, statusCard('\u94fe\u63a5\u7ef4\u62a4', response.text, 'grey'));
+        }
+
+        if (
+          actionName === 'link_registry_governance_start'
+          || actionName === 'link_registry_governance_advance'
+          || actionName === 'link_registry_governance_submit'
+          || actionName === 'link_registry_governance_snooze'
+          || actionName === 'link_registry_governance_ignore'
+        ) {
+          const form = readActionForm(action);
+          const response = await handleLinkRegistryGovernanceCardAction(outputDir, {
+            date: readString(value?.date) ?? '',
+            action:
+              actionName === 'link_registry_governance_start' ? 'start'
+                : actionName === 'link_registry_governance_advance' ? 'advance'
+                  : actionName === 'link_registry_governance_submit' ? 'submit'
+                  : actionName === 'link_registry_governance_snooze' ? 'snooze'
+                    : 'ignore',
+            reviewIndex: readNumber(value?.reviewIndex),
+            decision: readString(form?.decision) as 'resolved' | 'watch' | 'ignored' | undefined,
+            note: readString(form?.note),
+            reviewerId: extractCardReviewerId(data),
+          });
+          if (response.card) return replaceCard(client, messageId, response.card);
+          return replaceCard(client, messageId, statusCard('\u7ec4\u7ea7\u6cbb\u7406', response.text, 'grey'));
+        }
+
         if (actionName === 'agent_clarify_select') {
           const selection = parseAgentClarificationSelection(value);
           if (!selection) {
@@ -427,8 +499,7 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
           }
           const claim = claimRentalAction(messageId, actionName, value);
           if (!claim.claimed) {
-            await replyText(client, messageId, duplicateRentalActionText(claim.claim));
-            return;
+            return cardActionUpdateResponse(claimStatusCard('Agent 澄清已处理', claim.claim));
           }
           recordLearning({
             type: 'clarification_selected',
@@ -469,8 +540,7 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
           const claimValue = { ...value, selectedMessage: selection.selectedMessage };
           const claim = claimRentalAction(messageId, actionName, claimValue);
           if (!claim.claimed) {
-            await replyText(client, messageId, duplicateRentalActionText(claim.claim));
-            return;
+            return cardActionUpdateResponse(claimStatusCard('Agent 澄清已处理', claim.claim));
           }
           recordLearning({
             type: 'clarification_selected',
@@ -505,8 +575,7 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
           const originalMessage = readString(value?.originalMessage) ?? '未知指令';
           const claim = claimRentalAction(messageId, actionName, value);
           if (!claim.claimed) {
-            await replyText(client, messageId, duplicateRentalActionText(claim.claim));
-            return;
+            return cardActionUpdateResponse(claimStatusCard('Agent 澄清已处理', claim.claim));
           }
           setRentalActionStatus(claim.key, 'cancelled');
           recordLearning({
@@ -515,8 +584,7 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
             actorId: extractCardReviewerId(data),
             originalMessage,
           }, messageId);
-          await updateCard(client, messageId, statusCard('Agent 已取消', `已取消澄清：${originalMessage}`, 'grey')).catch(() => false);
-          return;
+          return replaceCard(client, messageId, statusCard('Agent 已取消', `已取消澄清：${originalMessage}`, 'grey'));
         }
 
         if (actionName === 'agent_tool_confirm') {
@@ -527,8 +595,7 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
           }
           const claim = claimRentalAction(messageId, actionName, value);
           if (!claim.claimed) {
-            await replyText(client, messageId, duplicateRentalActionText(claim.claim));
-            return;
+            return cardActionUpdateResponse(claimStatusCard('Agent 操作已处理', claim.claim));
           }
           recordLearning({
             type: 'tool_confirmed',
@@ -579,8 +646,7 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
           const toolName = readString(value?.toolName) ?? '未知工具';
           const claim = claimRentalAction(messageId, actionName, value);
           if (!claim.claimed) {
-            await replyText(client, messageId, duplicateRentalActionText(claim.claim));
-            return;
+            return cardActionUpdateResponse(claimStatusCard('Agent 操作已处理', claim.claim));
           }
           setRentalActionStatus(claim.key, 'cancelled');
           recordLearning({
@@ -589,8 +655,7 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
             actorId: extractCardReviewerId(data),
             toolName,
           }, messageId);
-          await updateCard(client, messageId, statusCard('Agent 操作已取消', `工具 ${toolName} 操作已取消。`, 'grey')).catch(() => false);
-          return;
+          return replaceCard(client, messageId, statusCard('Agent 操作已取消', `工具 ${toolName} 操作已取消。`, 'grey'));
         }
 
         if (actionName === 'new_link_batch_confirm') {
@@ -647,6 +712,61 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
           return;
         }
 
+        if (actionName === 'new_link_batch_multi_confirm') {
+          const request = parseNewLinkBatchMultiConfirmRequest(value);
+          if (!request) {
+            await replyText(client, messageId, '多商品新链批量复制确认参数无效，请重新发起。');
+            return;
+          }
+          const claim = claimRentalAction(messageId, actionName, value);
+          if (!claim.claimed) {
+            return cardActionUpdateResponse(newLinkBatchClaimStatusCard(claim.claim));
+          }
+          const selectedMessage = request.items.map((item) => `从商品 ${item.sourceProductId} 复制 ${item.count} 条「${item.keyword}」新链`).join('；');
+          recordLearning({
+            type: 'workflow_confirmed',
+            messageId,
+            actorId: extractCardReviewerId(data),
+            workflowName: request.workflowName,
+            originalMessage: request.reason,
+            selectedMessage,
+            label: '多商品新链批量复制',
+            arguments: { items: request.items.map((item) => ({ keyword: item.keyword, count: item.count, sourceProductId: item.sourceProductId })) },
+            reason: request.reason,
+          }, messageId);
+          void (async () => {
+            await updateCard(client, messageId, statusCard('多商品新链批量复制处理中', `已收到确认，准备分别复制 ${request.items.length} 个商品。`, 'blue')).catch(() => false);
+            try {
+              const result = await executeNewLinkBatchMultiConfirmRequest(rentalPriceClient, request);
+              setRentalActionStatus(claim.key, result.ok ? 'completed' : 'failed');
+              recordLearning({
+                type: result.ok ? 'workflow_completed' : 'workflow_failed',
+                messageId,
+                actorId: extractCardReviewerId(data),
+                workflowName: request.workflowName,
+                arguments: { items: request.items.map((item) => ({ keyword: item.keyword, count: item.count, sourceProductId: item.sourceProductId })) },
+                reason: request.reason,
+                resultSummary: result.text,
+              }, messageId);
+              await updateCard(client, messageId, statusCard(result.ok ? '多商品新链批量复制已完成' : '多商品新链批量复制失败', result.text, result.ok ? 'green' : 'red')).catch(() => false);
+            } catch (error) {
+              setRentalActionStatus(claim.key, 'failed');
+              recordLearning({
+                type: 'workflow_failed',
+                messageId,
+                actorId: extractCardReviewerId(data),
+                workflowName: request.workflowName,
+                arguments: { items: request.items.map((item) => ({ keyword: item.keyword, count: item.count, sourceProductId: item.sourceProductId })) },
+                reason: request.reason,
+                resultSummary: error instanceof Error ? error.message : String(error),
+              }, messageId);
+              await updateCard(client, messageId, statusCard('多商品新链批量复制失败', error instanceof Error ? error.message : String(error), 'red')).catch(() => false);
+              logError(error, { messageId, phase: 'reply' });
+            }
+          })();
+          return;
+        }
+
         if (actionName === 'new_link_batch_cancel') {
           const keyword = readString(value?.keyword) ?? '未知';
           const claim = claimRentalAction(messageId, actionName, value);
@@ -663,8 +783,7 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
             arguments: { keyword },
           }, messageId);
           const card = statusCard('新链批量复制已取消', `「${keyword}」新链批量复制已取消。`, 'grey');
-          void updateCard(client, messageId, card).catch(() => false);
-          return cardActionUpdateResponse(card);
+          return replaceCard(client, messageId, card);
         }
 
         if (actionName === 'rental_price_confirm') {
@@ -675,8 +794,7 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
           }
           const claim = claimRentalAction(messageId, actionName, value);
           if (!claim.claimed) {
-            await replyText(client, messageId, duplicateRentalActionText(claim.claim));
-            return;
+            return cardActionUpdateResponse(claimStatusCard('租赁商品改价已处理', claim.claim));
           }
           void (async () => {
             await updateCard(client, messageId, statusCard('租赁商品改价处理中', `商品 ${request.productId} 改价已收到确认，正在执行。`, 'blue')).catch(() => false);
@@ -694,24 +812,29 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
         }
 
         if (actionName === 'activity_automation_confirm') {
-          const request = parseActivityAutomationConfirmRequest(readActionForm(action));
+          const actionForm = readActionForm(action);
+          const request = parseActivityAutomationConfirmRequest(actionForm);
           if (!request) {
+            console.error('差异化定价参数解析失败', { messageId, actionValue: value, actionForm, action });
             await replyText(client, messageId, '差异化定价参数无效，请重新填写卡片后再试。');
             return;
           }
           const claim = claimRentalAction(messageId, actionName, value);
           if (!claim.claimed) {
-            await replyText(client, messageId, duplicateRentalActionText(claim.claim));
-            return;
+            return cardActionUpdateResponse(claimStatusCard('差异化定价已处理', claim.claim));
           }
           void (async () => {
             await updateCard(client, messageId, statusCard('差异化定价处理中', `活动时间 ${request.startsAt} -> ${request.endsAt}\n已收到确认，正在执行。`, 'blue')).catch(() => false);
             try {
               const result = await activityAutomationClient.execute(request);
+              const callbackRequest = buildActivityPriceCallbackRequest(result);
               setRentalActionStatus(claim.key, result.ok ? 'completed' : 'failed');
               await updateCard(
                 client,
                 messageId,
+                callbackRequest
+                  ? buildActivityPriceCallbackConfirmCard(callbackRequest)
+                  :
                 statusCard(result.ok ? '差异化定价已完成' : '差异化定价失败', formatActivityAutomationExecutionResult(result), result.ok ? 'green' : 'red'),
               ).catch(() => false);
             } catch (error) {
@@ -727,16 +850,53 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
           return;
         }
 
-        if (actionName === 'rental_price_cancel') {
-          const productId = readString(value?.productId) ?? '未知';
+        if (actionName === 'activity_automation_cancel') {
+          const claim = claimRentalAction(messageId, actionName, value);
+          if (!claim.claimed) {
+            return cardActionUpdateResponse(claimStatusCard('差异化定价已处理', claim.claim));
+          }
+          setRentalActionStatus(claim.key, 'cancelled');
+          return replaceCard(client, messageId, statusCard('差异化定价已取消', '已取消本次差异化定价。', 'grey'));
+        }
+
+        if (actionName === 'activity_price_callback_confirm') {
+          const request = parseActivityPriceCallbackConfirmRequest(value);
+          if (!request) {
+            await replyText(client, messageId, '价格回调确认参数无效，请重新发起。');
+            return;
+          }
           const claim = claimRentalAction(messageId, actionName, value);
           if (!claim.claimed) {
             await replyText(client, messageId, duplicateRentalActionText(claim.claim));
             return;
           }
-          setRentalActionStatus(claim.key, 'cancelled');
-          await updateCard(client, messageId, statusCard('租赁商品改价已取消', `商品 ${productId} 改价已取消。`, 'grey')).catch(() => false);
+          setRentalActionStatus(claim.key, 'completed');
+          await updateCard(client, messageId, buildActivityPriceCallbackStatusCard(request, { confirmed: true })).catch(() => false);
           return;
+        }
+
+        if (actionName === 'activity_price_callback_cancel') {
+          const request = parseActivityPriceCallbackConfirmRequest(value);
+          if (!request) {
+            await replyText(client, messageId, '价格回调取消参数无效，请重新发起。');
+            return;
+          }
+          const claim = claimRentalAction(messageId, actionName, value);
+          if (!claim.claimed) {
+            return cardActionUpdateResponse(claimStatusCard('价格回调已处理', claim.claim));
+          }
+          setRentalActionStatus(claim.key, 'cancelled');
+          return replaceCard(client, messageId, buildActivityPriceCallbackStatusCard(request, { confirmed: false }));
+        }
+
+        if (actionName === 'rental_price_cancel') {
+          const productId = readString(value?.productId) ?? '未知';
+          const claim = claimRentalAction(messageId, actionName, value);
+          if (!claim.claimed) {
+            return cardActionUpdateResponse(claimStatusCard('租赁商品改价已处理', claim.claim));
+          }
+          setRentalActionStatus(claim.key, 'cancelled');
+          return replaceCard(client, messageId, statusCard('租赁商品改价已取消', `商品 ${productId} 改价已取消。`, 'grey'));
         }
 
         if (actionName === 'rental_operation_confirm') {
@@ -747,8 +907,7 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
           }
           const claim = claimRentalAction(messageId, actionName, value);
           if (!claim.claimed) {
-            await replyText(client, messageId, duplicateRentalActionText(claim.claim));
-            return;
+            return cardActionUpdateResponse(claimStatusCard('租赁商品操作已处理', claim.claim));
           }
           void (async () => {
             await updateCard(client, messageId, statusCard('租赁商品操作处理中', `商品 ${request.productId} 操作已收到确认，正在执行。`, 'blue')).catch(() => false);
@@ -769,12 +928,10 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
           const productId = readString(value?.productId) ?? '未知';
           const claim = claimRentalAction(messageId, actionName, value);
           if (!claim.claimed) {
-            await replyText(client, messageId, duplicateRentalActionText(claim.claim));
-            return;
+            return cardActionUpdateResponse(claimStatusCard('租赁商品操作已处理', claim.claim));
           }
           setRentalActionStatus(claim.key, 'cancelled');
-          await updateCard(client, messageId, statusCard('租赁商品操作已取消', `商品 ${productId} 操作已取消。`, 'grey')).catch(() => false);
-          return;
+          return replaceCard(client, messageId, statusCard('租赁商品操作已取消', `商品 ${productId} 操作已取消。`, 'grey'));
         }
 
         if (actionName === 'id_lookup') {

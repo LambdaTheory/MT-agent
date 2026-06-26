@@ -7,6 +7,7 @@ import {
   parseSpecDiscoverCommand,
   parseTenancySetCommand,
 } from './rentalPrice.js';
+import { parseNumericProductIdList } from './reportStore.js';
 import { resolveSemanticAlias } from './semanticAlias.js';
 
 function normalize(text: string): string {
@@ -25,11 +26,19 @@ function looksLikeNewLinkWriteIntent(text: string): boolean {
   return /(新链|新链接)/.test(compact) && /(链|铺设|新建|创建|生成|新增|复制|批量)/.test(compact);
 }
 
+function parseShortMultiProductQuery(text: string): string | null {
+  const match = /^查\s*(.+)$/.exec(text);
+  if (!match) return null;
+  const productIds = parseNumericProductIdList(match[1]);
+  return productIds.length > 0 ? productIds.join(', ') : null;
+}
+
 export function parseExactBotIntent(input: string): BotIntent {
   const text = normalize(input);
   if (!text) return { type: 'help' };
   if (/^(帮助|help|\/help)$/i.test(text)) return { type: 'help' };
   if (/^(跑|生成|执行).*(公域)?日报/.test(text)) return { type: 'run_public_traffic_report', sendTo: sendTo(text) };
+  if (/^(抓取|补抓|刷新|更新).*(访问页|后链路|访问数据)/.test(text)) return { type: 'refresh_public_traffic_dashboard', sendTo: sendTo(text) };
   if (/^(推送)?(公域)?日报到群$/.test(text)) return { type: 'push_latest_report_to_group' };
   if (/^重发.*(公域)?日报/.test(text)) return { type: 'resend_latest_report', sendTo: sendTo(text) };
   if (/^(同步|拉取|更新).*(关单|关单反馈)/.test(text)) return { type: 'sync_closed_order_feedback' };
@@ -42,8 +51,14 @@ export function parseExactBotIntent(input: string): BotIntent {
   if (/^(运营学习|学习反馈).*(汇总|总结)$/.test(text)) return { type: 'operations_learning_summary' };
   if (/^(运营学习|学习测验|今日测验|loop测验|运营测验|测验)$|学习\s*loop|运营学习\s*loop/i.test(text)) return { type: 'operations_learning_quiz' };
   if (/^(差异化定价|配置差异化定价)$/.test(text)) return { type: 'differential_pricing_card' };
-  if (/^库存情况$/.test(text)) return { type: 'link_registry_overview' };
+  if (/^库存情况$/.test(text)) return { type: 'inventory_status_overview' };
+  const inventoryQuery = /^库存情况\s+(.+)$/.exec(text);
+  if (inventoryQuery) return { type: 'inventory_status_query', query: inventoryQuery[1].trim() };
+  if (/^(链接档案概览|链接概览)$/.test(text)) return { type: 'link_registry_overview' };
   if (/^(?:商品)?ID(?:查询|互查|转换|换算)$|^打开(?:商品)?ID(?:查询|互查|转换|换算)$|^查ID$/i.test(text)) return { type: 'lookup_product_id_card' };
+
+  const shortMultiProductQuery = parseShortMultiProductQuery(text);
+  if (shortMultiProductQuery) return { type: 'query_product', keyword: shortMultiProductQuery };
 
   const rentalPriceChange = parseRentalPriceChange(text);
   if (rentalPriceChange) return { type: 'rental_price_change', productId: rentalPriceChange.productId, request: rentalPriceChange };

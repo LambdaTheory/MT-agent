@@ -3,15 +3,20 @@ import { basename, dirname, isAbsolute, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { loadConfig } from '../config/loadConfig.js';
 import { loadEnv } from '../config/loadEnv.js';
+import { loadClosedOrderRegistryContext } from '../closedOrderFeedback/runtime.js';
 import { crawlPublicTrafficSources } from '../crawler/publicTrafficCrawler.js';
 import { normalizeRowsForPeriod } from '../extractor/normalizeRows.js';
+import { buildInventorySameSkuSnapshot } from '../inventoryStatus/snapshot.js';
+import { writeInventorySameSkuSnapshot } from '../inventoryStatus/store.js';
+import { openLinkRegistryGovernancePrompt } from '../linkRegistry/governanceSession.js';
+import { openLinkRegistryMaintenancePrompt } from '../linkRegistry/maintenanceSession.js';
 import { annotateGoodsExportWorkbookWithInternalId } from '../mapping/annotateGoodsExportWorkbook.js';
 import { loadProductIdMapping, type ProductIdMapping } from '../mapping/productIdMapping.js';
 import { writeProductIdMappingFromExport } from '../mapping/refreshProductIdMapping.js';
 import { sendFeishuCard } from '../notify/feishu.js';
 import { analyzePublicTrafficData } from '../publicTraffic/analyzePublicTrafficData.js';
 import { buildPublicTrafficCard } from '../publicTraffic/buildPublicTrafficCard.js';
-import { assessDashboardQuality } from '../publicTraffic/dashboardQuality.js';
+import { assessDashboardQuality, formatDashboardCrawlSummary } from '../publicTraffic/dashboardQuality.js';
 import { buildPublicTrafficArtifactManifest, savePublicTrafficArtifactManifest, type PublicTrafficArtifactManifest } from '../publicTraffic/artifacts.js';
 import { aggregateExposureDeltas } from '../publicTraffic/exposureAggregate.js';
 import { computeExposureDailyDelta } from '../publicTraffic/exposureDelta.js';
@@ -38,6 +43,15 @@ const EXPOSURE_SOURCE_URL = 'https://b.alipay.com/page/self-operation-center/cus
 const ORDER_ANALYSIS_SOURCE_URL = 'https://b.alipay.com/page/recycle-im/app/assistant-data-analysis/index/order/';
 const MIN_RELIABLE_PREVIOUS_EXPOSURE_PRODUCTS = 200;
 type FeishuSendTo = 'personal' | 'group' | 'both';
+
+export interface PublicTrafficReportCliResult {
+  logPath: string;
+  latestLogPath: string;
+  markdownPath: string;
+  workbookPath: string;
+  dashboardCrawlSummary: string;
+  firstReportSent: boolean;
+}
 
 export function parseFeishuSendToArg(argv: string[]): FeishuSendTo | undefined {
   const flagIndex = argv.indexOf('--send-to');
@@ -410,7 +424,7 @@ async function saveArtifactManifestSafely(path: string, manifest: PublicTrafficA
   }
 }
 
-export async function runPublicTrafficReportCli(): Promise<void> {
+export async function runPublicTrafficReportCli(): Promise<PublicTrafficReportCliResult> {
   await loadEnv();
   const config = await loadConfig();
   const runDate = today();
@@ -536,8 +550,10 @@ export async function runPublicTrafficReportCli(): Promise<void> {
         '30d': paths.publicVisitRaw['30d'],
       },
     }), log);
-    const dashboardRows = normalizeDashboardRowsForReport(rawTables, log);
     const dataQualityNotes = dashboardDataQualityNotes(rawTables);
+    const dashboardCrawlSummary = formatDashboardCrawlSummary(rawTables, dataQualityNotes);
+    for (const line of dashboardCrawlSummary.split('\n')) log.addEvent(line);
+    const dashboardRows = normalizeDashboardRowsForReport(rawTables, log);
     for (const note of dataQualityNotes) log.addEvent(note);
     log.addEvent(`后链路数据: ${dashboardRows.length} 条周期商品记录`);
 
@@ -587,7 +603,17 @@ export async function runPublicTrafficReportCli(): Promise<void> {
       `规则分析: 曝光不足=${context.lowExposure.length}, 点击弱=${context.weakClick.length}, 转化弱=${context.weakConversion.length}, 高潜力=${context.highPotential.length}, 新品观察=${context.newProductObservation.length}, 生命周期治理=${context.lifecycleGovernance.length}, 建议操作=${context.recommendedActions.length}`,
     );
 
+    const registryContext = await loadClosedOrderRegistryContext({ artifactsDir: config.outputDir }, process.cwd());
+    const sameSkuSnapshot = buildInventorySameSkuSnapshot({
+      date: runDate,
+      reportDate: context.date,
+      context,
+      registry: registryContext.registry,
+      overrideRisks: registryContext.overrideRisks,
+    });
+
     await writeFile(paths.reportContext, JSON.stringify(context, null, 2), 'utf8');
+    await writeInventorySameSkuSnapshot(sameSkuSnapshot, paths.sameSkuSnapshot);
     await writeFile(paths.markdown, buildPublicTrafficMarkdown(context), 'utf8');
     await writeFile(paths.workbook, writePublicTrafficWorkbookBuffer(context));
     log.addEvent(`报告已生成: ${paths.markdown}`);
@@ -605,6 +631,20 @@ export async function runPublicTrafficReportCli(): Promise<void> {
     });
 
     const firstReportSent = await sendFeishuCardSafely(card, fallbackText, log);
+    await sendLinkRegistryMaintenancePromptSafely(
+      config.outputDir,
+      runDate,
+      registryContext.registry,
+      registryContext.resolvedPaths.overridesPath,
+      log,
+    );
+    await sendLinkRegistryGovernancePromptSafely(
+      config.outputDir,
+      runDate,
+      registryContext.registry,
+      registryContext.overrideRisks,
+      log,
+    );
     await savePublicTrafficRunState(paths.publicTrafficRunState, {
       date: runDate,
       firstReportSent,
@@ -617,6 +657,14 @@ export async function runPublicTrafficReportCli(): Promise<void> {
     console.log(fallbackText);
 
     console.log(`公域流量报告已生成: ${paths.dir}`);
+    return {
+      logPath: paths.log,
+      latestLogPath: paths.latestLog,
+      markdownPath: paths.markdown,
+      workbookPath: paths.workbook,
+      dashboardCrawlSummary,
+      firstReportSent,
+    };
   } catch (error) {
     log.addEvent(`错误: ${error instanceof Error ? error.message : String(error)}`);
     throw error;
@@ -637,6 +685,64 @@ async function sendFeishuCardSafely(card: Record<string, unknown>, fallbackText:
     return feishuResult.sent;
   } catch (error) {
     log.addEvent(`飞书通知失败: ${error instanceof Error ? error.message : String(error)}`);
+    return false;
+  }
+}
+
+async function sendLinkRegistryMaintenancePromptSafely(
+  outputDir: string,
+  runDate: string,
+  registry: Parameters<typeof openLinkRegistryMaintenancePrompt>[1]['registry'],
+  overridesPath: string,
+  log: ReturnType<typeof createRunLog>,
+): Promise<boolean> {
+  try {
+    const prompt = await openLinkRegistryMaintenancePrompt(outputDir, {
+      date: runDate,
+      registry,
+      referenceDate: runDate,
+      overridesPath,
+    });
+    if (!prompt?.card) {
+      log.addEvent('链接维护提醒：当前没有需要主动发起的维护项');
+      return false;
+    }
+    const sendTo = parseFeishuSendToArg(process.argv);
+    const env = sendTo ? { ...process.env, FEISHU_SEND_TO: sendTo } : process.env;
+    const feishuResult = await sendFeishuCard(env, prompt.card, prompt.text);
+    log.addEvent(feishuResult.sent ? '链接维护提醒卡已发送' : `链接维护提醒卡跳过: ${feishuResult.reason}`);
+    return feishuResult.sent;
+  } catch (error) {
+    log.addEvent(`链接维护提醒发送失败: ${error instanceof Error ? error.message : String(error)}`);
+    return false;
+  }
+}
+
+async function sendLinkRegistryGovernancePromptSafely(
+  outputDir: string,
+  runDate: string,
+  registry: Parameters<typeof openLinkRegistryGovernancePrompt>[1]['registry'],
+  overrideRisks: Parameters<typeof openLinkRegistryGovernancePrompt>[1]['overrideRisks'],
+  log: ReturnType<typeof createRunLog>,
+): Promise<boolean> {
+  try {
+    const prompt = await openLinkRegistryGovernancePrompt(outputDir, {
+      date: runDate,
+      registry,
+      overrideRisks,
+      referenceDate: runDate,
+    });
+    if (!prompt?.card) {
+      log.addEvent('链接档案治理提醒：当前没有需要主动发起的组级问题');
+      return false;
+    }
+    const sendTo = parseFeishuSendToArg(process.argv);
+    const env = sendTo ? { ...process.env, FEISHU_SEND_TO: sendTo } : process.env;
+    const feishuResult = await sendFeishuCard(env, prompt.card, prompt.text);
+    log.addEvent(feishuResult.sent ? '链接档案治理提醒卡已发送' : `链接档案治理提醒卡跳过: ${feishuResult.reason}`);
+    return feishuResult.sent;
+  } catch (error) {
+    log.addEvent(`链接档案治理提醒发送失败: ${error instanceof Error ? error.message : String(error)}`);
     return false;
   }
 }

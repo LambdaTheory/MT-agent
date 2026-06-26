@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { RawTableData } from '../src/domain/types.js';
-import { assessDashboardQuality, hasDashboardMissingNote } from '../src/publicTraffic/dashboardQuality.js';
+import { assessDashboardQuality, formatDashboardCrawlSummary, hasDashboardMissingNote } from '../src/publicTraffic/dashboardQuality.js';
 
 function table(period: RawTableData['period'], overrides: Partial<RawTableData> = {}): RawTableData {
   return {
@@ -54,5 +54,28 @@ describe('assessDashboardQuality', () => {
   it('detects dashboard missing notes from report context notes', () => {
     expect(hasDashboardMissingNote(['今日访问数据支付宝暂未更新，本期访问量板块指标缺失。'])).toBe(true);
     expect(assessDashboardQuality([table('1d'), table('7d'), table('30d')], ['后链路数据缺失']).hasMissing).toBe(true);
+  });
+
+  it('formats dashboard crawl stats for run logs and bot success replies', () => {
+    const oneDay = table('1d', {
+      collection: {
+        period: '1d',
+        actualPageSizes: [],
+        pageCount: 0,
+        rowCount: 0,
+        dedupedRowCount: 0,
+        displayedTotalCount: 0,
+        pageSizeFallback: false,
+        complete: false,
+      },
+      headers: [],
+      rows: [],
+    });
+    const summary = formatDashboardCrawlSummary([oneDay, table('7d'), table('30d')]);
+
+    expect(summary).toContain('访问页抓取情况');
+    expect(summary).toContain('1日：页数 0，行数 0，去重 0，总数 0，完成 否（collection.complete=false）');
+    expect(summary).toContain('7日：页数 1，行数 1，去重 1，总数 1，完成 是');
+    expect(summary).toContain('30日：页数 1，行数 1，去重 1，总数 1，完成 是');
   });
 });

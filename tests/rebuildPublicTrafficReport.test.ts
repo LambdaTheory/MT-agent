@@ -84,12 +84,15 @@ describe('rebuildPublicTrafficReport', () => {
 
       const result = await rebuildPublicTrafficReport({ outputDir, date: runDate, refreshedAt: '12:00', send: false });
       const context = JSON.parse(await readFile(paths.reportContext, 'utf8'));
+      const sameSkuSnapshot = JSON.parse(await readFile(paths.sameSkuSnapshot, 'utf8'));
 
       expect(result.sent).toBe(false);
       expect(context.dataQualityNotes).toContain('访问页数据已于 12:00 补抓更新，本报告为重建版。');
       expect(context.dataQualityNotes.some((note: string) => note.includes('暂未更新'))).toBe(false);
       expect(context.newProductPoolItems[0].productId).toBe('101');
       expect(context.agentData.removedLinks[0].productId).toBe('900');
+      expect(sameSkuSnapshot.date).toBe(runDate);
+      expect(Array.isArray(sameSkuSnapshot.groups)).toBe(true);
       await expect(readFile(paths.markdown, 'utf8')).resolves.toContain('公域数据日报');
       await expect(readFile(paths.workbook)).resolves.toBeInstanceOf(Buffer);
     } finally {

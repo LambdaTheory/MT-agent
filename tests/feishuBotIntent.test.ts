@@ -12,6 +12,11 @@ describe('parseBotIntent', () => {
     expect(parseBotIntent('生成公域日报 发群')).toEqual({ type: 'run_public_traffic_report', sendTo: 'group' });
   });
 
+  it('parses dashboard refresh intent separately from full report generation', () => {
+    expect(parseBotIntent('抓取访问页数据')).toEqual({ type: 'refresh_public_traffic_dashboard', sendTo: undefined });
+    expect(parseBotIntent('补抓后链路数据 发群')).toEqual({ type: 'refresh_public_traffic_dashboard', sendTo: 'group' });
+  });
+
   it('parses resend report intent', () => {
     expect(parseBotIntent('重发日报')).toEqual({ type: 'resend_latest_report', sendTo: undefined });
     expect(parseBotIntent('重发公域日报 发全部')).toEqual({ type: 'resend_latest_report', sendTo: 'both' });
@@ -62,6 +67,8 @@ describe('parseBotIntent', () => {
     expect(parseBotIntent('查询商品 721')).toEqual({ type: 'query_product', keyword: '721' });
     expect(parseBotIntent('查商品 721')).toEqual({ type: 'query_product', keyword: '721' });
     expect(parseBotIntent('商品 iPhone')).toEqual({ type: 'query_product', keyword: 'iPhone' });
+    expect(parseBotIntent('查 433, 798, 872')).toEqual({ type: 'query_product', keyword: '433, 798, 872' });
+    expect(parseBotIntent('查 433, 798, 872;')).toEqual({ type: 'query_product', keyword: '433, 798, 872' });
   });
 
   it('keeps explicit ID lookup intent distinct from operations learning', () => {
@@ -75,7 +82,8 @@ describe('parseBotIntent', () => {
   });
 
   it('parses inventory overview card intent', () => {
-    expect(parseBotIntent('库存情况')).toEqual({ type: 'link_registry_overview' });
+    expect(parseBotIntent('库存情况')).toEqual({ type: 'inventory_status_overview' });
+    expect(parseBotIntent('链接档案概览')).toEqual({ type: 'link_registry_overview' });
   });
 
   it('parses explicit product lookup questions', () => {

@@ -1,6 +1,9 @@
 import { readFile, writeFile } from 'node:fs/promises';
+import { loadClosedOrderRegistryContext } from '../closedOrderFeedback/runtime.js';
 import type { PeriodKey, RawTableData } from '../domain/types.js';
 import { normalizeRowsForPeriod } from '../extractor/normalizeRows.js';
+import { buildInventorySameSkuSnapshot } from '../inventoryStatus/snapshot.js';
+import { writeInventorySameSkuSnapshot } from '../inventoryStatus/store.js';
 import { loadProductIdMapping, type ProductIdMapping } from '../mapping/productIdMapping.js';
 import { sendFeishuCard } from '../notify/feishu.js';
 import { analyzePublicTrafficData } from './analyzePublicTrafficData.js';
@@ -100,7 +103,20 @@ export async function rebuildPublicTrafficReport(input: RebuildPublicTrafficRepo
   context.newProductPoolIds = priorContext.newProductPoolIds;
   context.agentData = priorContext.agentData;
 
+  const registryContext = await loadClosedOrderRegistryContext({
+    ...(input.productIdMappingPath ? { productIdMapPath: input.productIdMappingPath } : {}),
+    artifactsDir: input.outputDir,
+  }, process.cwd());
+  const sameSkuSnapshot = buildInventorySameSkuSnapshot({
+    date: input.date,
+    reportDate: context.date,
+    context,
+    registry: registryContext.registry,
+    overrideRisks: registryContext.overrideRisks,
+  });
+
   await writeFile(paths.reportContext, `${JSON.stringify(context, null, 2)}\n`, 'utf8');
+  await writeInventorySameSkuSnapshot(sameSkuSnapshot, paths.sameSkuSnapshot);
   await writeFile(paths.markdown, buildPublicTrafficMarkdown(context), 'utf8');
   await writeFile(paths.workbook, writePublicTrafficWorkbookBuffer(context));
 

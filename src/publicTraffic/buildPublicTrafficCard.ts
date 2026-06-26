@@ -1,5 +1,5 @@
 import type { FeishuCardPayload } from '../notify/feishuApp.js';
-import { derivedOrderBusinessMetrics, findOrderAnalysisIndicator, shortDataDate } from './orderAnalysis.js';
+import { derivedOrderBusinessMetrics, findOrderAnalysisIndicator, findOrderAnalysisNumber, shortDataDate } from './orderAnalysis.js';
 import { resolveProductDisplayName, type ProductNameMap } from './productDisplayName.js';
 import type { PublicTrafficDataReportContext, PublicTrafficProductDataRow, PublicTrafficReportPaths } from './types.js';
 
@@ -13,6 +13,24 @@ function percent(value: number): string {
 
 function rateText(one: PublicTrafficDataReportContext['summary']['1d']): string {
   return percent(one.exposureVisitRate);
+}
+
+function percentDelta(current: number, previous: number | undefined): string | undefined {
+  if (previous === undefined || previous <= 0 || !Number.isFinite(current) || !Number.isFinite(previous)) return undefined;
+  const change = ((current - previous) / previous) * 100;
+  const prefix = change > 0 ? '+' : '';
+  return `较前日${prefix}${change.toFixed(2)}%`;
+}
+
+function publicFunnelMetrics(context: PublicTrafficDataReportContext): FunnelMetric[] {
+  const one = context.summary['1d'];
+  const previous = context.previousSummary;
+  return [
+    ['曝光', String(one.exposure), percentDelta(one.exposure, previous?.exposure)],
+    ['公域访问', String(one.publicVisits), percentDelta(one.publicVisits, previous?.publicVisits)],
+    ['公域金额', `¥${one.amount.toFixed(2)}`, percentDelta(one.amount, previous?.amount)],
+    ['转化率', rateText(one), percentDelta(one.exposureVisitRate, previous?.exposureVisitRate)],
+  ];
 }
 
 function shortId(row: PublicTrafficProductDataRow): string {
@@ -98,6 +116,35 @@ function orderMetric(page: Parameters<typeof findOrderAnalysisIndicator>[0], lab
   return [label, value, delta];
 }
 
+function parseOrderDeltaRate(delta: string | undefined): number | null {
+  if (!delta) return null;
+  const matched = delta.match(/较前日([+-]?\d+(?:\.\d+)?)%/);
+  if (!matched) return null;
+  const parsed = Number(matched[1]);
+  return Number.isFinite(parsed) ? parsed / 100 : null;
+}
+
+function previousValueFromDelta(current: number | null, delta: string | undefined): number | null {
+  const rate = parseOrderDeltaRate(delta);
+  if (current === null || rate === null || rate <= -1) return null;
+  const previous = current / (1 + rate);
+  return Number.isFinite(previous) ? previous : null;
+}
+
+function orderIndicatorDelta(page: Parameters<typeof findOrderAnalysisIndicator>[0], names: string[]): string | undefined {
+  return page?.indicators.find((item) => names.includes(item.label))?.delta;
+}
+
+function shipmentRateDelta(overview: Parameters<typeof findOrderAnalysisIndicator>[0]): string | undefined {
+  const created = findOrderAnalysisNumber(overview, ['创建订单数']);
+  const shipped = findOrderAnalysisNumber(overview, ['发货订单数']);
+  if (created === null || created <= 0 || shipped === null) return undefined;
+  const previousCreated = previousValueFromDelta(created, orderIndicatorDelta(overview, ['创建订单数']));
+  const previousShipped = previousValueFromDelta(shipped, orderIndicatorDelta(overview, ['发货订单数']));
+  if (previousCreated === null || previousCreated <= 0 || previousShipped === null) return undefined;
+  return percentDelta(shipped / created, previousShipped / previousCreated);
+}
+
 function nestedFunnelColumnSet(groups: Array<{ title: string | null; metrics: FunnelMetric[]; chunkSize?: number }>, elementId = 'funnel_summary'): Record<string, unknown> {
   return {
     tag: 'column_set',
@@ -112,17 +159,42 @@ function optionalElement(element: Record<string, unknown> | null): Record<string
   return element ? [element] : [];
 }
 
-function funnelColumnSet(one: PublicTrafficDataReportContext['summary']['1d']): Record<string, unknown> {
+type DataSourceHeaderTemplate = 'green' | 'blue' | 'orange' | 'red';
+
+interface DataSourceStatus {
+  template: DataSourceHeaderTemplate;
+  text: string;
+}
+
+function hasOneDaySourceData(context: PublicTrafficDataReportContext, source: 'hasExposureData' | 'hasDashboardData'): boolean {
+  return context.rows.some((row) => row.periods['1d']?.[source] === true);
+}
+
+function dataSourceStatus(context: PublicTrafficDataReportContext): DataSourceStatus {
+  const exposureReady = hasOneDaySourceData(context, 'hasExposureData');
+  const dashboardReady = hasOneDaySourceData(context, 'hasDashboardData');
+  const template: DataSourceHeaderTemplate = exposureReady && dashboardReady
+    ? 'green'
+    : exposureReady
+      ? 'blue'
+      : dashboardReady
+        ? 'orange'
+        : 'red';
+  const exposureText = exposureReady ? '曝光页已抓取' : '曝光页未更新/异常';
+  const dashboardText = dashboardReady ? '访问页已抓取' : '访问页未更新/异常';
+  return { template, text: `数据源状态：${exposureText}；${dashboardText}` };
+}
+
+function funnelColumnSet(context: PublicTrafficDataReportContext): Record<string, unknown> {
   return { tag: 'column_set', element_id: 'funnel_summary', flex_mode: 'stretch', horizontal_spacing: '8px', columns: [
-    nestedMetricColumn(null, [['曝光', String(one.exposure)], ['公域访问', String(one.publicVisits)], ['公域金额', `¥${one.amount.toFixed(2)}`], ['转化率', rateText(one)]], 4),
+    nestedMetricColumn(`公域（${shortDataDate(context.date)}）`, publicFunnelMetrics(context), 4),
   ] };
 }
 
 function funnelElements(context: PublicTrafficDataReportContext): Record<string, unknown>[] {
-  const one = context.summary['1d'];
   const oa = context.orderAnalysis;
   if (!oa) {
-    return [funnelColumnSet(one)];
+    return [funnelColumnSet(context)];
   }
   const overview = oa.pages.overview;
   const delivery = oa.pages.delivery;
@@ -131,10 +203,10 @@ function funnelElements(context: PublicTrafficDataReportContext): Record<string,
   const business = derivedOrderBusinessMetrics(overview, customs);
   return [
     nestedFunnelColumnSet([
-      { title: '公域 1日', metrics: [['曝光', String(one.exposure)], ['公域访问', String(one.publicVisits)], ['公域金额', `¥${one.amount.toFixed(2)}`], ['转化率', rateText(one)]], chunkSize: 4 },
+      { title: `公域（${shortDataDate(context.date)}）`, metrics: publicFunnelMetrics(context), chunkSize: 4 },
     ], 'funnel_public'),
     nestedFunnelColumnSet([
-      { title: `订单经营（${shortDataDate(overview?.dataDate)}）`, metrics: [orderMetric(overview, '创建订单', ['创建订单数']), orderMetric(overview, '签约订单', ['签约订单数']), orderMetric(overview, '发货订单', ['发货订单数']), ['发货率', business.shipmentRate]], chunkSize: 4 },
+      { title: `订单经营（${shortDataDate(overview?.dataDate)}）`, metrics: [orderMetric(overview, '创建订单', ['创建订单数']), orderMetric(overview, '签约订单', ['签约订单数']), orderMetric(overview, '发货订单', ['发货订单数']), ['发货率', business.shipmentRate, shipmentRateDelta(overview)]], chunkSize: 4 },
     ], 'funnel_order'),
     nestedFunnelColumnSet([
       { title: `履约（发货${shortDataDate(delivery?.dataDate)}｜归还${shortDataDate(returns?.dataDate)}｜关单${shortDataDate(customs?.dataDate)}）`, metrics: [orderMetric(delivery, '待发货', ['待发货订单数']), orderMetric(returns, '归还', ['归还订单数']), orderMetric(returns, '逾期', ['逾期订单数']), orderMetric(customs, '关单', ['关单数'])], chunkSize: 4 },
@@ -429,15 +501,17 @@ function metricTables(context: PublicTrafficDataReportContext, productNameMap: P
 export function buildPublicTrafficCard(context: PublicTrafficDataReportContext, _paths: PublicTrafficReportPaths, options: PublicTrafficCardOptions = {}): FeishuCardPayload {
   const one = context.summary['1d'];
   const productNameMap = options.productNameMap ?? {};
+  const sourceStatus = dataSourceStatus(context);
   return {
     schema: '2.0',
     config: { update_multi: true },
     header: {
       title: { tag: 'plain_text', content: `公域数据日报 ${context.date}` },
-      template: 'blue',
+      template: sourceStatus.template,
     },
     body: {
       elements: [
+        { tag: 'markdown', content: sourceStatus.text },
         ...funnelElements(context),
         { tag: 'hr' },
         ...metricTables(context, productNameMap),

@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { parseBotIntent } from '../src/feishuBot/intent.js';
 import { handleBotIntent } from '../src/feishuBot/tools.js';
-import type { ActivityAutomationSkillClient } from '../src/feishuBot/activityAutomation.js';
+import {
+  buildActivityAutomationCard,
+  buildActivityPriceCallbackConfirmCard,
+  parseActivityAutomationConfirmRequest,
+  parseActivityPriceCallbackConfirmRequest,
+  type ActivityAutomationSkillClient,
+} from '../src/feishuBot/activityAutomation.js';
 
 function fakeClient(): ActivityAutomationSkillClient & { executions: unknown[] } {
   return {
@@ -18,7 +24,9 @@ function fakeClient(): ActivityAutomationSkillClient & { executions: unknown[] }
         mappedCount: 7,
         unmappedCount: 0,
         productPickSessionPath: 'output/latest/activity-automation/activity-product-pick-session.json',
-        lines: ['鑷姩閫夊搧: 7', '娲诲姩鏃堕棿濉啓: 7', '鎶樻墸濉啓: 28', '宸叉槧灏勭鍐匢D: 7'],
+        submitSessionPath: 'output/latest/activity-automation/activity-submit-session.json',
+        callbackProductIds: ['770', '800', '801'],
+        lines: ['自动选品: 7', '活动时间填写: 7', '折扣填写: 28', '已映射端内ID: 7'],
       };
     },
   };
@@ -26,8 +34,8 @@ function fakeClient(): ActivityAutomationSkillClient & { executions: unknown[] }
 
 describe('differential pricing Feishu integration', () => {
   it('parses differential pricing card commands', () => {
-    expect(parseBotIntent('\u5dee\u5f02\u5316\u5b9a\u4ef7')).toEqual({ type: 'differential_pricing_card' });
-    expect(parseBotIntent('\u914d\u7f6e\u5dee\u5f02\u5316\u5b9a\u4ef7')).toEqual({ type: 'differential_pricing_card' });
+    expect(parseBotIntent('差异化定价')).toEqual({ type: 'differential_pricing_card' });
+    expect(parseBotIntent('配置差异化定价')).toEqual({ type: 'differential_pricing_card' });
   });
 
   it('returns a configuration card without executing the automation', async () => {
@@ -36,7 +44,7 @@ describe('differential pricing Feishu integration', () => {
     const cardJson = JSON.stringify(response.card);
 
     expect(client.executions).toHaveLength(0);
-    expect(response.text).toContain('\u5dee\u5f02\u5316\u5b9a\u4ef7');
+    expect(response.text).toContain('差异化定价');
     expect(response.card).toBeDefined();
     expect(cardJson).toContain('differential_pricing_form');
     expect(cardJson).toContain('starts_at');
@@ -46,5 +54,107 @@ describe('differential pricing Feishu integration', () => {
     expect(cardJson).toContain('"tag":"date_picker"');
     expect(cardJson).toContain('"name":"starts_at"');
     expect(cardJson).toContain('"name":"ends_at"');
+  });
+
+  it('builds date picker fields without unsupported label properties', () => {
+    const card = buildActivityAutomationCard();
+    const form = (card.body as { elements: Array<{ tag?: string; elements?: Array<Record<string, unknown>> }> }).elements
+      .find((element) => element.tag === 'form');
+    const datePickers = form?.elements?.filter((element) => element.tag === 'date_picker') ?? [];
+
+    expect(datePickers).toHaveLength(2);
+    for (const picker of datePickers) {
+      expect(picker).not.toHaveProperty('label');
+      expect(picker).not.toHaveProperty('label_position');
+    }
+    expect(JSON.stringify(card)).toContain('activity_automation_cancel');
+  });
+
+  it('builds a callback confirmation card from the submit session summary', () => {
+    const card = buildActivityPriceCallbackConfirmCard({
+      submitSessionPath: 'output/latest/activity-automation/activity-submit-session.json',
+      productIds: ['770', '800', '801'],
+      mappedCount: 3,
+      startsAt: '2026-06-24',
+      endsAt: '2026-06-30',
+    });
+
+    expect(JSON.stringify(card)).toContain('activity_price_callback_confirm');
+    expect(JSON.stringify(card)).toContain('770');
+    expect(JSON.stringify(card)).toContain('activity-submit-session.json');
+    expect(JSON.stringify(card)).toContain('activity_price_callback_cancel');
+    expect(JSON.stringify(card)).not.toContain('"tag":"action"');
+  });
+
+  it('parses date picker objects and falls back to default discounts when unchanged', () => {
+    expect(parseActivityAutomationConfirmRequest({
+      starts_at: { date: '2026-06-24' },
+      ends_at: { date: '2026-06-30' },
+    })).toEqual({
+      startsAt: '2026-06-24',
+      endsAt: '2026-06-30',
+      discounts: { SS: '8.5', S: '9.0', A: '9.5', B: '9.8' },
+    });
+  });
+
+  it('parses explicit discounts alongside object-shaped date picker values', () => {
+    expect(parseActivityAutomationConfirmRequest({
+      starts_at: { value: '2026-06-24' },
+      ends_at: { date: '2026-06-30' },
+      discount_ss: '8.1',
+      discount_s: '8.8',
+      discount_a: '9.1',
+      discount_b: '9.6',
+    })).toEqual({
+      startsAt: '2026-06-24',
+      endsAt: '2026-06-30',
+      discounts: { SS: '8.1', S: '8.8', A: '9.1', B: '9.6' },
+    });
+  });
+
+  it('parses Feishu date picker strings with timezone suffixes', () => {
+    expect(parseActivityAutomationConfirmRequest({
+      starts_at: '2026-06-24 +0800',
+      ends_at: '2026-07-01 +0800',
+      discount_ss: '8.5',
+      discount_s: '9.0',
+      discount_a: '9.5',
+      discount_b: '9.8',
+    })).toEqual({
+      startsAt: '2026-06-24',
+      endsAt: '2026-07-01',
+      discounts: { SS: '8.5', S: '9.0', A: '9.5', B: '9.8' },
+    });
+  });
+
+  it('parses nested differential_pricing_form payloads from form callbacks', () => {
+    expect(parseActivityAutomationConfirmRequest({
+      differential_pricing_form: {
+        starts_at: '2026-06-24',
+        ends_at: '2026-06-30',
+      },
+    })).toEqual({
+      startsAt: '2026-06-24',
+      endsAt: '2026-06-30',
+      discounts: { SS: '8.5', S: '9.0', A: '9.5', B: '9.8' },
+    });
+  });
+
+  it('parses the callback confirmation request from card action values', () => {
+    expect(parseActivityPriceCallbackConfirmRequest({
+      request: {
+        submitSessionPath: 'output/latest/activity-automation/activity-submit-session.json',
+        productIds: ['770', '800'],
+        mappedCount: 2,
+        startsAt: '2026-06-24',
+        endsAt: '2026-06-30',
+      },
+    })).toEqual({
+      submitSessionPath: 'output/latest/activity-automation/activity-submit-session.json',
+      productIds: ['770', '800'],
+      mappedCount: 2,
+      startsAt: '2026-06-24',
+      endsAt: '2026-06-30',
+    });
   });
 });

@@ -45,6 +45,16 @@ function matchesExactNumericProductId(row: PublicTrafficProductDataRow, normaliz
   );
 }
 
+export function parseNumericProductIdList(keyword: string): string[] {
+  const tokens = keyword
+    .trim()
+    .replace(/[;；。]+$/g, '')
+    .split(/[,\uFF0C\u3001\s;；]+/)
+    .filter(Boolean);
+  if (tokens.length < 2 || tokens.some((token) => !/^\d+$/.test(token))) return [];
+  return tokens;
+}
+
 export function formatLatestSummary(context: PublicTrafficDataReportContext): string {
   const one = context.summary['1d'];
   return [
@@ -59,6 +69,10 @@ export function formatLatestSummary(context: PublicTrafficDataReportContext): st
 export function queryProductRows(context: PublicTrafficDataReportContext, keyword: string): PublicTrafficProductDataRow[] {
   const normalized = normalizeProductIdentifier(keyword);
   if (!normalized) return [];
+  const productIds = parseNumericProductIdList(normalized);
+  if (productIds.length > 0) {
+    return productIds.flatMap((productId) => context.rows.find((row) => matchesExactNumericProductId(row, productId)) ?? []);
+  }
   if (/^\d+$/.test(normalized)) {
     return context.rows.filter((row) => matchesExactNumericProductId(row, normalized)).slice(0, 5);
   }

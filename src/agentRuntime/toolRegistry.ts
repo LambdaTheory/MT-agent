@@ -2,11 +2,41 @@ import type { AgentToolDefinition } from './tool.js';
 
 const noArgumentsSchema = { type: 'object', additionalProperties: false };
 const keywordArgumentsSchema = { type: 'object', properties: { keyword: { type: 'string' } }, required: ['keyword'], additionalProperties: false };
-const productIdArgumentsSchema = { type: 'object', properties: { productId: { type: 'string' } }, required: ['productId'], additionalProperties: false };
-const goodsExportPathArgumentsSchema = { type: 'object', properties: { goodsExportPath: { type: 'string' } }, required: ['goodsExportPath'], additionalProperties: false };
 const optionalSendToArgumentsSchema = {
   type: 'object',
   properties: { sendTo: { type: 'string' } },
+  additionalProperties: false,
+};
+const optionalDashboardRefreshArgumentsSchema = {
+  type: 'object',
+  properties: {
+    date: { type: 'string' },
+    sendTo: { type: 'string' },
+  },
+  additionalProperties: false,
+};
+const productIdArgumentsSchema = {
+  type: 'object',
+  properties: { productId: { type: 'string' } },
+  required: ['productId'],
+  additionalProperties: false,
+};
+const tenancySetArgumentsSchema = {
+  type: 'object',
+  properties: {
+    productId: { type: 'string' },
+    days: { type: 'string' },
+  },
+  required: ['productId', 'days'],
+  additionalProperties: false,
+};
+const specAddAndRefreshArgumentsSchema = {
+  type: 'object',
+  properties: {
+    productId: { type: 'string' },
+    itemTitle: { type: 'string' },
+  },
+  required: ['productId', 'itemTitle'],
   additionalProperties: false,
 };
 const rentalOperationArgumentsSchema = {
@@ -72,11 +102,11 @@ const agentTools: AgentToolDefinition[] = [
     inputSchema: noArgumentsSchema,
   },
   {
-    name: 'publicTraffic.crawlSources',
-    description: '抓取公域日报所需的商品总表、曝光、后链路与订单分析原始数据',
+    name: 'publicTraffic.refreshDashboard',
+    description: '补抓访问页/后链路数据；自动使用默认配置保存 raw，必要时重建并重发日报',
     risk: 'write',
     requiresConfirmation: true,
-    inputSchema: goodsExportPathArgumentsSchema,
+    inputSchema: optionalDashboardRefreshArgumentsSchema,
   },
   {
     name: 'closedOrder.syncFeedback',
@@ -93,17 +123,46 @@ const agentTools: AgentToolDefinition[] = [
     inputSchema: noArgumentsSchema,
   },
   {
-    name: 'rental.pricePreview',
-    description: '预览租赁商品改价，不直接执行改价',
+    name: 'rental.copy',
+    description: '复制租赁商品前的确认请求',
     risk: 'high',
     requiresConfirmation: true,
     inputSchema: productIdArgumentsSchema,
+  },
+  {
+    name: 'rental.delist',
+    description: '下架租赁商品前的确认请求',
+    risk: 'high',
+    requiresConfirmation: true,
+    inputSchema: productIdArgumentsSchema,
+  },
+  {
+    name: 'rental.tenancySet',
+    description: '设置租赁商品租期前的确认请求',
+    risk: 'high',
+    requiresConfirmation: true,
+    inputSchema: tenancySetArgumentsSchema,
+  },
+  {
+    name: 'rental.specDiscover',
+    description: '查看租赁商品规格前的确认请求',
+    risk: 'high',
+    requiresConfirmation: true,
+    inputSchema: productIdArgumentsSchema,
+  },
+  {
+    name: 'rental.specAddAndRefresh',
+    description: '添加租赁商品规格并刷新前的确认请求',
+    risk: 'high',
+    requiresConfirmation: true,
+    inputSchema: specAddAndRefreshArgumentsSchema,
   },
   {
     name: 'rental.operationConfirmRequest',
     description: '执行租赁商品复制、下架、租期设置、规格查看或规格添加前的确认请求',
     risk: 'high',
     requiresConfirmation: true,
+    plannerVisible: false,
     inputSchema: rentalOperationArgumentsSchema,
   },
 ];

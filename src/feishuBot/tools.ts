@@ -1,3 +1,4 @@
+import { basename, dirname } from 'node:path';
 import { buildAgentToolConfirmCard } from '../agentRuntime/approvalCard.js';
 import { buildAgentClarificationCard } from '../agentRuntime/clarificationCard.js';
 import { listAgentPlannerTools, validateAgentPlannerClarificationProposal, validateAgentPlannerProposal, type AgentPlannerProvider } from '../agentRuntime/planner.js';
@@ -5,21 +6,36 @@ import { validateAgentWorkflowPlannerProposal } from '../agentRuntime/workflowPl
 import { listAgentWorkflows } from '../agentRuntime/workflowRegistry.js';
 import { buildAgentLearningPlannerHints, summarizeAgentLearning } from '../agentLearning/store.js';
 import { parseAgentDataIntent } from '../agentData/intent.js';
+import { rankBestProductByRegistryQuery } from '../agentData/productRanking.js';
 import { loadClosedOrderRegistryContext, type ClosedOrderRegistryPathsInput } from '../closedOrderFeedback/runtime.js';
+import { queryInventoryStatus } from '../inventoryStatus/query.js';
+import { readInventorySameSkuSnapshot } from '../inventoryStatus/store.js';
 import { createLinkRegistry } from '../linkRegistry/store.js';
+import type { LinkRegistryEntry } from '../linkRegistry/types.js';
 import {
   buildNewLinkBatchConfirmCard,
+  buildNewLinkBatchMultiConfirmCard,
   buildNewLinkBatchPlan,
   formatNewLinkBatchPlan,
+  formatNewLinkBatchMultiPlan,
   NEW_LINK_BATCH_WORKFLOW_NAME,
   readNewLinkBatchWorkflowRequest,
 } from '../newLinkWorkflow/batch.js';
 import { startOperationsLearningSession, summarizeOperationsLearningHistory, summarizeOperationsLearningSession } from '../operationsLearningLoop/session.js';
+import { buildPublicTrafficPaths } from '../publicTraffic/paths.js';
 import {
   buildActivityAutomationCard,
   type ActivityAutomationSkillClient,
 } from './activityAutomation.js';
 import { executeAgentToolRequest } from './agentToolExecutor.js';
+import {
+  buildInventoryStatusDetailCard,
+  buildInventoryStatusOverviewCard,
+  formatInventoryStatusAmbiguousText,
+  formatInventoryStatusDetailText,
+  formatInventoryStatusMissingText,
+  formatInventoryStatusOverviewText,
+} from './inventoryStatusCard.js';
 import { formatIdLookupResult, lookupProductId } from './idLookup.js';
 import { buildIdLookupCard } from './idLookupCard.js';
 import { buildLinkRegistryOverviewCard, formatLinkRegistryOverviewText } from './linkRegistryOverviewCard.js';
@@ -36,7 +52,7 @@ import {
 } from './rentalPrice.js';
 import { findReadOnlyTool } from './readOnlyToolRegistry.js';
 import type { ReadOnlyToolRunOptions } from './readOnlyToolRegistry.js';
-import { findLatestReportContext, formatLatestSummary, formatProductRows, queryProductRows } from './reportStore.js';
+import { findLatestReportContext, formatLatestSummary, formatProductRows, parseNumericProductIdList, queryProductRows } from './reportStore.js';
 import type { BotIntent, BotResponse } from './types.js';
 
 const UNKNOWN_GUIDANCE = '我现在可以查：今日概况、商品、新链接池、待处理任务、转化差、曝光低、高潜力、下架链接、订单情况。你可以问“新链接池怎么样”或“查一下721”。';
@@ -119,7 +135,7 @@ function agentToolConfirmResponse(toolName: string, args: Record<string, unknown
 
 function looksLikeNewLinkWriteIntent(text: string): boolean {
   const compact = text.toLowerCase().replace(/\s+/g, '');
-  const hasNewLink = /新链|新链接/.test(compact);
+  const hasNewLink = /新链|新链接|(?:条|个|款)新(?=$|[?？。!！；;,，、])/.test(compact);
   const hasWriteVerb = /铺|补|新建|创建|生成|新增|复制|批量/.test(compact);
   return hasNewLink && hasWriteVerb;
 }
@@ -150,8 +166,191 @@ function applyExplicitNewLinkSource(
   return sourceProductId ? { ...request, sourceProductId } : request;
 }
 
+function parseSmallPositiveInteger(value: string): number | null {
+  const trimmed = value.trim();
+  if (/^\d+$/.test(trimmed)) return Number(trimmed);
+  const digits: Record<string, number> = {
+    一: 1,
+    二: 2,
+    两: 2,
+    三: 3,
+    四: 4,
+    五: 5,
+    六: 6,
+    七: 7,
+    八: 8,
+    九: 9,
+  };
+  if (trimmed === '十') return 10;
+  if (trimmed in digits) return digits[trimmed]!;
+
+  const teen = /^十([一二两三四五六七八九])$/u.exec(trimmed);
+  if (teen?.[1]) return 10 + digits[teen[1]]!;
+
+  const tens = /^([一二两三四五六七八九])十$/u.exec(trimmed);
+  if (tens?.[1]) return digits[tens[1]]! * 10;
+
+  const composed = /^([一二两三四五六七八九])十([一二两三四五六七八九])$/u.exec(trimmed);
+  if (composed?.[1] && composed[2]) return digits[composed[1]]! * 10 + digits[composed[2]]!;
+
+  return null;
+}
+
+function extractNewLinkBatchCount(text: string): number | null {
+  const compact = text.replace(/\s+/g, '');
+  const countToken = '([0-9]+|[一二两三四五六七八九十]{1,3})';
+  const newLinkToken = '(?:新链接|新链|新(?=$|[?？。!！；;,，、]))';
+  const patterns = [
+    new RegExp(`(?:复制|铺设|铺|新增|补|新建|创建|生成|批量)${countToken}(?:条|个|款)?${newLinkToken}`, 'u'),
+    new RegExp(`${countToken}(?:条|个|款)${newLinkToken}`, 'u'),
+  ];
+  for (const pattern of patterns) {
+    const match = pattern.exec(compact);
+    if (!match?.[1]) continue;
+    const count = parseSmallPositiveInteger(match[1]);
+    if (count !== null) return count;
+  }
+  return null;
+}
+
+function bestProductQueryCandidates(text: string): string[] {
+  const normalized = text.replace(/\s+/g, ' ').trim();
+  const candidates = new Set<string>();
+  const add = (value: string | undefined): void => {
+    const cleaned = value?.replace(/^(?:按|根据|用|以)\s*/u, '').trim();
+    if (cleaned) candidates.add(cleaned);
+  };
+  const beforeFollowUpWrite = normalized.split(/[?？。!！；;]\s*(?:分别)?(?:按|根据|用|以)(?:这个|该|此|上面|最好链接的|最好(?:的)?|其)?\s*(?:端内\s*)?id/iu)[0];
+
+  add(beforeFollowUpWrite);
+  add(normalized.split(/[?？。!！；;]/u)[0]);
+  add(normalized.split(/(?:按|根据|用|以)(?:这个|该|此|上面|最好链接的|最好(?:的)?|其)?\s*(?:端内\s*)?id/iu)[0]);
+  add(normalized.split(/(?:给我)?\s*(?:复制|铺设|铺|新增|补|新建|创建|生成|批量)/u)[0]);
+  add(normalized.split(/[?？。!！；;，,]/u)[0]);
+  add(normalized);
+  return [...candidates];
+}
+
+function splitRankingQueryList(query: string): string[] {
+  const values = query
+    .split(/\s*(?:,|，|、|和|及|与)\s*/u)
+    .map((value) => value.replace(/\s*(?:的)?(?:端内\s*id|id|链接)?\s*(?:是多少)?$/iu, '').trim())
+    .filter((value) => !!value);
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const value of values) {
+    const key = value.toLowerCase().replace(/\s+/g, '');
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(value);
+  }
+  return unique;
+}
+
+function parseBestProductQueryForNewLinkCopy(text: string): string | null {
+  for (const candidate of bestProductQueryCandidates(text)) {
+    const parsed = parseAgentDataIntent(candidate);
+    if (parsed.type === 'best_product_by_same_sku') return parsed.query;
+  }
+  return null;
+}
+
+function parseBestProductQueriesForNewLinkCopy(text: string): string[] {
+  for (const candidate of bestProductQueryCandidates(text)) {
+    const parsed = parseAgentDataIntent(candidate);
+    if (parsed.type !== 'best_product_by_same_sku') continue;
+    const queries = splitRankingQueryList(parsed.query);
+    if (queries.length > 0) return queries;
+  }
+  const single = parseBestProductQueryForNewLinkCopy(text);
+  return single ? [single] : [];
+}
+
+function parseBestLinkNewLinkBatchRequest(text: string): { keywords: string[]; count: number } | null {
+  if (!looksLikeNewLinkWriteIntent(text)) return null;
+  if (!/(数据|表现|同款)/u.test(text) || !/(最好|最佳|最优|最强)/u.test(text)) return null;
+
+  const count = extractNewLinkBatchCount(text);
+  const keywords = parseBestProductQueriesForNewLinkCopy(text);
+  return count !== null && keywords.length > 0 ? { keywords, count } : null;
+}
+
+function formatBestLinkCopyPlanFailure(keyword: string, status: ReturnType<typeof rankBestProductByRegistryQuery>): string {
+  if (status.status === 'ambiguous') {
+    const candidates = status.candidates
+      .map((candidate) => `- ${candidate.shortName ?? candidate.sameSkuGroupId ?? '未命名同款组'}：${candidate.internalProductIds.join('、')}`)
+      .join('\n');
+    return `链接维护档案对“${keyword}”匹配到多个同款组，我不会猜测端内ID，也不会复制。\n${candidates}`;
+  }
+  if (status.status === 'no_metrics') return `链接维护档案已匹配到“${keyword}”，但最新公域日报没有可用于排序的数据，我不会复制。`;
+  return `链接维护档案未匹配到“${keyword}”，我不会猜测端内ID，也不会复制。可以换成更完整的商品名或直接给端内ID。`;
+}
+
+async function bestLinkNewLinkBatchResponse(
+  message: string,
+  outputDir: string,
+  options: HandleBotIntentOptions,
+): Promise<BotResponse | null> {
+  const request = parseBestLinkNewLinkBatchRequest(message);
+  if (!request) return null;
+
+  const [latest, registryContext] = await Promise.all([
+    findLatestReportContext(outputDir),
+    loadClosedOrderRegistryContext(options.closedOrderRegistryPaths),
+  ]);
+  if (!latest) return { text: '还没有找到公域日报上下文，无法选择新链复制源商品。' };
+
+  const registry = createLinkRegistry(registryContext.registry);
+  const ranked = request.keywords.map((keyword) => ({
+    keyword,
+    ranking: rankBestProductByRegistryQuery(latest.context, registry, keyword),
+  }));
+  const failed = ranked.find((item) => item.ranking.status !== 'ranked');
+  if (failed) return { text: formatBestLinkCopyPlanFailure(failed.keyword, failed.ranking) };
+
+  const plans = ranked.map((item) => buildNewLinkBatchPlan(
+    { keyword: item.keyword, count: request.count, sourceProductId: item.ranking.status === 'ranked' ? item.ranking.best.internalProductId : '' },
+    latest.context,
+    registryContext.registry,
+  ));
+
+  if (plans.length > 1) {
+    const reason = `用户要求先分别找“${request.keywords.join('、')}”数据最好的端内ID，再按各自ID分别复制 ${request.count} 条新链；写操作需要二次确认。`;
+    return {
+      text: formatNewLinkBatchMultiPlan(plans),
+      ...(plans.every((plan) => plan.status === 'ready') ? { card: buildNewLinkBatchMultiConfirmCard(plans, reason) } : {}),
+    };
+  }
+
+  const plan = plans[0]!;
+  const selectedSourceId = plan.selectedSource?.productId ?? '';
+  const reason = `用户要求先找“${plan.request.keyword}”数据最好的端内ID，再按该ID复制 ${request.count} 条新链；已选择端内ID ${selectedSourceId}，写操作需要二次确认。`;
+  return {
+    text: formatNewLinkBatchPlan(plan),
+    ...(plan.status === 'ready' ? { card: buildNewLinkBatchConfirmCard(plan, reason) } : {}),
+  };
+}
+
 function readOnlyIntentNeedsLinkRegistry(intent: ReturnType<typeof parseAgentDataIntent>): boolean {
   return intent.type === 'best_product_by_same_sku';
+}
+
+function formatLinkRegistryStatus(status: LinkRegistryEntry['status']): string {
+  if (status === 'active') return '在架';
+  if (status === 'removed') return '已下架';
+  return '未知';
+}
+
+function formatRegistryProductRows(productIds: string[], entries: LinkRegistryEntry[]): string {
+  const entryById = new Map(entries.map((entry) => [entry.internalProductId, entry]));
+  const lines = productIds.map((productId) => {
+    const entry = entryById.get(productId);
+    if (!entry) return `端内ID ${productId}\n未在链接档案中找到`;
+    const name = entry.productName ?? entry.shortName ?? '未命名商品';
+    const platform = entry.platformProductId ? `平台商品ID ${entry.platformProductId}` : '平台商品ID 未记录';
+    return `端内ID ${entry.internalProductId} ${name}\n${platform}，状态 ${formatLinkRegistryStatus(entry.status)}`;
+  });
+  return lines.join('\n\n');
 }
 
 function llmReadOnlyToolNeedsLinkRegistry(tool: LlmReadOnlyToolName): boolean {
@@ -165,6 +364,36 @@ async function buildReadOnlyToolRunOptions(
   if (!needsLinkRegistry) return {};
   const registryContext = await loadClosedOrderRegistryContext(options.closedOrderRegistryPaths);
   return { linkRegistryStore: createLinkRegistry(registryContext.registry) };
+}
+
+async function handleInventoryStatusIntent(
+  intent: Extract<BotIntent, { type: 'inventory_status_overview' | 'inventory_status_query' }>,
+  outputDir: string,
+  options: HandleBotIntentOptions,
+): Promise<BotResponse> {
+  const latest = await findLatestReportContext(outputDir);
+  if (!latest) return { text: formatInventoryStatusMissingText({ status: 'snapshot_missing' }) };
+
+  const runDate = basename(dirname(latest.path));
+  const snapshotPath = buildPublicTrafficPaths(outputDir, runDate).sameSkuSnapshot;
+  const [snapshot, registryContext] = await Promise.all([
+    readInventorySameSkuSnapshot(snapshotPath),
+    loadClosedOrderRegistryContext(options.closedOrderRegistryPaths),
+  ]);
+  const result = queryInventoryStatus({
+    snapshot,
+    registryStore: createLinkRegistry(registryContext.registry, registryContext.overrideRisks),
+    query: intent.type === 'inventory_status_query' ? intent.query : '',
+  });
+
+  if (result.status === 'overview') {
+    return { text: formatInventoryStatusOverviewText(result), card: buildInventoryStatusOverviewCard(result) };
+  }
+  if (result.status === 'detail') {
+    return { text: formatInventoryStatusDetailText(result), card: buildInventoryStatusDetailCard(result) };
+  }
+  if (result.status === 'ambiguous') return { text: formatInventoryStatusAmbiguousText(result) };
+  return { text: formatInventoryStatusMissingText(result) };
 }
 
 async function agentPlannerResponse(
@@ -250,9 +479,24 @@ export async function handleBotIntent(intent: BotIntent, outputDir = 'output', o
     return { text: latest ? formatLatestSummary(latest.context) : '还没有找到公域日报上下文。' };
   }
 
+  if (intent.type === 'inventory_status_overview' || intent.type === 'inventory_status_query') {
+    return handleInventoryStatusIntent(intent, outputDir, options);
+  }
+
   if (intent.type === 'query_product') {
+    const productIds = parseNumericProductIdList(intent.keyword);
     const latest = await findLatestReportContext(outputDir);
-    return { text: latest ? formatProductRows(queryProductRows(latest.context, intent.keyword)) : '还没有找到公域日报上下文。' };
+    if (latest) {
+      const rows = queryProductRows(latest.context, intent.keyword);
+      if (rows.length > 0) return { text: formatProductRows(rows) };
+    }
+    if (productIds.length > 0) {
+      const registryContext = await loadClosedOrderRegistryContext(options.closedOrderRegistryPaths);
+      return { text: formatRegistryProductRows(productIds, registryContext.registry) };
+    }
+    if (!latest) return { text: '还没有找到公域日报上下文。' };
+
+    return { text: formatProductRows([]) };
   }
 
   if (intent.type === 'lookup_product_id') {
@@ -326,6 +570,14 @@ export async function handleBotIntent(intent: BotIntent, outputDir = 'output', o
     return agentToolConfirmResponse('publicTraffic.runReport', {}, '明确飞书命令需要二次确认后才能生成并发送公域日报。');
   }
 
+  if (intent.type === 'refresh_public_traffic_dashboard') {
+    return agentToolConfirmResponse(
+      'publicTraffic.refreshDashboard',
+      intent.sendTo ? { sendTo: intent.sendTo } : {},
+      '明确飞书命令需要二次确认后才能补抓访问页数据；若补抓后数据完整，可能重建并重发日报。',
+    );
+  }
+
   if (intent.type === 'push_latest_report_to_group') {
     return agentToolConfirmResponse('publicTraffic.pushLatestReportToGroup', {}, '明确飞书命令需要二次确认后才能把日报推送到群。');
   }
@@ -355,6 +607,9 @@ export async function handleBotIntent(intent: BotIntent, outputDir = 'output', o
         }
       }
     }
+
+    const bestLinkCopyResponse = await bestLinkNewLinkBatchResponse(intent.text, outputDir, options);
+    if (bestLinkCopyResponse) return bestLinkCopyResponse;
 
     const deterministicDataIntent = parseAgentDataIntent(intent.text);
     if (deterministicDataIntent.type === 'best_product_by_same_sku') {
