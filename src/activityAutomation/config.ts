@@ -5,6 +5,7 @@ import { createEmptyDifferentialPricingDraft, type DifferentialPricingDraft } fr
 export const ALIPAY_ACTIVITY_APP_ID = '2021005181665859';
 export const ALIPAY_ACTIVITY_PRODUCT_CODE = 'PROMO_ZHIMA_REDUCTION';
 export const ALIPAY_ACTIVITY_FORM_URL = `https://b.alipay.com/page/commodity-operation/activity/activityForm?appId=${ALIPAY_ACTIVITY_APP_ID}&productCode=${ALIPAY_ACTIVITY_PRODUCT_CODE}`;
+export const ALIPAY_ACTIVITY_LIST_URL = `https://b.alipay.com/page/commodity-operation/activity/activityList?productCode=${ALIPAY_ACTIVITY_PRODUCT_CODE}`;
 
 export interface ActivityAutomationConfig {
   targetUrl: string;

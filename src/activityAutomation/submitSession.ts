@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { activityAutomationOutputDir, type ActivityAutomationConfig } from './config.js';
 import type { ActivityScoutResult } from './scout.js';
@@ -8,10 +8,11 @@ export interface ActivitySubmitSessionProduct {
   platformProductId: string;
   merchantProductId: string;
   internalProductId?: string;
+  productName?: string;
 }
 
 export interface ActivitySubmitSession {
-  status: 'price_callback_pending';
+  status: ActivitySubmitSessionStatus;
   submittedAt: string;
   submittedUrl: string;
   confirmationText?: string;
@@ -24,6 +25,8 @@ export interface ActivitySubmitSession {
   unmappedCount: number;
   products: ActivitySubmitSessionProduct[];
 }
+
+export type ActivitySubmitSessionStatus = 'price_callback_pending' | 'cancel_assistance_opened' | 'cancelled';
 
 function buildSubmitSession(
   config: ActivityAutomationConfig,
@@ -41,6 +44,7 @@ function buildSubmitSession(
     platformProductId: product.platformProductId,
     merchantProductId: product.merchantProductId,
     internalProductId: product.internalProductId,
+    ...(product.productName ? { productName: product.productName } : {}),
   }));
 
   const mappedCount = products.filter((product) => Boolean(product.internalProductId)).length;
@@ -72,4 +76,18 @@ export async function writeActivitySubmitSession(
   const session = buildSubmitSession(config, scoutResult, submitResult);
   await writeFile(sessionPath, `${JSON.stringify(session, null, 2)}\n`, 'utf8');
   return sessionPath;
+}
+
+export async function readActivitySubmitSession(sessionPath: string): Promise<ActivitySubmitSession> {
+  return JSON.parse(await readFile(sessionPath, 'utf8')) as ActivitySubmitSession;
+}
+
+export async function updateActivitySubmitSessionStatus(
+  sessionPath: string,
+  status: ActivitySubmitSessionStatus,
+): Promise<ActivitySubmitSession> {
+  const session = await readActivitySubmitSession(sessionPath);
+  const updated = { ...session, status };
+  await writeFile(sessionPath, `${JSON.stringify(updated, null, 2)}\n`, 'utf8');
+  return updated;
 }

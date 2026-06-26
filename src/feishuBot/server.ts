@@ -1,4 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { createActivityCancellationAssistant, type ActivityCancellationAssistant } from '../activityAutomation/cancelAssistance.js';
+import { updateActivitySubmitSessionStatus } from '../activityAutomation/submitSession.js';
 import { parseAgentToolConfirmRequest } from '../agentRuntime/approvalCard.js';
 import { buildClarifiedMessage, parseAgentClarificationCustomSelection, parseAgentClarificationSelection } from '../agentRuntime/clarificationCard.js';
 import type { AgentPlannerProvider } from '../agentRuntime/planner.js';
@@ -12,6 +14,10 @@ import { buildIdLookupCard } from './idLookupCard.js';
 import { lookupProductId } from './idLookup.js';
 import { createFeishuMessageDispatcher } from './dispatcher.js';
 import {
+  buildActivityCancelAssistanceCard,
+  buildActivityCancelFailureCard,
+  buildActivityCancelStatusCard,
+  buildCancelDifferentialPricingCard,
   buildActivityPriceCallbackConfirmCard,
   buildActivityPriceCallbackRequest,
   buildActivityPriceCallbackStatusCard,
@@ -43,6 +49,7 @@ export interface FeishuBotServerConfig {
   replyCard?: (config: FeishuReplyConfig, card: FeishuCardPayload) => Promise<FeishuAppSendResult>;
   rentalPriceClient?: RentalPriceSkillClient;
   activityAutomationClient?: ActivityAutomationSkillClient;
+  activityCancellationAssistant?: ActivityCancellationAssistant;
   llmIntentProposalProvider?: LlmIntentProposalProvider;
   agentPlannerProvider?: AgentPlannerProvider;
 }
@@ -133,6 +140,12 @@ function expectedActionForButtonName(name: string | undefined): string | undefin
   if (name.startsWith('agent_clarify_select_')) return 'agent_clarify_select';
   if (name === 'agent_clarify_custom') return 'agent_clarify_custom';
   if (name === 'agent_clarify_cancel') return 'agent_clarify_cancel';
+  if (name === 'activity_cancel_open_submit') return 'activity_cancel_open';
+  if (name === 'activity_cancel_done_submit') return 'activity_cancel_done';
+  if (name === 'activity_cancel_abort_submit') return 'activity_cancel_abort';
+  if (name === 'cancel_differential_pricing_open_submit') return 'cancel_differential_pricing_open';
+  if (name === 'cancel_differential_pricing_done_submit') return 'cancel_differential_pricing_done';
+  if (name === 'cancel_differential_pricing_abort_submit') return 'cancel_differential_pricing_abort';
   return undefined;
 }
 
@@ -274,6 +287,7 @@ async function handleCardActionTrigger(
 
   const replyText = config.replyText ?? replyFeishuMessageText;
   const replyCard = config.replyCard ?? replyFeishuMessageCard;
+  const activityCancellationAssistant = config.activityCancellationAssistant ?? createActivityCancellationAssistant();
   const replyConfig = { appId: config.appId, appSecret: config.appSecret, messageId };
   const actorId = extractCardReviewerId(payload);
   const outputDir = config.outputDir ?? 'output';
@@ -626,8 +640,7 @@ async function handleCardActionTrigger(
       await replyText(replyConfig, '价格回调确认参数无效，请重新发起。');
       return;
     }
-    await replyCard(replyConfig, buildActivityPriceCallbackStatusCard(request, { confirmed: true }));
-    return;
+    return buildActivityPriceCallbackStatusCard(request, { confirmed: true });
   }
 
   if (actionName === 'activity_price_callback_cancel') {
@@ -642,6 +655,62 @@ async function handleCardActionTrigger(
     }
     setServerCardActionStatus(claim.key, 'cancelled');
     return buildActivityPriceCallbackStatusCard(request, { confirmed: false });
+  }
+
+  if (actionName === 'activity_cancel_open' || actionName === 'cancel_differential_pricing_open') {
+    const request = parseActivityPriceCallbackConfirmRequest(value);
+    if (!request) {
+      await replyText(replyConfig, '活动取消辅助参数无效，请重新发起。');
+      return;
+    }
+    const claim = claimServerCardAction(messageId, 'cancel_differential_pricing_open', actionName);
+    if (!claim.claimed) {
+      await replyText(replyConfig, duplicateServerCardActionText(claim.claim));
+      return;
+    }
+    try {
+      const assistance = await activityCancellationAssistant.open(request);
+      await updateActivitySubmitSessionStatus(request.submitSessionPath, assistance.cancelled ? 'cancelled' : 'cancel_assistance_opened');
+      setServerCardActionStatus(claim.key, 'completed');
+      return assistance.cancelled
+        ? buildActivityCancelStatusCard(request, { cancelled: true })
+        : buildActivityCancelAssistanceCard(request, assistance);
+    } catch (error) {
+      setServerCardActionStatus(claim.key, 'failed');
+      return buildActivityCancelFailureCard(request, error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  if (actionName === 'activity_cancel_done' || actionName === 'cancel_differential_pricing_done') {
+    const request = parseActivityPriceCallbackConfirmRequest(value);
+    if (!request) {
+      await replyText(replyConfig, '活动取消确认参数无效，请重新发起。');
+      return;
+    }
+    const claim = claimServerCardAction(messageId, 'cancel_differential_pricing_resolution', actionName);
+    if (!claim.claimed) {
+      await replyText(replyConfig, duplicateServerCardActionText(claim.claim));
+      return;
+    }
+    await updateActivitySubmitSessionStatus(request.submitSessionPath, 'cancelled');
+    setServerCardActionStatus(claim.key, 'completed');
+    return buildActivityCancelStatusCard(request, { cancelled: true });
+  }
+
+  if (actionName === 'activity_cancel_abort' || actionName === 'cancel_differential_pricing_abort') {
+    const request = parseActivityPriceCallbackConfirmRequest(value);
+    if (!request) {
+      await replyText(replyConfig, '活动取消保留参数无效，请重新发起。');
+      return;
+    }
+    const claim = claimServerCardAction(messageId, 'cancel_differential_pricing_resolution', actionName);
+    if (!claim.claimed) {
+      await replyText(replyConfig, duplicateServerCardActionText(claim.claim));
+      return;
+    }
+    await updateActivitySubmitSessionStatus(request.submitSessionPath, 'price_callback_pending');
+    setServerCardActionStatus(claim.key, 'completed');
+    return buildCancelDifferentialPricingCard(request);
   }
 
   if (actionName === 'rental_price_cancel') {

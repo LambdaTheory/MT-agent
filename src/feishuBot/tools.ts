@@ -25,6 +25,7 @@ import { startOperationsLearningSession, summarizeOperationsLearningHistory, sum
 import { buildPublicTrafficPaths } from '../publicTraffic/paths.js';
 import {
   buildActivityAutomationCard,
+  buildCancelDifferentialPricingCardResult,
   type ActivityAutomationSkillClient,
 } from './activityAutomation.js';
 import { executeAgentToolRequest } from './agentToolExecutor.js';
@@ -489,6 +490,10 @@ export async function handleBotIntent(intent: BotIntent, outputDir = 'output', o
       text: '差异化定价卡片已打开，请在卡片中填写日期和折扣后确认执行。',
       card: buildActivityAutomationCard(),
     };
+  }
+
+  if (intent.type === 'cancel_differential_pricing_card') {
+    return buildCancelDifferentialPricingCardResult(outputDir);
   }
 
   if (intent.type === 'sync_closed_order_feedback') {
