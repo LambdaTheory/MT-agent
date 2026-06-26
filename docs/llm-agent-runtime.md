@@ -53,6 +53,8 @@ When the LLM planner is configured, both production Feishu entries (`feishuBotSd
 
 The shared `handleBotIntent()` entry also rejects pre-parsed exact intents when an `agentPlannerProvider` is present. This protects tests, adapters, or future callers from accidentally calling the legacy deterministic branch while production is supposed to be planner-first. Those callers must pass the raw text as `{ type: 'unknown', text }` so the planner can choose a registered tool or ask for clarification.
 
+`npm run agent:dry-run -- "..."` also defaults to planner-first resolution. It includes a `legacyIntent` field only as a comparison aid; use `--legacy` when intentionally inspecting the old deterministic parser.
+
 Write or high-risk selections from these old command phrases still stop at confirmation cards. The regression tests cover SDK and HTTP text events for those examples.
 
 ## Smoke Test
