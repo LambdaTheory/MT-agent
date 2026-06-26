@@ -26,6 +26,8 @@ describe('parseAgentDataIntent', () => {
     expect(parseAgentDataIntent('数据最好的 pocket3 的端内id是多少')).toEqual({ type: 'best_product_by_same_sku', query: 'pocket3' });
     expect(parseAgentDataIntent('X200Ultra 数据最好的是哪个id')).toEqual({ type: 'best_product_by_same_sku', query: 'X200Ultra' });
     expect(parseAgentDataIntent('端内ID 733 这个同款组里数据最好的是哪条')).toEqual({ type: 'best_product_by_same_sku', query: '733' });
+    expect(parseAgentDataIntent('s23最好的链接是哪条?')).toEqual({ type: 'best_product_by_same_sku', query: 's23' });
+    expect(parseAgentDataIntent('s23 最好的端内id是多少')).toEqual({ type: 'best_product_by_same_sku', query: 's23' });
   });
 
   it('maps natural read-only questions to agent data intents', () => {

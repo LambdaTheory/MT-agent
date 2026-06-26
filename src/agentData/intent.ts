@@ -41,25 +41,29 @@ function buildBestProductIntent(text: string, query: string | null): SameSkuBest
 }
 
 function parseBestProductBySameSkuQuery(text: string): SameSkuBestIntent | null {
-  if (!/(数据|表现|同款|金额|成交额|曝光|发货)/u.test(text) || !/(最好|最佳|最优|最强)/u.test(text)) return null;
+  const normalized = text.replace(/[?？。!！]+$/g, '').trim();
+  if (!/(数据|表现|同款|金额|成交额|曝光|发货|链接|端内\s*id|id)/iu.test(normalized) || !/(最好|最佳|最优|最强)/u.test(normalized)) return null;
 
-  const explicitInternalId = /端内\s*ID\s*(\d+)/iu.exec(text);
-  if (explicitInternalId && /同款/u.test(text)) return buildBestProductIntent(text, explicitInternalId[1]!);
+  const explicitInternalId = /端内\s*ID\s*(\d+)/iu.exec(normalized);
+  if (explicitInternalId && /同款/u.test(normalized)) return buildBestProductIntent(normalized, explicitInternalId[1]!);
 
-  const leadingPeriodBest = /^近\s*\d+\s*天\s*(?:数据|表现|金额|成交额|曝光|发货)?\s*(?:最好|最佳|最优|最强)的?\s*(.+?)\s*(?:是\s*)?(?:(?:哪个|哪条|哪一个|哪款|什么)\s*)?(?:端内\s*id|id|链接)?\s*(?:是多少)?$/iu.exec(text);
-  if (leadingPeriodBest?.[1]) return buildBestProductIntent(text, cleanupRankingQuery(leadingPeriodBest[1]));
+  const leadingPeriodBest = /^近\s*\d+\s*天\s*(?:数据|表现|金额|成交额|曝光|发货)?\s*(?:最好|最佳|最优|最强)的?\s*(.+?)\s*(?:是\s*)?(?:(?:哪个|哪条|哪一个|哪款|什么)\s*)?(?:端内\s*id|id|链接)?\s*(?:是多少)?$/iu.exec(normalized);
+  if (leadingPeriodBest?.[1]) return buildBestProductIntent(normalized, cleanupRankingQuery(leadingPeriodBest[1]));
 
-  const productFirstBestLink = /^(.+?)\s*(?:数据|表现)\s*(?:最好|最佳|最优|最强)的?\s*(?:链接|端内\s*id|id)?\s*(?:是)?\s*(?:哪(?:个|条|一个|款)|什么|多少)?[?？。！!]*$/iu.exec(text);
-  if (productFirstBestLink?.[1]) return buildBestProductIntent(text, cleanupRankingQuery(productFirstBestLink[1]));
+  const productFirstBestLink = /^(.+?)\s*(?:数据|表现)\s*(?:最好|最佳|最优|最强)的?\s*(?:链接|端内\s*id|id)?\s*(?:是)?\s*(?:哪(?:个|条|一个|款)|什么|多少)?$/iu.exec(normalized);
+  if (productFirstBestLink?.[1]) return buildBestProductIntent(normalized, cleanupRankingQuery(productFirstBestLink[1]));
 
-  const leadingBest = /^(?:数据|表现)\s*(?:最好|最佳|最优|最强)的?\s*(.+?)\s*(?:是\s*)?(?:(?:哪个|哪条|哪一个|哪款|什么)\s*)?(?:端内\s*id|id|链接)?\s*(?:是多少)?$/iu.exec(text);
-  if (leadingBest?.[1]) return buildBestProductIntent(text, cleanupRankingQuery(leadingBest[1]));
+  const leadingBest = /^(?:数据|表现)\s*(?:最好|最佳|最优|最强)的?\s*(.+?)\s*(?:是\s*)?(?:(?:哪个|哪条|哪一个|哪款|什么)\s*)?(?:端内\s*id|id|链接)?\s*(?:是多少)?$/iu.exec(normalized);
+  if (leadingBest?.[1]) return buildBestProductIntent(normalized, cleanupRankingQuery(leadingBest[1]));
 
-  const trailingBestLink = /^(.+?)\s*(?:近\s*\d+\s*天\s*)?(?:金额|成交额|曝光|发货|数据|表现)\s*(?:最好|最佳|最优|最强)的?\s*链接\s*(?:是\s*)?(?:哪个|哪条|哪一个|哪款|什么)?$/iu.exec(text);
-  if (trailingBestLink?.[1]) return buildBestProductIntent(text, cleanupRankingQuery(trailingBestLink[1]));
+  const trailingBestLink = /^(.+?)\s*(?:近\s*\d+\s*天\s*)?(?:金额|成交额|曝光|发货|数据|表现)\s*(?:最好|最佳|最优|最强)的?\s*链接\s*(?:是\s*)?(?:哪个|哪条|哪一个|哪款|什么)?$/iu.exec(normalized);
+  if (trailingBestLink?.[1]) return buildBestProductIntent(normalized, cleanupRankingQuery(trailingBestLink[1]));
 
-  const trailingBest = /^(.+?)\s*(?:近\s*\d+\s*天\s*)?(?:这个)?(?:同款组里|同款组中|同款里|同款中)?\s*(?:数据|表现|金额|成交额|曝光|发货)\s*(?:最好|最佳|最优|最强)的?(?:是)?\s*(?:(?:哪个|哪条|哪一个|哪款|什么)\s*)?(?:端内\s*id|id|链接)?\s*(?:是多少)?$/iu.exec(text);
-  if (trailingBest?.[1]) return buildBestProductIntent(text, cleanupRankingQuery(trailingBest[1]));
+  const trailingBest = /^(.+?)\s*(?:近\s*\d+\s*天\s*)?(?:这个)?(?:同款组里|同款组中|同款里|同款中)?\s*(?:数据|表现|金额|成交额|曝光|发货)\s*(?:最好|最佳|最优|最强)(?:的?是|是|的)?\s*(?:(?:哪个|哪条|哪一个|哪款|什么)\s*)?(?:端内\s*id|id|链接)?\s*(?:是多少)?$/iu.exec(normalized);
+  if (trailingBest?.[1]) return buildBestProductIntent(normalized, cleanupRankingQuery(trailingBest[1]));
+
+  const linkBest = /^(.+?)\s*(?:这个)?(?:同款组里|同款组中|同款里|同款中)?\s*(?:最好|最佳|最优|最强)的?\s*(?:链接|端内\s*id|id)\s*(?:是\s*)?(?:(?:哪个|哪条|哪一个|哪款|什么|多少)\s*)?$/iu.exec(normalized);
+  if (linkBest?.[1]) return buildBestProductIntent(normalized, cleanupRankingQuery(linkBest[1]));
 
   return null;
 }
