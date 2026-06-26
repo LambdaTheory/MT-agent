@@ -67,6 +67,46 @@ function fakeActivityAutomationClient() {
   return client;
 }
 
+function fakeActivityCancellationAssistant() {
+  return {
+    requests: [] as unknown[],
+    async open(request: unknown) {
+      this.requests.push(request);
+      return {
+        openedUrl: 'https://b.alipay.com/page/commodity-operation/activity/list?appId=2021005181665859&productCode=PROMO_ZHIMA_REDUCTION',
+        requiresManualLogin: true,
+        lines: [
+          '已打开差异化定价活动页面。',
+          '当前页面可能需要登录、切换子账号，或手动完成最后的取消确认。',
+        ],
+      };
+    },
+  };
+}
+
+async function writeActivitySubmitSessionFixture(status: string = 'price_callback_pending'): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), 'mt-agent-activity-cancel-sdk-'));
+  const submitSessionPath = join(dir, 'activity-submit-session.json');
+  await writeFile(submitSessionPath, `${JSON.stringify({
+    status,
+    submittedAt: '2026-06-24T08:00:00.000Z',
+    submittedUrl: 'https://b.alipay.com/page/commodity-operation/activity/activityForm?appId=2021005181665859&productCode=PROMO_ZHIMA_REDUCTION',
+    confirmationText: '返回活动列表',
+    startsAt: '2026-06-24',
+    endsAt: '2026-07-01',
+    mappedCount: 1,
+    unmappedCount: 0,
+    products: [
+      {
+        platformProductId: '2026062322000235349104',
+        merchantProductId: '81665859-886-06231159',
+        internalProductId: '886',
+      },
+    ],
+  }, null, 2)}\n`, 'utf8');
+  return submitSessionPath;
+}
+
 async function writeContext(): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), 'mt-agent-card-action-'));
   await mkdir(join(dir, '2026-06-11'), { recursive: true });
@@ -284,7 +324,9 @@ describe('createFeishuSdkBot card.action.trigger', () => {
       },
     });
 
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    for (let attempt = 0; attempt < 100 && (activityAutomationClient.executions.length < 1 || sent.length < 2); attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
 
     expect(activityAutomationClient.executions).toEqual([
       {
@@ -298,6 +340,7 @@ describe('createFeishuSdkBot card.action.trigger', () => {
     expect(JSON.stringify(sent[0])).toContain('处理中');
     expect(sent[1]).toMatchObject({ kind: 'patch', request: { path: { message_id: 'om-activity-automation' } } });
     expect(JSON.stringify(sent[1])).toContain('activity_price_callback_confirm');
+    expect(JSON.stringify(sent[1])).not.toContain('activity_cancel_open');
     expect(JSON.stringify(sent[1])).toContain('activity-submit-session.json');
     expect(JSON.stringify(sent[1])).toContain('770');
   });
@@ -450,6 +493,134 @@ describe('createFeishuSdkBot card.action.trigger', () => {
     expect(JSON.stringify((first as any).card.data)).toContain('已取消');
     expect(second).toMatchObject({ card: { type: 'raw', data: { schema: '2.0' } } });
     expect(JSON.stringify((second as any).card.data)).toContain('已经取消');
+  });
+
+  it('opens human-assisted activity cancellation and patches the card in place', async () => {
+    const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
+    const sent: unknown[] = [];
+    const activityCancellationAssistant = fakeActivityCancellationAssistant();
+    const submitSessionPath = await writeActivitySubmitSessionFixture();
+    const bot = createFeishuSdkBot({
+      appId: 'app',
+      appSecret: 'secret',
+      outputDir: 'output',
+      sdk: fakeSdk(sent, registered),
+      activityCancellationAssistant,
+    } as any);
+
+    bot.start();
+    await registered['card.action.trigger']({
+      event: {
+        context: { open_message_id: 'om-activity-cancel-open' },
+        action: {
+          tag: 'button',
+          name: 'cancel_differential_pricing_open_submit',
+          value: {
+            action: 'cancel_differential_pricing_open',
+            request: {
+              submitSessionPath,
+              productIds: ['886'],
+              mappedCount: 1,
+              startsAt: '2026-06-24',
+              endsAt: '2026-07-01',
+            },
+          },
+        },
+      },
+    });
+
+    for (let attempt = 0; attempt < 100 && sent.length < 1; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    expect(activityCancellationAssistant.requests).toEqual([
+      {
+        submitSessionPath,
+        productIds: ['886'],
+        mappedCount: 1,
+        startsAt: '2026-06-24',
+        endsAt: '2026-07-01',
+      },
+    ]);
+    expect(sent).toHaveLength(1);
+    expect(JSON.stringify(sent[0])).toContain('cancel_differential_pricing_done');
+    expect(JSON.stringify(sent[0])).toContain('cancel_differential_pricing_abort');
+    await expect(readFile(submitSessionPath, 'utf8')).resolves.toContain('"status": "cancel_assistance_opened"');
+  });
+
+  it('marks the submitted activity as cancelled after manual confirmation', async () => {
+    const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
+    const sent: unknown[] = [];
+    const submitSessionPath = await writeActivitySubmitSessionFixture('cancel_assistance_opened');
+    const bot = createFeishuSdkBot({
+      appId: 'app',
+      appSecret: 'secret',
+      outputDir: 'output',
+      sdk: fakeSdk(sent, registered),
+    });
+
+    bot.start();
+    await registered['card.action.trigger']({
+      event: {
+        context: { open_message_id: 'om-activity-cancel-done' },
+        action: {
+          tag: 'button',
+          name: 'cancel_differential_pricing_done_submit',
+          value: {
+            action: 'cancel_differential_pricing_done',
+            request: {
+              submitSessionPath,
+              productIds: ['886'],
+              mappedCount: 1,
+              startsAt: '2026-06-24',
+              endsAt: '2026-07-01',
+            },
+          },
+        },
+      },
+    });
+
+    expect(sent).toHaveLength(1);
+    expect(JSON.stringify(sent[0])).toContain('差异化定价活动已取消');
+    await expect(readFile(submitSessionPath, 'utf8')).resolves.toContain('"status": "cancelled"');
+  });
+
+  it('restores the price callback confirmation card when keeping the activity', async () => {
+    const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
+    const sent: unknown[] = [];
+    const submitSessionPath = await writeActivitySubmitSessionFixture('cancel_assistance_opened');
+    const bot = createFeishuSdkBot({
+      appId: 'app',
+      appSecret: 'secret',
+      outputDir: 'output',
+      sdk: fakeSdk(sent, registered),
+    });
+
+    bot.start();
+    await registered['card.action.trigger']({
+      event: {
+        context: { open_message_id: 'om-activity-cancel-abort' },
+        action: {
+          tag: 'button',
+          name: 'cancel_differential_pricing_abort_submit',
+          value: {
+            action: 'cancel_differential_pricing_abort',
+            request: {
+              submitSessionPath,
+              productIds: ['886'],
+              mappedCount: 1,
+              startsAt: '2026-06-24',
+              endsAt: '2026-07-01',
+            },
+          },
+        },
+      },
+    });
+
+    expect(sent).toHaveLength(1);
+    expect(JSON.stringify(sent[0])).toContain('取消差异化定价');
+    expect(JSON.stringify(sent[0])).toContain('cancel_differential_pricing_open');
+    await expect(readFile(submitSessionPath, 'utf8')).resolves.toContain('"status": "price_callback_pending"');
   });
 
   it('handles id_lookup form submit by returning the updated card', async () => {

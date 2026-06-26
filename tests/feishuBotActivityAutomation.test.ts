@@ -1,3 +1,6 @@
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { parseBotIntent } from '../src/feishuBot/intent.js';
 import { handleBotIntent } from '../src/feishuBot/tools.js';
@@ -36,6 +39,7 @@ describe('differential pricing Feishu integration', () => {
   it('parses differential pricing card commands', () => {
     expect(parseBotIntent('差异化定价')).toEqual({ type: 'differential_pricing_card' });
     expect(parseBotIntent('配置差异化定价')).toEqual({ type: 'differential_pricing_card' });
+    expect(parseBotIntent('取消差异化定价')).toEqual({ type: 'cancel_differential_pricing_card' });
   });
 
   it('returns a configuration card without executing the automation', async () => {
@@ -80,6 +84,7 @@ describe('differential pricing Feishu integration', () => {
     });
 
     expect(JSON.stringify(card)).toContain('activity_price_callback_confirm');
+    expect(JSON.stringify(card)).not.toContain('activity_cancel_open');
     expect(JSON.stringify(card)).toContain('770');
     expect(JSON.stringify(card)).toContain('activity-submit-session.json');
     expect(JSON.stringify(card)).toContain('activity_price_callback_cancel');
@@ -138,6 +143,37 @@ describe('differential pricing Feishu integration', () => {
       endsAt: '2026-06-30',
       discounts: { SS: '8.5', S: '9.0', A: '9.5', B: '9.8' },
     });
+  });
+
+  it('returns a standalone cancellation card for the latest differential pricing activity', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-cancel-differential-pricing-'));
+    const activityDir = join(outputDir, 'latest', 'activity-automation');
+    await mkdir(activityDir, { recursive: true });
+    await writeFile(join(activityDir, 'activity-submit-session.json'), `${JSON.stringify({
+      status: 'price_callback_pending',
+      submittedAt: '2026-06-24T08:00:00.000Z',
+      submittedUrl: 'https://b.alipay.com/page/commodity-operation/activity/activityForm?appId=2021005181665859&productCode=PROMO_ZHIMA_REDUCTION',
+      confirmationText: '返回活动列表',
+      startsAt: '2026-06-24',
+      endsAt: '2026-07-01',
+      mappedCount: 1,
+      unmappedCount: 0,
+      products: [
+        {
+          platformProductId: '2026062322000235349104',
+          merchantProductId: '81665859-886-06231159',
+          internalProductId: '886',
+        },
+      ],
+    }, null, 2)}\n`, 'utf8');
+
+    const response = await handleBotIntent({ type: 'cancel_differential_pricing_card' } as any, outputDir);
+
+    expect(response.text).toContain('取消差异化定价');
+    expect(response.card).toBeDefined();
+    expect(JSON.stringify(response.card)).toContain('cancel_differential_pricing_open');
+    expect(JSON.stringify(response.card)).toContain('886');
+    expect(JSON.stringify(response.card)).not.toContain('activity_price_callback_confirm');
   });
 
   it('parses the callback confirmation request from card action values', () => {

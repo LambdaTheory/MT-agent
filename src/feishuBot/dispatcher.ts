@@ -79,6 +79,7 @@ function canonicalizeIntent(intent: BotIntent): BotIntent {
   switch (intent.type) {
     case 'help':
     case 'differential_pricing_card':
+    case 'cancel_differential_pricing_card':
     case 'latest_summary':
     case 'operations_learning_quiz':
     case 'operations_learning_summary':

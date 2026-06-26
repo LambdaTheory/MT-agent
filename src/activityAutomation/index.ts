@@ -1,4 +1,5 @@
 export * from './config.js';
+export * from './cancelAssistance.js';
 export * from './dateFilling.js';
 export * from './differentialPricing.js';
 export * from './discountFilling.js';
