@@ -1,9 +1,44 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { execFile } from 'node:child_process';
+import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { dirname, resolve, sep, join, isAbsolute } from 'node:path';
+import { promisify } from 'node:util';
 import type { FeishuCardPayload } from '../notify/feishuApp.js';
 
+const execFileAsync = promisify(execFile);
+
+export interface RentalPriceAuditIssue {
+  level: string;
+  msg: string;
+}
+
+export interface RentalPriceAuditDiff {
+  specId?: string;
+  specTitle?: string;
+  field: string;
+  label: string;
+  unit?: string;
+  old: string;
+  new: string;
+  change: string;
+  changePct: string;
+  issues: RentalPriceAuditIssue[];
+}
+
+export interface RentalPriceAuditReference {
+  taskId?: string;
+  changesFile?: string;
+  rollbackFile?: string;
+  previewFile?: string | null;
+  currentValuesFile?: string;
+  diffFile?: string;
+  hasErrors?: boolean;
+  hasWarnings?: boolean;
+  rulesApplied?: string[];
+  diff?: RentalPriceAuditDiff[];
+}
+
 export type RentalPriceChangeRequest =
-  | { mode: 'explicit_fields'; productId: string; fields: Record<string, string> }
+  | { mode: 'explicit_fields'; productId: string; fields: Record<string, string>; audit?: RentalPriceAuditReference }
   | { mode: 'global_discount'; productId: string; discount: number; scope: 'rent_fields' | 'all_price_fields' };
 
 export interface RentalPricePreview {
@@ -11,12 +46,27 @@ export interface RentalPricePreview {
   fields: Record<string, string>;
   lines: string[];
   warnings: string[];
+  audit?: RentalPriceAuditReference;
 }
 
 export interface RentalPriceExecutionResult {
   productId: string;
   ok: boolean;
   lines: string[];
+  audit?: { taskId?: string; status: 'completed' | 'verify_failed' | 'failed' | 'untracked'; resultFile?: string; rollbackFile?: string };
+}
+
+export interface RentalPriceRollbackRequest {
+  productId: string;
+  rollbackFile?: string;
+  taskId?: string;
+}
+
+export interface RentalPriceRollbackResult {
+  productId: string;
+  ok: boolean;
+  lines: string[];
+  audit?: { taskId?: string; status: 'rolled_back' | 'rollback_failed' | 'rollback_verify_failed' | 'untracked'; resultFile?: string; rollbackFile?: string };
 }
 
 export interface RentalPriceCopyResult {
@@ -60,6 +110,7 @@ export interface RentalPriceSpecAddResult {
 export interface RentalPriceSkillClient {
   preview(request: RentalPriceChangeRequest): Promise<RentalPricePreview>;
   execute(request: Extract<RentalPriceChangeRequest, { mode: 'explicit_fields' }>): Promise<RentalPriceExecutionResult>;
+  rollback?(request: RentalPriceRollbackRequest): Promise<RentalPriceRollbackResult>;
   copy(productId: string): Promise<RentalPriceCopyResult>;
   delist(productId: string): Promise<RentalPriceDelistResult>;
   tenancySet(productId: string, days: string): Promise<RentalPriceTenancySetResult>;
@@ -82,6 +133,7 @@ interface RentalPriceSkillClientOptions {
 
 const RENT_FIELD_PATTERN = /(1|2|3|4|5|7|10|15|30|60|90|180)\s*天(?:租金)?\s*([0-9]+(?:\.[0-9]+)?)/g;
 const PRICE_FIELD_NAMES = new Set(['rent1day', 'rent2day', 'rent3day', 'rent4day', 'rent5day', 'rent7day', 'rent10day', 'rent15day', 'rent30day', 'rent60day', 'rent90day', 'rent180day', 'marketPrice', 'deposit', 'purchasePrice', 'costPrice', 'finalPayment']);
+const AUDIT_TASK_ID_PATTERN = /^task_\d+_[a-f0-9]+$/i;
 
 function money(value: string | number): string {
   return Number(value).toFixed(2);
@@ -108,8 +160,75 @@ export function parseRentalPriceChange(text: string): RentalPriceChangeRequest |
   return Object.keys(fields).length ? { mode: 'explicit_fields', productId, fields } : null;
 }
 
+function compactAuditReference(audit: RentalPriceAuditReference | undefined): RentalPriceAuditReference | undefined {
+  if (!audit) return undefined;
+  return {
+    ...(audit.taskId ? { taskId: audit.taskId } : {}),
+    ...(audit.changesFile ? { changesFile: audit.changesFile } : {}),
+    ...(audit.rollbackFile ? { rollbackFile: audit.rollbackFile } : {}),
+    ...(audit.previewFile ? { previewFile: audit.previewFile } : {}),
+    ...(audit.currentValuesFile ? { currentValuesFile: audit.currentValuesFile } : {}),
+    ...(audit.diffFile ? { diffFile: audit.diffFile } : {}),
+    ...(audit.hasErrors !== undefined ? { hasErrors: audit.hasErrors } : {}),
+    ...(audit.hasWarnings !== undefined ? { hasWarnings: audit.hasWarnings } : {}),
+    ...(audit.rulesApplied ? { rulesApplied: audit.rulesApplied } : {}),
+  };
+}
+
+function auditStatusText(audit: RentalPriceAuditReference): string {
+  if (audit.hasErrors) return '🔴 有错误';
+  if (audit.hasWarnings) return '🟡 有警告';
+  return '✅ 通过';
+}
+
+function diffLine(diff: RentalPriceAuditDiff): string {
+  const issues = diff.issues.length ? `｜${diff.issues.map((issue) => `${issue.level}: ${issue.msg}`).join('；')}` : '';
+  const name = diff.specTitle ? `${diff.specTitle} / ${diff.label}` : diff.label;
+  return `- ${name}: ${diff.old}${diff.unit ?? ''} -> ${diff.new}${diff.unit ?? ''}（${diff.changePct}）${issues}`;
+}
+
+function auditMarkdown(audit: RentalPriceAuditReference): string {
+  const lines = [
+    `**审计预览** ${auditStatusText(audit)}`,
+    ...(audit.taskId ? [`审计任务：${audit.taskId}`] : []),
+    ...(audit.changesFile ? [`变更文件：${audit.changesFile}`] : []),
+    ...(audit.rollbackFile ? [`回滚文件：${audit.rollbackFile}`] : []),
+    ...(audit.previewFile ? [`HTML预览：${audit.previewFile}`] : []),
+  ];
+  const diffs = audit.diff?.slice(0, 8).map(diffLine) ?? [];
+  if (diffs.length > 0) lines.push('', ...diffs);
+  if ((audit.diff?.length ?? 0) > diffs.length) lines.push(`还有 ${(audit.diff?.length ?? 0) - diffs.length} 条变更已写入审计文件。`);
+  return lines.join('\n');
+}
+
 export function buildRentalPricePreviewCard(preview: RentalPricePreview): FeishuCardPayload {
-  const request: Extract<RentalPriceChangeRequest, { mode: 'explicit_fields' }> = { mode: 'explicit_fields', productId: preview.productId, fields: preview.fields };
+  const audit = preview.audit;
+  const request: Extract<RentalPriceChangeRequest, { mode: 'explicit_fields' }> = {
+    mode: 'explicit_fields',
+    productId: preview.productId,
+    fields: preview.fields,
+    ...(audit && !audit.hasErrors ? { audit: compactAuditReference(audit) } : {}),
+  };
+  const formElements: Record<string, unknown>[] = [];
+  if (!audit?.hasErrors) {
+    formElements.push({
+      tag: 'button',
+      text: { tag: 'plain_text', content: '确认改价' },
+      type: 'primary',
+      form_action_type: 'submit',
+      name: 'rental_price_confirm_submit',
+      behaviors: [{ type: 'callback', value: { action: 'rental_price_confirm', request } }],
+    });
+  }
+  formElements.push({
+    tag: 'button',
+    text: { tag: 'plain_text', content: '取消' },
+    type: 'default',
+    form_action_type: 'submit',
+    name: 'rental_price_cancel_submit',
+    behaviors: [{ type: 'callback', value: { action: 'rental_price_cancel', productId: preview.productId } }],
+  });
+
   return {
     schema: '2.0',
     config: { wide_screen_mode: true },
@@ -117,28 +236,12 @@ export function buildRentalPricePreviewCard(preview: RentalPricePreview): Feishu
     body: {
       elements: [
         { tag: 'markdown', content: `**商品 ${preview.productId} 改价预览**\n${preview.lines.join('\n')}` },
+        ...(audit ? [{ tag: 'markdown', content: audit.hasErrors ? `${auditMarkdown(audit)}\n\n**审计发现错误，已阻断执行。** 请调整价格后重新发起。` : auditMarkdown(audit) }] : []),
         ...(preview.warnings.length ? [{ tag: 'markdown', content: `**风险提示**\n${preview.warnings.join('\n')}` }] : []),
         {
           tag: 'form',
-          name: 'rental_price_confirm_form',
-          elements: [
-            {
-              tag: 'button',
-              text: { tag: 'plain_text', content: '确认改价' },
-              type: 'primary',
-              form_action_type: 'submit',
-              name: 'rental_price_confirm_submit',
-              behaviors: [{ type: 'callback', value: { action: 'rental_price_confirm', request } }],
-            },
-            {
-              tag: 'button',
-              text: { tag: 'plain_text', content: '取消' },
-              type: 'default',
-              form_action_type: 'submit',
-              name: 'rental_price_cancel_submit',
-              behaviors: [{ type: 'callback', value: { action: 'rental_price_cancel', productId: preview.productId } }],
-            },
-          ],
+          name: audit?.hasErrors ? 'rental_price_cancel_form' : 'rental_price_confirm_form',
+          elements: formElements,
         },
       ],
     },
@@ -245,6 +348,234 @@ function moneyValue(value: unknown): string | null {
   return Number.isFinite(numeric) ? money(numeric) : null;
 }
 
+function pathForCompare(path: string): string {
+  return process.platform === 'win32' ? path.toLowerCase() : path;
+}
+
+function isPathInside(rootDir: string, targetPath: string): boolean {
+  const root = pathForCompare(resolve(rootDir));
+  const target = pathForCompare(resolve(targetPath));
+  const rootWithSep = root.endsWith(sep) ? root : `${root}${sep}`;
+  return target === root || target.startsWith(rootWithSep);
+}
+
+function safeAuditPath(rootDir: string, path: unknown): string | undefined {
+  if (typeof path !== 'string' || !path.trim() || path.includes('\0')) return undefined;
+  const resolved = resolve(isAbsolute(path) ? path : join(rootDir, path));
+  return isPathInside(rootDir, resolved) ? resolved : undefined;
+}
+
+async function fileExists(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function writeJsonFile(path: string, value: unknown): Promise<void> {
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, JSON.stringify(value, null, 2), 'utf8');
+}
+
+async function runNodeJson(scriptPath: string, args: string[]): Promise<Record<string, unknown>> {
+  const { stdout } = await execFileAsync(process.execPath, [scriptPath, ...args], {
+    cwd: dirname(scriptPath),
+    encoding: 'utf8',
+    maxBuffer: 4 * 1024 * 1024,
+    windowsHide: true,
+  });
+  return JSON.parse(String(stdout)) as Record<string, unknown>;
+}
+
+function normalizeAuditIssue(value: unknown): RentalPriceAuditIssue | null {
+  if (!isRecord(value)) return null;
+  const level = typeof value.level === 'string' && value.level.trim() ? value.level.trim() : 'info';
+  const msg = typeof value.msg === 'string' ? value.msg : '';
+  return { level, msg };
+}
+
+function normalizeAuditDiff(value: unknown): RentalPriceAuditDiff | null {
+  if (!isRecord(value) || typeof value.field !== 'string') return null;
+  const issues = Array.isArray(value.issues) ? value.issues.map(normalizeAuditIssue).filter((issue): issue is RentalPriceAuditIssue => Boolean(issue)) : [];
+  return {
+    ...(typeof value.specId === 'string' ? { specId: value.specId } : {}),
+    ...(typeof value.specTitle === 'string' ? { specTitle: value.specTitle } : {}),
+    field: value.field,
+    label: typeof value.label === 'string' && value.label.trim() ? value.label : value.field,
+    ...(typeof value.unit === 'string' ? { unit: value.unit } : {}),
+    old: String(value.old ?? ''),
+    new: String(value.new ?? ''),
+    change: String(value.change ?? ''),
+    changePct: String(value.changePct ?? ''),
+    issues,
+  };
+}
+
+function normalizeAuditDiffs(value: unknown): RentalPriceAuditDiff[] {
+  return Array.isArray(value) ? value.map(normalizeAuditDiff).filter((diff): diff is RentalPriceAuditDiff => Boolean(diff)) : [];
+}
+
+function normalizeStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const items = value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0).map((item) => item.trim());
+  return items.length ? items : undefined;
+}
+
+function normalizePriceFields(value: unknown): Record<string, string> | null {
+  if (!isRecord(value)) return null;
+  const fields: Record<string, string> = {};
+  for (const [field, raw] of Object.entries(value)) {
+    if (PRICE_FIELD_NAMES.has(field) && (typeof raw === 'string' || typeof raw === 'number') && Number.isFinite(Number(raw))) fields[field] = money(raw);
+  }
+  return Object.keys(fields).length ? fields : null;
+}
+
+function buildRollbackFields(current: Record<string, unknown>, fields: Record<string, string>): Record<string, string> {
+  const values = readableValues(current);
+  const rollback: Record<string, string> = {};
+  for (const field of Object.keys(fields)) {
+    const formatted = moneyValue(values[field]);
+    if (formatted !== null) rollback[field] = formatted;
+    else if (typeof values[field] === 'string' && values[field].trim()) rollback[field] = values[field].trim();
+  }
+  return rollback;
+}
+
+function timestampToken(): string {
+  return `${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
+}
+
+async function createAuditPreview(rootDir: string, productId: string, current: Record<string, unknown>, fields: Record<string, string>): Promise<RentalPriceAuditReference | null> {
+  const diffScript = join(rootDir, 'scripts', 'diff-generator.js');
+  const taskStoreScript = join(rootDir, 'scripts', 'task-store.js');
+  const configPath = join(rootDir, 'config.json');
+  const scriptsReady = await Promise.all([fileExists(diffScript), fileExists(taskStoreScript), fileExists(configPath)]);
+  if (!scriptsReady.every(Boolean)) return null;
+
+  const tasksDir = join(rootDir, 'tasks');
+  await mkdir(tasksDir, { recursive: true });
+  const token = timestampToken();
+  const currentValuesFile = join(tasksDir, `mt-agent-current-${productId}-${token}.json`);
+  const intentFile = join(tasksDir, `mt-agent-intent-${productId}-${token}.json`);
+  const diffFile = join(tasksDir, `mt-agent-diff-${productId}-${token}.json`);
+  const rollbackFile = join(tasksDir, `rollback_${productId}-${token}.json`);
+  const currentSnapshot = {
+    ...current,
+    productId,
+    values: isRecord(current.values) ? current.values : {},
+    specs: Array.isArray(current.specs) ? current.specs : [],
+  };
+  await writeJsonFile(currentValuesFile, currentSnapshot);
+  await writeJsonFile(intentFile, fields);
+
+  const diffResult = await runNodeJson(diffScript, [currentValuesFile, intentFile, '--html']);
+  await writeJsonFile(diffFile, diffResult);
+  const changesFile = safeAuditPath(rootDir, diffResult.changesFile) ?? undefined;
+  const previewFile = typeof diffResult.previewFile === 'string' ? safeAuditPath(rootDir, diffResult.previewFile) ?? null : null;
+  const rollbackFields = buildRollbackFields(currentSnapshot, fields);
+  await writeJsonFile(rollbackFile, { __broadcast: true, ...rollbackFields });
+
+  let taskId: string | undefined;
+  if (changesFile) {
+    try {
+      const taskResult = await runNodeJson(taskStoreScript, ['create', `改价 商品 ${productId}`, changesFile]);
+      taskId = typeof taskResult.taskId === 'string' && AUDIT_TASK_ID_PATTERN.test(taskResult.taskId) ? taskResult.taskId : undefined;
+      if (taskId) {
+        await Promise.all([
+          runNodeJson(taskStoreScript, ['update', taskId, 'rollbackFile', rollbackFile]).catch(() => ({})),
+          runNodeJson(taskStoreScript, ['update', taskId, 'currentValuesFile', currentValuesFile]).catch(() => ({})),
+          runNodeJson(taskStoreScript, ['update', taskId, 'diffFile', diffFile]).catch(() => ({})),
+          ...(previewFile ? [runNodeJson(taskStoreScript, ['update', taskId, 'previewFile', previewFile]).catch(() => ({}))] : []),
+        ]);
+      }
+    } catch {
+      taskId = undefined;
+    }
+  }
+
+  return {
+    ...(taskId ? { taskId } : {}),
+    ...(changesFile ? { changesFile } : {}),
+    rollbackFile,
+    previewFile,
+    currentValuesFile,
+    diffFile,
+    diff: normalizeAuditDiffs(diffResult.diff),
+    hasErrors: Boolean(diffResult.hasErrors),
+    hasWarnings: Boolean(diffResult.hasWarnings),
+    ...(normalizeStringArray(diffResult.rulesApplied) ? { rulesApplied: normalizeStringArray(diffResult.rulesApplied) } : {}),
+  };
+}
+
+function parseAuditCallbackReference(value: unknown): RentalPriceAuditReference | undefined {
+  if (!isRecord(value)) return undefined;
+  const audit: RentalPriceAuditReference = {};
+  if (typeof value.taskId === 'string' && AUDIT_TASK_ID_PATTERN.test(value.taskId)) audit.taskId = value.taskId;
+  for (const key of ['changesFile', 'rollbackFile', 'currentValuesFile', 'diffFile'] as const) {
+    const path = readString(value[key]);
+    if (path && !path.includes('\0')) audit[key] = path;
+  }
+  const previewFile = value.previewFile === null ? null : readString(value.previewFile);
+  if (previewFile !== null && !previewFile.includes('\0')) audit.previewFile = previewFile;
+  if (typeof value.hasErrors === 'boolean') audit.hasErrors = value.hasErrors;
+  if (typeof value.hasWarnings === 'boolean') audit.hasWarnings = value.hasWarnings;
+  const rulesApplied = normalizeStringArray(value.rulesApplied);
+  if (rulesApplied) audit.rulesApplied = rulesApplied;
+  return Object.keys(audit).length ? audit : undefined;
+}
+
+function safeAuditForExecution(rootDir: string, audit: RentalPriceAuditReference | undefined): RentalPriceAuditReference | undefined {
+  if (!audit) return undefined;
+  return {
+    ...(audit.taskId && AUDIT_TASK_ID_PATTERN.test(audit.taskId) ? { taskId: audit.taskId } : {}),
+    ...(safeAuditPath(rootDir, audit.changesFile) ? { changesFile: safeAuditPath(rootDir, audit.changesFile) } : {}),
+    ...(safeAuditPath(rootDir, audit.rollbackFile) ? { rollbackFile: safeAuditPath(rootDir, audit.rollbackFile) } : {}),
+    ...(safeAuditPath(rootDir, audit.previewFile ?? undefined) ? { previewFile: safeAuditPath(rootDir, audit.previewFile ?? undefined) } : {}),
+    ...(safeAuditPath(rootDir, audit.currentValuesFile) ? { currentValuesFile: safeAuditPath(rootDir, audit.currentValuesFile) } : {}),
+    ...(safeAuditPath(rootDir, audit.diffFile) ? { diffFile: safeAuditPath(rootDir, audit.diffFile) } : {}),
+    ...(audit.hasErrors !== undefined ? { hasErrors: audit.hasErrors } : {}),
+    ...(audit.hasWarnings !== undefined ? { hasWarnings: audit.hasWarnings } : {}),
+    ...(audit.rulesApplied ? { rulesApplied: audit.rulesApplied } : {}),
+  };
+}
+
+async function updateAuditTask(rootDir: string, audit: RentalPriceAuditReference | undefined, status: 'completed' | 'verify_failed' | 'failed' | 'rolled_back' | 'rollback_failed' | 'rollback_verify_failed', resultFile?: string, evidenceType = 'verify_result'): Promise<void> {
+  if (!audit?.taskId || !AUDIT_TASK_ID_PATTERN.test(audit.taskId)) return;
+  const taskStoreScript = join(rootDir, 'scripts', 'task-store.js');
+  if (!(await fileExists(taskStoreScript))) return;
+  await runNodeJson(taskStoreScript, ['update', audit.taskId, 'status', status]).catch(() => ({}));
+  if (resultFile) await runNodeJson(taskStoreScript, ['add-evidence', audit.taskId, evidenceType, resultFile]).catch(() => ({}));
+}
+
+async function readJsonRecord(path: string): Promise<Record<string, unknown>> {
+  const parsed = JSON.parse(await readFile(path, 'utf8')) as unknown;
+  if (!isRecord(parsed)) throw new Error(`JSON file must contain an object: ${path}`);
+  return parsed;
+}
+
+async function resolveRollbackReference(rootDir: string, request: RentalPriceRollbackRequest): Promise<{ audit: RentalPriceAuditReference; fields: Record<string, string> }> {
+  const audit: RentalPriceAuditReference = {};
+  if (request.taskId && AUDIT_TASK_ID_PATTERN.test(request.taskId)) audit.taskId = request.taskId;
+
+  let rollbackFile = safeAuditPath(rootDir, request.rollbackFile);
+  if (!rollbackFile && audit.taskId) {
+    const taskFile = join(rootDir, 'tasks', `${audit.taskId}.json`);
+    if (!(await fileExists(taskFile))) throw new Error(`审计任务不存在：${audit.taskId}`);
+    const task = await readJsonRecord(taskFile);
+    rollbackFile = safeAuditPath(rootDir, task.rollbackFile);
+  }
+
+  if (!rollbackFile) throw new Error('回滚需要 rollbackFile，或提供包含 rollbackFile 的 taskId。');
+  if (!(await fileExists(rollbackFile))) throw new Error(`回滚文件不存在：${rollbackFile}`);
+
+  const fields = normalizePriceFields(await readJsonRecord(rollbackFile));
+  if (!fields) throw new Error(`回滚文件没有可执行的价格字段：${rollbackFile}`);
+  audit.rollbackFile = rollbackFile;
+  return { audit, fields };
+}
+
 async function readOptionalText(path: string): Promise<string | null> {
   try {
     const value = (await readFile(path, 'utf8')).trim();
@@ -284,25 +615,152 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
       const current = await send({ action: 'read', productId: request.productId });
       const values = isRecord(current.values) ? current.values : {};
       const fields = selectedFields(values, request);
-      return { productId: request.productId, fields, lines: Object.entries(fields).map(([field, value]) => `${field} -> ${value}`), warnings: [] };
+      const lines = Object.entries(fields).map(([field, value]) => `${field} -> ${value}`);
+      const warnings: string[] = [];
+      let audit: RentalPriceAuditReference | null = null;
+      if (Object.keys(fields).length > 0) {
+        try {
+          audit = await createAuditPreview(rootDir, request.productId, current, fields);
+          if (audit?.taskId) lines.push(`审计任务: ${audit.taskId}`);
+          if (audit?.rollbackFile) lines.push(`回滚文件: ${audit.rollbackFile}`);
+          if (audit?.hasErrors) warnings.push('审计发现错误，已阻断执行。');
+          else if (audit?.hasWarnings) warnings.push('审计发现警告，请确认后再执行。');
+          else if (!audit) warnings.push('审计预览不可用：未找到 rental-price-agent 审计脚本或 config.json，已降级为普通改价预览。');
+        } catch (error) {
+          warnings.push(`审计预览不可用：${error instanceof Error ? error.message : String(error)}，已降级为普通改价预览。`);
+        }
+      }
+      return { productId: request.productId, fields, lines, warnings, ...(audit ? { audit } : {}) };
     },
     async execute(request) {
       const tasksDir = join(rootDir, 'tasks');
       await mkdir(tasksDir, { recursive: true });
-      const changesFile = join(tasksDir, `mt-agent-changes-${Date.now()}.json`);
-      await writeFile(changesFile, JSON.stringify({ __broadcast: true, ...request.fields }, null, 2), 'utf8');
+      if (request.audit?.hasErrors) {
+        return {
+          productId: request.productId,
+          ok: false,
+          lines: ['apply: skipped', 'submit: skipped', 'verify: skipped', 'audit: blocked_by_errors'],
+          audit: { ...(request.audit.taskId ? { taskId: request.audit.taskId } : {}), status: 'failed', ...(request.audit.rollbackFile ? { rollbackFile: request.audit.rollbackFile } : {}) },
+        };
+      }
+      const audit = safeAuditForExecution(rootDir, request.audit);
+      let changesFile = audit?.changesFile;
+      if (!changesFile || !(await fileExists(changesFile))) {
+        changesFile = join(tasksDir, `mt-agent-changes-${Date.now()}.json`);
+        await writeFile(changesFile, JSON.stringify({ __broadcast: true, ...request.fields }, null, 2), 'utf8');
+      }
+      const auditLines = [
+        ...(audit?.taskId ? [`auditTask: ${audit.taskId}`] : []),
+        ...(audit?.rollbackFile ? [`rollbackFile: ${audit.rollbackFile}`] : []),
+      ];
       const apply = await send({ action: 'apply', productId: request.productId, changesFile });
       const applyStatus = commandStatus(apply);
-      if (applyStatus !== 'ok') return { productId: request.productId, ok: false, lines: [`apply: ${applyStatus}`, 'submit: skipped', 'verify: skipped'] };
+      if (applyStatus !== 'ok') {
+        await updateAuditTask(rootDir, audit, 'failed');
+        return {
+          productId: request.productId,
+          ok: false,
+          lines: [`apply: ${applyStatus}`, 'submit: skipped', 'verify: skipped', ...auditLines],
+          ...(audit ? { audit: { ...(audit.taskId ? { taskId: audit.taskId } : {}), status: audit.taskId ? 'failed' : 'untracked', ...(audit.rollbackFile ? { rollbackFile: audit.rollbackFile } : {}) } } : {}),
+        };
+      }
 
       const submit = await send({ action: 'submit' });
       const submitStatus = commandStatus(submit);
-      if (submitStatus !== 'ok') return { productId: request.productId, ok: false, lines: [`apply: ${applyStatus}`, `submit: ${submitStatus}`, 'verify: skipped'] };
+      if (submitStatus !== 'ok') {
+        await updateAuditTask(rootDir, audit, 'failed');
+        return {
+          productId: request.productId,
+          ok: false,
+          lines: [`apply: ${applyStatus}`, `submit: ${submitStatus}`, 'verify: skipped', ...auditLines],
+          ...(audit ? { audit: { ...(audit.taskId ? { taskId: audit.taskId } : {}), status: audit.taskId ? 'failed' : 'untracked', ...(audit.rollbackFile ? { rollbackFile: audit.rollbackFile } : {}) } } : {}),
+        };
+      }
 
       const verified = await send({ action: 'read', productId: request.productId });
       const verifyStatus = commandStatus(verified);
       const fieldsMatch = verifiedFields(verified, request.fields);
-      return { productId: request.productId, ok: verifyStatus !== 'error' && fieldsMatch, lines: [`apply: ${applyStatus}`, `submit: ${submitStatus}`, `verify: ${verifyStatus}`, `fields: ${fieldsMatch ? 'matched' : 'mismatch'}`] };
+      const ok = verifyStatus !== 'error' && fieldsMatch;
+      const auditStatus: 'completed' | 'verify_failed' = ok ? 'completed' : 'verify_failed';
+      const resultFile = join(tasksDir, `verify-${request.productId}-${timestampToken()}.json`);
+      await writeJsonFile(resultFile, {
+        productId: request.productId,
+        ok,
+        expectedFields: request.fields,
+        applyStatus,
+        submitStatus,
+        verifyStatus,
+        fieldsMatch,
+        verified,
+        changesFile,
+        rollbackFile: audit?.rollbackFile,
+        createdAt: new Date().toISOString(),
+      });
+      await updateAuditTask(rootDir, audit, auditStatus, resultFile);
+      return {
+        productId: request.productId,
+        ok,
+        lines: [`apply: ${applyStatus}`, `submit: ${submitStatus}`, `verify: ${verifyStatus}`, `fields: ${fieldsMatch ? 'matched' : 'mismatch'}`, ...auditLines, ...(audit ? [`verifyFile: ${resultFile}`] : [])],
+        ...(audit ? { audit: { ...(audit.taskId ? { taskId: audit.taskId } : {}), status: audit.taskId ? auditStatus : 'untracked', resultFile, ...(audit.rollbackFile ? { rollbackFile: audit.rollbackFile } : {}) } } : {}),
+      };
+    },
+    async rollback(request) {
+      const tasksDir = join(rootDir, 'tasks');
+      await mkdir(tasksDir, { recursive: true });
+      const { audit, fields } = await resolveRollbackReference(rootDir, request);
+      const auditLines = [
+        ...(audit.taskId ? [`auditTask: ${audit.taskId}`] : []),
+        ...(audit.rollbackFile ? [`rollbackFile: ${audit.rollbackFile}`] : []),
+      ];
+      const apply = await send({ action: 'apply', productId: request.productId, changesFile: audit.rollbackFile });
+      const applyStatus = commandStatus(apply);
+      if (applyStatus !== 'ok') {
+        await updateAuditTask(rootDir, audit, 'rollback_failed');
+        return {
+          productId: request.productId,
+          ok: false,
+          lines: [`rollbackApply: ${applyStatus}`, 'submit: skipped', 'verify: skipped', ...auditLines],
+          audit: { ...(audit.taskId ? { taskId: audit.taskId } : {}), status: audit.taskId ? 'rollback_failed' : 'untracked', ...(audit.rollbackFile ? { rollbackFile: audit.rollbackFile } : {}) },
+        };
+      }
+
+      const submit = await send({ action: 'submit' });
+      const submitStatus = commandStatus(submit);
+      if (submitStatus !== 'ok') {
+        await updateAuditTask(rootDir, audit, 'rollback_failed');
+        return {
+          productId: request.productId,
+          ok: false,
+          lines: [`rollbackApply: ${applyStatus}`, `submit: ${submitStatus}`, 'verify: skipped', ...auditLines],
+          audit: { ...(audit.taskId ? { taskId: audit.taskId } : {}), status: audit.taskId ? 'rollback_failed' : 'untracked', ...(audit.rollbackFile ? { rollbackFile: audit.rollbackFile } : {}) },
+        };
+      }
+
+      const verified = await send({ action: 'read', productId: request.productId });
+      const verifyStatus = commandStatus(verified);
+      const fieldsMatch = verifiedFields(verified, fields);
+      const ok = verifyStatus !== 'error' && fieldsMatch;
+      const auditStatus: 'rolled_back' | 'rollback_verify_failed' = ok ? 'rolled_back' : 'rollback_verify_failed';
+      const resultFile = join(tasksDir, `rollback-verify-${request.productId}-${timestampToken()}.json`);
+      await writeJsonFile(resultFile, {
+        productId: request.productId,
+        ok,
+        expectedFields: fields,
+        applyStatus,
+        submitStatus,
+        verifyStatus,
+        fieldsMatch,
+        verified,
+        rollbackFile: audit.rollbackFile,
+        createdAt: new Date().toISOString(),
+      });
+      await updateAuditTask(rootDir, audit, auditStatus, resultFile, 'rollback_verify_result');
+      return {
+        productId: request.productId,
+        ok,
+        lines: [`rollbackApply: ${applyStatus}`, `submit: ${submitStatus}`, `verify: ${verifyStatus}`, `fields: ${fieldsMatch ? 'matched' : 'mismatch'}`, ...auditLines, `verifyFile: ${resultFile}`],
+        audit: { ...(audit.taskId ? { taskId: audit.taskId } : {}), status: audit.taskId ? auditStatus : 'untracked', resultFile, ...(audit.rollbackFile ? { rollbackFile: audit.rollbackFile } : {}) },
+      };
     },
     async copy(productId) {
       const result = await send({ action: 'copy', productId });
@@ -392,11 +850,14 @@ export function parseRentalPriceConfirmRequest(value: unknown): Extract<RentalPr
   if (!isRecord(value)) return null;
   const request = value.request;
   if (!isRecord(request) || request.mode !== 'explicit_fields' || typeof request.productId !== 'string' || !isRecord(request.fields)) return null;
+  if (isRecord(request.audit) && request.audit.hasErrors === true) return null;
   const fields: Record<string, string> = {};
   for (const [field, raw] of Object.entries(request.fields)) {
     if (PRICE_FIELD_NAMES.has(field) && typeof raw === 'string' && Number.isFinite(Number(raw))) fields[field] = money(raw);
   }
-  return Object.keys(fields).length ? { mode: 'explicit_fields', productId: request.productId, fields } : null;
+  if (!Object.keys(fields).length) return null;
+  const audit = parseAuditCallbackReference(request.audit);
+  return { mode: 'explicit_fields', productId: request.productId, fields, ...(audit ? { audit } : {}) };
 }
 
 function readString(value: unknown): string | null {
@@ -406,6 +867,38 @@ function readString(value: unknown): string | null {
 function readProductId(value: unknown): string | null {
   const raw = readString(value);
   return raw && /^\d+$/.test(raw) ? raw : null;
+}
+
+export function rentalPriceChangeRequestFromToolArguments(args: Record<string, unknown>): RentalPriceChangeRequest | null {
+  const productId = readProductId(args.productId);
+  if (!productId) return null;
+
+  const fields = normalizePriceFields(args.fields);
+  if (fields) return { mode: 'explicit_fields', productId, fields };
+
+  const rawDiscount = args.discount;
+  const discount = typeof rawDiscount === 'number' ? rawDiscount : typeof rawDiscount === 'string' ? Number(rawDiscount) : NaN;
+  if (Number.isFinite(discount) && discount > 0) {
+    const rawScope = readString(args.scope);
+    const scope = rawScope === 'all_price_fields' ? 'all_price_fields' : 'rent_fields';
+    return { mode: 'global_discount', productId, discount, scope };
+  }
+
+  return null;
+}
+
+export function rentalPriceRollbackRequestFromToolArguments(args: Record<string, unknown>): RentalPriceRollbackRequest | null {
+  const productId = readProductId(args.productId);
+  if (!productId) return null;
+  const taskId = readString(args.taskId);
+  const rollbackFile = readString(args.rollbackFile);
+  if (!taskId && !rollbackFile) return null;
+  if (taskId && !AUDIT_TASK_ID_PATTERN.test(taskId)) return null;
+  return {
+    productId,
+    ...(taskId ? { taskId } : {}),
+    ...(rollbackFile ? { rollbackFile } : {}),
+  };
 }
 
 export function parseRentalOperationConfirmRequest(value: unknown): RentalOperationConfirmRequest | null {

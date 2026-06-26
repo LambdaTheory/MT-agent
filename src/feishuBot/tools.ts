@@ -47,6 +47,7 @@ import {
   buildRentalOperationConfirmCard,
   buildRentalPricePreviewCard,
   createRentalPriceSkillClient,
+  rentalPriceChangeRequestFromToolArguments,
   type RentalOperationConfirmRequest,
   type RentalPriceSkillClient,
 } from './rentalPrice.js';
@@ -441,6 +442,13 @@ async function agentPlannerResponse(
     arguments: parsed.proposal.arguments,
     reason: parsed.proposal.reason,
   };
+  if (parsed.proposal.selectedTool === 'rental.priceChange') {
+    const rentalRequest = rentalPriceChangeRequestFromToolArguments(parsed.proposal.arguments);
+    if (!rentalRequest) return { text: '租赁商品改价参数无效：需要 productId，并提供 fields 或 discount。' };
+    const rentalPriceClient = options.rentalPriceClient ?? createRentalPriceSkillClient();
+    const preview = await rentalPriceClient.preview(rentalRequest);
+    return { text: `请确认商品 ${rentalRequest.productId} 改价`, card: buildRentalPricePreviewCard(preview) };
+  }
   if (parsed.policy.decision === 'allow') {
     return executeAgentToolRequest(request, outputDir, {
       rentalPriceClient: options.rentalPriceClient,

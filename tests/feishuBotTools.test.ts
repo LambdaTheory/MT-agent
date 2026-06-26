@@ -1287,6 +1287,66 @@ describe('handleBotIntent', () => {
     expect(JSON.stringify(response.card)).toContain('22.00');
   });
 
+  it('turns Agent-planned rental.priceChange into the dedicated rental price preview card', async () => {
+    const planner: AgentPlannerProvider = {
+      async proposePlan(request) {
+        expect(request.tools.map((tool) => tool.name)).toContain('rental.priceChange');
+        return JSON.stringify({
+          goal: '改商品 761 的租金',
+          selectedTool: 'rental.priceChange',
+          arguments: { productId: '761', fields: { rent1day: 22 } },
+          confidence: 0.94,
+          reason: '用户要求把 761 的 1 天租金改成 22',
+        });
+      },
+    };
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview(request) {
+        expect(request).toEqual({ mode: 'explicit_fields', productId: '761', fields: { rent1day: '22.00' } });
+        if (request.mode !== 'explicit_fields') throw new Error('expected explicit fields preview');
+        return { productId: '761', fields: request.fields, lines: ['rent1day -> 22.00'], warnings: [] };
+      },
+      async execute() { throw new Error('execute should not run before price confirmation'); },
+      async copy() { throw new Error('copy should not run'); },
+      async delist() { throw new Error('delist should not run'); },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+
+    const response = await handleBotIntent({ type: 'unknown', text: '把 761 的 1 天租金改成 22' }, 'output', { agentPlannerProvider: planner, rentalPriceClient });
+
+    expect(response.text).toContain('请确认商品 761 改价');
+    expect(JSON.stringify(response.card)).toContain('rental_price_confirm');
+    expect(JSON.stringify(response.card)).not.toContain('agent_tool_confirm');
+  });
+
+  it('executes rental.priceRollback through the confirmed Agent tool path', async () => {
+    const calls: unknown[] = [];
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run for rollback'); },
+      async execute() { throw new Error('execute should not run for rollback'); },
+      async rollback(request) {
+        calls.push(request);
+        return { productId: request.productId, ok: true, lines: ['rollbackApply: ok', 'submit: ok', 'verify: ok'] };
+      },
+      async copy() { throw new Error('copy should not run'); },
+      async delist() { throw new Error('delist should not run'); },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+
+    const response = await executeAgentToolRequest(
+      { toolName: 'rental.priceRollback', arguments: { productId: '761', taskId: 'task_123_abcd1234' }, reason: '用户要求回滚改价任务' },
+      'output',
+      { rentalPriceClient },
+    );
+
+    expect(calls).toEqual([{ productId: '761', taskId: 'task_123_abcd1234' }]);
+    expect(response.text).toContain('改价回滚成功：商品 761');
+  });
+
   it('syncs closed-order feedback through the bot command', async () => {
     const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-closed-order-bot-sync-'));
     const fetchImpl = async () => new Response(JSON.stringify({

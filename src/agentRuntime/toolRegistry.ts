@@ -39,6 +39,27 @@ const specAddAndRefreshArgumentsSchema = {
   required: ['productId', 'itemTitle'],
   additionalProperties: false,
 };
+const rentalPriceChangeArgumentsSchema = {
+  type: 'object',
+  properties: {
+    productId: { type: 'string' },
+    fields: { type: 'object' },
+    discount: { type: 'number' },
+    scope: { type: 'string', enum: ['rent_fields', 'all_price_fields'] },
+  },
+  required: ['productId'],
+  additionalProperties: false,
+};
+const rentalPriceRollbackArgumentsSchema = {
+  type: 'object',
+  properties: {
+    productId: { type: 'string' },
+    taskId: { type: 'string' },
+    rollbackFile: { type: 'string' },
+  },
+  required: ['productId'],
+  additionalProperties: false,
+};
 const rentalOperationArgumentsSchema = {
   type: 'object',
   properties: {
@@ -156,6 +177,20 @@ const agentTools: AgentToolDefinition[] = [
     risk: 'high',
     requiresConfirmation: true,
     inputSchema: specAddAndRefreshArgumentsSchema,
+  },
+  {
+    name: 'rental.priceChange',
+    description: '生成租赁商品改价审计预览；执行前必须展示专用改价确认卡',
+    risk: 'high',
+    requiresConfirmation: true,
+    inputSchema: rentalPriceChangeArgumentsSchema,
+  },
+  {
+    name: 'rental.priceRollback',
+    description: '按改价审计任务或回滚文件回滚租赁商品价格',
+    risk: 'high',
+    requiresConfirmation: true,
+    inputSchema: rentalPriceRollbackArgumentsSchema,
   },
   {
     name: 'rental.operationConfirmRequest',

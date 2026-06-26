@@ -79,6 +79,33 @@ describe('rental price card action', () => {
     expect(parseRentalPriceConfirmRequest({ request: { mode: 'explicit_fields', productId: '761', fields: { rent1day: 'abc', script: 'evil' } } })).toBeNull();
   });
 
+  it('preserves safe audit references and rejects blocked audit confirmations', () => {
+    expect(parseRentalPriceConfirmRequest({
+      request: {
+        mode: 'explicit_fields',
+        productId: '761',
+        fields: { rent1day: '22' },
+        audit: {
+          taskId: 'task_123_abcd1234',
+          changesFile: 'C:/works/MT-agent/vendor/rental-price-agent/tasks/changes.json',
+          rollbackFile: 'C:/works/MT-agent/vendor/rental-price-agent/tasks/rollback.json',
+          hasWarnings: true,
+        },
+      },
+    })).toEqual({
+      mode: 'explicit_fields',
+      productId: '761',
+      fields: { rent1day: '22.00' },
+      audit: {
+        taskId: 'task_123_abcd1234',
+        changesFile: 'C:/works/MT-agent/vendor/rental-price-agent/tasks/changes.json',
+        rollbackFile: 'C:/works/MT-agent/vendor/rental-price-agent/tasks/rollback.json',
+        hasWarnings: true,
+      },
+    });
+    expect(parseRentalPriceConfirmRequest({ request: { mode: 'explicit_fields', productId: '761', fields: { rent1day: '22' }, audit: { hasErrors: true } } })).toBeNull();
+  });
+
   it('executes LLM-proposed rental operations only after confirmation', async () => {
     const calls: string[] = [];
     const rentalPriceClient: RentalPriceSkillClient = {
