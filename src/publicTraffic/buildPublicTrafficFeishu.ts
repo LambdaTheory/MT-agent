@@ -44,8 +44,9 @@ function toDataContext(context: PublicTrafficDataReportContext | PublicTrafficRe
     highPotential: [],
     newProductObservation: context.newProductObservation,
     lifecycleGovernance: context.lifecycleGovernance,
+    custodyAbnormal: [],
     recommendedActions: [],
-    emptySectionNotes: { lowExposure: '', weakClick: '', weakConversion: '', highPotential: '', newProductObservation: '', lifecycleGovernance: '', recommendedActions: '' },
+    emptySectionNotes: { lowExposure: '', weakClick: '', weakConversion: '', highPotential: '', newProductObservation: '', lifecycleGovernance: '', custodyAbnormal: '', recommendedActions: '' },
   };
 }
 
@@ -108,6 +109,7 @@ function moduleCountLine(context: PublicTrafficDataReportContext): string | null
     ['新品观察', context.newProductObservation.length],
     ['新品池维护', newProductPoolCount(context)],
     ['生命周期治理', context.lifecycleGovernance.length],
+    ['托管异常', context.custodyAbnormal?.length ?? 0],
     ['建议操作', context.recommendedActions.length],
   ].filter(([, count]) => Number(count) > 0);
   return counts.length > 0 ? counts.map(([label, count]) => `${label} ${count}`).join('｜') : null;
@@ -132,6 +134,7 @@ export function buildPublicTrafficFeishuText(input: PublicTrafficDataReportConte
   const moduleLine = moduleCountLine(context);
   if (moduleLine) lines.push('', '模块数量', moduleLine);
   appendSection(lines, '今日曝光 Top10', topExposureLines(context.rows));
+  appendSection(lines, '托管异常', itemLines(context.custodyAbnormal ?? [], (item) => `${item.identifier}｜${item.action}｜${item.reason}`));
   appendSection(lines, '诊断问题', itemLines(flattenDiagnosticItems(context), (diag) => `${diag.type}｜${diag.item.identifier}｜${diag.item.action}｜${diag.item.reason}`));
   appendSection(lines, '建议操作', itemLines(sortedActions(context.recommendedActions), (item) => `${item.action}｜${item.identifier}｜${item.reason}`));
   appendSection(lines, '新品池维护', newProductPoolLines(context));

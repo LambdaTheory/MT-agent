@@ -170,6 +170,7 @@ export interface PublicTrafficEmptySectionNotes {
   highPotential: string;
   newProductObservation: string;
   lifecycleGovernance: string;
+  custodyAbnormal?: string;
   recommendedActions: string;
 }
 
@@ -188,6 +189,7 @@ export interface PublicTrafficDataReportContext {
   highPotential: PublicTrafficReportSectionItem[];
   newProductObservation: PublicTrafficReportSectionItem[];
   lifecycleGovernance: PublicTrafficReportSectionItem[];
+  custodyAbnormal?: PublicTrafficReportSectionItem[];
   recommendedActions: PublicTrafficReportSectionItem[];
   emptySectionNotes: PublicTrafficEmptySectionNotes;
   orderAnalysis?: OrderAnalysisResult;

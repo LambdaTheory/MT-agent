@@ -600,7 +600,7 @@ export async function runPublicTrafficReportCli(): Promise<PublicTrafficReportCl
     }
     context.agentData = { ...(context.agentData ?? {}), removedLinks: linkLifecycle.removedLinks };
     log.addEvent(
-      `规则分析: 曝光不足=${context.lowExposure.length}, 点击弱=${context.weakClick.length}, 转化弱=${context.weakConversion.length}, 高潜力=${context.highPotential.length}, 新品观察=${context.newProductObservation.length}, 生命周期治理=${context.lifecycleGovernance.length}, 建议操作=${context.recommendedActions.length}`,
+      `规则分析: 曝光不足=${context.lowExposure.length}, 点击弱=${context.weakClick.length}, 转化弱=${context.weakConversion.length}, 高潜力=${context.highPotential.length}, 新品观察=${context.newProductObservation.length}, 生命周期治理=${context.lifecycleGovernance.length}, 托管异常=${context.custodyAbnormal?.length ?? 0}, 建议操作=${context.recommendedActions.length}`,
     );
 
     const registryContext = await loadClosedOrderRegistryContext({ artifactsDir: config.outputDir }, process.cwd());

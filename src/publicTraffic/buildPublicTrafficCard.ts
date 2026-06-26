@@ -46,6 +46,7 @@ function moduleCounts(context: PublicTrafficDataReportContext): Array<[string, n
     ['新品观察', context.newProductObservation.length],
     ['新品池维护', context.newProductPoolItems?.length ? context.newProductPoolItems.length : context.newProductPoolIds?.length ?? 0],
     ['生命周期治理', context.lifecycleGovernance.length],
+    ['托管异常', context.custodyAbnormal?.length ?? 0],
     ['建议操作', context.recommendedActions.length],
   ];
   return counts.filter(([, count]) => count > 0);
@@ -483,12 +484,14 @@ function metricTables(context: PublicTrafficDataReportContext, productNameMap: P
   const boostRows = exposureBoostRows(context, productNameMap);
   const conversionRowsData = conversionRows(context, productNameMap);
   const scaleRowsData = scaleRows(context, productNameMap);
+  const custodyAbnormalRows: FeishuTableRow[] = (context.custodyAbnormal ?? []).map((item) => ({ id: item.identifier, status: item.reason, action: item.action }));
   const optimizationTables: Record<string, unknown>[] = [];
   if (boostRows.length > 0) optimizationTables.push(tableElement('boost_table', [tableColumn('product', `补曝光（${boostRows.length}）`), tableColumn('id', 'ID'), tableColumn('exposure', '曝光', 'number'), tableColumn('visits', '访问', 'number'), tableColumn('custodyDays', '托管天')], boostRows));
   if (conversionRowsData.length > 0) optimizationTables.push(tableElement('conversion_table', [tableColumn('product', `提转化（${conversionRowsData.length}）`), tableColumn('id', 'ID'), tableColumn('visits', '公域访问', 'number'), tableColumn('amount', '公域金额', 'number'), tableColumn('rate', '转化率')], conversionRowsData));
   if (scaleRowsData.length > 0) optimizationTables.push(tableElement('scale_table', [tableColumn('product', `继续放量（${scaleRowsData.length}）`), tableColumn('id', 'ID'), tableColumn('exposure', '曝光', 'number'), tableColumn('visits', '公域访问', 'number'), tableColumn('amount', '公域金额', 'number')], scaleRowsData));
   return [
     analysisSummary(context, boostRows, conversionRowsData, scaleRowsData),
+    ...(custodyAbnormalRows.length > 0 ? [{ tag: 'hr' }, { tag: 'markdown', content: '**托管异常**' }, tableElement('custody_abnormal_table', [tableColumn('id', 'ID'), tableColumn('status', '商品/状态'), tableColumn('action', '处理建议')], custodyAbnormalRows)] : []),
     { tag: 'hr' },
     { tag: 'markdown', content: '**曝光 Top10**' },
     tableElement('exposure_top_table', [tableColumn('product', '商品'), tableColumn('id', 'ID'), tableColumn('exposure', '曝光', 'number'), tableColumn('visits', '公域访问', 'number'), tableColumn('amount', '公域金额', 'number')], exposureTopRows(context, productNameMap)),

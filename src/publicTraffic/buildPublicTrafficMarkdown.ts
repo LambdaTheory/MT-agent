@@ -42,8 +42,9 @@ function toDataContext(context: PublicTrafficDataReportContext | PublicTrafficRe
     highPotential: [],
     newProductObservation: context.newProductObservation,
     lifecycleGovernance: context.lifecycleGovernance,
+    custodyAbnormal: [],
     recommendedActions: [],
-    emptySectionNotes: { lowExposure: '', weakClick: '', weakConversion: '', highPotential: '', newProductObservation: '', lifecycleGovernance: '', recommendedActions: '' },
+    emptySectionNotes: { lowExposure: '', weakClick: '', weakConversion: '', highPotential: '', newProductObservation: '', lifecycleGovernance: '', custodyAbnormal: '', recommendedActions: '' },
   };
 }
 
@@ -113,6 +114,7 @@ export function buildPublicTrafficMarkdown(input: PublicTrafficDataReportContext
   ];
   lines.push('');
   appendMarkdownSection(lines, '今日曝光 Top10', topExposureLines(context.rows));
+  appendMarkdownTable(lines, '托管异常', ['商品', '操作', '原因'], (context.custodyAbnormal ?? []).map((item) => [item.identifier, item.action, item.reason]));
   appendMarkdownTable(lines, '诊断问题', ['类型', '商品', '操作', '原因'], diagnosticRows(context));
   appendMarkdownTable(lines, '建议操作', ['操作', '商品', '原因'], sortedActions(context.recommendedActions).map((item) => [item.action, item.identifier, item.reason]));
   appendMarkdownTable(lines, '新品观察', ['商品', '操作', '原因'], context.newProductObservation.map((item) => [item.identifier, item.action, item.reason]));

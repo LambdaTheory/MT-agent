@@ -294,6 +294,46 @@ describe('analyzePublicTrafficData', () => {
     });
   });
 
+  it('summarizes abnormal custody status from exposure cumulative rows', () => {
+    const report = analyzePublicTrafficData({
+      date: '2026-06-10',
+      rows: [
+        row('端内ID 733', metric(100, 5, 5, 0), metric(500, 20, 20, 0), metric(1000, 60, 60, 0), 3),
+        row('端内ID 848', metric(80, 2, 2, 0), metric(300, 8, 8, 0), metric(900, 20, 20, 0), 2),
+      ],
+      cumulativeProducts: [
+        {
+          productName: '大疆 Pocket3',
+          platformProductId: '端内ID 733',
+          exposure: 100,
+          visits: 5,
+          amount: 0,
+          custodyDays: 3,
+          raw: { 托管状态: '托管异常' },
+        },
+        {
+          productName: '佳能 G12',
+          platformProductId: '端内ID 848',
+          exposure: 80,
+          visits: 2,
+          amount: 0,
+          custodyDays: 2,
+          raw: { 托管状态: '托管中 2天' },
+        },
+      ],
+    });
+
+    expect(report.custodyAbnormal).toHaveLength(1);
+    expect(report.custodyAbnormal?.[0]).toMatchObject({
+      identifier: '端内ID 733',
+      action: '检查托管异常',
+      priority: 'high',
+    });
+    expect(report.custodyAbnormal?.[0]?.reason).toContain('大疆 Pocket3');
+    expect(report.custodyAbnormal?.[0]?.reason).toContain('托管异常');
+    expect(report.recommendedActions.map((item) => item.identifier)).not.toContain('端内ID 733');
+  });
+
   it('builds prioritized recommended actions with executable action text', () => {
     const report = analyzePublicTrafficData({
       date: '2026-06-10',

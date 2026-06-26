@@ -151,6 +151,9 @@ export function writePublicTrafficWorkbookBuffer(context: PublicTrafficDataRepor
   XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(overviewAoa), '总览');
   XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(sectionRows(context.recommendedActions, context.emptySectionNotes.recommendedActions)), '建议操作');
   XLSX.utils.book_append_sheet(workbook, detailSheet(context.rows), '商品明细');
+  if (context.custodyAbnormal?.length) {
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(sectionRows(context.custodyAbnormal, context.emptySectionNotes.custodyAbnormal ?? '暂无曝光页托管异常商品。')), '托管异常');
+  }
   XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(sectionRows(context.lowExposure, context.emptySectionNotes.lowExposure)), '曝光不足');
   XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(sectionRows(context.weakClick, context.emptySectionNotes.weakClick)), '点击弱');
   XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet(sectionRows(context.weakConversion, context.emptySectionNotes.weakConversion)), '转化弱');

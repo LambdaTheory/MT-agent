@@ -244,6 +244,42 @@ describe('public traffic report outputs', () => {
     expect(text).not.toContain('XLSX：report.xlsx');
   });
 
+  it('renders abnormal custody status in report outputs', () => {
+    const withCustodyAbnormal = makeDataReportContext({
+      custodyAbnormal: [
+        {
+          identifier: '端内ID 733',
+          action: '检查托管异常',
+          reason: '大疆 Pocket3｜托管状态：托管异常',
+          priority: 'high',
+        },
+      ],
+    });
+
+    const markdown = buildPublicTrafficMarkdown(withCustodyAbnormal);
+    expect(markdown).toContain('## 托管异常');
+    expect(markdown).toContain('| 商品 | 操作 | 原因 |');
+    expect(markdown).toContain('| 端内ID 733 | 检查托管异常 | 大疆 Pocket3｜托管状态：托管异常 |');
+
+    const text = buildPublicTrafficFeishuText(withCustodyAbnormal, { markdownPath: 'report.md', workbookPath: 'report.xlsx' });
+    expect(text).toContain('托管异常 1');
+    expect(text).toContain('托管异常\n1. 端内ID 733｜检查托管异常｜大疆 Pocket3｜托管状态：托管异常');
+
+    const cardJson = JSON.stringify(buildPublicTrafficCard(withCustodyAbnormal, { markdownPath: 'report.md', workbookPath: 'report.xlsx' }));
+    expect(cardJson).toContain('托管异常');
+    expect(cardJson).toContain('custody_abnormal_table');
+    expect(cardJson).toContain('端内ID 733');
+
+    const workbook = XLSX.read(writePublicTrafficWorkbookBuffer(withCustodyAbnormal), { type: 'buffer' });
+    expect(workbook.SheetNames).toContain('托管异常');
+    const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(workbook.Sheets['托管异常']);
+    expect(rows[0]).toMatchObject({
+      identifier: '端内ID 733',
+      action: '检查托管异常',
+      reason: '大疆 Pocket3｜托管状态：托管异常',
+    });
+  });
+
   it('builds a Feishu card payload', () => {
     const card = buildPublicTrafficCard(context, { markdownPath: 'report.md', workbookPath: 'report.xlsx' });
     expect(card.header).toMatchObject({ title: { tag: 'plain_text', content: '公域数据日报 2026-06-10' } });

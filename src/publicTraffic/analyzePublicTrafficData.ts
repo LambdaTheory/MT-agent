@@ -1,5 +1,6 @@
 import type { PeriodKey } from '../domain/types.js';
 import type {
+  ExposureCumulativeProduct,
   ExposureOverviewMetric,
   PublicTrafficDataAnalysisInput,
   PublicTrafficDataReportContext,
@@ -34,6 +35,7 @@ const EMPTY_SECTION_NOTES: PublicTrafficEmptySectionNotes = {
   highPotential: '暂无达到放量阈值的高潜力商品。',
   newProductObservation: '暂无可识别的新进入公域商品，或今日缺少上一日快照。',
   lifecycleGovernance: '暂无达到长期弱表现阈值的托管商品。',
+  custodyAbnormal: '暂无曝光页托管异常商品。',
   recommendedActions: '暂无需要立即处理的建议操作。',
 };
 
@@ -118,6 +120,45 @@ function monitoringReason(row: PublicTrafficProductDataRow): string {
 
 function byPlatformId(rows: PublicTrafficProductDataRow[]): Map<string, PublicTrafficProductDataRow> {
   return new Map(rows.map((row) => [row.platformProductId, row]));
+}
+
+function normalizeRawText(value: unknown): string {
+  return String(value ?? '').replace(/\s+/g, ' ').trim();
+}
+
+function custodyStatusText(product: ExposureCumulativeProduct): string {
+  for (const [key, value] of Object.entries(product.raw ?? {})) {
+    if (normalizeRawText(key).includes('托管状态')) return normalizeRawText(value);
+  }
+  return '';
+}
+
+function rowForCumulativeProduct(product: ExposureCumulativeProduct, rowsById: Map<string, PublicTrafficProductDataRow>): PublicTrafficProductDataRow | undefined {
+  const platformProductId = normalizeRawText(product.platformProductId);
+  return rowsById.get(platformProductId) ?? rowsById.get(platformProductId.slice(0, -1));
+}
+
+function buildCustodyAbnormalItems(input: PublicTrafficDataAnalysisInput, rowsById: Map<string, PublicTrafficProductDataRow>): PublicTrafficReportSectionItem[] {
+  const seen = new Set<string>();
+  return (input.cumulativeProducts ?? [])
+    .map((product) => ({ product, status: custodyStatusText(product), row: rowForCumulativeProduct(product, rowsById) }))
+    .filter(({ status }) => status.includes('托管异常'))
+    .map(({ product, status, row }) => {
+      const identifier = row?.displayProductId ?? `平台商品ID ${product.platformProductId}`;
+      const productName = product.productName || row?.productName || identifier;
+      return {
+        identifier,
+        action: '检查托管异常',
+        reason: `${productName}｜托管状态：${status}`,
+        priority: 'high' as const,
+      };
+    })
+    .filter((entry) => {
+      if (seen.has(entry.identifier)) return false;
+      seen.add(entry.identifier);
+      return true;
+    })
+    .sort((a, b) => a.identifier.localeCompare(b.identifier, 'zh-CN'));
 }
 
 function hasReliableThirtyDaySummary(summary: PublicTrafficDataAnalysisInput['thirtyDaySummary'], platformProductId: string): boolean {
@@ -273,6 +314,7 @@ export function analyzePublicTrafficData(input: PublicTrafficDataAnalysisInput):
     .map((row) => item(row, '下架、替换或重做素材', `已托管 ${row.custodyDays} 天，30日曝光 ${thirty(row).exposure}，访问 ${thirty(row).publicVisits}，金额 ${thirty(row).amount.toFixed(2)}`, lifecyclePriority(row)));
 
   const recommendedActions = buildRecommendedActions({ weakConversion, weakClick, lifecycleGovernance, highPotential, newProductObservation, lowExposure });
+  const custodyAbnormal = buildCustodyAbnormalItems(input, rowsById);
 
   return {
     date: input.date,
@@ -286,6 +328,7 @@ export function analyzePublicTrafficData(input: PublicTrafficDataAnalysisInput):
     highPotential,
     newProductObservation,
     lifecycleGovernance,
+    custodyAbnormal,
     recommendedActions,
     emptySectionNotes: EMPTY_SECTION_NOTES,
     orderAnalysis: input.orderAnalysis,
