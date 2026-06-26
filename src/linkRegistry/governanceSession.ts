@@ -188,7 +188,6 @@ function buildPromptCard(session: LinkRegistryGovernanceSession): FeishuCardPayl
                 tag: 'button',
                 text: plainText('开始治理'),
                 type: 'primary',
-                action_type: 'form_submit',
                 name: 'link_registry_governance_start',
                 behaviors: [{ type: 'callback', value: { action: 'link_registry_governance_start', date: session.date } }],
               }],
@@ -200,7 +199,6 @@ function buildPromptCard(session: LinkRegistryGovernanceSession): FeishuCardPayl
                 tag: 'button',
                 text: plainText('稍后提醒'),
                 type: 'default',
-                action_type: 'form_submit',
                 name: 'link_registry_governance_snooze',
                 behaviors: [{ type: 'callback', value: { action: 'link_registry_governance_snooze', date: session.date } }],
               }],
@@ -212,7 +210,6 @@ function buildPromptCard(session: LinkRegistryGovernanceSession): FeishuCardPayl
                 tag: 'button',
                 text: plainText('本次忽略'),
                 type: 'default',
-                action_type: 'form_submit',
                 name: 'link_registry_governance_ignore',
                 behaviors: [{ type: 'callback', value: { action: 'link_registry_governance_ignore', date: session.date } }],
               }],
@@ -292,8 +289,7 @@ function currentReviewResponse(
   const item = session.queue[reviewIndex - 1];
   if (!item) {
     return {
-      text: `??????????????${session.date}
-?????${session.reviewRecords.length}/${session.queue.length}`,
+      text: `组级治理已处理完成 ${session.date}\n已处理 ${session.reviewRecords.length}/${session.queue.length}`,
       card: statusCard('组级治理已处理完成', `日期 ${session.date}
 已处理 ${session.reviewRecords.length}/${session.queue.length} 条治理事项。`, 'green'),
     };

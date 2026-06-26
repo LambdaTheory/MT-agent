@@ -67,6 +67,9 @@ describe('link registry governance session', () => {
     expect(JSON.stringify(response?.card)).toContain('开始治理');
     expect(JSON.stringify(response?.card)).toContain('同款组样本不足');
     expect(JSON.stringify(response?.card)).toContain('人工覆盖风险');
+    const promptButtons = ((response?.card as { body?: { elements?: Array<{ columns?: Array<{ elements?: Array<Record<string, unknown>> }> }> } }).body?.elements?.[2]?.columns ?? [])
+      .flatMap((column) => column.elements ?? []);
+    expect(promptButtons.every((button) => !('action_type' in button))).toBe(true);
   });
 
   it('submits governance decisions, persists records, and suppresses duplicate reminders for the same signature', async () => {

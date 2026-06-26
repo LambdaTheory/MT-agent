@@ -71,6 +71,9 @@ describe('link registry maintenance session', () => {
     expect(response?.text).toContain('发现 2 条待维护链接');
     expect(JSON.stringify(response?.card)).toContain('开始维护');
     expect(JSON.stringify(response?.card)).toContain('link_registry_maintenance_start');
+    const promptButtons = ((response?.card as { body?: { elements?: Array<{ columns?: Array<{ elements?: Array<Record<string, unknown>> }> }> } }).body?.elements?.[2]?.columns ?? [])
+      .flatMap((column) => column.elements ?? []);
+    expect(promptButtons.every((button) => !('action_type' in button))).toBe(true);
 
     const saved = JSON.parse(await readFile(join(outputDir, '2026-06-24', 'link-registry-maintenance-session.json'), 'utf8')) as {
       queue: Array<{ internalProductId: string }>;

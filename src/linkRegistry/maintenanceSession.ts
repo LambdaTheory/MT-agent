@@ -306,7 +306,6 @@ function buildPromptCard(session: LinkRegistryMaintenanceSession): FeishuCardPay
                 tag: 'button',
                 text: plainText('开始维护'),
                 type: 'primary',
-                action_type: 'form_submit',
                 name: 'link_registry_maintenance_start',
                 behaviors: [{ type: 'callback', value: { action: 'link_registry_maintenance_start', date: session.date } }],
               }],
@@ -318,7 +317,6 @@ function buildPromptCard(session: LinkRegistryMaintenanceSession): FeishuCardPay
                 tag: 'button',
                 text: plainText('稍后提醒'),
                 type: 'default',
-                action_type: 'form_submit',
                 name: 'link_registry_maintenance_snooze',
                 behaviors: [{ type: 'callback', value: { action: 'link_registry_maintenance_snooze', date: session.date } }],
               }],
@@ -330,7 +328,6 @@ function buildPromptCard(session: LinkRegistryMaintenanceSession): FeishuCardPay
                 tag: 'button',
                 text: plainText('本次忽略'),
                 type: 'default',
-                action_type: 'form_submit',
                 name: 'link_registry_maintenance_ignore',
                 behaviors: [{ type: 'callback', value: { action: 'link_registry_maintenance_ignore', date: session.date } }],
               }],
@@ -443,8 +440,7 @@ function buildReviewCard(
 }
 
 function completionText(session: LinkRegistryMaintenanceSession): string {
-  return `??????????????${session.date}
-?????${session.reviewRecords.length}/${session.queue.length}`;
+  return `链接维护已处理完成 ${session.date}\n已处理 ${session.reviewRecords.length}/${session.queue.length}`;
 }
 
 function completionCard(session: LinkRegistryMaintenanceSession): FeishuCardPayload {
