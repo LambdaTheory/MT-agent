@@ -656,16 +656,17 @@ export async function handleBotIntent(intent: BotIntent, outputDir = 'output', o
     const plannedResponse = await agentPlannerResponse(intent.text, outputDir, options);
     if (plannedResponse) return plannedResponse;
 
+    if (options.agentPlannerProvider) {
+      if (looksLikeNewLinkWriteIntent(intent.text)) return { text: NEW_LINK_WRITE_INTENT_PLAN_FAILED };
+      return { text: 'Agent planner did not return a valid plan. No legacy deterministic route or operation was executed. Please rephrase the command or check the LLM output/config.' };
+    }
+
     const rollbackResponse = rollbackTaskConfirmResponse(intent.text);
     if (rollbackResponse) return rollbackResponse;
 
     const exactFallback = parseExactBotIntent(intent.text);
     if (exactFallback.type !== 'unknown') {
       return handleBotIntent(exactFallback, outputDir, { ...options, agentPlannerProvider: undefined });
-    }
-
-    if (options.agentPlannerProvider && looksLikeNewLinkWriteIntent(intent.text)) {
-      return { text: NEW_LINK_WRITE_INTENT_PLAN_FAILED };
     }
 
     if (options.llmIntentProposalProvider) {

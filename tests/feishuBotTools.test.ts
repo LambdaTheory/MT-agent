@@ -1194,6 +1194,34 @@ describe('handleBotIntent', () => {
     expect(response.text).toContain('端内ID 565 iPhone 15');
   });
 
+  it('does not fall back to deterministic exact routing when the Agent planner is configured but invalid', async () => {
+    const outputDir = await writeContext();
+    const planner: AgentPlannerProvider = {
+      async proposePlan() {
+        return '{}';
+      },
+    };
+
+    const response = await handleBotIntent({ type: 'unknown', text: '查 565' }, outputDir, { agentPlannerProvider: planner });
+
+    expect(response.text).toContain('No legacy deterministic route');
+    expect(response.text).not.toContain('iPhone 15');
+    expect(response.card).toBeUndefined();
+  });
+
+  it('does not use rollback shortcut routing when the Agent planner is configured but invalid', async () => {
+    const planner: AgentPlannerProvider = {
+      async proposePlan() {
+        return '{}';
+      },
+    };
+
+    const response = await handleBotIntent({ type: 'unknown', text: 'rollback task_1782451929574_977a5f62' }, 'output', { agentPlannerProvider: planner });
+
+    expect(response.text).toContain('No legacy deterministic route');
+    expect(response.card).toBeUndefined();
+  });
+
   it('lets the Agent planner handle help as a registered tool', async () => {
     const planner: AgentPlannerProvider = {
       async proposePlan(request) {
