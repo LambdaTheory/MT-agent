@@ -165,6 +165,28 @@ async function writeX200RankingContext(): Promise<string> {
           '30d': metric,
         },
       },
+      {
+        productName: '三星Galaxy S23Ultra演唱会神器2亿...',
+        platformProductId: 'p786',
+        displayProductId: '端内ID 786',
+        custodyDays: 30,
+        periods: {
+          '1d': { ...metric, exposure: 81, publicVisits: 3 },
+          '7d': { ...metric, exposure: 135, publicVisits: 5, amount: 0 },
+          '30d': metric,
+        },
+      },
+      {
+        productName: '三星Galaxy S23Ultra短租特惠演唱...',
+        platformProductId: 'p500',
+        displayProductId: '端内ID 500',
+        custodyDays: 30,
+        periods: {
+          '1d': { ...metric, exposure: 0, publicVisits: 0 },
+          '7d': { ...metric, exposure: 20885, publicVisits: 742, amount: 0 },
+          '30d': metric,
+        },
+      },
     ],
     lowExposure: [],
     weakClick: [],
@@ -217,9 +239,21 @@ async function writeX200RankingRegistryFixtures(rootDir: string, artifactsDir: s
   const stateDir = join(rootDir, 'output', 'state');
   await mkdir(configDir, { recursive: true });
   await mkdir(stateDir, { recursive: true });
-  await writeFile(join(configDir, 'product-id-map.json'), JSON.stringify({ p362: '362', p372: '372' }), 'utf8');
-  await writeFile(join(configDir, 'product-name-map.json'), JSON.stringify({ '362': 'vivo X200 Ultra', '372': 'vivo 蔡司增距镜' }), 'utf8');
-  await writeFile(join(configDir, 'link-registry-overrides.json'), JSON.stringify({ version: 1, entries: [] }), 'utf8');
+  await writeFile(join(configDir, 'product-id-map.json'), JSON.stringify({ p362: '362', p372: '372', p500: '500', p786: '786' }), 'utf8');
+  await writeFile(join(configDir, 'product-name-map.json'), JSON.stringify({
+    '362': 'vivo X200 Ultra',
+    '372': 'vivo 蔡司增距镜',
+    '500': '三星Galaxy S23Ultra短租特惠演唱',
+    '786': '三星Galaxy S23Ultra演唱会神器',
+  }), 'utf8');
+  await writeFile(join(configDir, 'link-registry-overrides.json'), JSON.stringify({
+    version: 1,
+    entries: [
+      { internalProductId: '500', productName: '三星Galaxy S23Ultra短租特惠演唱', shortName: '三星 Galaxy S23 Ultra', aliases: ['s23u', 'S23U', 's23'], sameSkuGroupId: 'samsung-galaxy-s23-ultra', updatedAt: '2026-06-27' },
+      { internalProductId: '786', productName: '三星Galaxy S23Ultra演唱会神器', shortName: '三星 Galaxy S23 Ultra', aliases: ['s23u', 'S23U', 's23'], sameSkuGroupId: 'samsung-galaxy-s23-ultra', updatedAt: '2026-06-27' },
+    ],
+    sameSkuGroupAliasRules: [{ sameSkuGroupId: 'samsung-galaxy-s23-ultra', aliases: ['s23u', 'S23U', 's23'] }],
+  }), 'utf8');
   return {
     productIdMapPath: join(configDir, 'product-id-map.json'),
     productNameMapPath: join(configDir, 'product-name-map.json'),
@@ -1153,6 +1187,36 @@ describe('handleBotIntent', () => {
     expect(response.text).toContain('端内ID 362');
     expect(response.text).toContain('同款组 vivo-x200-ultra');
     expect(response.text).not.toContain('端内ID 372');
+  });
+
+  it('routes the corpus S23U best-link phrase through Agent ranking instead of old product lookup ordering', async () => {
+    const outputDir = await writeX200RankingContext();
+    const registryRoot = await mkdtemp(join(tmpdir(), 'mt-agent-s23-ranking-registry-'));
+    const registryPaths = await writeX200RankingRegistryFixtures(registryRoot, outputDir);
+    const planner: AgentPlannerProvider = {
+      async proposePlan(request) {
+        expect(request.message).toBe('s23u最好的链接是哪条?');
+        expect(request.tools.map((tool) => tool.name)).toContain('product.rankBestSameSku');
+        expect(request.tools.map((tool) => tool.name)).toContain('product.query');
+        return JSON.stringify({
+          goal: '查询 S23U 同款组数据最好的链接',
+          selectedTool: 'product.rankBestSameSku',
+          arguments: { query: 's23u' },
+          confidence: 0.94,
+          reason: '用户问最好的链接，应按链接档案同款组排序，而不是普通商品查询',
+        });
+      },
+    };
+
+    const response = await handleBotIntent({ type: 'unknown', text: 's23u最好的链接是哪条?' }, outputDir, {
+      agentPlannerProvider: planner,
+      closedOrderRegistryPaths: registryPaths,
+    });
+
+    expect(response.text).toContain('端内ID 500');
+    expect(response.text).toContain('同款组 samsung-galaxy-s23-ultra');
+    expect(response.text).not.toContain('端内ID 786\n1日');
+    expect(response.card).toBeUndefined();
   });
 
   it('lets the Agent planner choose the best same-sku ranking tool', async () => {
@@ -2236,6 +2300,7 @@ describe('handleBotIntent', () => {
 
     expect(response.text).toContain('请确认商品 761 改价');
     expect(JSON.stringify(response.card)).toContain('rental_price_confirm');
+    expect(JSON.stringify(response.card)).toContain('用户要求把 761 的 1 天租金改成 22');
     expect(JSON.stringify(response.card)).not.toContain('agent_tool_confirm');
   });
 

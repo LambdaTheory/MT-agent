@@ -304,7 +304,7 @@ async function agentPlannerResponse(
     if (!rentalRequest) return { text: '租赁商品改价参数无效：需要 productId，并提供 fields 或 discount。' };
     const rentalPriceClient = options.rentalPriceClient ?? createRentalPriceSkillClient();
     const preview = await rentalPriceClient.preview(rentalRequest);
-    return { text: `请确认商品 ${rentalRequest.productId} 改价`, card: buildRentalPricePreviewCard(preview) };
+    return { text: `请确认商品 ${rentalRequest.productId} 改价`, card: buildRentalPricePreviewCard(preview, { reason: parsed.proposal.reason }) };
   }
   if (parsed.proposal.selectedTool === 'rental.specRemovePlan' || parsed.proposal.selectedTool === 'rental.newLinkBatchPlan') {
     return executeAgentToolRequest(request, outputDir, {

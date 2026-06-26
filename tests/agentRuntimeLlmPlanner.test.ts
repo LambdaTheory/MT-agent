@@ -39,6 +39,8 @@ describe('agent runtime LLM planner', () => {
 
     expect(system).toContain('multi-step plan composed only of registered tools');
     expect(system).toContain('Do not return selectedWorkflow');
+    expect(system).toContain('use rental.priceSnapshot');
+    expect(system).toContain('use rental.specRemovePlan');
     expect(system).not.toContain('For composite flows, return selectedWorkflow');
     expect(user.tools.map((tool) => tool.name)).toContain('rental.newLinkBatchPlan');
     expect(user.workflows).toEqual([]);
