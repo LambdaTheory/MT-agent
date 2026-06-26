@@ -1904,7 +1904,7 @@ describe('handleBotIntent', () => {
     expect(JSON.stringify(resend.card)).toContain('"sendTo":"both"');
   });
 
-  it('plans new-link batch workflows through LLM without copying before confirmation', async () => {
+  it('plans new-link batch tool calls through LLM without copying before confirmation', async () => {
     const { outputDir, registryPaths } = await writeNewLinkWorkflowContext();
     const planner: AgentPlannerProvider = {
       async proposePlan(request) {
@@ -1912,7 +1912,7 @@ describe('handleBotIntent', () => {
         expect(request.tools.map((tool) => tool.name)).toContain('rental.newLinkBatchPlan');
         return JSON.stringify({
           goal: '铺设 pocket3 新链',
-          selectedWorkflow: 'rental.newLinkBatch',
+          selectedTool: 'rental.newLinkBatchPlan',
           arguments: { keyword: 'pocket3', count: 10 },
           confidence: 0.95,
           reason: '用户要求铺十条 pocket3 的新链',
@@ -1949,8 +1949,8 @@ describe('handleBotIntent', () => {
       async proposePlan() {
         return JSON.stringify({
           goal: '从端内ID 875 复制新链',
-          selectedWorkflow: 'rental.newLinkBatch',
-          arguments: { keyword: 'pocket3', count: 3 },
+          selectedTool: 'rental.newLinkBatchPlan',
+          arguments: { keyword: 'pocket3', count: 3, sourceProductId: '875' },
           confidence: 0.95,
           reason: '用户要求从端内ID 875 复制 3 条新链',
           requiresConfirmation: true,
@@ -1987,11 +1987,12 @@ describe('handleBotIntent', () => {
         expect(request.message).toBe('数据最好的SQ1的端内id是多少?按这个id复制5条新链');
         return JSON.stringify({
           goal: '按 SQ1 最佳链接复制 5 条新链',
-          selectedWorkflow: 'rental.newLinkBatch',
-          arguments: { keyword: 'SQ1', count: 5 },
+          steps: [
+            { id: 'rank', toolName: 'product.rankBestSameSku', arguments: { query: 'SQ1' }, reason: '先找 SQ1 同款组里数据最好的端内ID' },
+            { toolName: 'rental.newLinkBatchPlan', arguments: { keyword: 'SQ1', count: 5, sourceProductId: '${rank.bestProductId}' }, reason: '按最佳端内ID生成新链复制确认卡' },
+          ],
           confidence: 0.95,
           reason: '用户要求先找到 SQ1 表现最好的链接，再按该链接复制 5 条新链',
-          requiresConfirmation: true,
         });
       },
     };
@@ -2028,11 +2029,22 @@ describe('handleBotIntent', () => {
         expect(request.message).toBe('数据最好的wide 300,wide 400的端内id是多少?分别按这个id复制5条新。');
         return JSON.stringify({
           goal: '分别按 wide 300 和 wide 400 最佳链接复制新链',
-          selectedWorkflow: 'rental.newLinkBatch',
-          arguments: { items: [{ keyword: 'wide 300', count: 5 }, { keyword: 'wide 400', count: 5 }] },
+          steps: [
+            { id: 'wide300', toolName: 'product.rankBestSameSku', arguments: { query: 'wide 300' }, reason: '找到 wide 300 最佳链接' },
+            { id: 'wide400', toolName: 'product.rankBestSameSku', arguments: { query: 'wide 400' }, reason: '找到 wide 400 最佳链接' },
+            {
+              toolName: 'rental.newLinkBatchPlan',
+              arguments: {
+                items: [
+                  { keyword: 'wide 300', count: 5, sourceProductId: '${wide300.bestProductId}' },
+                  { keyword: 'wide 400', count: 5, sourceProductId: '${wide400.bestProductId}' },
+                ],
+              },
+              reason: '按两个最佳链接分别生成新链复制确认卡',
+            },
+          ],
           confidence: 0.95,
           reason: '用户要求分别找到 wide 300、wide 400 的最佳链接，并各复制 5 条新链',
-          requiresConfirmation: true,
         });
       },
     };
@@ -2064,7 +2076,7 @@ describe('handleBotIntent', () => {
     expect(cardText).toContain('"sourceProductId":"402"');
   });
 
-  it('does not fall through to read-only new product pool when the LLM planner fails a new-link write plan', async () => {
+  it('rejects legacy selectedWorkflow output in the planner-first Feishu path', async () => {
     const outputDir = await writeContext();
     const planner: AgentPlannerProvider = {
       async proposePlan() {
@@ -2076,8 +2088,9 @@ describe('handleBotIntent', () => {
       agentPlannerProvider: planner,
     });
 
-    expect(response.text).toContain('Agent planner 没有生成有效');
-    expect(response.text).toContain('本次不执行');
+    expect(response.text).toContain('legacy workflow');
+    expect(response.text).toContain('未执行任何操作');
+    expect(response.text).toContain('selectedTool 或 steps');
     expect(response.text).not.toContain('大疆 Pocket 3');
     expect(response.card).toBeUndefined();
   });

@@ -36,7 +36,7 @@ export function createAgentPlannerProvider(provider: LlmProvider): AgentPlannerP
               'Later steps may reference metadata from earlier steps with string placeholders such as "${rank.bestProductId}", "${rank.best.internalProductId}", or "${steps.rank.sameSkuGroupId}". Only reference prior step ids.',
               'For "find the best link/product, then copy/create/fill new links", use product.rankBestSameSku first with id "rank", then rental.newLinkBatchPlan with sourceProductId "${rank.bestProductId}". This still only creates a confirmation card before copy execution.',
               'For activity refresh goals, use operations.refreshActivityPlan; it will generate a safe execution confirmation card only when candidates, same-SKU groups, and copy sources are valid.',
-              'Do not return selectedWorkflow unless the input explicitly includes a non-empty workflows list; normal Feishu planning intentionally exposes workflows as an empty legacy list.',
+              'Do not return selectedWorkflow unless the input explicitly includes a non-empty workflows list; normal Feishu planning intentionally exposes workflows as an empty legacy list and rejects selectedWorkflow responses.',
               'If a later step depends on a previous result that cannot be expressed with these placeholders, ask for clarification.',
               'If the goal, tool, or required arguments are unclear, return only a bare JSON object with goal, needsClarification:true, originalMessage, question, options, confidence, and reason.',
               'Clarification options must be natural-language restatements that can be planned again, each with label, message, and optional description; provide 2 to 4 options.',

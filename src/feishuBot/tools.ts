@@ -2,7 +2,6 @@ import { basename, dirname } from 'node:path';
 import { buildAgentToolConfirmCard } from '../agentRuntime/approvalCard.js';
 import { buildAgentClarificationCard } from '../agentRuntime/clarificationCard.js';
 import { listAgentPlannerTools, validateAgentMultiStepPlannerProposal, validateAgentPlannerClarificationProposal, validateAgentPlannerProposal, type AgentPlannerProvider } from '../agentRuntime/planner.js';
-import { validateAgentWorkflowPlannerProposal } from '../agentRuntime/workflowPlanner.js';
 import { buildAgentLearningPlannerHints, summarizeAgentLearning } from '../agentLearning/store.js';
 import { parseAgentDataIntent } from '../agentData/intent.js';
 import { loadClosedOrderRegistryContext, type ClosedOrderRegistryPathsInput } from '../closedOrderFeedback/runtime.js';
@@ -10,16 +9,6 @@ import { queryInventoryStatus } from '../inventoryStatus/query.js';
 import { readInventorySameSkuSnapshot } from '../inventoryStatus/store.js';
 import { createLinkRegistry } from '../linkRegistry/store.js';
 import type { LinkRegistryEntry } from '../linkRegistry/types.js';
-import {
-  buildNewLinkBatchConfirmCard,
-  buildNewLinkBatchMultiConfirmCard,
-  buildNewLinkBatchPlan,
-  formatNewLinkBatchPlan,
-  formatNewLinkBatchMultiPlan,
-  NEW_LINK_BATCH_WORKFLOW_NAME,
-  readNewLinkBatchWorkflowRequest,
-  readNewLinkBatchWorkflowRequests,
-} from '../newLinkWorkflow/batch.js';
 import { startOperationsLearningSession, summarizeOperationsLearningHistory, summarizeOperationsLearningSession } from '../operationsLearningLoop/session.js';
 import { buildPublicTrafficPaths } from '../publicTraffic/paths.js';
 import {
@@ -63,6 +52,8 @@ const NEW_LINK_WRITE_INTENT_NEEDS_LLM =
   '这像是新链批量铺设写操作，需要 LLM Agent planner 先理解参数并生成飞书确认卡。当前没有可用计划，所以不会执行，也不会把它当作新链接池查询。请配置 MT_AGENT_LLM_BASE_URL / MT_AGENT_LLM_MODEL 后重启 PM2，或换成明确的只读问题。';
 const NEW_LINK_WRITE_INTENT_PLAN_FAILED =
   '这像是新链批量铺设写操作，但 Agent planner 没有生成有效的新链批量铺设计划。为避免误执行或误答只读新链接池，本次不执行；请换个说法或检查 LLM 输出。';
+const LEGACY_WORKFLOW_PLAN_REJECTED =
+  'Agent planner 返回了 legacy workflow 格式（selectedWorkflow），但当前飞书路径只接受 registered tool 或 steps 多步骤计划。未执行任何操作；请让 LLM 改为 selectedTool 或 steps。';
 
 const HELP_TEXT = `📋 查询与分析
   今日概况 — 查看最新公域日报概况
@@ -184,42 +175,6 @@ function looksLikeNewLinkWriteIntent(text: string): boolean {
   return hasNewLink && hasWriteVerb;
 }
 
-function extractExplicitNewLinkSourceProductId(text: string): string | undefined {
-  const compact = text.replace(/\s+/g, '');
-  if (!/(新链|新链接)/.test(compact)) return undefined;
-  const verb = '(?:复制|铺|铺设|新增|补|新建|创建|生成)';
-  const id = '(?:端内(?:ID)?|商品(?:ID)?|链接)?(\\d{2,})';
-  const patterns = [
-    new RegExp(`(?:从|用|以|基于)${id}.*${verb}`),
-    new RegExp(`${id}.*${verb}.*(?:新链|新链接)`),
-    new RegExp(`${verb}.*${id}.*(?:新链|新链接)`),
-  ];
-  for (const pattern of patterns) {
-    const match = pattern.exec(compact);
-    if (match?.[1]) return match[1];
-  }
-  return undefined;
-}
-
-function applyExplicitNewLinkSource(
-  message: string,
-  request: ReturnType<typeof readNewLinkBatchWorkflowRequest>,
-): ReturnType<typeof readNewLinkBatchWorkflowRequest> {
-  if (!request) return null;
-  const sourceProductId = extractExplicitNewLinkSourceProductId(message);
-  return sourceProductId ? { ...request, sourceProductId } : request;
-}
-
-function applyExplicitNewLinkSourceToRequests(
-  message: string,
-  requests: ReturnType<typeof readNewLinkBatchWorkflowRequests>,
-): ReturnType<typeof readNewLinkBatchWorkflowRequests> {
-  if (!requests) return null;
-  if (requests.length !== 1) return requests;
-  const request = applyExplicitNewLinkSource(message, requests[0] ?? null);
-  return request ? [request] : null;
-}
-
 function readOnlyIntentNeedsLinkRegistry(intent: ReturnType<typeof parseAgentDataIntent>): boolean {
   return intent.type === 'best_product_by_same_sku';
 }
@@ -330,39 +285,13 @@ async function agentPlannerResponse(
   });
   const parsed = validateAgentPlannerProposal(rawProposal);
   if (!parsed.ok) {
-    const workflowParsed = validateAgentWorkflowPlannerProposal(rawProposal);
-    if (!workflowParsed.ok) {
-      const multiStepResponse = await executeAgentMultiStepPlannerResponse(rawProposal, outputDir, options);
-      if (multiStepResponse) return multiStepResponse;
-      const clarificationParsed = validateAgentPlannerClarificationProposal(rawProposal);
-      return clarificationParsed.ok
-        ? { text: clarificationParsed.proposal.question, card: buildAgentClarificationCard(clarificationParsed.proposal) }
-        : null;
-    }
-    if (workflowParsed.proposal.selectedWorkflow !== NEW_LINK_BATCH_WORKFLOW_NAME) return null;
-    const workflowRequests = applyExplicitNewLinkSourceToRequests(message, readNewLinkBatchWorkflowRequests(workflowParsed.proposal.arguments));
-    if (!workflowRequests) return { text: '新链批量铺设参数无效：需要 keyword 和 count，或 items 数组。' };
-
-    const [latest, registryContext] = await Promise.all([
-      findLatestReportContext(outputDir),
-      loadClosedOrderRegistryContext(options.closedOrderRegistryPaths),
-    ]);
-    if (!latest) return { text: '还没有找到公域日报上下文，无法选择新链复制源商品。' };
-
-    const plans = workflowRequests.map((request) => buildNewLinkBatchPlan(request, latest.context, registryContext.registry));
-    if (plans.length > 1) {
-      const text = formatNewLinkBatchMultiPlan(plans);
-      return {
-        text,
-        ...(plans.every((plan) => plan.status === 'ready') ? { card: buildNewLinkBatchMultiConfirmCard(plans, workflowParsed.proposal.reason) } : {}),
-      };
-    }
-
-    const plan = plans[0]!;
-    return {
-      text: formatNewLinkBatchPlan(plan),
-      ...(plan.status === 'ready' ? { card: buildNewLinkBatchConfirmCard(plan, workflowParsed.proposal.reason) } : {}),
-    };
+    if (/"selectedWorkflow"\s*:/.test(rawProposal)) return { text: LEGACY_WORKFLOW_PLAN_REJECTED };
+    const multiStepResponse = await executeAgentMultiStepPlannerResponse(rawProposal, outputDir, options);
+    if (multiStepResponse) return multiStepResponse;
+    const clarificationParsed = validateAgentPlannerClarificationProposal(rawProposal);
+    return clarificationParsed.ok
+      ? { text: clarificationParsed.proposal.question, card: buildAgentClarificationCard(clarificationParsed.proposal) }
+      : null;
   }
 
   const request = {
