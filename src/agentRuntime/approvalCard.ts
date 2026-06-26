@@ -51,7 +51,7 @@ function parseContinuationStep(value: unknown): AgentPlannerStep | null {
   return { ...(id ? { id } : {}), toolName, arguments: args, reason };
 }
 
-function parseAgentToolConfirmContinuation(value: unknown): AgentToolConfirmContinuation | null | undefined {
+export function parseAgentToolConfirmContinuation(value: unknown): AgentToolConfirmContinuation | null | undefined {
   if (value === undefined) return undefined;
   if (!isRecord(value)) return null;
   const goal = readString(value.goal);

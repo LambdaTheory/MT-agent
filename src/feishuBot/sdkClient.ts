@@ -2,7 +2,7 @@ import * as lark from '@larksuiteoapi/node-sdk';
 import { createHash } from 'node:crypto';
 import { createActivityCancellationAssistant, type ActivityCancellationAssistant } from '../activityAutomation/cancelAssistance.js';
 import { updateActivitySubmitSessionStatus } from '../activityAutomation/submitSession.js';
-import { parseAgentToolConfirmRequest } from '../agentRuntime/approvalCard.js';
+import { parseAgentToolConfirmRequest, type AgentToolConfirmRequest } from '../agentRuntime/approvalCard.js';
 import { buildClarifiedMessage, parseAgentClarificationCustomSelection, parseAgentClarificationSelection } from '../agentRuntime/clarificationCard.js';
 import type { AgentPlannerProvider } from '../agentRuntime/planner.js';
 import { recordAgentLearningEvent, type AgentLearningEventInput } from '../agentLearning/store.js';
@@ -11,7 +11,16 @@ import { handleLinkRegistryMaintenanceCardAction } from '../linkRegistry/mainten
 import { handleOperationsLearningFeedback, handleOperationsLearningStop } from '../operationsLearningLoop/session.js';
 import { findLatestReportContext } from './reportStore.js';
 import { createFeishuMessageDispatcher } from './dispatcher.js';
-import { executeAgentToolRequestWithContinuation } from './agentToolContinuation.js';
+import { continueAgentPlannerStepsAfterResponse, executeAgentToolRequestWithContinuation } from './agentToolContinuation.js';
+import {
+  agentRequestFromNewLinkBatchConfirm,
+  agentRequestFromNewLinkBatchMultiConfirm,
+  agentRequestFromRentalOperationConfirm,
+  agentRequestFromRentalPriceConfirm,
+  botResponseFromNewLinkBatchResult,
+  botResponseFromRentalOperationResult,
+  botResponseFromRentalPriceExecution,
+} from './agentSpecializedContinuation.js';
 import { buildIdLookupCard } from './idLookupCard.js';
 import { lookupProductId } from './idLookup.js';
 import {
@@ -207,11 +216,13 @@ function fallbackCancelValue(expectedAction: string, candidates: Record<string, 
   if (expectedAction === 'new_link_batch_cancel') {
     const keyword = readString(first?.keyword) ?? readString(request?.keyword);
     const sourceProductId = readString(first?.sourceProductId) ?? readString(request?.sourceProductId);
-    return { action: expectedAction, ...(keyword ? { keyword } : {}), ...(sourceProductId ? { sourceProductId } : {}) };
+    const confirmationKey = readString(first?.confirmationKey) ?? readString(request?.confirmationKey);
+    return { action: expectedAction, ...(keyword ? { keyword } : {}), ...(sourceProductId ? { sourceProductId } : {}), ...(confirmationKey ? { confirmationKey } : {}) };
   }
   if (expectedAction === 'rental_price_cancel' || expectedAction === 'rental_operation_cancel') {
     const productId = readString(first?.productId) ?? readString(request?.productId);
-    return { action: expectedAction, ...(productId ? { productId } : {}) };
+    const confirmationKey = readString(first?.confirmationKey) ?? readString(request?.confirmationKey);
+    return { action: expectedAction, ...(productId ? { productId } : {}), ...(confirmationKey ? { confirmationKey } : {}) };
   }
   if (expectedAction === 'agent_tool_cancel') {
     const toolName = readString(first?.toolName) ?? readString(request?.toolName);
@@ -292,7 +303,7 @@ function actionClaimFamily(actionName: string): string {
 
 function stableActionKey(messageId: string, actionName: string, value: Record<string, unknown>): string {
   const family = actionClaimFamily(actionName);
-  const confirmationKey = family === 'agent_tool' ? readString(value.confirmationKey) : undefined;
+  const confirmationKey = readString(value.confirmationKey);
   return createHash('sha256').update(JSON.stringify({ messageId, family: confirmationKey ? `${family}:${confirmationKey}` : family })).digest('hex');
 }
 
@@ -429,6 +440,21 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
   const activityAutomationClient = config.activityAutomationClient ?? createActivityAutomationSkillClient();
   const activityCancellationAssistant = config.activityCancellationAssistant ?? createActivityCancellationAssistant();
   const outputDir = config.outputDir ?? 'output';
+
+  async function deliverContinuationResult(
+    messageId: string,
+    request: AgentToolConfirmRequest,
+    response: { text: string; card?: FeishuCardPayload; metadata?: Record<string, unknown> },
+    titles: { success: string; failure: string },
+    ok: boolean,
+  ): Promise<void> {
+    const finalResponse = await continueAgentPlannerStepsAfterResponse(request, response, outputDir, { rentalPriceClient });
+    if (finalResponse.card) {
+      await deliverCard(client, messageId, finalResponse.card, logError);
+      return;
+    }
+    await deliverCard(client, messageId, statusCard(ok ? titles.success : titles.failure, finalResponse.text, ok ? 'green' : 'red'), logError);
+  }
 
   function recordLearning(input: AgentLearningEventInput, contextMessageId: string): void {
     void recordAgentLearningEvent(outputDir, input).catch((error) => logError(error, { messageId: contextMessageId, phase: 'reply' }));
@@ -752,7 +778,13 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
                 reason: request.reason,
                 resultSummary: result.text,
               }, messageId);
-              await updateCard(client, messageId, statusCard(result.ok ? '新链批量复制已完成' : '新链批量复制失败', result.text, result.ok ? 'green' : 'red')).catch(() => false);
+              await deliverContinuationResult(
+                messageId,
+                agentRequestFromNewLinkBatchConfirm(request),
+                botResponseFromNewLinkBatchResult(request, result),
+                { success: '新链批量复制已完成', failure: '新链批量复制失败' },
+                result.ok,
+              );
             } catch (error) {
               setRentalActionStatus(claim.key, 'failed');
               recordLearning({
@@ -807,7 +839,13 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
                 reason: request.reason,
                 resultSummary: result.text,
               }, messageId);
-              await updateCard(client, messageId, statusCard(result.ok ? '多商品新链批量复制已完成' : '多商品新链批量复制失败', result.text, result.ok ? 'green' : 'red')).catch(() => false);
+              await deliverContinuationResult(
+                messageId,
+                agentRequestFromNewLinkBatchMultiConfirm(request),
+                botResponseFromNewLinkBatchResult(request, result),
+                { success: '多商品新链批量复制已完成', failure: '多商品新链批量复制失败' },
+                result.ok,
+              );
             } catch (error) {
               setRentalActionStatus(claim.key, 'failed');
               recordLearning({
@@ -860,7 +898,13 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
             try {
               const result = await rentalPriceClient.execute(request);
               setRentalActionStatus(claim.key, result.ok ? 'completed' : 'failed');
-              await updateCard(client, messageId, statusCard(result.ok ? '租赁商品改价已完成' : '租赁商品改价失败', `商品 ${result.productId}\n${result.lines.join('\n')}`, result.ok ? 'green' : 'red')).catch(() => false);
+              await deliverContinuationResult(
+                messageId,
+                agentRequestFromRentalPriceConfirm(request),
+                botResponseFromRentalPriceExecution(result),
+                { success: '租赁商品改价已完成', failure: '租赁商品改价失败' },
+                result.ok,
+              );
             } catch (error) {
               setRentalActionStatus(claim.key, 'failed');
               await updateCard(client, messageId, statusCard('租赁商品改价失败', `商品 ${request.productId}\n${error instanceof Error ? error.message : String(error)}`, 'red')).catch(() => false);
@@ -1041,7 +1085,13 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
             try {
               const result = await executeRentalOperationConfirmRequest(rentalPriceClient, request);
               setRentalActionStatus(claim.key, result.ok ? 'completed' : 'failed');
-              await updateCard(client, messageId, statusCard(result.ok ? '租赁商品操作已完成' : '租赁商品操作失败', result.text, result.ok ? 'green' : 'red')).catch(() => false);
+              await deliverContinuationResult(
+                messageId,
+                agentRequestFromRentalOperationConfirm(request),
+                botResponseFromRentalOperationResult(request, result),
+                { success: '租赁商品操作已完成', failure: '租赁商品操作失败' },
+                result.ok,
+              );
             } catch (error) {
               setRentalActionStatus(claim.key, 'failed');
               await updateCard(client, messageId, statusCard('租赁商品操作失败', `商品 ${request.productId}\n${error instanceof Error ? error.message : String(error)}`, 'red')).catch(() => false);

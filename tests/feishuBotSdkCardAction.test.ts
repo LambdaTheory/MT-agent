@@ -393,6 +393,200 @@ describe('createFeishuSdkBot card.action.trigger', () => {
     expect(calls).toEqual(['copy:761', 'delist:762']);
   });
 
+  it('continues a planner sequence after a dedicated new-link confirmation succeeds', async () => {
+    const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
+    const sent: unknown[] = [];
+    const outputDir = await writeContext();
+    const calls: string[] = [];
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run'); },
+      async execute() { throw new Error('execute should not run'); },
+      async copy(productId) {
+        calls.push(productId);
+        return { productId, ok: true, newProductId: `new-${calls.length}`, lines: ['copy: ok'] };
+      },
+      async delist() { throw new Error('delist should not run'); },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+    const bot = createFeishuSdkBot({
+      appId: 'app',
+      appSecret: 'x',
+      outputDir,
+      rentalPriceClient,
+      sdk: fakeSdk(sent, registered),
+    });
+
+    bot.start();
+    await registered['card.action.trigger']({
+      event: {
+        context: { open_message_id: 'om-new-link-continued' },
+        operator: { open_id: 'ou_agent' },
+        action: {
+          tag: 'button',
+          name: 'new_link_batch_confirm_submit',
+          value: {
+            action: 'new_link_batch_confirm',
+            confirmationKey: 'new-link-step-1',
+            request: {
+              safetyVersion: 2,
+              workflowName: 'rental.newLinkBatch',
+              keyword: 'SQ1',
+              count: 2,
+              sourceProductId: '388',
+              sourceProductName: 'SQ1 最佳源',
+              dataDate: '2026-06-11',
+              reason: '先铺 SQ1 新链，再查询商品表现',
+              continuation: {
+                goal: '先铺新链再查商品',
+                reason: '用户要求确认复制后继续查询',
+                steps: [
+                  { toolName: 'product.query', arguments: { keyword: '565' }, reason: '复制后查询 565' },
+                ],
+                nextIndex: 1,
+                totalSteps: 2,
+                currentStepId: 'newLinks',
+                currentStepIndex: 0,
+                metadataStore: {},
+              },
+            },
+          },
+        },
+      },
+    });
+
+    for (let attempt = 0; attempt < 100 && !sent.some((item) => JSON.stringify(item).includes('步骤 2/2：product.query')); attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    expect(calls).toEqual(['388', '388']);
+    const finalPatch = sent.map(patchedCard).find((card) => JSON.stringify(card).includes('步骤 2/2：product.query'));
+    expect(JSON.stringify(finalPatch)).toContain('新链批量复制完成');
+    expect(JSON.stringify(finalPatch)).toContain('端内ID 565');
+  });
+
+  it('continues a planner sequence after a dedicated price confirmation succeeds', async () => {
+    const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
+    const sent: unknown[] = [];
+    const outputDir = await writeContext();
+    const executions: unknown[] = [];
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run'); },
+      async execute(request) {
+        executions.push(request);
+        return { productId: request.productId, ok: true, lines: ['apply: ok', 'submit: ok', 'verify: ok'] };
+      },
+      async copy() { throw new Error('copy should not run'); },
+      async delist() { throw new Error('delist should not run'); },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+    const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'x', outputDir, rentalPriceClient, sdk: fakeSdk(sent, registered) });
+
+    bot.start();
+    await registered['card.action.trigger']({
+      event: {
+        context: { open_message_id: 'om-price-continued' },
+        action: {
+          tag: 'button',
+          name: 'rental_price_confirm_submit',
+          value: {
+            action: 'rental_price_confirm',
+            confirmationKey: 'price-step-1',
+            request: {
+              mode: 'explicit_fields',
+              productId: '761',
+              fields: { rent1day: '22.00' },
+              reason: '先改价再查询',
+              continuation: {
+                goal: '先改价再查商品',
+                reason: '用户要求确认改价后继续查询',
+                steps: [{ toolName: 'product.query', arguments: { keyword: '565' }, reason: '改价后查询 565' }],
+                nextIndex: 1,
+                totalSteps: 2,
+                currentStepId: 'price',
+                currentStepIndex: 0,
+                metadataStore: {},
+              },
+            },
+          },
+        },
+      },
+    });
+
+    for (let attempt = 0; attempt < 100 && !sent.some((item) => JSON.stringify(item).includes('步骤 2/2：product.query')); attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    expect(executions).toHaveLength(1);
+    const finalPatch = sent.map(patchedCard).find((card) => JSON.stringify(card).includes('步骤 2/2：product.query'));
+    expect(JSON.stringify(finalPatch)).toContain('改价执行成功');
+    expect(JSON.stringify(finalPatch)).toContain('端内ID 565');
+  });
+
+  it('continues a planner sequence after a dedicated rental operation confirmation succeeds', async () => {
+    const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
+    const sent: unknown[] = [];
+    const outputDir = await writeContext();
+    const calls: string[] = [];
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run'); },
+      async execute() { throw new Error('execute should not run'); },
+      async copy() { throw new Error('copy should not run'); },
+      async delist(productId) {
+        calls.push(productId);
+        return { productId, ok: true, lines: ['delist: ok'] };
+      },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+    const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'x', outputDir, rentalPriceClient, sdk: fakeSdk(sent, registered) });
+
+    bot.start();
+    await registered['card.action.trigger']({
+      event: {
+        context: { open_message_id: 'om-rental-operation-continued' },
+        action: {
+          tag: 'button',
+          name: 'rental_operation_confirm_submit',
+          value: {
+            action: 'rental_operation_confirm',
+            confirmationKey: 'operation-step-1',
+            request: {
+              action: 'delist',
+              productId: '761',
+              plannerToolName: 'rental.operationConfirmRequest',
+              plannerArguments: { action: 'delist', productId: '761' },
+              plannerReason: '先下架再查询',
+              continuation: {
+                goal: '先下架再查商品',
+                reason: '用户要求确认下架后继续查询',
+                steps: [{ toolName: 'product.query', arguments: { keyword: '565' }, reason: '下架后查询 565' }],
+                nextIndex: 1,
+                totalSteps: 2,
+                currentStepId: 'delist',
+                currentStepIndex: 0,
+                metadataStore: {},
+              },
+            },
+          },
+        },
+      },
+    });
+
+    for (let attempt = 0; attempt < 100 && !sent.some((item) => JSON.stringify(item).includes('步骤 2/2：product.query')); attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    expect(calls).toEqual(['761']);
+    const finalPatch = sent.map(patchedCard).find((card) => JSON.stringify(card).includes('步骤 2/2：product.query'));
+    expect(JSON.stringify(finalPatch)).toContain('下架成功');
+    expect(JSON.stringify(finalPatch)).toContain('端内ID 565');
+  });
+
   it('patches a price callback confirmation card after differential pricing automation completes', async () => {
     const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
     const sent: unknown[] = [];

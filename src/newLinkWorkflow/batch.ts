@@ -1,4 +1,6 @@
+import { createHash } from 'node:crypto';
 import type { FeishuCardPayload } from '../notify/feishuApp.js';
+import { parseAgentToolConfirmContinuation, type AgentToolConfirmContinuation } from '../agentRuntime/approvalCard.js';
 import type { LinkRegistryEntry } from '../linkRegistry/types.js';
 import type { PublicTrafficDataReportContext, PublicTrafficProductDataRow } from '../publicTraffic/types.js';
 import type { RentalPriceSkillClient } from '../feishuBot/rentalPrice.js';
@@ -43,6 +45,7 @@ export interface NewLinkBatchConfirmRequest {
   sourceProductName: string;
   dataDate: string;
   reason: string;
+  continuation?: AgentToolConfirmContinuation;
 }
 
 export interface NewLinkBatchMultiConfirmRequest {
@@ -52,6 +55,7 @@ export interface NewLinkBatchMultiConfirmRequest {
   items: NewLinkBatchConfirmRequest[];
   dataDate: string;
   reason: string;
+  continuation?: AgentToolConfirmContinuation;
 }
 
 export interface NewLinkBatchExecutionResult {
@@ -78,6 +82,10 @@ function readPositiveInteger(value: unknown): number | null {
 function readProductId(value: unknown): string | null {
   const parsed = readPositiveInteger(value);
   return parsed ? String(parsed) : null;
+}
+
+function confirmationKey(value: Record<string, unknown>): string {
+  return createHash('sha256').update(JSON.stringify(value)).digest('hex').slice(0, 24);
 }
 
 export function readNewLinkBatchWorkflowRequest(value: Record<string, unknown>): NewLinkBatchWorkflowRequest | null {
@@ -263,7 +271,7 @@ export function formatNewLinkBatchPlan(plan: NewLinkBatchPlan): string {
   return `${header}\n数据日期：${plan.dataDate}\n${source}\n候选排序：\n${candidates}${warnings}\n\n注意：当前仅生成计划和确认卡，确认前不会复制商品。`;
 }
 
-export function buildNewLinkBatchConfirmRequest(plan: NewLinkBatchPlan, reason: string): NewLinkBatchConfirmRequest | null {
+export function buildNewLinkBatchConfirmRequest(plan: NewLinkBatchPlan, reason: string, continuation?: AgentToolConfirmContinuation): NewLinkBatchConfirmRequest | null {
   if (plan.status !== 'ready' || !plan.selectedSource) return null;
   if (plan.requestedSourceProductId && plan.selectedSource.productId !== plan.requestedSourceProductId) return null;
   return {
@@ -276,10 +284,11 @@ export function buildNewLinkBatchConfirmRequest(plan: NewLinkBatchPlan, reason: 
     sourceProductName: plan.selectedSource.productName,
     dataDate: plan.dataDate,
     reason,
+    ...(continuation ? { continuation } : {}),
   };
 }
 
-export function buildNewLinkBatchMultiConfirmRequest(plans: NewLinkBatchPlan[], reason: string): NewLinkBatchMultiConfirmRequest | null {
+export function buildNewLinkBatchMultiConfirmRequest(plans: NewLinkBatchPlan[], reason: string, continuation?: AgentToolConfirmContinuation): NewLinkBatchMultiConfirmRequest | null {
   if (plans.length < 2) return null;
   const items = plans.map((plan) => buildNewLinkBatchConfirmRequest(plan, reason));
   if (items.some((item) => item === null)) return null;
@@ -295,6 +304,7 @@ export function buildNewLinkBatchMultiConfirmRequest(plans: NewLinkBatchPlan[], 
     items: requests,
     dataDate,
     reason,
+    ...(continuation ? { continuation } : {}),
   };
 }
 
@@ -314,9 +324,10 @@ export function formatNewLinkBatchMultiPlan(plans: NewLinkBatchPlan[]): string {
   ].join('\n');
 }
 
-export function buildNewLinkBatchConfirmCard(plan: NewLinkBatchPlan, reason: string): FeishuCardPayload | undefined {
-  const request = buildNewLinkBatchConfirmRequest(plan, reason);
+export function buildNewLinkBatchConfirmCard(plan: NewLinkBatchPlan, reason: string, continuation?: AgentToolConfirmContinuation): FeishuCardPayload | undefined {
+  const request = buildNewLinkBatchConfirmRequest(plan, reason, continuation);
   if (!request || !plan.selectedSource) return undefined;
+  const key = confirmationKey(request as unknown as Record<string, unknown>);
   return {
     schema: '2.0',
     config: { wide_screen_mode: true },
@@ -344,7 +355,7 @@ export function buildNewLinkBatchConfirmCard(plan: NewLinkBatchPlan, reason: str
               type: 'primary',
               form_action_type: 'submit',
               name: 'new_link_batch_confirm_submit',
-              behaviors: [{ type: 'callback', value: { action: 'new_link_batch_confirm', request } }],
+              behaviors: [{ type: 'callback', value: { action: 'new_link_batch_confirm', request, confirmationKey: key } }],
             },
           ],
         },
@@ -365,6 +376,7 @@ export function buildNewLinkBatchConfirmCard(plan: NewLinkBatchPlan, reason: str
                   keyword: request.keyword,
                   sourceProductId: request.sourceProductId,
                   safetyVersion: NEW_LINK_BATCH_CONFIRMATION_VERSION,
+                  confirmationKey: key,
                 },
               }],
             },
@@ -375,10 +387,11 @@ export function buildNewLinkBatchConfirmCard(plan: NewLinkBatchPlan, reason: str
   };
 }
 
-export function buildNewLinkBatchMultiConfirmCard(plans: NewLinkBatchPlan[], reason: string): FeishuCardPayload | undefined {
-  const request = buildNewLinkBatchMultiConfirmRequest(plans, reason);
+export function buildNewLinkBatchMultiConfirmCard(plans: NewLinkBatchPlan[], reason: string, continuation?: AgentToolConfirmContinuation): FeishuCardPayload | undefined {
+  const request = buildNewLinkBatchMultiConfirmRequest(plans, reason, continuation);
   if (!request) return undefined;
   const totalCount = request.items.reduce((sum, item) => sum + item.count, 0);
+  const key = confirmationKey(request as unknown as Record<string, unknown>);
   return {
     schema: '2.0',
     config: { wide_screen_mode: true },
@@ -410,7 +423,7 @@ export function buildNewLinkBatchMultiConfirmCard(plans: NewLinkBatchPlan[], rea
               type: 'primary',
               form_action_type: 'submit',
               name: 'new_link_batch_multi_confirm_submit',
-              behaviors: [{ type: 'callback', value: { action: 'new_link_batch_multi_confirm', request } }],
+              behaviors: [{ type: 'callback', value: { action: 'new_link_batch_multi_confirm', request, confirmationKey: key } }],
             },
           ],
         },
@@ -430,6 +443,7 @@ export function buildNewLinkBatchMultiConfirmCard(plans: NewLinkBatchPlan[], rea
                   action: 'new_link_batch_cancel',
                   keyword: request.items.map((item) => item.keyword).join('、'),
                   safetyVersion: NEW_LINK_BATCH_CONFIRMATION_VERSION,
+                  confirmationKey: key,
                 },
               }],
             },
@@ -450,6 +464,7 @@ function readNewLinkBatchConfirmRequestRecord(request: Record<string, unknown>):
   const sourceProductName = readString(request.sourceProductName);
   const dataDate = readString(request.dataDate);
   const reason = readString(request.reason);
+  const continuation = parseAgentToolConfirmContinuation(request.continuation);
 
   if (
     safetyVersion !== NEW_LINK_BATCH_CONFIRMATION_VERSION ||
@@ -462,7 +477,8 @@ function readNewLinkBatchConfirmRequestRecord(request: Record<string, unknown>):
     (requestedSourceProductId !== null && (!/^\d+$/.test(requestedSourceProductId) || requestedSourceProductId !== sourceProductId)) ||
     !sourceProductName ||
     !dataDate ||
-    !reason
+    !reason ||
+    (request.continuation !== undefined && !continuation)
   ) {
     return null;
   }
@@ -477,6 +493,7 @@ function readNewLinkBatchConfirmRequestRecord(request: Record<string, unknown>):
     sourceProductName,
     dataDate,
     reason,
+    ...(continuation ? { continuation } : {}),
   };
 }
 
@@ -493,8 +510,17 @@ export function parseNewLinkBatchMultiConfirmRequest(value: unknown): NewLinkBat
   const mode = readString(request.mode);
   const dataDate = readString(request.dataDate);
   const reason = readString(request.reason);
+  const continuation = parseAgentToolConfirmContinuation(request.continuation);
   const rawItems = Array.isArray(request.items) ? request.items : [];
-  if (safetyVersion !== NEW_LINK_BATCH_CONFIRMATION_VERSION || workflowName !== NEW_LINK_BATCH_WORKFLOW_NAME || mode !== 'multi-source' || !dataDate || !reason || rawItems.length < 2) return null;
+  if (
+    safetyVersion !== NEW_LINK_BATCH_CONFIRMATION_VERSION ||
+    workflowName !== NEW_LINK_BATCH_WORKFLOW_NAME ||
+    mode !== 'multi-source' ||
+    !dataDate ||
+    !reason ||
+    rawItems.length < 2 ||
+    (request.continuation !== undefined && !continuation)
+  ) return null;
   const items = rawItems.map((item) => isRecord(item) ? readNewLinkBatchConfirmRequestRecord(item) : null);
   if (items.some((item) => item === null)) return null;
   const parsedItems = items as NewLinkBatchConfirmRequest[];
@@ -508,6 +534,7 @@ export function parseNewLinkBatchMultiConfirmRequest(value: unknown): NewLinkBat
     items: parsedItems,
     dataDate,
     reason,
+    ...(continuation ? { continuation } : {}),
   };
 }
 

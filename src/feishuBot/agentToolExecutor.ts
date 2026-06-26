@@ -378,6 +378,7 @@ async function rentalSpecRemovePlanResponse(
   reason: string,
   client: RentalPriceSkillClient,
   options: AgentToolExecutionOptions,
+  continuation?: AgentToolConfirmRequest['continuation'],
 ): Promise<BotResponse> {
   const registryContext = await loadClosedOrderRegistryContext(options.closedOrderRegistryPaths);
   const registry = createLinkRegistry(registryContext.registry);
@@ -457,6 +458,10 @@ async function rentalSpecRemovePlanResponse(
     keyword,
     ...(resolution.sameSkuGroupId ? { sameSkuGroupId: resolution.sameSkuGroupId } : {}),
     items: matches,
+    plannerToolName: 'rental.specRemovePlan',
+    plannerArguments: { query, keyword },
+    plannerReason: reason,
+    ...(continuation ? { continuation } : {}),
   };
   return {
     text: formatSpecRemovePlanLines(query, keyword, resolution, matches, blocked, failedReads),
@@ -1036,12 +1041,12 @@ export async function executeAgentToolRequest(
       const rentalRequest = rentalAgentToolRequest(request.toolName, request.arguments);
       if (!rentalRequest) throw new Error('租赁商品操作参数无效，请重新发起。');
       const result = await executeRentalOperationConfirmRequest(options.rentalPriceClient ?? createRentalPriceSkillClient(), rentalRequest);
-      return { text: result.text };
+      return { text: result.text, metadata: { toolName: request.toolName, ok: result.ok, productId: rentalRequest.productId } };
     }
     case 'rental.specRemovePlan': {
       const query = requireString(request.arguments.query, 'query');
       const keyword = requireString(request.arguments.keyword, 'keyword');
-      return rentalSpecRemovePlanResponse(query, keyword, request.reason, options.rentalPriceClient ?? createRentalPriceSkillClient(), options);
+      return rentalSpecRemovePlanResponse(query, keyword, request.reason, options.rentalPriceClient ?? createRentalPriceSkillClient(), options, request.continuation);
     }
     case 'rental.operationConfirmRequest': {
       const rentalRequest = parseRentalOperationConfirmRequest({ request: request.arguments });
@@ -1054,7 +1059,7 @@ export async function executeAgentToolRequest(
       if (!rentalRequest) throw new Error('租赁商品改价参数无效，请重新发起。');
       const client = options.rentalPriceClient ?? createRentalPriceSkillClient();
       const preview = await client.preview(rentalRequest);
-      return { text: `请确认商品 ${rentalRequest.productId} 改价`, card: buildRentalPricePreviewCard(preview) };
+      return { text: `请确认商品 ${rentalRequest.productId} 改价`, card: buildRentalPricePreviewCard(preview, { reason: request.reason, continuation: request.continuation }) };
     }
     case 'rental.priceSnapshot': {
       const query = requireString(request.arguments.query, 'query');
@@ -1074,7 +1079,7 @@ export async function executeAgentToolRequest(
         const text = formatNewLinkBatchMultiPlan(plans);
         return {
           text,
-          ...(plans.every((plan) => plan.status === 'ready') ? { card: buildNewLinkBatchMultiConfirmCard(plans, request.reason) } : {}),
+          ...(plans.every((plan) => plan.status === 'ready') ? { card: buildNewLinkBatchMultiConfirmCard(plans, request.reason, request.continuation) } : {}),
           metadata: { toolName: 'rental.newLinkBatchPlan', plans, ready: plans.every((plan) => plan.status === 'ready') },
         };
       }
@@ -1082,7 +1087,7 @@ export async function executeAgentToolRequest(
       const plan = plans[0]!;
       return {
         text: formatNewLinkBatchPlan(plan),
-        ...(plan.status === 'ready' ? { card: buildNewLinkBatchConfirmCard(plan, request.reason) } : {}),
+        ...(plan.status === 'ready' ? { card: buildNewLinkBatchConfirmCard(plan, request.reason, request.continuation) } : {}),
         metadata: {
           toolName: 'rental.newLinkBatchPlan',
           status: plan.status,
@@ -1099,7 +1104,7 @@ export async function executeAgentToolRequest(
       const client = options.rentalPriceClient ?? createRentalPriceSkillClient();
       if (!client.rollback) throw new Error('当前租赁改价客户端不支持回滚。');
       const result = await client.rollback(rollbackRequest);
-      return { text: `${result.ok ? '改价回滚成功' : '改价回滚失败'}：商品 ${result.productId}\n${result.lines.join('\n')}` };
+      return { text: `${result.ok ? '改价回滚成功' : '改价回滚失败'}：商品 ${result.productId}\n${result.lines.join('\n')}`, metadata: { toolName: 'rental.priceRollback', ok: result.ok, productId: result.productId, taskId: result.audit?.taskId, rollbackFile: result.audit?.rollbackFile } };
     }
     case 'closedOrder.syncFeedback': {
       const result = await syncClosedOrderFeedbackFromApi(

@@ -30,6 +30,24 @@ function stepIdFor(step: AgentPlannerStep, absoluteIndex: number): string {
   return step.id ?? `step${absoluteIndex + 1}`;
 }
 
+function buildContinuation(input: ContinuePlannerStepsInput, stepId: string, absoluteIndex: number, remainingSteps: AgentPlannerStep[]): AgentToolConfirmRequest['continuation'] | undefined {
+  if (remainingSteps.length === 0) return undefined;
+  return {
+    goal: input.goal,
+    reason: input.reason,
+    steps: remainingSteps,
+    nextIndex: absoluteIndex + 1,
+    totalSteps: input.totalSteps,
+    currentStepId: stepId,
+    currentStepIndex: absoluteIndex,
+    metadataStore: cloneMetadataStore(input.metadataStore),
+  };
+}
+
+function shouldStopAfterConfirmedResponse(response: BotResponse): boolean {
+  return response.metadata?.ok === false;
+}
+
 export async function continueAgentPlannerSteps(input: ContinuePlannerStepsInput): Promise<BotResponse | null> {
   for (const [localIndex, step] of input.steps.entries()) {
     const absoluteIndex = input.baseIndex + localIndex;
@@ -57,18 +75,10 @@ export async function continueAgentPlannerSteps(input: ContinuePlannerStepsInput
       reason: step.reason || input.reason,
     };
     const policy = decideAgentPolicy({ tool, input: resolvedArguments.value, reason: request.reason });
+    if (policy?.decision === 'confirmation_required') {
+      request.continuation = buildContinuation(input, stepId, absoluteIndex, input.steps.slice(localIndex + 1));
+    }
     if (policy?.decision === 'confirmation_required' && !isPreConfirmationPlanningTool(step.toolName)) {
-      const remainingSteps = input.steps.slice(localIndex + 1);
-      request.continuation = {
-        goal: input.goal,
-        reason: input.reason,
-        steps: remainingSteps,
-        nextIndex: absoluteIndex + 1,
-        totalSteps: input.totalSteps,
-        currentStepId: stepId,
-        currentStepIndex: absoluteIndex,
-        metadataStore: cloneMetadataStore(input.metadataStore),
-      };
       input.textParts.push('');
       input.textParts.push(`步骤 ${absoluteIndex + 1}/${input.totalSteps} 需要确认：${step.toolName}`);
       input.textParts.push(`原因：${request.reason}`);
@@ -89,16 +99,12 @@ export async function continueAgentPlannerSteps(input: ContinuePlannerStepsInput
   return { text: input.textParts.join('\n') };
 }
 
-export async function executeAgentToolRequestWithContinuation(
+export async function continueAgentPlannerStepsAfterResponse(
   request: AgentToolConfirmRequest,
+  response: BotResponse,
   outputDir = 'output',
   options: AgentToolExecutionOptions = {},
 ): Promise<BotResponse> {
-  const response = await executeAgentToolRequest(
-    { toolName: request.toolName, arguments: request.arguments, reason: request.reason },
-    outputDir,
-    options,
-  );
   const continuation = request.continuation;
   if (!continuation) return response;
 
@@ -111,6 +117,12 @@ export async function executeAgentToolRequestWithContinuation(
     response.text,
   ];
   rememberStepMetadata(metadataStore, continuation.currentStepId, response);
+
+  if (shouldStopAfterConfirmedResponse(response)) {
+    textParts.push('');
+    textParts.push('当前步骤执行未成功，已停止后续步骤。');
+    return { text: textParts.join('\n'), ...(response.card ? { card: response.card } : {}) };
+  }
 
   if (response.card) {
     textParts.push('');
@@ -130,4 +142,17 @@ export async function executeAgentToolRequestWithContinuation(
     options,
   });
   return continued ?? { text: textParts.join('\n') };
+}
+
+export async function executeAgentToolRequestWithContinuation(
+  request: AgentToolConfirmRequest,
+  outputDir = 'output',
+  options: AgentToolExecutionOptions = {},
+): Promise<BotResponse> {
+  const response = await executeAgentToolRequest(
+    { toolName: request.toolName, arguments: request.arguments, reason: request.reason },
+    outputDir,
+    options,
+  );
+  return continueAgentPlannerStepsAfterResponse(request, response, outputDir, options);
 }

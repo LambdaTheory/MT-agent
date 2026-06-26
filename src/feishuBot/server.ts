@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { createActivityCancellationAssistant, type ActivityCancellationAssistant } from '../activityAutomation/cancelAssistance.js';
 import { updateActivitySubmitSessionStatus } from '../activityAutomation/submitSession.js';
-import { parseAgentToolConfirmRequest } from '../agentRuntime/approvalCard.js';
+import { parseAgentToolConfirmRequest, type AgentToolConfirmRequest } from '../agentRuntime/approvalCard.js';
 import { buildClarifiedMessage, parseAgentClarificationCustomSelection, parseAgentClarificationSelection } from '../agentRuntime/clarificationCard.js';
 import type { AgentPlannerProvider } from '../agentRuntime/planner.js';
 import { recordAgentLearningEvent } from '../agentLearning/store.js';
@@ -27,7 +27,16 @@ import {
   parseActivityPriceCallbackConfirmRequest,
   type ActivityAutomationSkillClient,
 } from './activityAutomation.js';
-import { executeAgentToolRequestWithContinuation } from './agentToolContinuation.js';
+import { continueAgentPlannerStepsAfterResponse, executeAgentToolRequestWithContinuation } from './agentToolContinuation.js';
+import {
+  agentRequestFromNewLinkBatchConfirm,
+  agentRequestFromNewLinkBatchMultiConfirm,
+  agentRequestFromRentalOperationConfirm,
+  agentRequestFromRentalPriceConfirm,
+  botResponseFromNewLinkBatchResult,
+  botResponseFromRentalOperationResult,
+  botResponseFromRentalPriceExecution,
+} from './agentSpecializedContinuation.js';
 import { executeNewLinkBatchConfirmRequest, executeNewLinkBatchMultiConfirmRequest, parseNewLinkBatchConfirmRequest, parseNewLinkBatchMultiConfirmRequest } from '../newLinkWorkflow/batch.js';
 import { createRentalPriceSkillClient, executeRentalOperationConfirmRequest, parseRentalOperationConfirmRequest, parseRentalPriceConfirmRequest, type RentalPriceSkillClient } from './rentalPrice.js';
 import type { LlmIntentProposalProvider } from './llmIntentProposal.js';
@@ -166,11 +175,13 @@ function fallbackCancelValue(expectedAction: string, candidates: Record<string, 
   if (expectedAction === 'new_link_batch_cancel') {
     const keyword = readString(first?.keyword) ?? readString(request?.keyword);
     const sourceProductId = readString(first?.sourceProductId) ?? readString(request?.sourceProductId);
-    return { action: expectedAction, ...(keyword ? { keyword } : {}), ...(sourceProductId ? { sourceProductId } : {}) };
+    const confirmationKey = readString(first?.confirmationKey) ?? readString(request?.confirmationKey);
+    return { action: expectedAction, ...(keyword ? { keyword } : {}), ...(sourceProductId ? { sourceProductId } : {}), ...(confirmationKey ? { confirmationKey } : {}) };
   }
   if (expectedAction === 'rental_price_cancel' || expectedAction === 'rental_operation_cancel') {
     const productId = readString(first?.productId) ?? readString(request?.productId);
-    return { action: expectedAction, ...(productId ? { productId } : {}) };
+    const confirmationKey = readString(first?.confirmationKey) ?? readString(request?.confirmationKey);
+    return { action: expectedAction, ...(productId ? { productId } : {}), ...(confirmationKey ? { confirmationKey } : {}) };
   }
   if (expectedAction === 'agent_tool_cancel') {
     const toolName = readString(first?.toolName) ?? readString(request?.toolName);
@@ -243,6 +254,11 @@ function agentToolClaimFamily(value: Record<string, unknown> | undefined): strin
   return confirmationKey ? `agent_tool:${confirmationKey}` : 'agent_tool';
 }
 
+function cardActionClaimFamily(family: string, value: Record<string, unknown> | undefined): string {
+  const confirmationKey = readString(value?.confirmationKey);
+  return confirmationKey ? `${family}:${confirmationKey}` : family;
+}
+
 function readActionFormValue(action: FeishuCardAction | undefined, name: string): string | undefined {
   if (!isRecord(action)) return undefined;
   const actionRecord = action as Record<string, unknown>;
@@ -297,6 +313,15 @@ async function handleCardActionTrigger(
   const replyConfig = { appId: config.appId, appSecret: config.appSecret, messageId };
   const actorId = extractCardReviewerId(payload);
   const outputDir = config.outputDir ?? 'output';
+
+  async function continueSpecializedResponse(
+    request: AgentToolConfirmRequest,
+    response: BotResponse,
+  ): Promise<BotResponse> {
+    return continueAgentPlannerStepsAfterResponse(request, response, outputDir, {
+      rentalPriceClient: config.rentalPriceClient,
+    });
+  }
 
   if (actionName === 'operations_learning_feedback') {
     const productId = readString(value?.productId);
@@ -516,7 +541,7 @@ async function handleCardActionTrigger(
       await replyText(replyConfig, '新链批量复制确认参数无效，请重新发起。');
       return;
     }
-    const claim = claimServerCardAction(messageId, 'new_link_batch', actionName);
+    const claim = claimServerCardAction(messageId, cardActionClaimFamily('new_link_batch', value), actionName);
     if (!claim.claimed) {
       return claimStatusCard('新链批量复制已处理', claim.claim);
     }
@@ -542,7 +567,9 @@ async function handleCardActionTrigger(
       reason: request.reason,
       resultSummary: result.text,
     });
-    await replyText(replyConfig, result.text);
+    const response = await continueSpecializedResponse(agentRequestFromNewLinkBatchConfirm(request), botResponseFromNewLinkBatchResult(request, result));
+    if (response.card) await replyCard(replyConfig, response.card);
+    else await replyText(replyConfig, response.text);
     return;
   }
 
@@ -552,7 +579,7 @@ async function handleCardActionTrigger(
       await replyText(replyConfig, '多商品新链批量复制确认参数无效，请重新发起。');
       return;
     }
-    const claim = claimServerCardAction(messageId, 'new_link_batch', actionName);
+    const claim = claimServerCardAction(messageId, cardActionClaimFamily('new_link_batch', value), actionName);
     if (!claim.claimed) {
       return claimStatusCard('新链批量复制已处理', claim.claim);
     }
@@ -578,13 +605,15 @@ async function handleCardActionTrigger(
       reason: request.reason,
       resultSummary: result.text,
     });
-    await replyText(replyConfig, result.text);
+    const response = await continueSpecializedResponse(agentRequestFromNewLinkBatchMultiConfirm(request), botResponseFromNewLinkBatchResult(request, result));
+    if (response.card) await replyCard(replyConfig, response.card);
+    else await replyText(replyConfig, response.text);
     return;
   }
 
   if (actionName === 'new_link_batch_cancel') {
     const keyword = readString(value?.keyword) ?? '未知';
-    const claim = claimServerCardAction(messageId, 'new_link_batch', actionName);
+    const claim = claimServerCardAction(messageId, cardActionClaimFamily('new_link_batch', value), actionName);
     if (!claim.claimed) {
       return claimStatusCard('新链批量复制已处理', claim.claim);
     }
@@ -606,13 +635,15 @@ async function handleCardActionTrigger(
       await replyText(replyConfig, '改价确认参数无效，请重新发起改价。');
       return;
     }
-    const claim = claimServerCardAction(messageId, 'rental_price', actionName);
+    const claim = claimServerCardAction(messageId, cardActionClaimFamily('rental_price', value), actionName);
     if (!claim.claimed) {
       return claimStatusCard('租赁商品改价已处理', claim.claim);
     }
     const result = await (config.rentalPriceClient ?? createRentalPriceSkillClient()).execute(request);
     setServerCardActionStatus(claim.key, result.ok ? 'completed' : 'failed');
-    await replyText(replyConfig, `${result.ok ? '改价执行成功' : '改价执行失败'}：商品 ${result.productId}\n${result.lines.join('\n')}`);
+    const response = await continueSpecializedResponse(agentRequestFromRentalPriceConfirm(request), botResponseFromRentalPriceExecution(result));
+    if (response.card) await replyCard(replyConfig, response.card);
+    else await replyText(replyConfig, response.text);
     return;
   }
 
@@ -729,7 +760,7 @@ async function handleCardActionTrigger(
 
   if (actionName === 'rental_price_cancel') {
     const productId = readString(value?.productId) ?? '未知';
-    const claim = claimServerCardAction(messageId, 'rental_price', actionName);
+    const claim = claimServerCardAction(messageId, cardActionClaimFamily('rental_price', value), actionName);
     if (!claim.claimed) {
       return claimStatusCard('租赁商品改价已处理', claim.claim);
     }
@@ -743,19 +774,21 @@ async function handleCardActionTrigger(
       await replyText(replyConfig, '租赁商品操作确认参数无效，请重新发起。');
       return;
     }
-    const claim = claimServerCardAction(messageId, 'rental_operation', actionName);
+    const claim = claimServerCardAction(messageId, cardActionClaimFamily('rental_operation', value), actionName);
     if (!claim.claimed) {
       return claimStatusCard('租赁商品操作已处理', claim.claim);
     }
     const result = await executeRentalOperationConfirmRequest(config.rentalPriceClient ?? createRentalPriceSkillClient(), request);
     setServerCardActionStatus(claim.key, result.ok ? 'completed' : 'failed');
-    await replyText(replyConfig, result.text);
+    const response = await continueSpecializedResponse(agentRequestFromRentalOperationConfirm(request), botResponseFromRentalOperationResult(request, result));
+    if (response.card) await replyCard(replyConfig, response.card);
+    else await replyText(replyConfig, response.text);
     return;
   }
 
   if (actionName === 'rental_operation_cancel') {
     const productId = readString(value?.productId) ?? '未知';
-    const claim = claimServerCardAction(messageId, 'rental_operation', actionName);
+    const claim = claimServerCardAction(messageId, cardActionClaimFamily('rental_operation', value), actionName);
     if (!claim.claimed) {
       return claimStatusCard('租赁商品操作已处理', claim.claim);
     }

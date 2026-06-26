@@ -1,7 +1,10 @@
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve, sep, join, isAbsolute } from 'node:path';
 import { promisify } from 'node:util';
+import { parseAgentToolConfirmContinuation, type AgentToolConfirmContinuation } from '../agentRuntime/approvalCard.js';
+import { validateAgentToolArguments } from '../agentRuntime/planner.js';
 import type { FeishuCardPayload } from '../notify/feishuApp.js';
 
 const execFileAsync = promisify(execFile);
@@ -38,7 +41,7 @@ export interface RentalPriceAuditReference {
 }
 
 export type RentalPriceChangeRequest =
-  | { mode: 'explicit_fields'; productId: string; fields: Record<string, string>; audit?: RentalPriceAuditReference }
+  | { mode: 'explicit_fields'; productId: string; fields: Record<string, string>; audit?: RentalPriceAuditReference; reason?: string; continuation?: AgentToolConfirmContinuation }
   | { mode: 'global_discount'; productId: string; discount: number; scope: 'rent_fields' | 'all_price_fields' };
 
 export interface RentalPricePreview {
@@ -127,6 +130,13 @@ export interface RentalPriceSpecRemoveResult {
   audit?: { resultFile?: string };
 }
 
+interface RentalOperationConfirmMetadata {
+  continuation?: AgentToolConfirmContinuation;
+  plannerToolName?: 'rental.specRemovePlan' | 'rental.operationConfirmRequest';
+  plannerArguments?: Record<string, unknown>;
+  plannerReason?: string;
+}
+
 export interface RentalPriceSkillClient {
   preview(request: RentalPriceChangeRequest): Promise<RentalPricePreview>;
   execute(request: Extract<RentalPriceChangeRequest, { mode: 'explicit_fields' }>): Promise<RentalPriceExecutionResult>;
@@ -149,13 +159,14 @@ export interface RentalSpecRemoveItemConfirmRequest {
   keyword?: string;
 }
 
-export type RentalOperationConfirmRequest =
+export type RentalOperationConfirmRequest = (
   | { action: 'copy'; productId: string }
   | { action: 'delist'; productId: string }
   | { action: 'tenancy-set'; productId: string; days: string }
   | { action: 'spec-discover'; productId: string }
   | { action: 'spec-add-and-refresh'; productId: string; itemTitle: string }
-  | { action: 'spec-remove-items'; productId: string; query?: string; keyword: string; sameSkuGroupId?: string; items: RentalSpecRemoveItemConfirmRequest[] };
+  | { action: 'spec-remove-items'; productId: string; query?: string; keyword: string; sameSkuGroupId?: string; items: RentalSpecRemoveItemConfirmRequest[] }
+) & RentalOperationConfirmMetadata;
 
 interface RentalPriceSkillClientOptions {
   rootDir?: string;
@@ -169,6 +180,10 @@ const AUDIT_TASK_ID_PATTERN = /^task_\d+_[a-f0-9]+$/i;
 
 function money(value: string | number): string {
   return Number(value).toFixed(2);
+}
+
+function confirmationKey(value: Record<string, unknown>): string {
+  return createHash('sha256').update(JSON.stringify(value)).digest('hex').slice(0, 24);
 }
 
 export function parseRentalPriceChange(text: string): RentalPriceChangeRequest | null {
@@ -233,14 +248,17 @@ function auditMarkdown(audit: RentalPriceAuditReference): string {
   return lines.join('\n');
 }
 
-export function buildRentalPricePreviewCard(preview: RentalPricePreview): FeishuCardPayload {
+export function buildRentalPricePreviewCard(preview: RentalPricePreview, options: { reason?: string; continuation?: AgentToolConfirmContinuation } = {}): FeishuCardPayload {
   const audit = preview.audit;
   const request: Extract<RentalPriceChangeRequest, { mode: 'explicit_fields' }> = {
     mode: 'explicit_fields',
     productId: preview.productId,
     fields: preview.fields,
     ...(audit && !audit.hasErrors ? { audit: compactAuditReference(audit) } : {}),
+    ...(options.reason ? { reason: options.reason } : {}),
+    ...(options.continuation ? { continuation: options.continuation } : {}),
   };
+  const key = confirmationKey(request as unknown as Record<string, unknown>);
   const formElements: Record<string, unknown>[] = [];
   if (!audit?.hasErrors) {
     formElements.push({
@@ -249,7 +267,7 @@ export function buildRentalPricePreviewCard(preview: RentalPricePreview): Feishu
       type: 'primary',
       form_action_type: 'submit',
       name: 'rental_price_confirm_submit',
-      behaviors: [{ type: 'callback', value: { action: 'rental_price_confirm', request } }],
+      behaviors: [{ type: 'callback', value: { action: 'rental_price_confirm', request, confirmationKey: key } }],
     });
   }
   formElements.push({
@@ -258,7 +276,7 @@ export function buildRentalPricePreviewCard(preview: RentalPricePreview): Feishu
     type: 'default',
     form_action_type: 'submit',
     name: 'rental_price_cancel_submit',
-    behaviors: [{ type: 'callback', value: { action: 'rental_price_cancel', productId: preview.productId } }],
+    behaviors: [{ type: 'callback', value: { action: 'rental_price_cancel', productId: preview.productId, confirmationKey: key } }],
   });
 
   return {
@@ -318,6 +336,7 @@ function rentalOperationDetailMarkdown(request: RentalOperationConfirmRequest): 
 export function buildRentalOperationConfirmCard(request: RentalOperationConfirmRequest, reason: string): FeishuCardPayload {
   const title = rentalOperationTitle(request);
   const details = rentalOperationDetailMarkdown(request);
+  const key = confirmationKey(request as unknown as Record<string, unknown>);
   return {
     schema: '2.0',
     config: { wide_screen_mode: true },
@@ -335,7 +354,7 @@ export function buildRentalOperationConfirmCard(request: RentalOperationConfirmR
               type: 'primary',
               form_action_type: 'submit',
               name: 'rental_operation_confirm_submit',
-              behaviors: [{ type: 'callback', value: { action: 'rental_operation_confirm', request } }],
+              behaviors: [{ type: 'callback', value: { action: 'rental_operation_confirm', request, confirmationKey: key } }],
             },
             {
               tag: 'button',
@@ -343,7 +362,7 @@ export function buildRentalOperationConfirmCard(request: RentalOperationConfirmR
               type: 'default',
               form_action_type: 'submit',
               name: 'rental_operation_cancel_submit',
-              behaviors: [{ type: 'callback', value: { action: 'rental_operation_cancel', productId: request.productId } }],
+              behaviors: [{ type: 'callback', value: { action: 'rental_operation_cancel', productId: request.productId, confirmationKey: key } }],
             },
           ],
         },
@@ -1037,13 +1056,23 @@ export function parseRentalPriceConfirmRequest(value: unknown): Extract<RentalPr
   const request = value.request;
   if (!isRecord(request) || request.mode !== 'explicit_fields' || typeof request.productId !== 'string' || !isRecord(request.fields)) return null;
   if (isRecord(request.audit) && request.audit.hasErrors === true) return null;
+  const continuation = parseAgentToolConfirmContinuation(request.continuation);
+  if (request.continuation !== undefined && !continuation) return null;
   const fields: Record<string, string> = {};
   for (const [field, raw] of Object.entries(request.fields)) {
     if (PRICE_FIELD_NAMES.has(field) && typeof raw === 'string' && Number.isFinite(Number(raw))) fields[field] = money(raw);
   }
   if (!Object.keys(fields).length) return null;
   const audit = parseAuditCallbackReference(request.audit);
-  return { mode: 'explicit_fields', productId: request.productId, fields, ...(audit ? { audit } : {}) };
+  const reason = readString(request.reason) ?? undefined;
+  return {
+    mode: 'explicit_fields',
+    productId: request.productId,
+    fields,
+    ...(audit ? { audit } : {}),
+    ...(reason ? { reason } : {}),
+    ...(continuation ? { continuation } : {}),
+  };
 }
 
 function readString(value: unknown): string | null {
@@ -1077,6 +1106,27 @@ function parseSpecRemoveItems(value: unknown): RentalSpecRemoveItemConfirmReques
     });
   }
   return items;
+}
+
+function parseRentalOperationMetadata(request: Record<string, unknown>): RentalOperationConfirmMetadata | null {
+  const continuation = parseAgentToolConfirmContinuation(request.continuation);
+  if (request.continuation !== undefined && !continuation) return null;
+
+  const rawPlannerToolName = readString(request.plannerToolName);
+  const plannerToolName = rawPlannerToolName === 'rental.specRemovePlan' || rawPlannerToolName === 'rental.operationConfirmRequest' ? rawPlannerToolName : undefined;
+  if (rawPlannerToolName && !plannerToolName) return null;
+
+  const plannerArguments = isRecord(request.plannerArguments) ? request.plannerArguments : undefined;
+  if (request.plannerArguments !== undefined && !plannerArguments) return null;
+  if (plannerToolName && plannerArguments && !validateAgentToolArguments(plannerToolName, plannerArguments)) return null;
+
+  const plannerReason = readString(request.plannerReason) ?? undefined;
+  return {
+    ...(continuation ? { continuation } : {}),
+    ...(plannerToolName ? { plannerToolName } : {}),
+    ...(plannerArguments ? { plannerArguments } : {}),
+    ...(plannerReason ? { plannerReason } : {}),
+  };
 }
 
 export function rentalPriceChangeRequestFromToolArguments(args: Record<string, unknown>): RentalPriceChangeRequest | null {
@@ -1157,17 +1207,19 @@ export function parseRentalOperationConfirmRequest(value: unknown): RentalOperat
   const action = readString(request.action);
   const productId = readProductId(request.productId);
   if (!action || !productId) return null;
+  const metadata = parseRentalOperationMetadata(request);
+  if (!metadata) return null;
 
-  if (action === 'copy') return { action, productId };
-  if (action === 'delist') return { action, productId };
-  if (action === 'spec-discover') return { action, productId };
+  if (action === 'copy') return { action, productId, ...metadata };
+  if (action === 'delist') return { action, productId, ...metadata };
+  if (action === 'spec-discover') return { action, productId, ...metadata };
   if (action === 'tenancy-set') {
     const days = readString(request.days);
-    return days && /^\d+(?:,\d+)*$/.test(days) ? { action, productId, days } : null;
+    return days && /^\d+(?:,\d+)*$/.test(days) ? { action, productId, days, ...metadata } : null;
   }
   if (action === 'spec-add-and-refresh') {
     const itemTitle = readString(request.itemTitle);
-    return itemTitle ? { action, productId, itemTitle } : null;
+    return itemTitle ? { action, productId, itemTitle, ...metadata } : null;
   }
   if (action === 'spec-remove-items') {
     const keyword = readString(request.keyword);
@@ -1182,6 +1234,7 @@ export function parseRentalOperationConfirmRequest(value: unknown): RentalOperat
       keyword,
       ...(sameSkuGroupId ? { sameSkuGroupId } : {}),
       items,
+      ...metadata,
     };
   }
   return null;
