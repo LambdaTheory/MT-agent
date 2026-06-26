@@ -1622,7 +1622,7 @@ describe('handleBotIntent', () => {
         return JSON.stringify({
           goal: 'bad unresolved reference',
           steps: [
-            { id: 'summary', toolName: 'publicTraffic.latestSummary', arguments: {}, reason: 'read summary' },
+            { id: 'rank', toolName: 'publicTraffic.latestSummary', arguments: {}, reason: 'read summary without bestProductId metadata' },
             { toolName: 'rental.copy', arguments: { productId: '${rank.bestProductId}' }, reason: 'bad reference should stop' },
           ],
           confidence: 0.8,

@@ -113,6 +113,38 @@ describe('agent runtime planner proposal validation', () => {
     });
   });
 
+  it('rejects multi-step placeholders that do not reference prior steps', () => {
+    expect(validateAgentMultiStepPlannerProposal(JSON.stringify({
+      goal: 'unknown reference',
+      steps: [
+        { id: 'summary', toolName: 'publicTraffic.latestSummary', arguments: {}, reason: 'read summary' },
+        { toolName: 'rental.copy', arguments: { productId: '${rank.bestProductId}' }, reason: 'unknown step id' },
+      ],
+      confidence: 0.8,
+      reason: 'bad reference',
+    }))).toEqual({ ok: false, reason: 'invalid_arguments' });
+
+    expect(validateAgentMultiStepPlannerProposal(JSON.stringify({
+      goal: 'future reference',
+      steps: [
+        { toolName: 'rental.copy', arguments: { productId: '${rank.bestProductId}' }, reason: 'future step id' },
+        { id: 'rank', toolName: 'product.rankBestSameSku', arguments: { query: 'SQ1' }, reason: 'rank too late' },
+      ],
+      confidence: 0.8,
+      reason: 'bad reference',
+    }))).toEqual({ ok: false, reason: 'invalid_arguments' });
+
+    expect(validateAgentMultiStepPlannerProposal(JSON.stringify({
+      goal: 'self reference',
+      steps: [
+        { id: 'rank', toolName: 'product.rankBestSameSku', arguments: { query: '${rank.query}' }, reason: 'self reference' },
+        { toolName: 'system.help', arguments: {}, reason: 'second step' },
+      ],
+      confidence: 0.8,
+      reason: 'bad reference',
+    }))).toEqual({ ok: false, reason: 'invalid_arguments' });
+  });
+
   it('allows placeholders in non-string fields only for multi-step pre-validation', () => {
     expect(validateAgentMultiStepPlannerProposal(JSON.stringify({
       goal: 'rank then price preview',

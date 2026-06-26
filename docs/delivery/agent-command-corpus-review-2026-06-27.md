@@ -30,6 +30,7 @@
 - 生产飞书入口配置 LLM planner 后，未知自然语言不会再回落到旧 deterministic 路由执行。
 - 共享 `handleBotIntent()` 在配置 `agentPlannerProvider` 时会拒绝旧 exact intent 直通，避免测试、适配器或后续入口绕开 planner-first 边界。
 - `agent:dry-run` 默认也走 planner-first 解析；旧 deterministic 结果只作为 `legacyIntent` 对照，或通过 `--legacy` 显式查看。
+- 多步骤计划的 `${...}` 占位符只允许引用已经出现过的 step id；未知、未来或自引用会在 planner 校验阶段被拒绝。
 
 ## 测试证据
 
@@ -50,6 +51,8 @@
   - 规格删除执行链路与审计文件。
 - `tests/agentDryRunCliSource.test.ts`
   - dry-run 默认 planner-first；`--legacy` 仅用于旧解析对照。
+- `tests/agentRuntimePlanner.test.ts`
+  - 多步骤占位符引用必须指向前序步骤；未知、未来、自引用均拒绝。
 
 ## 复盘
 

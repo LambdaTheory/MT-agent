@@ -80,6 +80,35 @@ function isPlannerPlaceholder(value: unknown): boolean {
   return typeof value === 'string' && /^\$\{[^}]+\}$/.test(value.trim());
 }
 
+function collectPlannerReferences(value: unknown, references: string[] = []): string[] {
+  if (typeof value === 'string') {
+    for (const match of value.matchAll(/\$\{([^}]+)\}/g)) {
+      const reference = match[1]?.trim();
+      if (reference) references.push(reference);
+    }
+    return references;
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) collectPlannerReferences(item, references);
+    return references;
+  }
+
+  if (isRecord(value)) {
+    for (const item of Object.values(value)) collectPlannerReferences(item, references);
+  }
+
+  return references;
+}
+
+function isReferenceToPriorStep(reference: string, priorStepIds: Set<string>, hasPriorStep: boolean): boolean {
+  const normalized = reference.startsWith('steps.') ? reference.slice('steps.'.length) : reference;
+  const root = normalized.split('.')[0]?.trim();
+  if (!root) return false;
+  if (root === 'last') return hasPriorStep;
+  return priorStepIds.has(root);
+}
+
 export function schemaAllowsArguments(schema: unknown, value: Record<string, unknown>, options: { allowPlaceholders?: boolean } = {}): boolean {
   if (!isRecord(schema)) return true;
   if (schema.type !== undefined && schema.type !== 'object') return false;
@@ -201,12 +230,16 @@ export function validateAgentMultiStepPlannerProposal(raw: string): AgentMultiSt
     const normalizedId = readStepId(id);
     if (normalizedId === null) return { ok: false, reason: 'invalid_shape' };
     if (normalizedId && stepIds.has(normalizedId)) return { ok: false, reason: 'invalid_shape' };
-    if (normalizedId) stepIds.add(normalizedId);
     const tool = findAgentTool(toolName);
     if (!tool) return { ok: false, reason: 'unknown_tool' };
     if (!schemaAllowsArguments(tool.inputSchema, stepArguments, { allowPlaceholders: true })) return { ok: false, reason: 'invalid_arguments' };
+    const references = collectPlannerReferences(stepArguments);
+    if (!references.every((reference) => isReferenceToPriorStep(reference, stepIds, normalizedSteps.length > 0))) {
+      return { ok: false, reason: 'invalid_arguments' };
+    }
     normalizedSteps.push({ ...(normalizedId ? { id: normalizedId } : {}), toolName, arguments: stepArguments, reason: stepReason });
     policies.push(decideAgentPolicy({ tool, input: stepArguments, reason: stepReason || reason }));
+    if (normalizedId) stepIds.add(normalizedId);
   }
 
   return {
