@@ -5,9 +5,19 @@ import { describe, expect, it } from 'vitest';
 import { createFeishuSdkBot } from '../src/feishuBot/sdkClient.js';
 import { createRentalPriceSkillClient, parseRentalOperationConfirmRequest, parseRentalPriceConfirmRequest, type RentalPriceSkillClient } from '../src/feishuBot/rentalPrice.js';
 
-function fakeSdk(sent: unknown[], registered: Record<string, (data: unknown) => Promise<unknown>>) {
+function fakeSdk(sent: unknown[], registered: Record<string, (data: unknown) => Promise<unknown>>, options: { failPatch?: boolean } = {}) {
   class FakeClient {
-    im = { v1: { message: { reply: async (request: unknown) => sent.push({ kind: 'reply', request }), patch: async (request: unknown) => sent.push({ kind: 'patch', request }) } } };
+    im = {
+      v1: {
+        message: {
+          reply: async (request: unknown) => sent.push({ kind: 'reply', request }),
+          patch: async (request: unknown) => {
+            sent.push({ kind: 'patch', request });
+            if (options.failPatch) throw new Error('patch failed');
+          },
+        },
+      },
+    };
   }
   class FakeWSClient { start() { return undefined; } }
   class FakeEventDispatcher {
@@ -346,6 +356,41 @@ describe('rental price card action', () => {
     expect(sent.some((item) => JSON.stringify(item).includes('agent_tool_confirm'))).toBe(true);
     expect(sent.some((item) => JSON.stringify(item).includes('task_1782451929574_977a5f62'))).toBe(true);
     expect(sent.some((item) => JSON.stringify(item).includes('"kind":"reply"'))).toBe(false);
+  });
+
+  it('replies with the clarified result when patching the original card fails', async () => {
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run from rollback clarification'); },
+      async execute() { throw new Error('execute should not run from rollback clarification'); },
+      async rollback() { throw new Error('rollback should not run before confirmation'); },
+      async copy() { throw new Error('copy should not run from rollback clarification'); },
+      async delist() { throw new Error('delist should not run from rollback clarification'); },
+      async tenancySet() { throw new Error('tenancySet should not run from rollback clarification'); },
+      async specDiscover() { throw new Error('specDiscover should not run from rollback clarification'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run from rollback clarification'); },
+    };
+    const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
+    const sent: unknown[] = [];
+    const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', outputDir: await mkdtemp(join(tmpdir(), 'mt-agent-sdk-rollback-clarify-fallback-')), sdk: fakeSdk(sent, registered, { failPatch: true }), rentalPriceClient });
+
+    bot.start();
+    const callbackResult = await registered['card.action.trigger']({
+      event: {
+        context: { open_message_id: 'om-agent-rollback-clarify-fallback' },
+        action: {
+          value: {
+            action: 'agent_clarify_custom',
+            originalMessage: '请回滚刚才的改价',
+          },
+          form_value: { custom_message: '回滚任务id:task_1782454161506_5c9645c5' },
+        },
+      },
+    });
+
+    expect(JSON.stringify(callbackResult)).toContain('Agent 已收到你的补充');
+    await waitFor(() => sent.some((item) => JSON.stringify(item).includes('"kind":"reply"') && JSON.stringify(item).includes('rental.priceRollback')));
+    expect(sent.some((item) => JSON.stringify(item).includes('"kind":"patch"'))).toBe(true);
+    expect(sent.some((item) => JSON.stringify(item).includes('task_1782454161506_5c9645c5'))).toBe(true);
   });
 
   it('executes new-link batch confirmations by copying the selected source repeatedly', async () => {

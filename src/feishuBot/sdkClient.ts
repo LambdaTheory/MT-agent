@@ -342,6 +342,20 @@ async function updateCard(client: FeishuSdkClient, messageId: string, card: Feis
   return true;
 }
 
+type FeishuSdkLogError = NonNullable<FeishuSdkBotConfig['logError']>;
+
+async function deliverCard(client: FeishuSdkClient, messageId: string, card: FeishuCardPayload, logError: FeishuSdkLogError): Promise<void> {
+  const patched = await updateCard(client, messageId, card).catch((error) => {
+    logError(error, { messageId, phase: 'reply' });
+    return false;
+  });
+  if (patched) return;
+
+  await replyCard(client, messageId, card).catch((error) => {
+    logError(error, { messageId, phase: 'reply' });
+  });
+}
+
 function replaceCard(client: FeishuSdkClient, messageId: string, card: FeishuCardPayload): FeishuCardActionResponse {
   void updateCard(client, messageId, card).catch(() => false);
   return cardActionUpdateResponse(card);
@@ -522,12 +536,12 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
               });
               setRentalActionStatus(claim.key, 'completed');
               if (!response.skipped) {
-                if (response.card) await updateCard(client, messageId, response.card).catch(() => false);
-                else await updateCard(client, messageId, statusCard('Agent 澄清处理完成', response.text, 'green')).catch(() => false);
+                if (response.card) await deliverCard(client, messageId, response.card, logError);
+                else await deliverCard(client, messageId, statusCard('Agent 澄清处理完成', response.text, 'green'), logError);
               }
             } catch (error) {
               setRentalActionStatus(claim.key, 'failed');
-              await updateCard(client, messageId, statusCard('Agent 澄清处理失败', error instanceof Error ? error.message : String(error), 'red')).catch(() => false);
+              await deliverCard(client, messageId, statusCard('Agent 澄清处理失败', error instanceof Error ? error.message : String(error), 'red'), logError);
               logError(error, { messageId, phase: 'reply' });
             }
           })();
@@ -567,12 +581,12 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
               });
               setRentalActionStatus(claim.key, 'completed');
               if (!response.skipped) {
-                if (response.card) await updateCard(client, messageId, response.card).catch(() => false);
-                else await updateCard(client, messageId, statusCard('Agent 澄清处理完成', response.text, 'green')).catch(() => false);
+                if (response.card) await deliverCard(client, messageId, response.card, logError);
+                else await deliverCard(client, messageId, statusCard('Agent 澄清处理完成', response.text, 'green'), logError);
               }
             } catch (error) {
               setRentalActionStatus(claim.key, 'failed');
-              await updateCard(client, messageId, statusCard('Agent 澄清处理失败', error instanceof Error ? error.message : String(error), 'red')).catch(() => false);
+              await deliverCard(client, messageId, statusCard('Agent 澄清处理失败', error instanceof Error ? error.message : String(error), 'red'), logError);
               logError(error, { messageId, phase: 'reply' });
             }
           })();
@@ -614,7 +628,7 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
             reason: request.reason,
           }, messageId);
           void (async () => {
-            await updateCard(client, messageId, statusCard('Agent 操作处理中', `工具 ${request.toolName} 已收到确认，正在执行。`, 'blue')).catch(() => false);
+            await deliverCard(client, messageId, statusCard('Agent 操作处理中', `工具 ${request.toolName} 已收到确认，正在执行。`, 'blue'), logError);
             try {
               const response = await executeAgentToolRequest(request, config.outputDir ?? 'output', { rentalPriceClient });
               setRentalActionStatus(claim.key, 'completed');
@@ -628,9 +642,9 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
                 resultSummary: response.text,
               }, messageId);
               if (response.card) {
-                await updateCard(client, messageId, response.card).catch(() => false);
+                await deliverCard(client, messageId, response.card, logError);
               } else {
-                await updateCard(client, messageId, statusCard('Agent 操作已完成', response.text, 'green')).catch(() => false);
+                await deliverCard(client, messageId, statusCard('Agent 操作已完成', response.text, 'green'), logError);
               }
             } catch (error) {
               setRentalActionStatus(claim.key, 'failed');
@@ -643,7 +657,7 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
                 reason: request.reason,
                 resultSummary: error instanceof Error ? error.message : String(error),
               }, messageId);
-              await updateCard(client, messageId, statusCard('Agent 操作失败', `${request.toolName}\n${error instanceof Error ? error.message : String(error)}`, 'red')).catch(() => false);
+              await deliverCard(client, messageId, statusCard('Agent 操作失败', `${request.toolName}\n${error instanceof Error ? error.message : String(error)}`, 'red'), logError);
               logError(error, { messageId, phase: 'reply' });
             }
           })();
