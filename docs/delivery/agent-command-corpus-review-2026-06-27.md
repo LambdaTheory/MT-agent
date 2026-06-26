@@ -31,6 +31,7 @@
 - 共享 `handleBotIntent()` 在配置 `agentPlannerProvider` 时会拒绝旧 exact intent 直通，避免测试、适配器或后续入口绕开 planner-first 边界。
 - `agent:dry-run` 默认也走 planner-first 解析；旧 deterministic 结果只作为 `legacyIntent` 对照，或通过 `--legacy` 显式查看。
 - 多步骤计划的 `${...}` 占位符只允许引用已经出现过的 step id；未知、未来或自引用会在 planner 校验阶段被拒绝。
+- 所有 `plannerVisible:false` 的内部执行工具即使存在于 runtime registry，也会被 planner validator 当作未知工具拒绝，只能由确认卡内部续跑触发；当前覆盖 `operations.refreshActivityExecute` 和 `rental.operationConfirmRequest`。
 
 ## 测试证据
 
@@ -53,6 +54,21 @@
   - dry-run 默认 planner-first；`--legacy` 仅用于旧解析对照。
 - `tests/agentRuntimePlanner.test.ts`
   - 多步骤占位符引用必须指向前序步骤；未知、未来、自引用均拒绝。
+  - 所有隐藏执行工具不能被原子计划或多步骤计划直接选择。
+
+本轮自测结果：
+
+- `tsc -p tsconfig.json --noEmit`：通过。
+- `vitest run tests/agentRuntimePlanner.test.ts tests/agentRuntimeToolRegistry.test.ts tests/agentRuntimeLlmPlanner.test.ts tests/feishuBotTools.test.ts`：4 个文件、88 个测试通过。
+- `vitest run --exclude "**/.worktrees/**"`：142 个文件、960 个测试通过。
+- 全量测试中的 stderr 来自既有用例：坏同款组跳过库存快照、飞书卡片 patch 失败回退；均为测试故意覆盖的异常路径。
+
+## Review 结论
+
+- 本轮新增边界很窄，只改 planner validator、planner 测试和交付审计文档。
+- planner 可见工具列表已经过滤隐藏工具；validator 现在也会二次拒绝隐藏工具，避免恶意或错误 LLM 输出绕过列表直接点名内部执行工具。
+- 写类工具仍由本地 policy 与专用确认卡兜底；语料表里的 M-002、M-003 不会因为 LLM 置信度高而直接产生副作用。
+- 已填写语料的实现路径都落在注册工具上，没有再依赖旧 workflow 直通。
 
 ## 复盘
 

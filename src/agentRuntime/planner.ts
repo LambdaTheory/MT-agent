@@ -155,6 +155,10 @@ export function validateAgentToolArguments(toolName: string, value: Record<strin
   return Boolean(tool && schemaAllowsArguments(tool.inputSchema, value));
 }
 
+function isPlannerSelectableTool(tool: AgentToolDefinition): boolean {
+  return tool.plannerVisible !== false;
+}
+
 export function validateAgentPlannerProposal(raw: string): AgentPlannerValidationResult {
   let parsed: unknown;
 
@@ -182,6 +186,7 @@ export function validateAgentPlannerProposal(raw: string): AgentPlannerValidatio
 
   const tool = findAgentTool(selectedTool);
   if (!tool) return { ok: false, reason: 'unknown_tool' };
+  if (!isPlannerSelectableTool(tool)) return { ok: false, reason: 'unknown_tool' };
   if (!schemaAllowsArguments(tool.inputSchema, proposalArguments)) return { ok: false, reason: 'invalid_arguments' };
 
   const proposal: AgentPlannerProposal = { goal, selectedTool, arguments: proposalArguments, confidence, reason };
@@ -232,6 +237,7 @@ export function validateAgentMultiStepPlannerProposal(raw: string): AgentMultiSt
     if (normalizedId && stepIds.has(normalizedId)) return { ok: false, reason: 'invalid_shape' };
     const tool = findAgentTool(toolName);
     if (!tool) return { ok: false, reason: 'unknown_tool' };
+    if (!isPlannerSelectableTool(tool)) return { ok: false, reason: 'unknown_tool' };
     if (!schemaAllowsArguments(tool.inputSchema, stepArguments, { allowPlaceholders: true })) return { ok: false, reason: 'invalid_arguments' };
     const references = collectPlannerReferences(stepArguments);
     if (!references.every((reference) => isReferenceToPriorStep(reference, stepIds, normalizedSteps.length > 0))) {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { validateAgentMultiStepPlannerProposal, validateAgentPlannerClarificationProposal, validateAgentPlannerProposal } from '../src/agentRuntime/planner.js';
+import { listAgentTools } from '../src/agentRuntime/toolRegistry.js';
 
 describe('agent runtime planner proposal validation', () => {
   it('validates a read-tool proposal and applies allow policy', () => {
@@ -30,6 +31,31 @@ describe('agent runtime planner proposal validation', () => {
   it('rejects malformed JSON and unknown tools', () => {
     expect(validateAgentPlannerProposal('不是 JSON')).toEqual({ ok: false, reason: 'invalid_json' });
     expect(validateAgentPlannerProposal('{"goal":"删除全部","selectedTool":"danger.deleteAll","arguments":{},"confidence":0.99,"reason":"bad"}')).toEqual({ ok: false, reason: 'unknown_tool' });
+  });
+
+  it('rejects all planner-hidden tools even when they exist in the internal registry', () => {
+    const hiddenTools = listAgentTools().filter((tool) => tool.plannerVisible === false);
+    expect(hiddenTools.map((tool) => tool.name)).toEqual(['operations.refreshActivityExecute', 'rental.operationConfirmRequest']);
+
+    for (const tool of hiddenTools) {
+      expect(validateAgentPlannerProposal(JSON.stringify({
+        goal: `direct ${tool.name}`,
+        selectedTool: tool.name,
+        arguments: {},
+        confidence: 0.9,
+        reason: 'planner must not call hidden tools directly',
+      }))).toEqual({ ok: false, reason: 'unknown_tool' });
+
+      expect(validateAgentMultiStepPlannerProposal(JSON.stringify({
+        goal: `multi-step ${tool.name}`,
+        steps: [
+          { toolName: 'system.help', arguments: {}, reason: 'read first' },
+          { toolName: tool.name, arguments: {}, reason: 'hidden tool step' },
+        ],
+        confidence: 0.9,
+        reason: 'planner must not call hidden tools through multi-step plans',
+      }))).toEqual({ ok: false, reason: 'unknown_tool' });
+    }
   });
 
   it('rejects arguments that do not satisfy tool metadata schema', () => {
