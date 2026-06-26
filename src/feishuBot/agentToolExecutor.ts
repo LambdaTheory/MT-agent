@@ -654,7 +654,12 @@ async function writeRefreshActivityAudit(outputDir: string, value: unknown): Pro
   return path;
 }
 
-async function refreshActivityPlanResponse(outputDir: string, args: Record<string, unknown>, options: AgentToolExecutionOptions): Promise<BotResponse> {
+async function refreshActivityPlanResponse(
+  outputDir: string,
+  args: Record<string, unknown>,
+  options: AgentToolExecutionOptions,
+  continuation?: AgentToolConfirmRequest['continuation'],
+): Promise<BotResponse> {
   const date = readOptionalDate(args.date);
   const report = await findReportContextForTool(outputDir, date);
   if (!report) return { text: missingReportContextText(date) };
@@ -705,6 +710,7 @@ async function refreshActivityPlanResponse(outputDir: string, args: Record<strin
       newLinkItems: execution.request.newLinkItems,
     },
     reason: '用户要求刷新活跃度：先下架近30天零创单链接，再按同款组补回新链。',
+    ...(continuation ? { continuation } : {}),
   } : null;
 
   return {
@@ -1030,7 +1036,7 @@ export async function executeAgentToolRequest(
       };
     }
     case 'operations.refreshActivityPlan':
-      return refreshActivityPlanResponse(outputDir, request.arguments, options);
+      return refreshActivityPlanResponse(outputDir, request.arguments, options, request.continuation);
     case 'operations.refreshActivityExecute':
       return refreshActivityExecuteResponse(outputDir, request.arguments, options.rentalPriceClient ?? createRentalPriceSkillClient());
     case 'rental.copy':

@@ -8,7 +8,7 @@ Composite workflow definitions remain in code only as legacy reference/validatio
 
 Multi-step plans may pass metadata from earlier steps into later steps with placeholders such as `${rank.bestProductId}`. When a normal write/high-risk step is reached, the Agent confirmation card stores the remaining plan as a continuation. After the user confirms, the bot executes that one write step and then resumes the remaining steps. If another write/high-risk step appears later, it stops again and asks for a fresh confirmation.
 
-Plan tools can generate their own dedicated confirmation cards. Dedicated cards for `rental.priceChange`, `rental.newLinkBatchPlan`, and `rental.specRemovePlan` also carry the remaining multi-step continuation. After the dedicated confirmation succeeds, the bot resumes the remaining steps; if the confirmed action fails, the remaining steps stop.
+Plan tools can generate their own dedicated confirmation cards. Dedicated cards for `rental.priceChange`, `rental.newLinkBatchPlan`, `rental.specRemovePlan`, and `operations.refreshActivityPlan` also carry the remaining multi-step continuation. After the dedicated confirmation succeeds, the bot resumes the remaining steps; if the confirmed action fails, the remaining steps stop.
 
 For example, `operations.refreshActivityPlan` first builds the zero-order-link delist and replenishment plan. Only when the candidates, same-SKU groups, safe copy sources, and count limits all pass does it generate a hidden `operations.refreshActivityExecute` confirmation card. That execute tool is not exposed for direct planner selection; confirmation is required, and execution writes an audit file.
 

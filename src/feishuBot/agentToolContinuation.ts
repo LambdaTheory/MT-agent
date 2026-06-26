@@ -75,8 +75,9 @@ export async function continueAgentPlannerSteps(input: ContinuePlannerStepsInput
       reason: step.reason || input.reason,
     };
     const policy = decideAgentPolicy({ tool, input: resolvedArguments.value, reason: request.reason });
-    if (policy?.decision === 'confirmation_required') {
-      request.continuation = buildContinuation(input, stepId, absoluteIndex, input.steps.slice(localIndex + 1));
+    const remainingSteps = input.steps.slice(localIndex + 1);
+    if (policy?.decision === 'confirmation_required' || isPreConfirmationPlanningTool(step.toolName)) {
+      request.continuation = buildContinuation(input, stepId, absoluteIndex, remainingSteps);
     }
     if (policy?.decision === 'confirmation_required' && !isPreConfirmationPlanningTool(step.toolName)) {
       input.textParts.push('');

@@ -40,7 +40,7 @@
 - 前序步骤的结构化结果可以通过 `${rank.bestProductId}` / `${steps.rank.sameSkuGroupId}` 传给后续步骤。
 - 普通写操作会先停在 Agent 确认卡；确认后执行当前步骤，并继续执行剩余步骤。
 - 如果剩余步骤里再次遇到写操作，会再次停住要求确认，不会因为第一次确认而批量执行所有写操作。
-- `rental.priceChange`、`rental.specRemovePlan`、`rental.newLinkBatchPlan` 属于预览/计划型工具，只会生成专用确认卡，不会在专用确认前改价、删规格或复制新链。
+- `rental.priceChange`、`rental.specRemovePlan`、`rental.newLinkBatchPlan`、`operations.refreshActivityPlan` 属于预览/计划型工具，只会生成专用确认卡，不会在专用确认前改价、删规格、复制新链或执行活跃度刷新。
 - 专用确认卡也会携带剩余步骤：确认成功后继续跑后续步骤；确认失败或取消后停止，不会继续执行。
 - 下方空白行只是留给后续新增语料，不代表已确认但未实现的需求。
 

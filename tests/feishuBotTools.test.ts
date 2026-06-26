@@ -1774,6 +1774,61 @@ describe('handleBotIntent', () => {
     expect(audit.request?.delistProductIds).toEqual(['901', '902']);
   });
 
+  it('continues a multi-step plan after a confirmed activity refresh execution card', async () => {
+    const { outputDir, registryPaths } = await writeRefreshActivityFixtures();
+    const planner: AgentPlannerProvider = {
+      async proposePlan() {
+        return JSON.stringify({
+          goal: '刷新活跃度后查询健康源',
+          steps: [
+            { id: 'refresh', toolName: 'operations.refreshActivityPlan', arguments: {}, reason: '先生成活跃度刷新计划和确认卡' },
+            { toolName: 'product.query', arguments: { keyword: '900' }, reason: '确认执行后再查询健康源表现' },
+          ],
+          confidence: 0.9,
+          reason: '活跃度刷新会生成专用执行确认卡，确认后仍应续跑后续查询',
+        });
+      },
+    };
+    const calls: string[] = [];
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run'); },
+      async execute() { throw new Error('execute should not run'); },
+      async copy(productId) {
+        calls.push(`copy:${productId}`);
+        return { productId, ok: true, newProductId: `new-${calls.length}`, lines: ['copy: ok'] };
+      },
+      async delist(productId) {
+        calls.push(`delist:${productId}`);
+        return { productId, ok: true, lines: ['delist: ok'] };
+      },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+
+    const response = await handleBotIntent({ type: 'unknown', text: '刷新活跃度，然后查 900' }, outputDir, {
+      agentPlannerProvider: planner,
+      rentalPriceClient,
+      closedOrderRegistryPaths: registryPaths,
+    });
+    const request = readAgentToolConfirmRequestFromCard(response.card);
+
+    expect(request.toolName).toBe('operations.refreshActivityExecute');
+    expect(request.continuation?.steps).toHaveLength(1);
+
+    const executed = await executeAgentToolRequestWithContinuation(request, outputDir, {
+      rentalPriceClient,
+      closedOrderRegistryPaths: registryPaths,
+    });
+
+    expect(calls).toEqual(['delist:901', 'delist:902', 'copy:900', 'copy:900']);
+    expect(executed.text).toContain('Agent 多步骤计划继续执行：刷新活跃度后查询健康源');
+    expect(executed.text).toContain('步骤 1/2：operations.refreshActivityExecute');
+    expect(executed.text).toContain('活跃度刷新执行完成：2026-06-11');
+    expect(executed.text).toContain('步骤 2/2：product.query');
+    expect(executed.text).toContain('端内ID 900');
+  });
+
   it('passes silent learning hints into the generic agent planner', async () => {
     const outputDir = await writeContext();
     await recordAgentLearningEvent(outputDir, {
