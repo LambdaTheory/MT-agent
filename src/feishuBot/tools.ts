@@ -1,7 +1,9 @@
 import { basename, dirname } from 'node:path';
 import { buildAgentToolConfirmCard } from '../agentRuntime/approvalCard.js';
 import { buildAgentClarificationCard } from '../agentRuntime/clarificationCard.js';
-import { listAgentPlannerTools, validateAgentMultiStepPlannerProposal, validateAgentPlannerClarificationProposal, validateAgentPlannerProposal, type AgentPlannerProvider } from '../agentRuntime/planner.js';
+import { decideAgentPolicy } from '../agentRuntime/policy.js';
+import { listAgentPlannerTools, validateAgentMultiStepPlannerProposal, validateAgentPlannerClarificationProposal, validateAgentPlannerProposal, validateAgentToolArguments, type AgentPlannerProvider } from '../agentRuntime/planner.js';
+import { findAgentTool } from '../agentRuntime/toolRegistry.js';
 import { validateAgentWorkflowPlannerProposal } from '../agentRuntime/workflowPlanner.js';
 import { listAgentWorkflows } from '../agentRuntime/workflowRegistry.js';
 import { buildAgentLearningPlannerHints, summarizeAgentLearning } from '../agentLearning/store.js';
@@ -285,7 +287,88 @@ async function handleInventoryStatusIntent(
   return { text: formatInventoryStatusMissingText(result) };
 }
 
-const PRE_CONFIRMATION_PLANNING_TOOLS = new Set(['rental.priceChange', 'rental.specRemovePlan']);
+const PRE_CONFIRMATION_PLANNING_TOOLS = new Set(['rental.priceChange', 'rental.specRemovePlan', 'rental.newLinkBatchPlan']);
+
+type MultiStepMetadataStore = Record<string, unknown>;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function readPath(root: unknown, path: string): unknown {
+  if (!path.trim()) return undefined;
+  let current: unknown = root;
+  for (const part of path.split('.')) {
+    if (!part) return undefined;
+    if (!isRecord(current) && !Array.isArray(current)) return undefined;
+    current = (current as Record<string, unknown>)[part];
+  }
+  return current;
+}
+
+function resolvePlannerReference(path: string, store: MultiStepMetadataStore): unknown {
+  const normalized = path.trim();
+  if (!normalized) return undefined;
+  const withoutPrefix = normalized.startsWith('steps.') ? normalized.slice('steps.'.length) : normalized;
+  return readPath(store, withoutPrefix);
+}
+
+function stringifyResolvedValue(value: unknown): string {
+  if (value === undefined || value === null) return '';
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return JSON.stringify(value);
+}
+
+function resolvePlannerArgumentValue(value: unknown, store: MultiStepMetadataStore): { ok: true; value: unknown } | { ok: false; reference: string } {
+  if (typeof value === 'string') {
+    const exact = /^\$\{([^}]+)\}$/.exec(value.trim());
+    if (exact) {
+      const resolved = resolvePlannerReference(exact[1], store);
+      return resolved === undefined ? { ok: false, reference: exact[1] } : { ok: true, value: resolved };
+    }
+
+    const replaced = value.replace(/\$\{([^}]+)\}/g, (match, reference) => {
+      const resolved = resolvePlannerReference(reference, store);
+      return resolved === undefined ? match : stringifyResolvedValue(resolved);
+    });
+    const unresolved = /\$\{([^}]+)\}/.exec(replaced);
+    return unresolved ? { ok: false, reference: unresolved[1] } : { ok: true, value: replaced };
+  }
+
+  if (Array.isArray(value)) {
+    const resolvedItems: unknown[] = [];
+    for (const item of value) {
+      const resolved = resolvePlannerArgumentValue(item, store);
+      if (!resolved.ok) return resolved;
+      resolvedItems.push(resolved.value);
+    }
+    return { ok: true, value: resolvedItems };
+  }
+
+  if (isRecord(value)) {
+    const resolvedRecord: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(value)) {
+      const resolved = resolvePlannerArgumentValue(item, store);
+      if (!resolved.ok) return resolved;
+      resolvedRecord[key] = resolved.value;
+    }
+    return { ok: true, value: resolvedRecord };
+  }
+
+  return { ok: true, value };
+}
+
+function resolvePlannerArguments(args: Record<string, unknown>, store: MultiStepMetadataStore): { ok: true; value: Record<string, unknown> } | { ok: false; reference: string } {
+  const resolved = resolvePlannerArgumentValue(args, store);
+  return resolved.ok && isRecord(resolved.value) ? { ok: true, value: resolved.value } : resolved.ok ? { ok: false, reference: '<arguments>' } : resolved;
+}
+
+function rememberStepMetadata(store: MultiStepMetadataStore, stepId: string, response: BotResponse): void {
+  const metadata = response.metadata ?? { text: response.text };
+  store[stepId] = metadata;
+  store.last = metadata;
+}
 
 async function executeAgentMultiStepPlannerResponse(
   rawProposal: string,
@@ -300,9 +383,27 @@ async function executeAgentMultiStepPlannerResponse(
     `判断原因：${parsed.proposal.reason}`,
   ];
 
+  const metadataStore: MultiStepMetadataStore = {};
+
   for (const [index, step] of parsed.proposal.steps.entries()) {
-    const policy = parsed.policies[index];
-    const request = { toolName: step.toolName, arguments: step.arguments, reason: step.reason || parsed.proposal.reason };
+    const stepId = step.id ?? `step${index + 1}`;
+    const resolvedArguments = resolvePlannerArguments(step.arguments, metadataStore);
+    if (!resolvedArguments.ok) {
+      textParts.push('');
+      textParts.push(`步骤 ${index + 1}/${parsed.proposal.steps.length} 引用解析失败：${resolvedArguments.reference}`);
+      textParts.push('已停止执行后续步骤，未触发任何未确认的写操作。');
+      return { text: textParts.join('\n') };
+    }
+    if (!validateAgentToolArguments(step.toolName, resolvedArguments.value)) {
+      textParts.push('');
+      textParts.push(`步骤 ${index + 1}/${parsed.proposal.steps.length} 参数校验失败：${step.toolName}`);
+      textParts.push('已停止执行后续步骤，未触发任何未确认的写操作。');
+      return { text: textParts.join('\n') };
+    }
+    const tool = findAgentTool(step.toolName);
+    if (!tool) return null;
+    const request = { toolName: step.toolName, arguments: resolvedArguments.value, reason: step.reason || parsed.proposal.reason };
+    const policy = decideAgentPolicy({ tool, input: resolvedArguments.value, reason: request.reason });
     if (policy?.decision === 'confirmation_required' && !PRE_CONFIRMATION_PLANNING_TOOLS.has(step.toolName)) {
       textParts.push('');
       textParts.push(`步骤 ${index + 1}/${parsed.proposal.steps.length} 需要确认：${step.toolName}`);
@@ -321,6 +422,7 @@ async function executeAgentMultiStepPlannerResponse(
     textParts.push('');
     textParts.push(`步骤 ${index + 1}/${parsed.proposal.steps.length}：${step.toolName}`);
     textParts.push(response.text);
+    rememberStepMetadata(metadataStore, stepId, response);
     if (response.card) return { text: textParts.join('\n'), card: response.card };
   }
 
@@ -389,7 +491,7 @@ async function agentPlannerResponse(
     const preview = await rentalPriceClient.preview(rentalRequest);
     return { text: `请确认商品 ${rentalRequest.productId} 改价`, card: buildRentalPricePreviewCard(preview) };
   }
-  if (parsed.proposal.selectedTool === 'rental.specRemovePlan') {
+  if (parsed.proposal.selectedTool === 'rental.specRemovePlan' || parsed.proposal.selectedTool === 'rental.newLinkBatchPlan') {
     return executeAgentToolRequest(request, outputDir, {
       rentalPriceClient: options.rentalPriceClient,
       closedOrderFetchImpl: options.closedOrderFetchImpl,

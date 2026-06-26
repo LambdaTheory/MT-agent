@@ -4,7 +4,7 @@ import { validateAgentWorkflowPlannerProposal } from '../src/agentRuntime/workfl
 import { findAgentWorkflow, listAgentWorkflows } from '../src/agentRuntime/workflowRegistry.js';
 
 describe('agent runtime workflow registry', () => {
-  it('describes composite workflows without registering them as executable tools', () => {
+  it('describes composite workflows separately from planner-facing plan tools', () => {
     expect(listAgentWorkflows().map((workflow) => workflow.name)).toContain('rental.newLinkBatch');
     expect(findAgentWorkflow('rental.newLinkBatch')).toMatchObject({
       risk: 'high',
@@ -17,7 +17,10 @@ describe('agent runtime workflow registry', () => {
       ]),
     });
     expect(findAgentTool('rental.newLinkBatch')).toBeUndefined();
-    expect(findAgentTool('rental.newLinkBatchPlan')).toBeUndefined();
+    expect(findAgentTool('rental.newLinkBatchPlan')).toMatchObject({
+      risk: 'high',
+      requiresConfirmation: true,
+    });
   });
 
   it('validates LLM workflow proposals against registered workflow metadata', () => {

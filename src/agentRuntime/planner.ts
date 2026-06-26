@@ -28,6 +28,7 @@ export interface AgentPlannerProposal {
 }
 
 export interface AgentPlannerStep {
+  id?: string;
   toolName: string;
   arguments: Record<string, unknown>;
   reason: string;
@@ -68,7 +69,18 @@ function readNonEmptyString(value: unknown, maxLength: number): string | null {
   return trimmed;
 }
 
-export function schemaAllowsArguments(schema: unknown, value: Record<string, unknown>): boolean {
+function readStepId(value: unknown): string | undefined | null {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return /^[A-Za-z][A-Za-z0-9_-]{0,39}$/.test(trimmed) ? trimmed : null;
+}
+
+function isPlannerPlaceholder(value: unknown): boolean {
+  return typeof value === 'string' && /^\$\{[^}]+\}$/.test(value.trim());
+}
+
+export function schemaAllowsArguments(schema: unknown, value: Record<string, unknown>, options: { allowPlaceholders?: boolean } = {}): boolean {
   if (!isRecord(schema)) return true;
   if (schema.type !== undefined && schema.type !== 'object') return false;
 
@@ -85,6 +97,7 @@ export function schemaAllowsArguments(schema: unknown, value: Record<string, unk
 
   for (const [key, propertySchema] of Object.entries(properties)) {
     if (!Object.hasOwn(value, key)) continue;
+    if (options.allowPlaceholders && isPlannerPlaceholder(value[key])) continue;
     if (isRecord(propertySchema) && propertySchema.type === 'string' && typeof value[key] !== 'string') return false;
     if (isRecord(propertySchema) && propertySchema.type === 'number' && typeof value[key] !== 'number') return false;
     if (isRecord(propertySchema) && propertySchema.type === 'integer' && (!Number.isInteger(value[key]) || typeof value[key] !== 'number')) return false;
@@ -178,16 +191,21 @@ export function validateAgentMultiStepPlannerProposal(raw: string): AgentMultiSt
 
   const normalizedSteps: AgentPlannerStep[] = [];
   const policies: AgentPolicyDecision[] = [];
+  const stepIds = new Set<string>();
   for (const step of steps) {
     if (!isRecord(step)) return { ok: false, reason: 'invalid_shape' };
-    const { toolName, arguments: stepArguments, reason: stepReason } = step;
+    const { id, toolName, arguments: stepArguments, reason: stepReason } = step;
     if (typeof toolName !== 'string' || !isRecord(stepArguments) || typeof stepReason !== 'string') {
       return { ok: false, reason: 'invalid_shape' };
     }
+    const normalizedId = readStepId(id);
+    if (normalizedId === null) return { ok: false, reason: 'invalid_shape' };
+    if (normalizedId && stepIds.has(normalizedId)) return { ok: false, reason: 'invalid_shape' };
+    if (normalizedId) stepIds.add(normalizedId);
     const tool = findAgentTool(toolName);
     if (!tool) return { ok: false, reason: 'unknown_tool' };
-    if (!schemaAllowsArguments(tool.inputSchema, stepArguments)) return { ok: false, reason: 'invalid_arguments' };
-    normalizedSteps.push({ toolName, arguments: stepArguments, reason: stepReason });
+    if (!schemaAllowsArguments(tool.inputSchema, stepArguments, { allowPlaceholders: true })) return { ok: false, reason: 'invalid_arguments' };
+    normalizedSteps.push({ ...(normalizedId ? { id: normalizedId } : {}), toolName, arguments: stepArguments, reason: stepReason });
     policies.push(decideAgentPolicy({ tool, input: stepArguments, reason: stepReason || reason }));
   }
 

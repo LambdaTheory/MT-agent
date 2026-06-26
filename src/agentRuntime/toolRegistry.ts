@@ -88,6 +88,17 @@ const rentalPriceRollbackArgumentsSchema = {
   minProperties: 1,
   additionalProperties: false,
 };
+const newLinkBatchPlanArgumentsSchema = {
+  type: 'object',
+  properties: {
+    keyword: { type: 'string' },
+    count: {},
+    sourceProductId: { type: 'string' },
+    items: { type: 'array' },
+  },
+  minProperties: 1,
+  additionalProperties: false,
+};
 const rentalOperationArgumentsSchema = {
   type: 'object',
   properties: {
@@ -349,6 +360,13 @@ const agentTools: AgentToolDefinition[] = [
     risk: 'read',
     requiresConfirmation: false,
     inputSchema: productRankingArgumentsSchema,
+  },
+  {
+    name: 'rental.newLinkBatchPlan',
+    description: '生成新链批量复制计划和专用确认卡；可指定 keyword/count/sourceProductId，或用 items 数组分别补链。确认前不会复制商品。',
+    risk: 'high',
+    requiresConfirmation: true,
+    inputSchema: newLinkBatchPlanArgumentsSchema,
   },
   {
     name: 'rental.priceRollback',

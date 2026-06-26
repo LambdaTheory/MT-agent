@@ -35,6 +35,7 @@ export type BotIntent =
 export interface BotResponse {
   text: string;
   card?: FeishuCardPayload;
+  metadata?: Record<string, unknown>;
 }
 
 export interface FeishuMessageEvent {

@@ -44,10 +44,11 @@ describe('agent runtime tool registry', () => {
       'rental.specRemovePlan',
       'rental.priceChange',
       'rental.priceSnapshot',
+      'rental.newLinkBatchPlan',
       'rental.priceRollback',
       'rental.operationConfirmRequest',
     ]);
-    expect(listAgentTools().map((tool) => tool.name)).not.toContain('rental.newLinkBatchPlan');
+    expect(listAgentTools().map((tool) => tool.name)).toContain('rental.newLinkBatchPlan');
     expect(listAgentTools().map((tool) => tool.name)).not.toContain('rental.pricePreview');
     expect(listAgentTools().map((tool) => tool.name)).not.toContain('publicTraffic.crawlSources');
   });
@@ -58,7 +59,7 @@ describe('agent runtime tool registry', () => {
 
     const tools = listAgentTools();
     tools.pop();
-    expect(listAgentTools()).toHaveLength(37);
+    expect(listAgentTools()).toHaveLength(38);
   });
 
   it('returns defensive copies of tool metadata', () => {
@@ -130,6 +131,7 @@ describe('agent runtime tool registry', () => {
     expect(findAgentTool('rental.specRemovePlan')).toMatchObject({ risk: 'high', requiresConfirmation: true });
     expect(findAgentTool('rental.priceChange')).toMatchObject({ risk: 'high', requiresConfirmation: true });
     expect(findAgentTool('rental.priceSnapshot')).toMatchObject({ risk: 'read', requiresConfirmation: false });
+    expect(findAgentTool('rental.newLinkBatchPlan')).toMatchObject({ risk: 'high', requiresConfirmation: true });
     expect(findAgentTool('rental.priceRollback')).toMatchObject({ risk: 'high', requiresConfirmation: true });
     expect(findAgentTool('rental.operationConfirmRequest')).toMatchObject({ risk: 'high', requiresConfirmation: true });
   });
@@ -206,6 +208,7 @@ describe('agent runtime tool registry', () => {
       'rental.specRemovePlan',
       'rental.priceChange',
       'rental.priceSnapshot',
+      'rental.newLinkBatchPlan',
       'rental.priceRollback',
     ]);
     expect(plannerToolNames).not.toContain('rental.operationConfirmRequest');
@@ -265,6 +268,15 @@ describe('agent runtime tool registry', () => {
         query: { type: 'string' },
       },
       required: ['query'],
+      additionalProperties: false,
+    });
+    expect(findAgentTool('rental.newLinkBatchPlan')?.inputSchema).toMatchObject({
+      properties: {
+        keyword: { type: 'string' },
+        sourceProductId: { type: 'string' },
+        items: { type: 'array' },
+      },
+      minProperties: 1,
       additionalProperties: false,
     });
     expect(findAgentTool('rental.priceRollback')?.inputSchema).toMatchObject({

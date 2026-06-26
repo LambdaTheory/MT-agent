@@ -1264,6 +1264,85 @@ describe('handleBotIntent', () => {
     expect(JSON.stringify(response.card)).toContain('agent_tool_confirm');
   });
 
+  it('passes best-link metadata into a later new-link planning step', async () => {
+    const { outputDir, registryPaths } = await writeNewLinkWorkflowContext();
+    const planner: AgentPlannerProvider = {
+      async proposePlan(request) {
+        expect(request.tools.map((tool) => tool.name)).toContain('product.rankBestSameSku');
+        expect(request.tools.map((tool) => tool.name)).toContain('rental.newLinkBatchPlan');
+        return JSON.stringify({
+          goal: 'rank SQ1 then copy five new links',
+          steps: [
+            { id: 'rank', toolName: 'product.rankBestSameSku', arguments: { query: 'SQ1' }, reason: 'find the best SQ1 source' },
+            { toolName: 'rental.newLinkBatchPlan', arguments: { keyword: 'SQ1', count: 5, sourceProductId: '${rank.bestProductId}' }, reason: 'create a confirmation card from the ranked source' },
+          ],
+          confidence: 0.93,
+          reason: 'the user asks for a best-link lookup followed by a high-risk copy plan',
+        });
+      },
+    };
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run'); },
+      async execute() { throw new Error('execute should not run'); },
+      async copy() { throw new Error('copy should not run before confirmation'); },
+      async delist() { throw new Error('delist should not run'); },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+
+    const response = await handleBotIntent({ type: 'unknown', text: 'best SQ1 then copy 5 new links' }, outputDir, {
+      agentPlannerProvider: planner,
+      rentalPriceClient,
+      closedOrderRegistryPaths: registryPaths,
+    });
+
+    const cardText = JSON.stringify(response.card);
+    expect(response.text).toContain('product.rankBestSameSku');
+    expect(response.text).toContain('rental.newLinkBatchPlan');
+    expect(response.text).toContain('388');
+    expect(response.card).toBeDefined();
+    expect(cardText).toContain('new_link_batch_confirm');
+    expect(cardText).toContain('"keyword":"SQ1"');
+    expect(cardText).toContain('"count":5');
+    expect(cardText).toContain('"sourceProductId":"388"');
+  });
+
+  it('stops a multi-step plan when a metadata placeholder cannot be resolved', async () => {
+    const outputDir = await writeContext();
+    const planner: AgentPlannerProvider = {
+      async proposePlan() {
+        return JSON.stringify({
+          goal: 'bad unresolved reference',
+          steps: [
+            { id: 'summary', toolName: 'publicTraffic.latestSummary', arguments: {}, reason: 'read summary' },
+            { toolName: 'rental.copy', arguments: { productId: '${rank.bestProductId}' }, reason: 'bad reference should stop' },
+          ],
+          confidence: 0.8,
+          reason: 'test unresolved reference safety',
+        });
+      },
+    };
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run'); },
+      async execute() { throw new Error('execute should not run'); },
+      async copy() { throw new Error('copy should not run'); },
+      async delist() { throw new Error('delist should not run'); },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+
+    const response = await handleBotIntent({ type: 'unknown', text: 'bad multi step reference' }, outputDir, {
+      agentPlannerProvider: planner,
+      rentalPriceClient,
+    });
+
+    expect(response.text).toContain('rank.bestProductId');
+    expect(response.text).toContain('未触发任何未确认的写操作');
+    expect(response.card).toBeUndefined();
+  });
+
   it('lets the Agent planner summarize same-sku rental price snapshots', async () => {
     const outputDir = await writeContext();
     const registryRoot = await mkdtemp(join(tmpdir(), 'mt-agent-x200-price-registry-'));

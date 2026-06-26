@@ -170,7 +170,25 @@ export const readOnlyTools: ReadOnlyTool[] = [
       if (intent.type !== 'best_product_by_same_sku') return { text: '暂无匹配商品。' };
       const registry = options.linkRegistryStore;
       if (!registry) return { text: '需要先读取链接维护档案，才能安全判断同款组里哪个端内ID数据最好。' };
-      return { text: formatRankingAnswer(rankBestProductByRegistryQuery(context, registry, intent.query)) };
+      const result = rankBestProductByRegistryQuery(context, registry, intent.query);
+      return {
+        text: formatRankingAnswer(result),
+        metadata: {
+          toolName: 'product.rankBestSameSku',
+          status: result.status,
+          query: intent.query,
+          ...(result.status === 'ranked'
+            ? {
+                bestProductId: result.best.internalProductId,
+                best: result.best,
+                ranking: result.ranking,
+                sameSkuGroupId: result.sameSkuGroupId,
+                date: result.date,
+              }
+            : {}),
+          result,
+        },
+      };
     },
   },
   {

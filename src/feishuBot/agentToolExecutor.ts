@@ -13,6 +13,14 @@ import { summarizeAgentLearning } from '../agentLearning/store.js';
 import { syncClosedOrderFeedbackFromApi } from '../closedOrderFeedback/sync.js';
 import { queryInventoryStatus } from '../inventoryStatus/query.js';
 import { readInventorySameSkuSnapshot } from '../inventoryStatus/store.js';
+import {
+  buildNewLinkBatchConfirmCard,
+  buildNewLinkBatchMultiConfirmCard,
+  buildNewLinkBatchPlan,
+  formatNewLinkBatchPlan,
+  formatNewLinkBatchMultiPlan,
+  readNewLinkBatchWorkflowRequests,
+} from '../newLinkWorkflow/batch.js';
 import { sendFeishuCard } from '../notify/feishu.js';
 import { summarizeOperationsLearningHistory, summarizeOperationsLearningSession } from '../operationsLearningLoop/session.js';
 import { buildPublicTrafficCard } from '../publicTraffic/buildPublicTrafficCard.js';
@@ -788,6 +796,39 @@ export async function executeAgentToolRequest(
     case 'rental.priceSnapshot': {
       const query = requireString(request.arguments.query, 'query');
       return rentalPriceSnapshotResponse(query, options.rentalPriceClient ?? createRentalPriceSkillClient(), options);
+    }
+    case 'rental.newLinkBatchPlan': {
+      const workflowRequests = readNewLinkBatchWorkflowRequests(request.arguments);
+      if (!workflowRequests) return { text: '新链批量铺设参数无效：需要 keyword 和 count，或 items 数组。' };
+      const [latest, registryContext] = await Promise.all([
+        findLatestReportContext(outputDir),
+        loadClosedOrderRegistryContext(options.closedOrderRegistryPaths),
+      ]);
+      if (!latest) return { text: '还没有找到公域日报上下文，无法选择新链复制源商品。' };
+
+      const plans = workflowRequests.map((item) => buildNewLinkBatchPlan(item, latest.context, registryContext.registry));
+      if (plans.length > 1) {
+        const text = formatNewLinkBatchMultiPlan(plans);
+        return {
+          text,
+          ...(plans.every((plan) => plan.status === 'ready') ? { card: buildNewLinkBatchMultiConfirmCard(plans, request.reason) } : {}),
+          metadata: { toolName: 'rental.newLinkBatchPlan', plans, ready: plans.every((plan) => plan.status === 'ready') },
+        };
+      }
+
+      const plan = plans[0]!;
+      return {
+        text: formatNewLinkBatchPlan(plan),
+        ...(plan.status === 'ready' ? { card: buildNewLinkBatchConfirmCard(plan, request.reason) } : {}),
+        metadata: {
+          toolName: 'rental.newLinkBatchPlan',
+          status: plan.status,
+          sourceProductId: plan.selectedSource?.productId,
+          keyword: plan.request.keyword,
+          count: plan.request.count,
+          plan,
+        },
+      };
     }
     case 'rental.priceRollback': {
       const rollbackRequest = rentalPriceRollbackRequestFromToolArguments(request.arguments);

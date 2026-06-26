@@ -89,9 +89,63 @@ describe('agent runtime planner proposal validation', () => {
     });
   });
 
+  it('validates multi-step plans with step ids and placeholder arguments', () => {
+    expect(validateAgentMultiStepPlannerProposal(JSON.stringify({
+      goal: 'rank then plan new links',
+      steps: [
+        { id: 'rank', toolName: 'product.rankBestSameSku', arguments: { query: 'SQ1' }, reason: 'rank same sku links' },
+        { toolName: 'rental.newLinkBatchPlan', arguments: { keyword: 'SQ1', count: 5, sourceProductId: '${rank.bestProductId}' }, reason: 'plan copy from ranked source' },
+      ],
+      confidence: 0.9,
+      reason: 'the second step safely uses metadata from the first step',
+    }))).toMatchObject({
+      ok: true,
+      proposal: {
+        steps: [
+          { id: 'rank', toolName: 'product.rankBestSameSku', arguments: { query: 'SQ1' } },
+          { toolName: 'rental.newLinkBatchPlan', arguments: { sourceProductId: '${rank.bestProductId}' } },
+        ],
+      },
+      policies: [
+        { decision: 'allow', toolName: 'product.rankBestSameSku', risk: 'read' },
+        { decision: 'confirmation_required', toolName: 'rental.newLinkBatchPlan', risk: 'high' },
+      ],
+    });
+  });
+
+  it('allows placeholders in non-string fields only for multi-step pre-validation', () => {
+    expect(validateAgentMultiStepPlannerProposal(JSON.stringify({
+      goal: 'rank then price preview',
+      steps: [
+        { id: 'rank', toolName: 'product.rankBestSameSku', arguments: { query: 'SQ1' }, reason: 'rank source' },
+        { toolName: 'rental.priceChange', arguments: { productId: '${rank.bestProductId}', fields: '${rank.priceFields}' }, reason: 'preview price fields from prior metadata' },
+      ],
+      confidence: 0.8,
+      reason: 'object field is resolved later by the executor',
+    }))).toMatchObject({
+      ok: true,
+      proposal: {
+        steps: [
+          { id: 'rank', toolName: 'product.rankBestSameSku' },
+          { toolName: 'rental.priceChange', arguments: { fields: '${rank.priceFields}' } },
+        ],
+      },
+    });
+
+    expect(validateAgentPlannerProposal(JSON.stringify({
+      goal: 'bad atomic placeholder',
+      selectedTool: 'rental.priceChange',
+      arguments: { productId: '761', fields: '${rank.priceFields}' },
+      confidence: 0.8,
+      reason: 'atomic plans cannot use unresolved placeholders',
+    }))).toEqual({ ok: false, reason: 'invalid_arguments' });
+  });
+
   it('rejects invalid multi-step plans', () => {
     expect(validateAgentMultiStepPlannerProposal('{"goal":"bad","steps":[{"toolName":"product.query","arguments":{},"reason":"missing keyword"},{"toolName":"system.help","arguments":{},"reason":"help"}],"confidence":0.7,"reason":"bad"}')).toEqual({ ok: false, reason: 'invalid_arguments' });
     expect(validateAgentMultiStepPlannerProposal('{"goal":"bad","steps":[{"toolName":"missing.tool","arguments":{},"reason":"bad"},{"toolName":"system.help","arguments":{},"reason":"help"}],"confidence":0.7,"reason":"bad"}')).toEqual({ ok: false, reason: 'unknown_tool' });
+    expect(validateAgentMultiStepPlannerProposal(JSON.stringify({ goal: 'bad', steps: [{ id: '1bad', toolName: 'system.help', arguments: {}, reason: 'bad id' }, { toolName: 'system.help', arguments: {}, reason: 'help' }], confidence: 0.7, reason: 'bad' }))).toEqual({ ok: false, reason: 'invalid_shape' });
+    expect(validateAgentMultiStepPlannerProposal(JSON.stringify({ goal: 'bad', steps: [{ id: 'dup', toolName: 'system.help', arguments: {}, reason: 'first' }, { id: 'dup', toolName: 'system.help', arguments: {}, reason: 'second' }], confidence: 0.7, reason: 'bad' }))).toEqual({ ok: false, reason: 'invalid_shape' });
   });
 
   it('validates clarification proposals for ambiguous goals', () => {
