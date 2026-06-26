@@ -2,6 +2,15 @@ import type { AgentToolDefinition } from './tool.js';
 
 const noArgumentsSchema = { type: 'object', additionalProperties: false };
 const keywordArgumentsSchema = { type: 'object', properties: { keyword: { type: 'string' } }, required: ['keyword'], additionalProperties: false };
+const productRankingArgumentsSchema = { type: 'object', properties: { query: { type: 'string' } }, required: ['query'], additionalProperties: false };
+const problemProductsArgumentsSchema = {
+  type: 'object',
+  properties: {
+    problemType: { type: 'string', enum: ['low_exposure', 'weak_conversion', 'high_potential', 'new_product_pool', 'recommended_action'] },
+  },
+  required: ['problemType'],
+  additionalProperties: false,
+};
 const optionalSendToArgumentsSchema = {
   type: 'object',
   properties: { sendTo: { type: 'string' } },
@@ -82,10 +91,17 @@ const agentTools: AgentToolDefinition[] = [
   },
   {
     name: 'product.query',
-    description: '按商品 ID、平台 ID 或商品名查询表现',
+    description: '按商品 ID、平台 ID 或商品名查询单个或多个商品表现。不要用于“同款组里哪条最好/最好的链接/最好的端内ID”这类排名问题。',
     risk: 'read',
     requiresConfirmation: false,
     inputSchema: keywordArgumentsSchema,
+  },
+  {
+    name: 'product.rankBestSameSku',
+    description: '按链接维护档案解析商品名、别名、端内ID或同款组，并返回同款组里公域数据表现最好的端内ID。适用于“s23最好的链接是哪条”“数据最好的 pocket3 的端内id是多少”。',
+    risk: 'read',
+    requiresConfirmation: false,
+    inputSchema: productRankingArgumentsSchema,
   },
   {
     name: 'productId.lookup',
@@ -97,6 +113,41 @@ const agentTools: AgentToolDefinition[] = [
   {
     name: 'operationsLearning.startQuiz',
     description: '开始运营学习测验',
+    risk: 'read',
+    requiresConfirmation: false,
+    inputSchema: noArgumentsSchema,
+  },
+  {
+    name: 'publicTraffic.newLinkPool',
+    description: '查询新链接池、新品池、冷启动链接的当前商品列表和维护状态',
+    risk: 'read',
+    requiresConfirmation: false,
+    inputSchema: noArgumentsSchema,
+  },
+  {
+    name: 'publicTraffic.taskPool',
+    description: '查询公域日报生成的待处理任务、优先事项和不健康链接建议',
+    risk: 'read',
+    requiresConfirmation: false,
+    inputSchema: noArgumentsSchema,
+  },
+  {
+    name: 'publicTraffic.problemProducts',
+    description: '按问题类型查询商品：low_exposure 曝光低，weak_conversion 转化差/成交少，high_potential 高潜力，new_product_pool 新品池，recommended_action 推荐动作',
+    risk: 'read',
+    requiresConfirmation: false,
+    inputSchema: problemProductsArgumentsSchema,
+  },
+  {
+    name: 'publicTraffic.removedLinks',
+    description: '查询最近下架、移除、消失的链接',
+    risk: 'read',
+    requiresConfirmation: false,
+    inputSchema: noArgumentsSchema,
+  },
+  {
+    name: 'publicTraffic.orderSummary',
+    description: '查询订单分析、履约、发货、归还、关单相关概况',
     risk: 'read',
     requiresConfirmation: false,
     inputSchema: noArgumentsSchema,

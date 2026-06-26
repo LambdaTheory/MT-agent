@@ -6,6 +6,9 @@ import { loadEnv } from '../config/loadEnv.js';
 import { loadClosedOrderIngestState } from '../closedOrderFeedback/ingest.js';
 import { buildClosedOrderObservationReport, writeClosedOrderObservationReportArtifacts } from '../closedOrderFeedback/observation.js';
 import { loadClosedOrderRegistryContext, type ClosedOrderRegistryPathsInput } from '../closedOrderFeedback/runtime.js';
+import type { AgentIntent, AgentProblemType } from '../agentData/types.js';
+import { createLinkRegistry } from '../linkRegistry/store.js';
+import type { LinkRegistryEntry } from '../linkRegistry/types.js';
 import { syncClosedOrderFeedbackFromApi } from '../closedOrderFeedback/sync.js';
 import { sendFeishuCard } from '../notify/feishu.js';
 import { buildPublicTrafficCard } from '../publicTraffic/buildPublicTrafficCard.js';
@@ -26,7 +29,8 @@ import {
   type RentalOperationConfirmRequest,
   type RentalPriceSkillClient,
 } from './rentalPrice.js';
-import { findLatestReportContext, formatLatestSummary, formatProductRows, queryProductRows } from './reportStore.js';
+import { findReadOnlyTool } from './readOnlyToolRegistry.js';
+import { findLatestReportContext, formatLatestSummary, formatProductRows, parseNumericProductIdList, queryProductRows } from './reportStore.js';
 
 export interface AgentToolExecutionOptions {
   rentalPriceClient?: RentalPriceSkillClient;
@@ -59,6 +63,43 @@ function requireProductId(value: unknown, fieldName: string): string {
   const parsed = requireString(value, fieldName);
   if (!/^\d+$/.test(parsed)) throw new Error(`${fieldName} must be numeric`);
   return parsed;
+}
+
+function formatLinkRegistryStatus(status: LinkRegistryEntry['status']): string {
+  if (status === 'active') return '在架';
+  if (status === 'removed') return '已下架';
+  return '未知';
+}
+
+function formatRegistryProductRows(productIds: string[], entries: LinkRegistryEntry[]): string {
+  const entryById = new Map(entries.map((entry) => [entry.internalProductId, entry]));
+  return productIds.map((productId) => {
+    const entry = entryById.get(productId);
+    if (!entry) return `端内ID ${productId}\n未在链接档案中找到`;
+    const name = entry.productName ?? entry.shortName ?? '未命名商品';
+    const platform = entry.platformProductId ? `平台商品ID ${entry.platformProductId}` : '平台商品ID 未记录';
+    return `端内ID ${entry.internalProductId} ${name}\n${platform}，状态 ${formatLinkRegistryStatus(entry.status)}`;
+  }).join('\n\n');
+}
+
+function readProblemType(value: unknown): AgentProblemType {
+  if (value === 'low_exposure' || value === 'weak_conversion' || value === 'high_potential' || value === 'new_product_pool' || value === 'recommended_action') return value;
+  throw new Error('problemType must be low_exposure, weak_conversion, high_potential, new_product_pool, or recommended_action');
+}
+
+async function runReadOnlyAgentIntent(
+  outputDir: string,
+  intent: Exclude<AgentIntent, { type: 'unknown' }>,
+  options: AgentToolExecutionOptions,
+): Promise<BotResponse> {
+  const latest = await findLatestReportContext(outputDir);
+  if (!latest) return { text: '还没有找到公域日报上下文。' };
+  const tool = findReadOnlyTool(intent);
+  if (!tool) return { text: '暂无匹配工具。' };
+  if (intent.type !== 'best_product_by_same_sku') return tool.run(latest.context, intent);
+
+  const registryContext = await loadClosedOrderRegistryContext(options.closedOrderRegistryPaths);
+  return tool.run(latest.context, intent, { linkRegistryStore: createLinkRegistry(registryContext.registry) });
 }
 
 function requireTenancyDays(value: unknown, fieldName: string): string {
@@ -147,7 +188,20 @@ export async function executeAgentToolRequest(
     case 'product.query': {
       const latest = await findLatestReportContext(outputDir);
       const keyword = requireString(request.arguments.keyword, 'keyword');
-      return { text: latest ? formatProductRows(queryProductRows(latest.context, keyword)) : '还没有找到公域日报上下文。' };
+      const productIds = parseNumericProductIdList(keyword);
+      if (latest) {
+        const rows = queryProductRows(latest.context, keyword);
+        if (rows.length > 0) return { text: formatProductRows(rows) };
+      }
+      if (productIds.length > 0) {
+        const registryContext = await loadClosedOrderRegistryContext(options.closedOrderRegistryPaths);
+        return { text: formatRegistryProductRows(productIds, registryContext.registry) };
+      }
+      return { text: latest ? formatProductRows([]) : '还没有找到公域日报上下文。' };
+    }
+    case 'product.rankBestSameSku': {
+      const query = requireString(request.arguments.query, 'query');
+      return runReadOnlyAgentIntent(outputDir, { type: 'best_product_by_same_sku', query }, options);
     }
     case 'productId.lookup': {
       const latest = await findLatestReportContext(outputDir);
@@ -158,6 +212,16 @@ export async function executeAgentToolRequest(
       const latest = await findLatestReportContext(outputDir);
       return latest ? startOperationsLearningSession(outputDir, latest.context) : { text: '还没有找到公域日报上下文。' };
     }
+    case 'publicTraffic.newLinkPool':
+      return runReadOnlyAgentIntent(outputDir, { type: 'new_product_pool' }, options);
+    case 'publicTraffic.taskPool':
+      return runReadOnlyAgentIntent(outputDir, { type: 'tasks' }, options);
+    case 'publicTraffic.problemProducts':
+      return runReadOnlyAgentIntent(outputDir, { type: 'problem_products', problemType: readProblemType(request.arguments.problemType) }, options);
+    case 'publicTraffic.removedLinks':
+      return runReadOnlyAgentIntent(outputDir, { type: 'removed_links' }, options);
+    case 'publicTraffic.orderSummary':
+      return runReadOnlyAgentIntent(outputDir, { type: 'order_summary' }, options);
     case 'publicTraffic.runReport':
       if (publicTrafficReportRunning) return { text: '公域日报正在运行中，请稍后再试。' };
       publicTrafficReportRunning = true;

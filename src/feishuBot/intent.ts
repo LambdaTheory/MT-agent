@@ -108,3 +108,25 @@ export function parseBotIntent(input: string): BotIntent {
 
   return { type: 'unknown', text };
 }
+
+export function parseAgentFirstBotIntent(input: string): BotIntent {
+  const text = normalize(input);
+  if (!text) return { type: 'help' };
+  if (/^(帮助|help|\/help)$/i.test(text)) return { type: 'help' };
+
+  if (/^(?:Agent|agent|智能体语义|语义)(?:学习|迭代).*(?:汇总|总结|历史|统计)$|^(?:Agent|agent|智能体语义|语义)(?:学习|迭代)$/.test(text)) {
+    return { type: 'agent_learning_summary' };
+  }
+  if (/^(运营学习|学习反馈).*(历史|统计)$/.test(text)) return { type: 'operations_learning_history' };
+  if (/^(运营学习|学习反馈).*(汇总|总结)$/.test(text)) return { type: 'operations_learning_summary' };
+  if (/^(差异化定价|配置差异化定价)$/.test(text)) return { type: 'differential_pricing_card' };
+
+  if (/^库存情况$/.test(text)) return { type: 'inventory_status_overview' };
+  const inventoryQuery = /^库存情况\s+(.+)$/.exec(text);
+  if (inventoryQuery) return { type: 'inventory_status_query', query: inventoryQuery[1].trim() };
+
+  if (/^(链接档案概览|链接概览)$/.test(text)) return { type: 'link_registry_overview' };
+  if (/^(?:商品)?ID(?:查询|互查|转换|换算)$|^打开(?:商品)?ID(?:查询|互查|转换|换算)$|^查ID$/i.test(text)) return { type: 'lookup_product_id_card' };
+
+  return { type: 'unknown', text };
+}

@@ -1,6 +1,6 @@
 import { createAgentRuntime, type AgentRuntime } from '../agentRuntime/runtime.js';
 import type { AgentRequest, AgentResponse } from '../agentRuntime/types.js';
-import { parseBotIntent } from './intent.js';
+import { parseAgentFirstBotIntent, parseBotIntent } from './intent.js';
 import { handleBotIntent } from './tools.js';
 import type { LlmToolSelectionProvider } from './llmProvider.js';
 import type { LlmIntentProposalProvider } from './llmIntentProposal.js';
@@ -142,7 +142,7 @@ function toBotResponse(response: AgentResponse): BotResponse {
 }
 
 export function createFeishuMessageDispatcher(config: FeishuMessageDispatcherConfig = {}): FeishuMessageDispatcher {
-  const resolveIntent = config.resolveIntent ?? ((text: string) => parseBotIntent(text));
+  const resolveIntent = config.resolveIntent ?? ((text: string) => (config.agentPlannerProvider ? parseAgentFirstBotIntent(text) : parseBotIntent(text)));
   const handleIntent = config.handleIntent ?? ((intent, outputDir) => handleBotIntent(intent, outputDir, {
     llmToolSelector: config.llmToolSelector,
     llmIntentProposalProvider: config.llmIntentProposalProvider,

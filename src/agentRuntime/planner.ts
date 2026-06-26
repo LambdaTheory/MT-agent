@@ -72,6 +72,7 @@ export function schemaAllowsArguments(schema: unknown, value: Record<string, unk
     if (isRecord(propertySchema) && propertySchema.type === 'number' && typeof value[key] !== 'number') return false;
     if (isRecord(propertySchema) && propertySchema.type === 'integer' && (!Number.isInteger(value[key]) || typeof value[key] !== 'number')) return false;
     if (isRecord(propertySchema) && propertySchema.type === 'object' && !isRecord(value[key])) return false;
+    if (isRecord(propertySchema) && propertySchema.type === 'array' && !Array.isArray(value[key])) return false;
     if (isRecord(propertySchema) && Array.isArray(propertySchema.enum) && !propertySchema.enum.includes(value[key])) return false;
   }
 
