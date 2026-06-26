@@ -2480,6 +2480,91 @@ describe('handleBotIntent', () => {
     expect(response.card).toBeUndefined();
   });
 
+  it('lets the Agent planner query a public traffic summary by explicit date', async () => {
+    const outputDir = await writeContext();
+    await mkdir(join(outputDir, '2026-06-10'), { recursive: true });
+    await writeFile(join(outputDir, '2026-06-10', 'report-context.json'), JSON.stringify({
+      date: '2026-06-10',
+      summary: { '1d': { ...summary, exposure: 1234 }, '7d': summary, '30d': summary },
+      conclusions: [],
+      rows: [],
+      lowExposure: [],
+      weakClick: [],
+      weakConversion: [],
+      highPotential: [],
+      newProductObservation: [],
+      lifecycleGovernance: [],
+      recommendedActions: [],
+      emptySectionNotes: {},
+    }), 'utf8');
+    const planner: AgentPlannerProvider = {
+      async proposePlan(request) {
+        expect(request.message).toBe('看 2026-06-10 的日报');
+        expect(request.tools.find((tool) => tool.name === 'publicTraffic.latestSummary')?.inputSchema).toMatchObject({
+          properties: { date: { type: 'string' } },
+        });
+        return JSON.stringify({
+          goal: '查询指定日期公域日报',
+          selectedTool: 'publicTraffic.latestSummary',
+          arguments: { date: '2026-06-10' },
+          confidence: 0.94,
+          reason: '用户明确要看 2026-06-10 的日报',
+        });
+      },
+    };
+
+    const response = await handleBotIntent({ type: 'unknown', text: '看 2026-06-10 的日报' }, outputDir, { agentPlannerProvider: planner });
+
+    expect(response.text).toContain('公域日报 2026-06-10');
+    expect(response.text).toContain('曝光 1234');
+  });
+
+  it('lets the Agent planner query product rows by explicit report date', async () => {
+    const outputDir = await writeContext();
+    await mkdir(join(outputDir, '2026-06-10'), { recursive: true });
+    await writeFile(join(outputDir, '2026-06-10', 'report-context.json'), JSON.stringify({
+      date: '2026-06-10',
+      summary: { '1d': summary, '7d': summary, '30d': summary },
+      conclusions: [],
+      rows: [{
+        productName: 'Historical Pocket 3',
+        platformProductId: 'p733-old',
+        displayProductId: '端内ID 733',
+        custodyDays: 10,
+        periods: {
+          '1d': { ...metric, exposure: 321, publicVisits: 12 },
+          '7d': { ...metric, exposure: 654, publicVisits: 34 },
+          '30d': metric,
+        },
+      }],
+      lowExposure: [],
+      weakClick: [],
+      weakConversion: [],
+      highPotential: [],
+      newProductObservation: [],
+      lifecycleGovernance: [],
+      recommendedActions: [],
+      emptySectionNotes: {},
+    }), 'utf8');
+    const planner: AgentPlannerProvider = {
+      async proposePlan() {
+        return JSON.stringify({
+          goal: '查询指定日期商品表现',
+          selectedTool: 'product.query',
+          arguments: { keyword: '733', date: '2026-06-10' },
+          confidence: 0.94,
+          reason: '用户指定日期和端内ID',
+        });
+      },
+    };
+
+    const response = await handleBotIntent({ type: 'unknown', text: '2026-06-10 查询 733' }, outputDir, { agentPlannerProvider: planner });
+
+    expect(response.text).toContain('端内ID 733 Historical Pocket 3');
+    expect(response.text).toContain('1日：曝光 321');
+    expect(response.text).not.toContain('大疆DJI');
+  });
+
   it('lets the Agent planner summarize same-sku rental price snapshots', async () => {
     const outputDir = await writeContext();
     const registryRoot = await mkdtemp(join(tmpdir(), 'mt-agent-x200-price-registry-'));

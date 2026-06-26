@@ -288,18 +288,28 @@ describe('agent runtime tool registry', () => {
       additionalProperties: false,
     });
     expect(findAgentTool('product.query')?.inputSchema).toMatchObject({
-      properties: { keyword: { type: 'string' }, date: { type: 'string' } },
+      properties: { keyword: { type: 'string' }, date: { type: 'string', pattern: expect.any(String) } },
       required: ['keyword'],
       additionalProperties: false,
     });
     expect(findAgentTool('productId.lookup')?.inputSchema).toMatchObject({
-      properties: { keyword: { type: 'string' }, date: { type: 'string' } },
+      properties: { keyword: { type: 'string' }, date: { type: 'string', pattern: expect.any(String) } },
       required: ['keyword'],
+      additionalProperties: false,
+    });
+    expect(findAgentTool('product.rankBestSameSku')?.inputSchema).toMatchObject({
+      properties: { query: { type: 'string' }, date: { type: 'string', pattern: expect.any(String) } },
+      required: ['query'],
       additionalProperties: false,
     });
     expect(findAgentTool('inventory.statusQuery')?.inputSchema).toMatchObject({
       properties: { query: { type: 'string' } },
       required: ['query'],
+      additionalProperties: false,
+    });
+    expect(findAgentTool('publicTraffic.problemProducts')?.inputSchema).toMatchObject({
+      properties: { problemType: { type: 'string' }, date: { type: 'string', pattern: expect.any(String) } },
+      required: ['problemType'],
       additionalProperties: false,
     });
     expect(findAgentTool('publicTraffic.resendLatestReport')?.inputSchema).toMatchObject({

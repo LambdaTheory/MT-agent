@@ -482,6 +482,7 @@ const problemProductsArgumentsSchema = {
   type: 'object',
   properties: {
     problemType: { type: 'string', enum: ['low_exposure', 'weak_conversion', 'high_potential', 'new_product_pool', 'recommended_action'] },
+    date: { type: 'string' },
   },
   required: ['problemType'],
   additionalProperties: false,
@@ -1225,14 +1226,14 @@ const agentTools: AgentToolDefinition[] = [
     description: '查询新链接池、新品池、冷启动链接的当前商品列表和维护状态',
     risk: 'read',
     requiresConfirmation: false,
-    inputSchema: noArgumentsSchema,
+    inputSchema: optionalReportDateArgumentsSchema,
   },
   {
     name: 'publicTraffic.taskPool',
     description: '查询公域日报生成的待处理任务、优先事项和不健康链接建议',
     risk: 'read',
     requiresConfirmation: false,
-    inputSchema: noArgumentsSchema,
+    inputSchema: optionalReportDateArgumentsSchema,
   },
   {
     name: 'publicTraffic.problemProducts',
@@ -1253,14 +1254,14 @@ const agentTools: AgentToolDefinition[] = [
     description: '查询最近已下架、已移除、已消失的链接。不要用于疑似失活/低活跃/生命周期治理候选，后者应使用 publicTraffic.inactiveLinks 或 productLink.query。',
     risk: 'read',
     requiresConfirmation: false,
-    inputSchema: noArgumentsSchema,
+    inputSchema: optionalReportDateArgumentsSchema,
   },
   {
     name: 'publicTraffic.orderSummary',
     description: '查询订单分析、履约、发货、归还、关单相关概况',
     risk: 'read',
     requiresConfirmation: false,
-    inputSchema: noArgumentsSchema,
+    inputSchema: optionalReportDateArgumentsSchema,
   },
   {
     name: 'publicTraffic.windowedFindings',

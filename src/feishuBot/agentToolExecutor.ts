@@ -3300,15 +3300,16 @@ async function runReadOnlyAgentIntent(
   outputDir: string,
   intent: Exclude<AgentIntent, { type: 'unknown' }>,
   options: AgentToolExecutionOptions,
+  date?: string,
 ): Promise<BotResponse> {
-  const latest = await findLatestReportContext(outputDir);
-  if (!latest) return { text: '还没有找到公域日报上下文。' };
+  const report = await findReportContextForTool(outputDir, date);
+  if (!report) return { text: missingReportContextText(date) };
   const tool = findReadOnlyTool(intent);
   if (!tool) return { text: '暂无匹配工具。' };
-  if (intent.type !== 'best_product_by_same_sku' && intent.type !== 'safe_source_resolve' && intent.type !== 'safe_source_groups' && intent.type !== 'refresh_candidate_explain') return tool.run(latest.context, intent);
+  if (intent.type !== 'best_product_by_same_sku' && intent.type !== 'safe_source_resolve' && intent.type !== 'safe_source_groups' && intent.type !== 'refresh_candidate_explain') return tool.run(report.context, intent);
 
   const registryContext = await loadClosedOrderRegistryContext(options.closedOrderRegistryPaths);
-  return tool.run(latest.context, intent, { linkRegistryStore: createLinkRegistry(registryContext.registry), registryEntries: registryContext.registry, outputDir });
+  return tool.run(report.context, intent, { linkRegistryStore: createLinkRegistry(registryContext.registry), registryEntries: registryContext.registry, outputDir });
 }
 
 function closedOrderIngestStatePath(outputDir: string): string {
@@ -3592,13 +3593,14 @@ export async function executeAgentToolRequest(
       return { text: report ? formatProductRows([]) : missingReportContextText() };
     }
     case 'product.rankBestSameSku': {
+      const date = readOptionalDate(request.arguments.date);
       const query = requireString(request.arguments.query, 'query');
       return runReadOnlyAgentIntent(outputDir, {
         type: 'best_product_by_same_sku',
         query,
         periodDays: readOptionalPeriodDays(request.arguments.periodDays),
         metric: readOptionalPublicTrafficMetric(request.arguments.metric),
-      }, options);
+      }, options, date);
     }
     case 'product.rankByCategory': {
       const periodDays = readBoundedDays(request.arguments.periodDays, 'periodDays');
@@ -3687,17 +3689,17 @@ export async function executeAgentToolRequest(
     case 'activity.cancelDifferentialPricingCard':
       return buildCancelDifferentialPricingCardResult(outputDir);
     case 'publicTraffic.newLinkPool':
-      return runReadOnlyAgentIntent(outputDir, { type: 'new_product_pool' }, options);
+      return runReadOnlyAgentIntent(outputDir, { type: 'new_product_pool' }, options, readOptionalDate(request.arguments.date));
     case 'publicTraffic.taskPool':
-      return runReadOnlyAgentIntent(outputDir, { type: 'tasks' }, options);
+      return runReadOnlyAgentIntent(outputDir, { type: 'tasks' }, options, readOptionalDate(request.arguments.date));
     case 'publicTraffic.problemProducts':
-      return runReadOnlyAgentIntent(outputDir, { type: 'problem_products', problemType: readProblemType(request.arguments.problemType) }, options);
+      return runReadOnlyAgentIntent(outputDir, { type: 'problem_products', problemType: readProblemType(request.arguments.problemType) }, options, readOptionalDate(request.arguments.date));
     case 'publicTraffic.inactiveLinks':
-      return runReadOnlyAgentIntent(outputDir, { type: 'inactive_links' }, options);
+      return runReadOnlyAgentIntent(outputDir, { type: 'inactive_links' }, options, readOptionalDate(request.arguments.date));
     case 'publicTraffic.removedLinks':
-      return runReadOnlyAgentIntent(outputDir, { type: 'removed_links' }, options);
+      return runReadOnlyAgentIntent(outputDir, { type: 'removed_links' }, options, readOptionalDate(request.arguments.date));
     case 'publicTraffic.orderSummary':
-      return runReadOnlyAgentIntent(outputDir, { type: 'order_summary' }, options);
+      return runReadOnlyAgentIntent(outputDir, { type: 'order_summary' }, options, readOptionalDate(request.arguments.date));
     case 'publicTraffic.windowedFindings': {
       const result = await findWindowedProducts(outputDir, {
         lookbackDays: readOptionalLimit(request.arguments.lookbackDays) ?? 1,
