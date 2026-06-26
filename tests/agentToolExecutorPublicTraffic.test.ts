@@ -73,4 +73,11 @@ describe('executeAgentToolRequest public traffic report', () => {
     expect(response.text).toContain('已重建日报并重发飞书');
     expect(response.text).toContain('1日：完整');
   });
+
+  it('does not expose the old crawlSources boundary through Feishu tool execution', async () => {
+    await expect(executeAgentToolRequest(
+      { toolName: 'publicTraffic.crawlSources', arguments: { goodsExportPath: 'output/goods.xlsx' }, reason: '旧抓源工具不应由飞书执行' },
+      'output',
+    )).rejects.toThrow('Unsupported agent tool: publicTraffic.crawlSources');
+  });
 });

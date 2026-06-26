@@ -1128,8 +1128,6 @@ export async function executeAgentToolRequest(
         card: buildClosedOrderObservationCard(report),
       };
     }
-    case 'publicTraffic.crawlSources':
-      throw new Error('publicTraffic.crawlSources 当前需要 CLI AgentConfig，尚未接入飞书审批执行。');
     default:
       throw new Error(`Unsupported agent tool: ${request.toolName}`);
   }

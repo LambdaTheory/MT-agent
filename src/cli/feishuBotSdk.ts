@@ -2,7 +2,6 @@ import { pathToFileURL } from 'node:url';
 import { createAgentPlannerProvider } from '../agentRuntime/llmPlanner.js';
 import { loadEnv } from '../config/loadEnv.js';
 import { createFeishuSdkBot } from '../feishuBot/sdkClient.js';
-import { createLlmToolSelector } from '../feishuBot/llmToolSelector.js';
 import { createLlmProviderFromEnv, formatLlmProviderEnvSummary, summarizeLlmProviderEnv } from '../llm/openAiCompatibleProvider.js';
 
 export async function main(): Promise<void> {
@@ -20,7 +19,7 @@ export async function main(): Promise<void> {
     botMentionOpenId: process.env.FEISHU_BOT_OPEN_ID,
     botMentionName: process.env.FEISHU_BOT_MENTION_NAME,
     outputDir: process.env.MT_AGENT_OUTPUT_DIR ?? 'output',
-    ...(llmProvider ? { agentPlannerProvider: createAgentPlannerProvider(llmProvider), llmToolSelector: createLlmToolSelector(llmProvider) } : {}),
+    ...(llmProvider ? { agentPlannerProvider: createAgentPlannerProvider(llmProvider) } : {}),
   });
   await bot.start();
   console.log('Feishu SDK bot long connection started.');
