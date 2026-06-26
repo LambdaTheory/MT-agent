@@ -17,6 +17,11 @@ const mocks = vi.hoisted(() => ({
   normalizeRowsForPeriod: vi.fn<(table: RawTableData) => PeriodProductMetrics[]>(),
   sendFeishuCard: vi.fn(),
   fetchRecentGoodsManagerProducts: vi.fn(),
+  loadClosedOrderRegistryContext: vi.fn(),
+  buildInventorySameSkuSnapshot: vi.fn(),
+  writeInventorySameSkuSnapshot: vi.fn(),
+  openLinkRegistryMaintenancePrompt: vi.fn(),
+  openLinkRegistryGovernancePrompt: vi.fn(),
 }));
 
 vi.mock('../src/config/loadEnv.js', () => ({
@@ -53,6 +58,26 @@ vi.mock('../src/notify/feishu.js', () => ({
 
 vi.mock('../src/publicTraffic/goodsManagerNewProducts.js', () => ({
   fetchRecentGoodsManagerProducts: mocks.fetchRecentGoodsManagerProducts,
+}));
+
+vi.mock('../src/closedOrderFeedback/runtime.js', () => ({
+  loadClosedOrderRegistryContext: mocks.loadClosedOrderRegistryContext,
+}));
+
+vi.mock('../src/inventoryStatus/snapshot.js', () => ({
+  buildInventorySameSkuSnapshot: mocks.buildInventorySameSkuSnapshot,
+}));
+
+vi.mock('../src/inventoryStatus/store.js', () => ({
+  writeInventorySameSkuSnapshot: mocks.writeInventorySameSkuSnapshot,
+}));
+
+vi.mock('../src/linkRegistry/maintenanceSession.js', () => ({
+  openLinkRegistryMaintenancePrompt: mocks.openLinkRegistryMaintenancePrompt,
+}));
+
+vi.mock('../src/linkRegistry/governanceSession.js', () => ({
+  openLinkRegistryGovernancePrompt: mocks.openLinkRegistryGovernancePrompt,
 }));
 
 describe('runPublicTrafficReportCli public traffic sequencing', () => {
@@ -122,6 +147,11 @@ describe('runPublicTrafficReportCli public traffic sequencing', () => {
     ]);
     mocks.sendFeishuCard.mockResolvedValue({ sent: false, reason: 'test' });
     mocks.fetchRecentGoodsManagerProducts.mockResolvedValue([]);
+    mocks.loadClosedOrderRegistryContext.mockRejectedValue(new Error('registry skipped in publicTrafficReportCliBehavior tests'));
+    mocks.buildInventorySameSkuSnapshot.mockReturnValue({});
+    mocks.writeInventorySameSkuSnapshot.mockResolvedValue(undefined);
+    mocks.openLinkRegistryMaintenancePrompt.mockResolvedValue(null);
+    mocks.openLinkRegistryGovernancePrompt.mockResolvedValue(null);
 
     const historicalPaths = buildPublicTrafficPaths(mocks.outputDir, '2026-06-09');
     await mkdir(historicalPaths.dir, { recursive: true });

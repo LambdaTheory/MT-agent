@@ -17,6 +17,12 @@ function truncate(value: string, limit: number): string {
 }
 
 function compactModelName(name: string): string | null {
+  const ulike = name.match(/\bUlike\s*Air\s*3\b/i);
+  if (ulike) return 'Ulike Air 3';
+
+  const seayeo = name.match(/\bSEAYEO\b.*大排灯美容仪/u);
+  if (seayeo) return 'SEAYEO 大排灯美容仪';
+
   const canonRfLens = name.match(/佳能\s*(RF-S|RF)\s*(100-400mm|50mm\s*F1\.8|18-150mm)/i);
   if (canonRfLens) return `佳能 ${canonRfLens[1].toUpperCase()} ${canonRfLens[2].replace(/\s+/g, ' ')} 镜头`;
 
@@ -28,6 +34,12 @@ function compactModelName(name: string): string | null {
 
   const djiPocket = name.match(/(?:大疆|DJI)\s*(?:O\s*mo|Osmo)?\s*Pocket\s*([34])/i);
   if (djiPocket) return `大疆 Pocket ${djiPocket[1]}`;
+
+  const djiPocketTypo = name.match(/(?:大疆|DJI)\s*pocke[t]?\s*([34])/i);
+  if (djiPocketTypo) return `大疆 Pocket ${djiPocketTypo[1]}`;
+
+  const djiPocketBare = name.match(/\bpocket\s*([34])\b/i);
+  if (djiPocketBare) return `大疆 Pocket ${djiPocketBare[1]}`;
 
   const djiAction = name.match(/(?:大疆|DJI)\s*(?:Osmo\s*)?Action\s*([45])\s*(Pro)?/i);
   if (djiAction) return ['大疆 Action', djiAction[1], djiAction[2] ? 'Pro' : ''].filter(Boolean).join(' ');
@@ -44,11 +56,23 @@ function compactModelName(name: string): string | null {
   const fujiInstax = name.match(/富士\s*instax\s*(mini|SQUARE|wide)\s*(link\s*[23]|EVO|LiPlay|SQ(?:1|20|40)|(?:11|12|40|90|99|300|400))/i);
   if (fujiInstax) return `富士 instax ${fujiInstax[1]} ${fujiInstax[2].replace(/\s+/g, ' ')}`;
 
+  const fujiLiPlay = name.match(/富士\s*mini\s*LiPlay/i);
+  if (fujiLiPlay) return '富士 mini LiPlay';
+
+  const fujiLiPlayBare = name.match(/\bmini[-\s]*LiPlay\b/i);
+  if (fujiLiPlayBare) return '富士 mini LiPlay';
+
   const fujiXHalf = name.match(/富士\s*X[-\s]?half/i);
   if (fujiXHalf) return '富士 X-half';
 
   const sonyZv = name.match(/索尼\s*ZV-?1\b/i);
   if (sonyZv) return '索尼 ZV-1';
+
+  const sonyRx = name.match(/索尼\s*RX10\s*M?4\b/i);
+  if (sonyRx) return '索尼 RX10M4';
+
+  const sonyRxBare = name.match(/\bRX10\s*M?4\b/i);
+  if (sonyRxBare) return '索尼 RX10M4';
 
   const panasonic = name.match(/松下\s*(ZS99|ZS220D|FZ80D|ZS80D)\b/i);
   if (panasonic) return `松下 ${panasonic[1].toUpperCase()}`;
@@ -73,6 +97,12 @@ function compactModelName(name: string): string | null {
 
   const vivo = name.match(/\bvivo\s+X\s*(\d+)\s+Ultra\b/i);
   if (vivo) return `vivo X${vivo[1]} Ultra`;
+
+  const vivoBare = name.match(/\bX\s*(\d+)\s*Ultra\b/i);
+  if (vivoBare) return `vivo X${vivoBare[1]} Ultra`;
+
+  const vivoPro = name.match(/\bvivo\s*X\s*(\d+)\s*Pro\b/i);
+  if (vivoPro) return `vivo X${vivoPro[1]} Pro`;
 
   return null;
 }

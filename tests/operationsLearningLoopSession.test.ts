@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { handleOperationsLearningFeedback, startOperationsLearningSession, summarizeOperationsLearningHistory, summarizeOperationsLearningSession } from '../src/operationsLearningLoop/session.js';
+import { handleOperationsLearningFeedback, handleOperationsLearningStop, startOperationsLearningSession, summarizeOperationsLearningHistory, summarizeOperationsLearningSession } from '../src/operationsLearningLoop/session.js';
 import type { PublicTrafficDataReportContext, PublicTrafficPeriodMetrics } from '../src/publicTraffic/types.js';
 
 const metric: PublicTrafficPeriodMetrics = {
@@ -148,6 +148,23 @@ describe('operations learning session', () => {
     const stored = JSON.parse(await readFile(join(outputDir, '2026-06-16', 'operations-learning-session.json'), 'utf8')) as { feedbacks: unknown[]; learnedSignals: { rejectedReasons: Record<string, number> } };
     expect(stored.feedbacks).toEqual([]);
     expect(stored.learnedSignals.rejectedReasons).toEqual({});
+  });
+
+  it('stops the session and ignores later feedback from old cards', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-learning-stop-'));
+    await startOperationsLearningSession(outputDir, context());
+
+    const stopped = await handleOperationsLearningStop(outputDir, { date: '2026-06-16', reviewerId: 'ou_stop' });
+    const staleFeedback = await handleOperationsLearningFeedback(outputDir, { date: '2026-06-16', productId: '701', feedback: 'reasonable', questionIndex: 1, reviewerId: 'ou_late' });
+
+    expect(stopped.card).toBeUndefined();
+    expect(stopped.text).toContain('运营学习已停止');
+    expect(stopped.text).toContain('已答 0/2');
+    expect(staleFeedback.text).toContain('运营学习已停止');
+    const stored = JSON.parse(await readFile(join(outputDir, '2026-06-16', 'operations-learning-session.json'), 'utf8')) as { stoppedAt?: string; stoppedBy?: string; feedbacks: unknown[] };
+    expect(stored.stoppedAt).toEqual(expect.any(String));
+    expect(stored.stoppedBy).toBe('ou_stop');
+    expect(stored.feedbacks).toEqual([]);
   });
 
   it('summarizes cross-day history and per-reviewer stats', async () => {

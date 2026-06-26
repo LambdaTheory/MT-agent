@@ -729,6 +729,30 @@ describe('createFeishuSdkBot card.action.trigger', () => {
     ]);
   });
 
+  it('stops operations learning from a card action and replaces the current card', async () => {
+    const outputDir = await writeContext();
+    await seedLearningSession(outputDir);
+    const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
+    const sent: unknown[] = [];
+    const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', outputDir, sdk: fakeSdk(sent, registered) });
+
+    bot.start();
+    const result = await registered['card.action.trigger']({
+      event: {
+        context: { open_message_id: 'om-learning-stop' },
+        operator: { open_id: 'ou_stop' },
+        action: { tag: 'button', value: { action: 'operations_learning_stop', date: '2026-06-11' } },
+      },
+    });
+    await Promise.resolve();
+
+    expect(JSON.stringify(result)).toContain('运营学习已停止');
+    expect(sent).toEqual([
+      expect.objectContaining({ kind: 'patch', request: expect.objectContaining({ path: { message_id: 'om-learning-stop' } }) }),
+    ]);
+    await expect(readFile(join(outputDir, '2026-06-11', 'operations-learning-session.json'), 'utf8')).resolves.toContain('ou_stop');
+  });
+
   it('replies with the next operations learning question after feedback', async () => {
     const outputDir = await writeContext();
     await seedLearningSession(outputDir);

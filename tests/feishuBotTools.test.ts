@@ -82,6 +82,47 @@ async function writeContext(): Promise<string> {
   return dir;
 }
 
+async function writeDatedContexts(): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), 'mt-agent-bot-tools-dated-'));
+  const writeOne = async (runDate: string, reportDate: string, exposure: number, productName: string): Promise<void> => {
+    await mkdir(join(dir, runDate), { recursive: true });
+    await writeFile(join(dir, runDate, 'report-context.json'), JSON.stringify({
+      date: reportDate,
+      summary: {
+        '1d': { ...summary, exposure },
+        '7d': { ...summary, exposure: exposure + 7 },
+        '30d': { ...summary, exposure: exposure + 30 },
+      },
+      conclusions: [],
+      rows: [
+        {
+          productName,
+          platformProductId: `platform-${reportDate}-733`,
+          displayProductId: '端内ID 733',
+          custodyDays: 1,
+          periods: {
+            '1d': { ...metric, exposure },
+            '7d': { ...metric, exposure: exposure + 7 },
+            '30d': { ...metric, exposure: exposure + 30 },
+          },
+        },
+      ],
+      lowExposure: [],
+      weakClick: [],
+      weakConversion: [],
+      highPotential: [],
+      newProductObservation: [],
+      lifecycleGovernance: [],
+      recommendedActions: [],
+      emptySectionNotes: {},
+    }), 'utf8');
+  };
+
+  await writeOne('2026-06-10', '2026-06-10', 321, '旧日期 Pocket3');
+  await writeOne('2026-06-11', '2026-06-11', 999, '最新日期 Pocket3');
+  return dir;
+}
+
 async function writeX200RankingContext(): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), 'mt-agent-x200-ranking-'));
   await mkdir(join(dir, '2026-06-11'), { recursive: true });
@@ -649,7 +690,9 @@ describe('handleBotIntent', () => {
   it('returns help text', async () => {
     await expect(handleBotIntent({ type: 'help' })).resolves.toEqual({ text: `📋 查询与分析
   今日概况 — 查看最新公域日报概况
+  看 2026-06-22 的日报 / 查昨天日报 — 查看指定日期公域日报
   查询 565 / 查 433,798 — 查询单个或多个端内ID表现
+  2026-06-22 查询 733 — 查询指定日期的商品表现
   s23u最好的链接是哪条 — 按链接档案找同款组里数据最好的端内ID
   x200u的定价情况怎么样 — 按同款组汇总SKU平均租金
   查ID 565 / 商品ID互查 — 端内ID与平台商品ID互查
@@ -668,6 +711,11 @@ describe('handleBotIntent', () => {
   数据最好的SQ1是哪条？按这个ID复制5条新链
   数据最好的wide300、wide400分别复制5条新链
   刷新活跃度 — 这类高风险批量运营动作会先生成计划/澄清，不会直接执行
+
+🎓 运营学习
+  运营学习 — 开始运营学习测验
+  运营学习汇总 / 运营学习历史 — 查看测验反馈汇总或历史统计
+  Agent学习汇总 — 查看 Agent 澄清与确认学习记录
 
 💰 改价、审计与回滚
   876 全局改价 0.9 — 生成改价审计预览和确认卡
@@ -770,11 +818,35 @@ describe('handleBotIntent', () => {
     expect(response.text).toContain('曝光 1000');
   });
 
+  it('answers dated latest summary from the requested report context', async () => {
+    const outputDir = await writeDatedContexts();
+    const response = await handleBotIntent({ type: 'latest_summary', date: '2026-06-10' }, outputDir);
+    expect(response.text).toContain('公域日报 2026-06-10');
+    expect(response.text).toContain('曝光 321');
+    expect(response.text).not.toContain('2026-06-11');
+    expect(response.text).not.toContain('曝光 999');
+  });
+
   it('answers product query from report context', async () => {
     const outputDir = await writeContext();
     const response = await handleBotIntent({ type: 'query_product', keyword: '565' }, outputDir);
     expect(response.text).toContain('端内ID 565 iPhone 15');
     expect(response.text).toContain('1日：曝光 10');
+  });
+
+  it('answers dated product query from the requested report context', async () => {
+    const outputDir = await writeDatedContexts();
+    const response = await handleBotIntent({ type: 'query_product', keyword: '733', date: '2026-06-10' }, outputDir);
+    expect(response.text).toContain('端内ID 733 旧日期 Pocket3');
+    expect(response.text).toContain('1日：曝光 321');
+    expect(response.text).not.toContain('最新日期 Pocket3');
+  });
+
+  it('returns dated missing-context text instead of silently using latest context', async () => {
+    const outputDir = await writeDatedContexts();
+    await expect(handleBotIntent({ type: 'latest_summary', date: '2026-06-09' }, outputDir)).resolves.toEqual({
+      text: '没有找到 2026-06-09 的公域日报上下文。',
+    });
   });
 
   it('answers numeric product query with only the exact product id', async () => {

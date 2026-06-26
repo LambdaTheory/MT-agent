@@ -24,6 +24,8 @@ export interface OperationsLearningSession {
   date: string;
   createdAt: string;
   updatedAt: string;
+  stoppedAt?: string;
+  stoppedBy?: string;
   items: OperationsLearningQuizItem[];
   feedbacks: OperationsLearningFeedbackRecord[];
   learnedSignals: OperationsLearningSignals;
@@ -41,6 +43,11 @@ export interface OperationsLearningFeedbackInput {
 export interface OperationsLearningSessionResponse {
   text: string;
   card?: FeishuCardPayload;
+}
+
+export interface OperationsLearningStopInput {
+  date?: string;
+  reviewerId?: string;
 }
 
 const SESSION_FILE = 'operations-learning-session.json';
@@ -87,6 +94,7 @@ function nextUnansweredIndex(session: OperationsLearningSession): number {
 }
 
 function currentSessionResponse(session: OperationsLearningSession): OperationsLearningSessionResponse {
+  if (session.stoppedAt) return { text: compactSummary(session, 'stopped') };
   const nextIndex = nextUnansweredIndex(session);
   const nextItem = session.items[nextIndex - 1];
   if (!nextItem) return { text: compactSummary(session) };
@@ -136,13 +144,14 @@ function applySignals(session: OperationsLearningSession, item: OperationsLearni
   increment(session.learnedSignals.rejectedOperations, item.recommendedOperation);
 }
 
-function compactSummary(session: OperationsLearningSession): string {
+function compactSummary(session: OperationsLearningSession, status: 'completed' | 'stopped' = 'completed'): string {
   const counts = session.feedbacks.reduce<Record<string, number>>((acc, item) => {
     acc[item.feedback] = (acc[item.feedback] ?? 0) + 1;
     return acc;
   }, {});
   const suggestions = session.feedbacks.filter((item) => item.suggestion).length;
-  return [`运营学习反馈完成 ${session.date}`, `已答 ${session.feedbacks.length}/${session.items.length}`, `合理 ${counts.reasonable ?? 0}，不合理 ${counts.unreasonable ?? 0}，不具代表性 ${counts.not_representative ?? 0}，改写建议 ${suggestions}`].join('\n');
+  const title = status === 'stopped' ? `运营学习已停止 ${session.date}` : `运营学习反馈完成 ${session.date}`;
+  return [title, `已答 ${session.feedbacks.length}/${session.items.length}`, `合理 ${counts.reasonable ?? 0}，不合理 ${counts.unreasonable ?? 0}，不具代表性 ${counts.not_representative ?? 0}，改写建议 ${suggestions}`].join('\n');
 }
 
 export async function summarizeOperationsLearningSession(outputDir: string, date: string): Promise<string> {
@@ -192,6 +201,7 @@ export async function handleOperationsLearningFeedback(outputDir: string, input:
   return withSessionLock(outputDir, input.date, async () => {
     const session = await loadOperationsLearningSession(outputDir, input.date!);
     if (!session) return { text: '还没有找到运营学习测验会话，请先发送“运营学习”。' };
+    if (session.stoppedAt) return { text: compactSummary(session, 'stopped') };
 
     const feedback = parseFeedback(input.feedback);
     if (!feedback) return { text: `无法识别的运营学习反馈：${input.feedback}。` };
@@ -212,5 +222,20 @@ export async function handleOperationsLearningFeedback(outputDir: string, input:
     await saveSession(outputDir, session);
 
     return currentSessionResponse(session);
+  });
+}
+
+export async function handleOperationsLearningStop(outputDir: string, input: OperationsLearningStopInput): Promise<OperationsLearningSessionResponse> {
+  if (!input.date) return { text: '还没有找到运营学习测验会话，请先发送“运营学习”。' };
+  return withSessionLock(outputDir, input.date, async () => {
+    const session = await loadOperationsLearningSession(outputDir, input.date!);
+    if (!session) return { text: '还没有找到运营学习测验会话，请先发送“运营学习”。' };
+    if (!session.stoppedAt) {
+      session.stoppedAt = new Date().toISOString();
+      if (input.reviewerId) session.stoppedBy = input.reviewerId;
+      session.updatedAt = session.stoppedAt;
+      await saveSession(outputDir, session);
+    }
+    return { text: compactSummary(session, 'stopped') };
   });
 }

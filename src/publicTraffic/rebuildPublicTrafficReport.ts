@@ -1,5 +1,5 @@
 import { readFile, writeFile } from 'node:fs/promises';
-import { loadClosedOrderRegistryContext } from '../closedOrderFeedback/runtime.js';
+import { loadClosedOrderRegistryContext, type ClosedOrderRegistryPathsInput } from '../closedOrderFeedback/runtime.js';
 import type { PeriodKey, RawTableData } from '../domain/types.js';
 import { normalizeRowsForPeriod } from '../extractor/normalizeRows.js';
 import { buildInventorySameSkuSnapshot } from '../inventoryStatus/snapshot.js';
@@ -21,6 +21,7 @@ export interface RebuildPublicTrafficReportInput {
   outputDir: string;
   date: string;
   productIdMappingPath?: string;
+  closedOrderRegistryPaths?: ClosedOrderRegistryPathsInput;
   refreshedAt?: string;
   sendTo?: 'personal' | 'group' | 'both';
   send?: boolean;
@@ -32,6 +33,7 @@ export interface RebuildPublicTrafficReportResult {
   workbookPath: string;
   sent: boolean;
   sendReason?: string;
+  inventorySnapshotWarning?: string;
 }
 
 async function readJson<T>(path: string): Promise<T> {
@@ -52,6 +54,41 @@ function filterRecoveredDashboardNotes(notes: string[] | undefined): string[] {
 
 function rebuildNote(refreshedAt: string | undefined): string {
   return `访问页数据已于 ${refreshedAt ?? new Date().toISOString()} 补抓更新，本报告为重建版。`;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+async function writeInventorySameSkuSnapshotSafely(input: {
+  outputDir: string;
+  date: string;
+  reportDate: string;
+  context: PublicTrafficDataReportContext;
+  snapshotPath: string;
+  productIdMappingPath?: string;
+  closedOrderRegistryPaths?: ClosedOrderRegistryPathsInput;
+}): Promise<string | undefined> {
+  try {
+    const registryContext = await loadClosedOrderRegistryContext({
+      ...input.closedOrderRegistryPaths,
+      ...(input.productIdMappingPath ? { productIdMapPath: input.productIdMappingPath } : {}),
+      artifactsDir: input.closedOrderRegistryPaths?.artifactsDir ?? input.outputDir,
+    }, process.cwd());
+    const sameSkuSnapshot = buildInventorySameSkuSnapshot({
+      date: input.date,
+      reportDate: input.reportDate,
+      context: input.context,
+      registry: registryContext.registry,
+      overrideRisks: registryContext.overrideRisks,
+    });
+    await writeInventorySameSkuSnapshot(sameSkuSnapshot, input.snapshotPath);
+    return undefined;
+  } catch (error) {
+    const warning = `inventory same-sku snapshot skipped: ${errorMessage(error)}`;
+    console.warn(warning);
+    return warning;
+  }
 }
 
 export async function rebuildPublicTrafficReport(input: RebuildPublicTrafficReportInput): Promise<RebuildPublicTrafficReportResult> {
@@ -103,28 +140,25 @@ export async function rebuildPublicTrafficReport(input: RebuildPublicTrafficRepo
   context.newProductPoolIds = priorContext.newProductPoolIds;
   context.agentData = priorContext.agentData;
 
-  const registryContext = await loadClosedOrderRegistryContext({
-    ...(input.productIdMappingPath ? { productIdMapPath: input.productIdMappingPath } : {}),
-    artifactsDir: input.outputDir,
-  }, process.cwd());
-  const sameSkuSnapshot = buildInventorySameSkuSnapshot({
+  const inventorySnapshotWarning = await writeInventorySameSkuSnapshotSafely({
+    outputDir: input.outputDir,
     date: input.date,
     reportDate: context.date,
     context,
-    registry: registryContext.registry,
-    overrideRisks: registryContext.overrideRisks,
+    snapshotPath: paths.sameSkuSnapshot,
+    productIdMappingPath: input.productIdMappingPath,
+    closedOrderRegistryPaths: input.closedOrderRegistryPaths,
   });
 
   await writeFile(paths.reportContext, `${JSON.stringify(context, null, 2)}\n`, 'utf8');
-  await writeInventorySameSkuSnapshot(sameSkuSnapshot, paths.sameSkuSnapshot);
   await writeFile(paths.markdown, buildPublicTrafficMarkdown(context), 'utf8');
   await writeFile(paths.workbook, writePublicTrafficWorkbookBuffer(context));
 
-  if (input.send === false) return { context, markdownPath: paths.markdown, workbookPath: paths.workbook, sent: false, sendReason: 'send disabled' };
+  if (input.send === false) return { context, markdownPath: paths.markdown, workbookPath: paths.workbook, sent: false, sendReason: 'send disabled', inventorySnapshotWarning };
 
   const env = input.sendTo ? { ...process.env, FEISHU_SEND_TO: input.sendTo } : process.env;
   const card = buildPublicTrafficCard(context, { markdownPath: paths.markdown, workbookPath: paths.workbook });
   const fallbackText = buildPublicTrafficFeishuText(context, { markdownPath: paths.markdown, workbookPath: paths.workbook });
   const result = await sendFeishuCard(env, card, fallbackText);
-  return { context, markdownPath: paths.markdown, workbookPath: paths.workbook, sent: result.sent, sendReason: result.sent ? undefined : result.reason };
+  return { context, markdownPath: paths.markdown, workbookPath: paths.workbook, sent: result.sent, sendReason: result.sent ? undefined : result.reason, inventorySnapshotWarning };
 }

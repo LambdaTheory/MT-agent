@@ -14,6 +14,7 @@ export interface FeishuEnv {
   FEISHU_PERSONAL_RECEIVE_ID?: string;
   FEISHU_GROUP_RECEIVE_ID_TYPE?: string;
   FEISHU_GROUP_RECEIVE_ID?: string;
+  FEISHU_GROUP_RECEIVE_IDS?: string;
   FEISHU_RECEIVE_ID_TYPE?: string;
   FEISHU_RECEIVE_ID?: string;
   FEISHU_WEBHOOK_URL?: string;
@@ -53,12 +54,20 @@ function explicitPersonalRecipient(env: FeishuEnv): Pick<FeishuAppConfig, 'recei
   };
 }
 
-function groupRecipient(env: FeishuEnv): Pick<FeishuAppConfig, 'receiveIdType' | 'receiveId'> | null {
-  if (!env.FEISHU_GROUP_RECEIVE_ID) return null;
-  return {
+function splitReceiveIds(value: string | undefined): string[] {
+  return value?.split(/[,\s]+/).map((item) => item.trim()).filter(Boolean) ?? [];
+}
+
+function groupRecipients(env: FeishuEnv): Array<Pick<FeishuAppConfig, 'receiveIdType' | 'receiveId'>> {
+  const receiveIds = [
+    ...(env.FEISHU_GROUP_RECEIVE_ID ? [env.FEISHU_GROUP_RECEIVE_ID] : []),
+    ...splitReceiveIds(env.FEISHU_GROUP_RECEIVE_IDS),
+  ];
+  const deduped = [...new Set(receiveIds)];
+  return deduped.map((receiveId) => ({
     receiveIdType: env.FEISHU_GROUP_RECEIVE_ID_TYPE ?? 'chat_id',
-    receiveId: env.FEISHU_GROUP_RECEIVE_ID,
-  };
+    receiveId,
+  }));
 }
 
 function appConfigsFromEnv(env: FeishuEnv): FeishuAppConfig[] {
@@ -66,19 +75,20 @@ function appConfigsFromEnv(env: FeishuEnv): FeishuAppConfig[] {
   if (!base) return [];
 
   const target = normalizeSendTarget(env.FEISHU_SEND_TO);
-  const recipients = target === 'both' ? [personalRecipient(env), groupRecipient(env)] : [target === 'group' ? groupRecipient(env) : personalRecipient(env)];
+  const recipients = target === 'both' ? [personalRecipient(env), ...groupRecipients(env)] : (target === 'group' ? groupRecipients(env) : [personalRecipient(env)]);
 
   return recipients.filter((recipient): recipient is Pick<FeishuAppConfig, 'receiveIdType' | 'receiveId'> => Boolean(recipient)).map((recipient) => ({ ...base, ...recipient }));
 }
 
-function appConfigFromEnv(env: FeishuEnv): FeishuAppConfig | null {
-  return appConfigsFromEnv(env)[0] ?? null;
-}
-
 export async function sendFeishuText(env: FeishuEnv, text: string, fetchImpl: typeof fetch = fetch): Promise<FeishuDeliveryResult> {
-  const appConfig = appConfigFromEnv(env);
-  if (appConfig) {
-    return sendFeishuAppText(appConfig, text, fetchImpl);
+  const appConfigs = appConfigsFromEnv(env);
+  if (appConfigs.length > 0) {
+    const results = [];
+    for (const appConfig of appConfigs) {
+      results.push(await sendFeishuAppText(appConfig, text, fetchImpl));
+    }
+    const failed = results.find((result) => !result.sent);
+    return failed ?? { sent: true, channel: 'app' };
   }
 
   if (env.FEISHU_WEBHOOK_URL) {

@@ -2,7 +2,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { loadProductNameMap, resolveProductDisplayName } from '../src/publicTraffic/productDisplayName.js';
+import { canonicalProductShortName, loadProductNameMap, resolveProductDisplayName } from '../src/publicTraffic/productDisplayName.js';
 import type { PublicTrafficProductDataRow } from '../src/publicTraffic/types.js';
 
 function row(productName: string): PublicTrafficProductDataRow {
@@ -91,5 +91,15 @@ describe('product display names', () => {
     expect(resolveProductDisplayName(row('富士in tax SQUARE SQ1方形拍立得'))).toBe('富士 instax SQUARE SQ1');
     expect(resolveProductDisplayName(row('影石in ta360 Ace Pro2 运动相机'))).toBe('影石 Insta360 Ace Pro 2');
     expect(resolveProductDisplayName(row('大疆O mo Nano 自由视角运动相机'))).toBe('大疆 Osmo Nano');
+  });
+  it('strips marketing copy and keeps only the core brand model name', () => {
+    expect(canonicalProductShortName('Ulike Air3 蓝宝石冰点脱毛仪 四周见效 全身无痛 脱毛家用')).toBe('Ulike Air 3');
+    expect(canonicalProductShortName('富士 mini LiPlay 数模拍立得短租 旅游拍照神器')).toBe('富士 mini LiPlay');
+    expect(canonicalProductShortName('mini liplay')).toBe('富士 mini LiPlay');
+    expect(canonicalProductShortName('索尼 RX10M4 长焦相机 安全下车 演唱会神器')).toBe('索尼 RX10M4');
+    expect(canonicalProductShortName('rx10m4')).toBe('索尼 RX10M4');
+    expect(canonicalProductShortName('vivoX300Pro 百倍变焦 蔡司2亿APO')).toBe('vivo X300 Pro');
+    expect(canonicalProductShortName('X200 Ultra')).toBe('vivo X200 Ultra');
+    expect(canonicalProductShortName('pocket3')).toBe('大疆 Pocket 3');
   });
 });

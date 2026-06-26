@@ -155,9 +155,20 @@ function feedbackButton(label: string, feedback: OperationsLearningFeedbackOptio
     tag: 'button',
     text: { tag: 'plain_text', content: label },
     type: feedback === 'reasonable' ? 'primary' : 'default',
-    action_type: 'form_submit',
+    form_action_type: 'submit',
     name: `operations_learning_${feedback}`,
     behaviors: [{ type: 'callback', value }],
+  };
+}
+
+function stopButton(date: string): Record<string, unknown> {
+  return {
+    tag: 'button',
+    text: { tag: 'plain_text', content: '停止学习' },
+    type: 'default',
+    form_action_type: 'submit',
+    name: 'operations_learning_stop',
+    behaviors: [{ type: 'callback', value: { action: 'operations_learning_stop', date } }],
   };
 }
 
@@ -195,7 +206,7 @@ function periodMetricMatrix(item: OperationsLearningQuizItem): Record<string, un
 }
 
 function reasonsPanel(item: OperationsLearningQuizItem): Record<string, unknown> {
-  return { tag: 'note', elements: [{ tag: 'plain_text', content: `判断依据：${item.reasons.join('；')}` }] };
+  return markdown(`**判断依据**\n${item.reasons.join('；')}`);
 }
 
 export function buildOperationsLearningQuestionCard(date: string, item: OperationsLearningQuizItem, options: { index: number; total: number }): OperationsLearningQuestionCardPayload {
@@ -226,19 +237,11 @@ export function buildOperationsLearningQuestionCard(date: string, item: Operatio
               input_type: 'text',
               max_length: 500,
             },
-            {
-              tag: 'column_set',
-              flex_mode: 'none',
-              background_style: 'default',
-              horizontal_spacing: 'default',
-              columns: [
-                { tag: 'column', width: 'auto', vertical_align: 'top', elements: [feedbackButton('合理', 'reasonable', date, item, options.index)] },
-                { tag: 'column', width: 'auto', vertical_align: 'top', elements: [feedbackButton('不合理', 'unreasonable', date, item, options.index)] },
-                { tag: 'column', width: 'auto', vertical_align: 'top', elements: [feedbackButton('提交改写建议', 'suggested_action', date, item, options.index)] },
-                { tag: 'column', width: 'auto', vertical_align: 'top', elements: [feedbackButton('不具代表性', 'not_representative', date, item, options.index)] },
-              ],
-              margin: '0px',
-            },
+            feedbackButton('合理', 'reasonable', date, item, options.index),
+            feedbackButton('不合理', 'unreasonable', date, item, options.index),
+            feedbackButton('提交改写建议', 'suggested_action', date, item, options.index),
+            feedbackButton('不具代表性', 'not_representative', date, item, options.index),
+            stopButton(date),
           ],
         },
       ],

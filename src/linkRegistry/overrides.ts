@@ -74,7 +74,7 @@ function validInternalProductId(value: string): boolean {
 }
 
 function validSameSkuGroupId(value: string): boolean {
-  return /^[a-z0-9][a-z0-9_-]{1,63}$/.test(value.trim());
+  return /^[\p{Letter}\p{Number}][\p{Letter}\p{Number}\s_-]{1,63}$/u.test(value.trim());
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

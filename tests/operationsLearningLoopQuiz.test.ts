@@ -90,14 +90,16 @@ describe('operations learning loop quiz preview', () => {
     expect(serialized).toContain('tag":"input');
     expect(serialized).toContain('name":"suggested_action');
     expect(serialized).toContain('input_type":"text');
-    expect(serialized).toContain('action_type":"form_submit');
+    expect(serialized).toContain('form_action_type":"submit');
+    expect(serialized).not.toContain('action_type":"form_submit');
     expect(serialized).toContain('behaviors');
     expect(serialized).toContain('tag":"button');
     expect(serialized).toContain('tag":"column_set');
     expect(serialized).toContain('operations_learning_period_metric_matrix');
     expect(serialized).not.toContain('tag":"table');
     expect(serialized).not.toContain('tag":"collapsible_panel');
-    expect(serialized).toContain('tag":"note');
+    expect(serialized).not.toContain('tag":"note');
+    expect(serialized).toContain('判断依据');
     expect(serialized).toContain('tag":"hr');
     expect(serialized).toContain('background_style":"grey');
     expect(serialized).toContain('color=\'orange\'');
@@ -119,6 +121,8 @@ describe('operations learning loop quiz preview', () => {
     expect(serialized).toContain('feedback":"unreasonable');
     expect(serialized).toContain('feedback":"suggested_action');
     expect(serialized).toContain('feedback":"not_representative');
+    expect(serialized).toContain('停止学习');
+    expect(serialized).toContain('operations_learning_stop');
     expect(serialized).toContain('"behaviors":[{"type":"callback","value":{"action":"operations_learning_feedback"');
     expect(serialized).toContain(item.productId);
   });

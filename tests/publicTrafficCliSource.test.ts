@@ -29,7 +29,9 @@ describe('public traffic CLI wiring', () => {
     expect(text).toContain("const productNameMap = await loadProductNameMap('config/product-name-map.json', (message) => log.addEvent(message));");
     expect(text).toContain('buildPublicTrafficCard(context,');
     expect(text).toContain('productNameMap,');
-    expect(text).toContain('await writeInventorySameSkuSnapshot(sameSkuSnapshot, paths.sameSkuSnapshot);');
+    expect(text).toContain('const registryContext = await writeInventorySameSkuSnapshotSafely({');
+    expect(text).toContain('await writeInventorySameSkuSnapshot(sameSkuSnapshot, input.snapshotPath);');
+    expect(text).toContain('inventory same-sku snapshot skipped:');
     expect(text).toContain('const sendTo = parseFeishuSendToArg(process.argv);');
     expect(text).toContain('sendFeishuCard(env, card, fallbackText)');
   });

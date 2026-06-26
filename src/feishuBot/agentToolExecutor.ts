@@ -31,7 +31,7 @@ import {
   type RentalPriceSkillClient,
 } from './rentalPrice.js';
 import { findReadOnlyTool } from './readOnlyToolRegistry.js';
-import { findLatestReportContext, formatLatestSummary, formatProductRows, parseNumericProductIdList, queryProductRows } from './reportStore.js';
+import { findLatestReportContext, findReportContextByDate, formatLatestSummary, formatProductRows, parseNumericProductIdList, queryProductRows } from './reportStore.js';
 
 export interface AgentToolExecutionOptions {
   rentalPriceClient?: RentalPriceSkillClient;
@@ -344,6 +344,14 @@ function readOptionalDate(value: unknown): string | undefined {
   return parsed;
 }
 
+async function findReportContextForTool(outputDir: string, date?: string) {
+  return date ? findReportContextByDate(outputDir, date) : findLatestReportContext(outputDir);
+}
+
+function missingReportContextText(date?: string): string {
+  return date ? `没有找到 ${date} 的公域日报上下文。` : '还没有找到公域日报上下文。';
+}
+
 function today(): string {
   return new Date().toISOString().slice(0, 10);
 }
@@ -355,31 +363,35 @@ export async function executeAgentToolRequest(
 ): Promise<BotResponse> {
   switch (request.toolName) {
     case 'publicTraffic.latestSummary': {
-      const latest = await findLatestReportContext(outputDir);
-      return { text: latest ? formatLatestSummary(latest.context) : '还没有找到公域日报上下文。' };
+      const date = readOptionalDate(request.arguments.date);
+      const report = await findReportContextForTool(outputDir, date);
+      return { text: report ? formatLatestSummary(report.context) : missingReportContextText(date) };
     }
     case 'product.query': {
-      const latest = await findLatestReportContext(outputDir);
+      const date = readOptionalDate(request.arguments.date);
+      const report = await findReportContextForTool(outputDir, date);
       const keyword = requireString(request.arguments.keyword, 'keyword');
       const productIds = parseNumericProductIdList(keyword);
-      if (latest) {
-        const rows = queryProductRows(latest.context, keyword);
+      if (report) {
+        const rows = queryProductRows(report.context, keyword);
         if (rows.length > 0) return { text: formatProductRows(rows) };
       }
+      if (!report && date) return { text: missingReportContextText(date) };
       if (productIds.length > 0) {
         const registryContext = await loadClosedOrderRegistryContext(options.closedOrderRegistryPaths);
         return { text: formatRegistryProductRows(productIds, registryContext.registry) };
       }
-      return { text: latest ? formatProductRows([]) : '还没有找到公域日报上下文。' };
+      return { text: report ? formatProductRows([]) : missingReportContextText() };
     }
     case 'product.rankBestSameSku': {
       const query = requireString(request.arguments.query, 'query');
       return runReadOnlyAgentIntent(outputDir, { type: 'best_product_by_same_sku', query }, options);
     }
     case 'productId.lookup': {
-      const latest = await findLatestReportContext(outputDir);
+      const date = readOptionalDate(request.arguments.date);
+      const report = await findReportContextForTool(outputDir, date);
       const query = requireString(request.arguments.keyword, 'keyword');
-      return { text: latest ? formatIdLookupResult(lookupProductId(latest.context, query)) : '还没有找到公域日报上下文。' };
+      return { text: report ? formatIdLookupResult(lookupProductId(report.context, query)) : missingReportContextText(date) };
     }
     case 'operationsLearning.startQuiz': {
       const latest = await findLatestReportContext(outputDir);

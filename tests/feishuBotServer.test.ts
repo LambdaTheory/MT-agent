@@ -1016,6 +1016,50 @@ describe('startFeishuBotServer', () => {
     }
   });
 
+  it('returns a stopped operations learning card for HTTP stop callbacks', async () => {
+    const outputDir = await writeLearningContext();
+    await writeFile(join(outputDir, '2026-06-11', 'operations-learning-session.json'), JSON.stringify({
+      date: '2026-06-11',
+      createdAt: '2026-06-11T00:00:00.000Z',
+      updatedAt: '2026-06-11T00:00:00.000Z',
+      items: [
+        { productId: '565', productName: 'iPhone 15', platformProductId: 'p565', score: 1, sourceModules: ['建议操作'], reasons: ['原因1'], recommendedOperation: '补曝光', metrics: { '1d': metric, '7d': metric, '30d': metric }, feedbackOptions: ['reasonable', 'unreasonable', 'suggested_action', 'not_representative'] },
+      ],
+      feedbacks: [],
+      learnedSignals: { acceptedReasons: {}, rejectedReasons: {}, rejectedOperations: {}, nonRepresentativeProducts: [] },
+    }));
+    const server = startFeishuBotServer({
+      port: 0,
+      appId: 'app',
+      appSecret: 'secret',
+      outputDir,
+    });
+    try {
+      await new Promise<void>((resolve) => server.once('listening', resolve));
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+
+      const response = await fetch(`http://127.0.0.1:${address.port}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          header: { event_type: 'card.action.trigger' },
+          event: {
+            context: { open_message_id: 'mid-http-loop-stop' },
+            operator: { open_id: 'ou_http_stop' },
+            action: { value: { action: 'operations_learning_stop', date: '2026-06-11' } },
+          },
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(JSON.stringify(await response.json())).toContain('运营学习已停止');
+      await expect(readFile(join(outputDir, '2026-06-11', 'operations-learning-session.json'), 'utf8')).resolves.toContain('ou_http_stop');
+    } finally {
+      server.close();
+    }
+  });
+
   it('routes HTTP card action callbacks when Feishu returns callback value through behaviors', async () => {
     const replies: Array<{ messageId: string; text: string }> = [];
     const cards: Array<{ messageId: string; card: Record<string, unknown> }> = [];

@@ -33,6 +33,67 @@ function parseShortMultiProductQuery(text: string): string | null {
   return productIds.length > 0 ? productIds.join(', ') : null;
 }
 
+interface DateHint {
+  date: string;
+  raw: string;
+}
+
+function formatLocalDate(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function offsetLocalDate(days: number): string {
+  const date = new Date();
+  date.setDate(date.getDate() + days);
+  return formatLocalDate(date);
+}
+
+function parseDateHint(text: string): DateHint | null {
+  const absolute = /\b(20\d{2}-\d{2}-\d{2})\b/.exec(text);
+  if (absolute?.[1]) return { date: absolute[1], raw: absolute[1] };
+
+  const relative = /(昨天|前天)/.exec(text);
+  if (!relative?.[1]) return null;
+  return { date: relative[1] === '昨天' ? offsetLocalDate(-1) : offsetLocalDate(-2), raw: relative[1] };
+}
+
+function stripDateHint(text: string, hint: DateHint): string {
+  return normalize(text.replace(hint.raw, ' ').replace(/的/g, ' '));
+}
+
+function cleanDatedProductKeyword(keyword: string): string {
+  return keyword
+    .replace(/[?？!！。；;，,、]+$/g, '')
+    .replace(/\s*(?:的数据|数据|表现|怎么样|如何)$/g, '')
+    .trim();
+}
+
+function parseDatedReadIntent(text: string): BotIntent | null {
+  const hint = parseDateHint(text);
+  if (!hint) return null;
+
+  const rest = stripDateHint(text, hint);
+  const idLookup = /^(?:查\s*ID|ID\s*查询)\s*(\d+)$/i.exec(rest);
+  if (idLookup?.[1]) return { type: 'lookup_product_id', query: idLookup[1], date: hint.date };
+
+  const query = /^(?:查询商品|查商品|查询|查|商品)\s+(.+)$/.exec(rest);
+  if (query?.[1]) {
+    const keyword = cleanDatedProductKeyword(query[1]);
+    if (keyword && !/^(?:日报|概况|数据)$/.test(keyword)) {
+      return { type: 'query_product', keyword, date: hint.date };
+    }
+  }
+
+  if (/(日报|概况|数据)/.test(rest) || /(日报|概况|数据)/.test(text)) {
+    return { type: 'latest_summary', date: hint.date };
+  }
+
+  return null;
+}
+
 export function parseExactBotIntent(input: string): BotIntent {
   const text = normalize(input);
   if (!text) return { type: 'help' };
@@ -43,6 +104,8 @@ export function parseExactBotIntent(input: string): BotIntent {
   if (/^重发.*(公域)?日报/.test(text)) return { type: 'resend_latest_report', sendTo: sendTo(text) };
   if (/^(同步|拉取|更新).*(关单|关单反馈)/.test(text)) return { type: 'sync_closed_order_feedback' };
   if (/^(跑|生成|执行).*(关单观察|关单报告|关单反馈观察)/.test(text)) return { type: 'run_closed_order_observation_report' };
+  const datedReadIntent = parseDatedReadIntent(text);
+  if (datedReadIntent) return datedReadIntent;
   if (/(今日|今天|现在).*(咋样|怎么样|概况|数据|日报|看下|看看)/.test(text)) return { type: 'latest_summary' };
   if (/^(?:Agent|agent|智能体语义|语义)(?:学习|迭代).*(?:汇总|总结|历史|统计)$|^(?:Agent|agent|智能体语义|语义)(?:学习|迭代)$/.test(text)) {
     return { type: 'agent_learning_summary' };

@@ -8,7 +8,7 @@ import { recordAgentLearningEvent } from '../agentLearning/store.js';
 import { handleLinkRegistryGovernanceCardAction } from '../linkRegistry/governanceSession.js';
 import { handleLinkRegistryMaintenanceCardAction } from '../linkRegistry/maintenanceSession.js';
 import { replyFeishuMessageCard, replyFeishuMessageText, type FeishuAppSendResult, type FeishuCardPayload, type FeishuReplyConfig } from '../notify/feishuApp.js';
-import { handleOperationsLearningFeedback } from '../operationsLearningLoop/session.js';
+import { handleOperationsLearningFeedback, handleOperationsLearningStop } from '../operationsLearningLoop/session.js';
 import { findLatestReportContext } from './reportStore.js';
 import { buildIdLookupCard } from './idLookupCard.js';
 import { lookupProductId } from './idLookup.js';
@@ -311,6 +311,14 @@ async function handleCardActionTrigger(
     if (response.card) await replyCard(replyConfig, response.card);
     else await replyText(replyConfig, response.text);
     return;
+  }
+
+  if (actionName === 'operations_learning_stop') {
+    const response = await handleOperationsLearningStop(config.outputDir ?? 'output', {
+      date: readString(value?.date),
+      reviewerId: actorId,
+    });
+    return statusCard('运营学习已停止', response.text, 'grey');
   }
 
   if (

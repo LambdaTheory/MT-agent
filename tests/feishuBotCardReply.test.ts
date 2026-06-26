@@ -2,9 +2,18 @@ import { describe, expect, it } from 'vitest';
 import { createFeishuSdkBot } from '../src/feishuBot/sdkClient.js';
 
 describe('createFeishuSdkBot card reply', () => {
-  function fakeSdk(sent: unknown[], registered: Record<string, (data: unknown) => Promise<void>>) {
+  function fakeSdk(sent: unknown[], registered: Record<string, (data: unknown) => Promise<void>>, options: { rejectInteractive?: boolean } = {}) {
     class FakeClient {
-      im = { v1: { message: { reply: async (request: unknown) => sent.push(request) } } };
+      im = {
+        v1: {
+          message: {
+            reply: async (request: { data?: { msg_type?: string } }) => {
+              if (options.rejectInteractive && request.data?.msg_type === 'interactive') throw new Error('invalid card');
+              sent.push(request);
+            },
+          },
+        },
+      };
     }
     class FakeWSClient {
       start() {
@@ -40,6 +49,31 @@ describe('createFeishuSdkBot card reply', () => {
     expect(sent).toEqual([
       { path: { message_id: 'mid-card' }, data: { content: JSON.stringify(card), msg_type: 'interactive' } },
     ]);
+  });
+
+  it('falls back to text when Feishu rejects the interactive card payload', async () => {
+    const registered: Record<string, (data: unknown) => Promise<void>> = {};
+    const sent: unknown[] = [];
+    const errors: unknown[] = [];
+    const card = { config: { wide_screen_mode: true }, elements: [{ tag: 'note' }] };
+
+    const bot = createFeishuSdkBot({
+      appId: 'app',
+      appSecret: 'secret',
+      dispatchMessage: async () => ({ text: 'fallback text', card, skipped: false }),
+      sdk: fakeSdk(sent, registered, { rejectInteractive: true }),
+      logError: (error) => errors.push(error),
+    });
+
+    bot.start();
+    await registered['im.message.receive_v1']({
+      message: { message_id: 'mid-card-fallback', chat_id: 'chat', message_type: 'text', content: JSON.stringify({ text: '运营学习' }) },
+    });
+
+    expect(sent).toEqual([
+      { path: { message_id: 'mid-card-fallback' }, data: { content: JSON.stringify({ text: 'fallback text' }), msg_type: 'text' } },
+    ]);
+    expect(errors).toHaveLength(1);
   });
 
   it('still replies with text when no card is present', async () => {

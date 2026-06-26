@@ -1,14 +1,18 @@
-import { readFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { loadClosedOrderRegistryContext } from '../closedOrderFeedback/runtime.js';
 import { buildLinkRegistryAudit, type LinkRegistryAudit } from '../linkRegistry/audit.js';
-import { buildLinkRegistry } from '../linkRegistry/buildRegistry.js';
+import {
+  renderLinkRegistryAuditReviewApprovalMarkdown,
+  buildLinkRegistryAuditReviewReport,
+  renderLinkRegistryAuditReviewCsv,
+  renderLinkRegistryAuditReviewGuide,
+  renderLinkRegistryAuditReviewMarkdown,
+} from '../linkRegistry/auditReview.js';
 import { buildLinkRegistryMaintenanceReport, type LinkRegistryMaintenanceReport } from '../linkRegistry/maintenance.js';
-import { applyLinkRegistryOverrides, parseLinkRegistryOverrides } from '../linkRegistry/overrides.js';
+import type { LinkRegistryOverrideRisk } from '../linkRegistry/overrides.js';
 import type { LinkRegistryEntry } from '../linkRegistry/types.js';
-import type { ProductIdMapping } from '../mapping/productIdMapping.js';
-import type { GoodsLinkLifecycleState } from '../publicTraffic/goodsLinkLifecycle.js';
-import type { GoodsFirstSeenIndex } from '../publicTraffic/goodsSnapshot.js';
-import type { ProductNameMap } from '../publicTraffic/productDisplayName.js';
 
 function readArg(argv: string[], name: string): string | undefined {
   const flagIndex = argv.indexOf(name);
@@ -24,60 +28,8 @@ async function readJson(path: string): Promise<unknown> {
   return JSON.parse(await readFile(path, 'utf8')) as unknown;
 }
 
-async function readOptionalJson(path: string): Promise<unknown | null> {
-  try {
-    return await readJson(path);
-  } catch (error) {
-    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return null;
-    throw error;
-  }
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
-}
-
-function stringRecord(value: unknown): Record<string, string> {
-  if (!isRecord(value)) return {};
-  const record: Record<string, string> = {};
-  for (const [key, item] of Object.entries(value)) {
-    if (typeof item === 'string') record[key] = item;
-  }
-  return record;
-}
-
-function parseFirstSeen(value: unknown): GoodsFirstSeenIndex {
-  if (!isRecord(value)) return {};
-  const state: GoodsFirstSeenIndex = {};
-  for (const [internalProductId, item] of Object.entries(value)) {
-    if (!/^\d+$/.test(internalProductId) || !isRecord(item) || typeof item.firstSeenDate !== 'string') continue;
-    state[internalProductId] = {
-      firstSeenDate: item.firstSeenDate,
-      platformProductId: typeof item.platformProductId === 'string' ? item.platformProductId : '',
-      productName: typeof item.productName === 'string' ? item.productName : '',
-      ...(item.baseline === true ? { baseline: true } : {}),
-    };
-  }
-  return state;
-}
-
-function parseLifecycle(value: unknown): GoodsLinkLifecycleState | null {
-  if (!isRecord(value) || !isRecord(value.active) || !Array.isArray(value.removedLinks)) return null;
-  const active: GoodsLinkLifecycleState['active'] = {};
-  for (const [internalProductId, item] of Object.entries(value.active)) {
-    if (!/^\d+$/.test(internalProductId) || !isRecord(item) || typeof item.platformProductId !== 'string' || typeof item.productName !== 'string') continue;
-    active[internalProductId] = { platformProductId: item.platformProductId, productName: item.productName };
-  }
-  const removedLinks = value.removedLinks.filter((item): item is GoodsLinkLifecycleState['removedLinks'][number] => {
-    if (!isRecord(item)) return false;
-    return typeof item.productId === 'string'
-      && typeof item.platformProductId === 'string'
-      && typeof item.productName === 'string'
-      && typeof item.removedDate === 'string'
-      && item.reason === '商品总表缺失'
-      && item.source === 'goods_snapshot_diff';
-  });
-  return { active, removedLinks };
 }
 
 function parseRegistryEntries(value: unknown): LinkRegistryEntry[] {
@@ -95,42 +47,58 @@ function parseRegistryEntries(value: unknown): LinkRegistryEntry[] {
   });
 }
 
-async function buildEntriesFromInputs(argv: string[]): Promise<LinkRegistryEntry[]> {
+async function buildEntriesFromInputs(argv: string[]): Promise<{ entries: LinkRegistryEntry[]; overrideRisks: LinkRegistryOverrideRisk[] }> {
   const registryPath = readArg(argv, '--registry');
-  if (registryPath) return parseRegistryEntries(await readJson(registryPath));
+  if (registryPath) return { entries: parseRegistryEntries(await readJson(registryPath)), overrideRisks: [] };
 
-  const productIdMapPath = readArg(argv, '--product-id-map') ?? 'config/product-id-map.json';
-  const productNameMapPath = readArg(argv, '--product-name-map') ?? 'config/product-name-map.json';
-  const firstSeenPath = readArg(argv, '--first-seen') ?? 'output/state/goods-first-seen.json';
-  const lifecyclePath = readArg(argv, '--lifecycle') ?? 'output/state/goods-link-lifecycle.json';
-  const productIdMapping = stringRecord(await readOptionalJson(productIdMapPath)) as ProductIdMapping;
-  const productNameMap = stringRecord(await readOptionalJson(productNameMapPath)) as ProductNameMap;
-  const firstSeen = parseFirstSeen(await readOptionalJson(firstSeenPath));
-  const lifecycle = parseLifecycle(await readOptionalJson(lifecyclePath));
-  return buildLinkRegistry({ productIdMapping, productNameMap, firstSeen, lifecycle });
+  const ctx = await loadClosedOrderRegistryContext({
+    ...(readArg(argv, '--product-id-map') ? { productIdMapPath: readArg(argv, '--product-id-map') } : {}),
+    ...(readArg(argv, '--product-name-map') ? { productNameMapPath: readArg(argv, '--product-name-map') } : {}),
+    ...(readArg(argv, '--first-seen') ? { firstSeenPath: readArg(argv, '--first-seen') } : {}),
+    ...(readArg(argv, '--lifecycle') ? { lifecyclePath: readArg(argv, '--lifecycle') } : {}),
+    ...(readArg(argv, '--overrides') ? { overridesPath: readArg(argv, '--overrides') } : {}),
+  });
+  return { entries: ctx.registry, overrideRisks: ctx.overrideRisks };
 }
 
 interface AuditBuildResult {
   audit: LinkRegistryAudit;
   maintenance: LinkRegistryMaintenanceReport;
+  entries: LinkRegistryEntry[];
 }
 
 async function buildReportsFromArgs(argv: string[]): Promise<AuditBuildResult> {
-  const entries = await buildEntriesFromInputs(argv);
-  const overridesPath = readArg(argv, '--overrides') ?? 'config/link-registry-overrides.json';
-  const rawOverrides = await readOptionalJson(overridesPath);
+  const input = await buildEntriesFromInputs(argv);
   const referenceDate = readArg(argv, '--reference-date') ?? new Date().toISOString().slice(0, 10);
-  if (rawOverrides === null) {
-    return {
-      audit: buildLinkRegistryAudit(entries),
-      maintenance: buildLinkRegistryMaintenanceReport(entries, [], { referenceDate }),
-    };
-  }
-  const overrideResult = applyLinkRegistryOverrides(entries, parseLinkRegistryOverrides(rawOverrides));
   return {
-    audit: buildLinkRegistryAudit(overrideResult.entries, overrideResult.risks),
-    maintenance: buildLinkRegistryMaintenanceReport(overrideResult.entries, overrideResult.risks, { referenceDate }),
+    audit: buildLinkRegistryAudit(input.entries, input.overrideRisks),
+    maintenance: buildLinkRegistryMaintenanceReport(input.entries, input.overrideRisks, { referenceDate }),
+    entries: input.entries,
   };
+}
+
+async function writeArtifacts(
+  outputDir: string,
+  reportDate: string,
+  reviewMarkdown: string,
+  approvalMarkdown: string,
+  reviewCsv: string,
+  reviewGuide: string,
+  reviewReport: unknown,
+): Promise<{ markdownPath: string; approvalMarkdownPath: string; csvPath: string; guidePath: string; jsonPath: string }> {
+  const dir = join(outputDir, 'latest', 'link-registry-audit');
+  await mkdir(dir, { recursive: true });
+  const markdownPath = join(dir, `link-registry-audit-review-${reportDate}.md`);
+  const approvalMarkdownPath = join(dir, `link-registry-audit-review-approval-${reportDate}.md`);
+  const csvPath = join(dir, `link-registry-audit-review-${reportDate}.csv`);
+  const guidePath = join(dir, `link-registry-audit-review-guide-${reportDate}.md`);
+  const jsonPath = join(dir, `link-registry-audit-review-${reportDate}.json`);
+  await writeFile(markdownPath, `${reviewMarkdown}\n`, 'utf8');
+  await writeFile(approvalMarkdownPath, approvalMarkdown, 'utf8');
+  await writeFile(csvPath, reviewCsv, 'utf8');
+  await writeFile(guidePath, `${reviewGuide}\n`, 'utf8');
+  await writeFile(jsonPath, `${JSON.stringify(reviewReport, null, 2)}\n`, 'utf8');
+  return { markdownPath, approvalMarkdownPath, csvPath, guidePath, jsonPath };
 }
 
 function percent(value: number): string {
@@ -170,11 +138,33 @@ function printSummary(audit: LinkRegistryAudit, maintenance: LinkRegistryMainten
 
 export async function runLinkRegistryAuditCli(argv = process.argv.slice(2)): Promise<void> {
   const reports = await buildReportsFromArgs(argv);
+  const reportDate = readArg(argv, '--reference-date') ?? new Date().toISOString().slice(0, 10);
+  const outputDir = readArg(argv, '--output-dir') ?? 'output';
+  const reviewReport = buildLinkRegistryAuditReviewReport({
+    audit: reports.audit,
+    maintenance: reports.maintenance,
+    entries: reports.entries,
+  });
+  const artifacts = await writeArtifacts(
+    outputDir,
+    reportDate,
+    renderLinkRegistryAuditReviewMarkdown(reviewReport),
+    renderLinkRegistryAuditReviewApprovalMarkdown(reviewReport),
+    renderLinkRegistryAuditReviewCsv(reviewReport),
+    renderLinkRegistryAuditReviewGuide(reviewReport),
+    reviewReport,
+  );
   if (hasFlag(argv, '--json')) {
-    console.log(JSON.stringify({ ...reports.audit, maintenance: reports.maintenance }, null, 2));
+    console.log(JSON.stringify({ ...reports.audit, maintenance: reports.maintenance, review: reviewReport, artifacts }, null, 2));
     return;
   }
   printSummary(reports.audit, reports.maintenance);
+  console.log('审计审批单已生成:');
+  console.log(`- Overview Markdown: ${artifacts.markdownPath}`);
+  console.log(`- Approval Markdown: ${artifacts.approvalMarkdownPath}`);
+  console.log(`- CSV: ${artifacts.csvPath}`);
+  console.log(`- Guide: ${artifacts.guidePath}`);
+  console.log(`- JSON: ${artifacts.jsonPath}`);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

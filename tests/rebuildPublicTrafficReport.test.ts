@@ -81,12 +81,15 @@ describe('rebuildPublicTrafficReport', () => {
           customs: { key: 'customs', label: '关单分析', dataDate: '2026-06-14', indicators: [] },
         },
       });
+      const overridesPath = join(outputDir, 'link-registry-overrides.json');
+      await writeJson(overridesPath, { version: 1 });
 
-      const result = await rebuildPublicTrafficReport({ outputDir, date: runDate, refreshedAt: '12:00', send: false });
+      const result = await rebuildPublicTrafficReport({ outputDir, date: runDate, refreshedAt: '12:00', send: false, closedOrderRegistryPaths: { overridesPath } });
       const context = JSON.parse(await readFile(paths.reportContext, 'utf8'));
       const sameSkuSnapshot = JSON.parse(await readFile(paths.sameSkuSnapshot, 'utf8'));
 
       expect(result.sent).toBe(false);
+      expect(result.inventorySnapshotWarning).toBeUndefined();
       expect(context.dataQualityNotes).toContain('访问页数据已于 12:00 补抓更新，本报告为重建版。');
       expect(context.dataQualityNotes.some((note: string) => note.includes('暂未更新'))).toBe(false);
       expect(context.newProductPoolItems[0].productId).toBe('101');
@@ -95,6 +98,61 @@ describe('rebuildPublicTrafficReport', () => {
       expect(Array.isArray(sameSkuSnapshot.groups)).toBe(true);
       await expect(readFile(paths.markdown, 'utf8')).resolves.toContain('公域数据日报');
       await expect(readFile(paths.workbook)).resolves.toBeInstanceOf(Buffer);
+    } finally {
+      await rm(outputDir, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps rebuilt report outputs when link registry overrides cannot build inventory snapshot', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-rebuild-bad-registry-'));
+    const runDate = '2026-06-15';
+    const paths = buildPublicTrafficPaths(outputDir, runDate);
+    try {
+      await writeJson(paths.reportContext, {
+        date: '2026-06-14',
+        summary: {},
+        conclusions: [],
+        dataQualityNotes: [],
+        rows: [],
+        lowExposure: [],
+        weakClick: [],
+        weakConversion: [],
+        highPotential: [],
+        newProductObservation: [],
+        lifecycleGovernance: [],
+        recommendedActions: [],
+        emptySectionNotes: { lowExposure: '', weakClick: '', weakConversion: '', highPotential: '', newProductObservation: '', lifecycleGovernance: '', recommendedActions: '' },
+        agentData: { removedLinks: [] },
+      });
+      await writeJson(paths.exposureCumulativeProducts, [{ productName: '测试商品', platformProductId: 'p1', exposure: 100, visits: 10, amount: 199, custodyDays: 3, raw: {} }]);
+      await writeJson(paths.exposureOverview, [{ period: '1d', exposure: 100, visits: 10, conversionRate: 10, amount: 199 }]);
+      await writeJson(paths.exposureDailyDelta, [{ date: '2026-06-14', productName: '测试商品', platformProductId: 'p1', exposure: 100, visits: 10, amount: 199, custodyDays: 3, flags: [] }]);
+      await writeJson(paths.exposure7dSummary, [{ productName: '测试商品', platformProductId: 'p1', exposure: 500, visits: 60, amount: 500, visitRate: 0.12, days: 7, flags: [] }]);
+      await writeJson(paths.exposure30dSummary, [{ productName: '测试商品', platformProductId: 'p1', exposure: 1000, visits: 120, amount: 900, visitRate: 0.12, days: 30, flags: [] }]);
+      await writeJson(paths.publicVisitRaw['1d'], raw('1d'));
+      await writeJson(paths.publicVisitRaw['7d'], raw('7d'));
+      await writeJson(paths.publicVisitRaw['30d'], raw('30d'));
+      await writeJson(paths.orderAnalysis, {
+        runDate,
+        capturedAt: '2026-06-15T01:00:00.000Z',
+        pages: {
+          overview: { key: 'overview', label: '标准订单分析', dataDate: '2026-06-14', indicators: [] },
+          delivery: { key: 'delivery', label: '发货分析', dataDate: '2026-06-14', indicators: [] },
+          return: { key: 'return', label: '归还分析', dataDate: '2026-06-14', indicators: [] },
+          customs: { key: 'customs', label: '关单分析', dataDate: '2026-06-14', indicators: [] },
+        },
+      });
+      const overridesPath = join(outputDir, 'bad-link-registry-overrides.json');
+      await writeJson(overridesPath, { version: 1, entries: [{ internalProductId: '701', sameSkuGroupId: 'bad/group' }] });
+
+      const result = await rebuildPublicTrafficReport({ outputDir, date: runDate, refreshedAt: '12:00', send: false, closedOrderRegistryPaths: { overridesPath } });
+
+      expect(result.sent).toBe(false);
+      expect(result.inventorySnapshotWarning).toContain('Invalid sameSkuGroupId: bad/group');
+      await expect(readFile(paths.reportContext, 'utf8')).resolves.toContain('访问页数据已于 12:00 补抓更新');
+      await expect(readFile(paths.markdown, 'utf8')).resolves.toContain('公域数据日报');
+      await expect(readFile(paths.workbook)).resolves.toBeInstanceOf(Buffer);
+      await expect(readFile(paths.sameSkuSnapshot, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
     } finally {
       await rm(outputDir, { recursive: true, force: true });
     }

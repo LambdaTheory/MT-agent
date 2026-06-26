@@ -54,7 +54,7 @@ import {
 } from './rentalPrice.js';
 import { findReadOnlyTool } from './readOnlyToolRegistry.js';
 import type { ReadOnlyToolRunOptions } from './readOnlyToolRegistry.js';
-import { findLatestReportContext, formatLatestSummary, formatProductRows, parseNumericProductIdList, queryProductRows } from './reportStore.js';
+import { findLatestReportContext, findReportContextByDate, formatLatestSummary, formatProductRows, parseNumericProductIdList, queryProductRows } from './reportStore.js';
 import type { BotIntent, BotResponse } from './types.js';
 
 const UNKNOWN_GUIDANCE = '我现在可以查：今日概况、商品、新链接池、待处理任务、转化差、曝光低、高潜力、下架链接、订单情况。你可以问“新链接池怎么样”或“查一下721”。';
@@ -65,7 +65,9 @@ const NEW_LINK_WRITE_INTENT_PLAN_FAILED =
 
 const HELP_TEXT = `📋 查询与分析
   今日概况 — 查看最新公域日报概况
+  看 2026-06-22 的日报 / 查昨天日报 — 查看指定日期公域日报
   查询 565 / 查 433,798 — 查询单个或多个端内ID表现
+  2026-06-22 查询 733 — 查询指定日期的商品表现
   s23u最好的链接是哪条 — 按链接档案找同款组里数据最好的端内ID
   x200u的定价情况怎么样 — 按同款组汇总SKU平均租金
   查ID 565 / 商品ID互查 — 端内ID与平台商品ID互查
@@ -84,6 +86,11 @@ const HELP_TEXT = `📋 查询与分析
   数据最好的SQ1是哪条？按这个ID复制5条新链
   数据最好的wide300、wide400分别复制5条新链
   刷新活跃度 — 这类高风险批量运营动作会先生成计划/澄清，不会直接执行
+
+🎓 运营学习
+  运营学习 — 开始运营学习测验
+  运营学习汇总 / 运营学习历史 — 查看测验反馈汇总或历史统计
+  Agent学习汇总 — 查看 Agent 澄清与确认学习记录
 
 💰 改价、审计与回滚
   876 全局改价 0.9 — 生成改价审计预览和确认卡
@@ -141,6 +148,14 @@ function agentToolConfirmResponse(toolName: string, args: Record<string, unknown
     text: `请确认 Agent 操作：${toolName}`,
     card: buildAgentToolConfirmCard(request),
   };
+}
+
+async function findReportContextForIntent(outputDir: string, date?: string) {
+  return date ? findReportContextByDate(outputDir, date) : findLatestReportContext(outputDir);
+}
+
+function missingReportContextText(date?: string): string {
+  return date ? `没有找到 ${date} 的公域日报上下文。` : '还没有找到公域日报上下文。';
 }
 
 function rollbackTaskConfirmResponse(text: string): BotResponse | null {
@@ -366,8 +381,8 @@ export async function handleBotIntent(intent: BotIntent, outputDir = 'output', o
   }
 
   if (intent.type === 'latest_summary') {
-    const latest = await findLatestReportContext(outputDir);
-    return { text: latest ? formatLatestSummary(latest.context) : '还没有找到公域日报上下文。' };
+    const latest = await findReportContextForIntent(outputDir, intent.date);
+    return { text: latest ? formatLatestSummary(latest.context) : missingReportContextText(intent.date) };
   }
 
   if (intent.type === 'inventory_status_overview' || intent.type === 'inventory_status_query') {
@@ -376,23 +391,24 @@ export async function handleBotIntent(intent: BotIntent, outputDir = 'output', o
 
   if (intent.type === 'query_product') {
     const productIds = parseNumericProductIdList(intent.keyword);
-    const latest = await findLatestReportContext(outputDir);
+    const latest = await findReportContextForIntent(outputDir, intent.date);
     if (latest) {
       const rows = queryProductRows(latest.context, intent.keyword);
       if (rows.length > 0) return { text: formatProductRows(rows) };
     }
+    if (!latest && intent.date) return { text: missingReportContextText(intent.date) };
     if (productIds.length > 0) {
       const registryContext = await loadClosedOrderRegistryContext(options.closedOrderRegistryPaths);
       return { text: formatRegistryProductRows(productIds, registryContext.registry) };
     }
-    if (!latest) return { text: '还没有找到公域日报上下文。' };
+    if (!latest) return { text: missingReportContextText() };
 
     return { text: formatProductRows([]) };
   }
 
   if (intent.type === 'lookup_product_id') {
-    const latest = await findLatestReportContext(outputDir);
-    return { text: latest ? formatIdLookupResult(lookupProductId(latest.context, intent.query)) : '还没有找到公域日报上下文。' };
+    const latest = await findReportContextForIntent(outputDir, intent.date);
+    return { text: latest ? formatIdLookupResult(lookupProductId(latest.context, intent.query)) : missingReportContextText(intent.date) };
   }
 
   if (intent.type === 'lookup_product_id_card') {

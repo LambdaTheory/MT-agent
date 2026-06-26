@@ -8,7 +8,7 @@ import type { AgentPlannerProvider } from '../agentRuntime/planner.js';
 import { recordAgentLearningEvent, type AgentLearningEventInput } from '../agentLearning/store.js';
 import { handleLinkRegistryGovernanceCardAction } from '../linkRegistry/governanceSession.js';
 import { handleLinkRegistryMaintenanceCardAction } from '../linkRegistry/maintenanceSession.js';
-import { handleOperationsLearningFeedback } from '../operationsLearningLoop/session.js';
+import { handleOperationsLearningFeedback, handleOperationsLearningStop } from '../operationsLearningLoop/session.js';
 import { findLatestReportContext } from './reportStore.js';
 import { createFeishuMessageDispatcher } from './dispatcher.js';
 import { executeAgentToolRequest } from './agentToolExecutor.js';
@@ -444,6 +444,11 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
         else await replyText(client, message.messageId, response.text);
       } catch (error) {
         logError(error, { messageId: message.messageId, phase: 'reply' });
+        if (response.card) {
+          await replyText(client, message.messageId, response.text).catch((fallbackError) => {
+            logError(fallbackError, { messageId: message.messageId, phase: 'reply' });
+          });
+        }
       }
     },
     'card.action.trigger': async (data: unknown) => {
@@ -473,6 +478,14 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
           if (response.card) await replyCard(client, messageId, response.card);
           else await replyText(client, messageId, response.text);
           return;
+        }
+
+        if (actionName === 'operations_learning_stop') {
+          const response = await handleOperationsLearningStop(config.outputDir ?? 'output', {
+            date: readString(value?.date),
+            reviewerId: extractCardReviewerId(data),
+          });
+          return replaceCard(client, messageId, statusCard('运营学习已停止', response.text, 'grey'));
         }
 
         if (

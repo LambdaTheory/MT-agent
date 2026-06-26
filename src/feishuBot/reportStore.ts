@@ -2,27 +2,44 @@ import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { PublicTrafficDataReportContext, PublicTrafficProductDataRow } from '../publicTraffic/types.js';
 
+const reportDatePattern = /^\d{4}-\d{2}-\d{2}$/;
+
+function reportContextFileNames(date: string): string[] {
+  return [`公域数据上下文_${date}.json`, 'report-context.json'];
+}
+
+async function readReportContextFromDateDir(outputDir: string, date: string): Promise<{ path: string; context: PublicTrafficDataReportContext } | null> {
+  for (const fileName of reportContextFileNames(date)) {
+    const path = join(outputDir, date, fileName);
+    try {
+      return { path, context: JSON.parse(await readFile(path, 'utf8')) as PublicTrafficDataReportContext };
+    } catch (error) {
+      if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') continue;
+      throw error;
+    }
+  }
+  return null;
+}
+
 export async function findLatestReportContext(outputDir = 'output'): Promise<{ path: string; context: PublicTrafficDataReportContext } | null> {
   const entries = await readdir(outputDir, { withFileTypes: true }).catch(() => []);
   const dates = entries
-    .filter((entry) => entry.isDirectory() && /^\d{4}-\d{2}-\d{2}$/.test(entry.name))
+    .filter((entry) => entry.isDirectory() && reportDatePattern.test(entry.name))
     .map((entry) => entry.name)
     .sort()
     .reverse();
 
   for (const date of dates) {
-    for (const fileName of [`公域数据上下文_${date}.json`, 'report-context.json']) {
-      const path = join(outputDir, date, fileName);
-      try {
-        return { path, context: JSON.parse(await readFile(path, 'utf8')) as PublicTrafficDataReportContext };
-      } catch (error) {
-        if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') continue;
-        throw error;
-      }
-    }
+    const found = await readReportContextFromDateDir(outputDir, date);
+    if (found) return found;
   }
 
   return null;
+}
+
+export async function findReportContextByDate(outputDir: string, date: string): Promise<{ path: string; context: PublicTrafficDataReportContext } | null> {
+  if (!reportDatePattern.test(date)) throw new Error('date must be YYYY-MM-DD');
+  return readReportContextFromDateDir(outputDir, date);
 }
 
 function percent(value: number): string {

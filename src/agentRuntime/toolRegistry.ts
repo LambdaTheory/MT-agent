@@ -1,7 +1,8 @@
 import type { AgentToolDefinition } from './tool.js';
 
 const noArgumentsSchema = { type: 'object', additionalProperties: false };
-const keywordArgumentsSchema = { type: 'object', properties: { keyword: { type: 'string' } }, required: ['keyword'], additionalProperties: false };
+const optionalReportDateArgumentsSchema = { type: 'object', properties: { date: { type: 'string' } }, additionalProperties: false };
+const keywordArgumentsSchema = { type: 'object', properties: { keyword: { type: 'string' }, date: { type: 'string' } }, required: ['keyword'], additionalProperties: false };
 const productRankingArgumentsSchema = { type: 'object', properties: { query: { type: 'string' } }, required: ['query'], additionalProperties: false };
 const problemProductsArgumentsSchema = {
   type: 'object',
@@ -87,7 +88,7 @@ const agentTools: AgentToolDefinition[] = [
     description: '查询最新公域日报概况',
     risk: 'read',
     requiresConfirmation: false,
-    inputSchema: noArgumentsSchema,
+    inputSchema: optionalReportDateArgumentsSchema,
   },
   {
     name: 'product.query',

@@ -3,7 +3,7 @@ import { basename, dirname, isAbsolute, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { loadConfig } from '../config/loadConfig.js';
 import { loadEnv } from '../config/loadEnv.js';
-import { loadClosedOrderRegistryContext } from '../closedOrderFeedback/runtime.js';
+import { loadClosedOrderRegistryContext, type ClosedOrderRegistryContext } from '../closedOrderFeedback/runtime.js';
 import { crawlPublicTrafficSources } from '../crawler/publicTrafficCrawler.js';
 import { normalizeRowsForPeriod } from '../extractor/normalizeRows.js';
 import { buildInventorySameSkuSnapshot } from '../inventoryStatus/snapshot.js';
@@ -603,17 +603,14 @@ export async function runPublicTrafficReportCli(): Promise<PublicTrafficReportCl
       `规则分析: 曝光不足=${context.lowExposure.length}, 点击弱=${context.weakClick.length}, 转化弱=${context.weakConversion.length}, 高潜力=${context.highPotential.length}, 新品观察=${context.newProductObservation.length}, 生命周期治理=${context.lifecycleGovernance.length}, 托管异常=${context.custodyAbnormal?.length ?? 0}, 建议操作=${context.recommendedActions.length}`,
     );
 
-    const registryContext = await loadClosedOrderRegistryContext({ artifactsDir: config.outputDir }, process.cwd());
-    const sameSkuSnapshot = buildInventorySameSkuSnapshot({
-      date: runDate,
-      reportDate: context.date,
+    const registryContext = await writeInventorySameSkuSnapshotSafely({
+      outputDir: config.outputDir,
+      runDate,
       context,
-      registry: registryContext.registry,
-      overrideRisks: registryContext.overrideRisks,
-    });
+      snapshotPath: paths.sameSkuSnapshot,
+    }, log);
 
     await writeFile(paths.reportContext, JSON.stringify(context, null, 2), 'utf8');
-    await writeInventorySameSkuSnapshot(sameSkuSnapshot, paths.sameSkuSnapshot);
     await writeFile(paths.markdown, buildPublicTrafficMarkdown(context), 'utf8');
     await writeFile(paths.workbook, writePublicTrafficWorkbookBuffer(context));
     log.addEvent(`报告已生成: ${paths.markdown}`);
@@ -631,20 +628,24 @@ export async function runPublicTrafficReportCli(): Promise<PublicTrafficReportCl
     });
 
     const firstReportSent = await sendFeishuCardSafely(card, fallbackText, log);
-    await sendLinkRegistryMaintenancePromptSafely(
-      config.outputDir,
-      runDate,
-      registryContext.registry,
-      registryContext.resolvedPaths.overridesPath,
-      log,
-    );
-    await sendLinkRegistryGovernancePromptSafely(
-      config.outputDir,
-      runDate,
-      registryContext.registry,
-      registryContext.overrideRisks,
-      log,
-    );
+    if (registryContext) {
+      await sendLinkRegistryMaintenancePromptSafely(
+        config.outputDir,
+        runDate,
+        registryContext.registry,
+        registryContext.resolvedPaths.overridesPath,
+        log,
+      );
+      await sendLinkRegistryGovernancePromptSafely(
+        config.outputDir,
+        runDate,
+        registryContext.registry,
+        registryContext.overrideRisks,
+        log,
+      );
+    } else {
+      log.addEvent('link registry prompts skipped: registry context unavailable');
+    }
     await savePublicTrafficRunState(paths.publicTrafficRunState, {
       date: runDate,
       firstReportSent,
@@ -686,6 +687,36 @@ async function sendFeishuCardSafely(card: Record<string, unknown>, fallbackText:
   } catch (error) {
     log.addEvent(`飞书通知失败: ${error instanceof Error ? error.message : String(error)}`);
     return false;
+  }
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+async function writeInventorySameSkuSnapshotSafely(
+  input: {
+    outputDir: string;
+    runDate: string;
+    context: PublicTrafficDataReportContext;
+    snapshotPath: string;
+  },
+  log: ReturnType<typeof createRunLog>,
+): Promise<ClosedOrderRegistryContext | null> {
+  try {
+    const registryContext = await loadClosedOrderRegistryContext({ artifactsDir: input.outputDir }, process.cwd());
+    const sameSkuSnapshot = buildInventorySameSkuSnapshot({
+      date: input.runDate,
+      reportDate: input.context.date,
+      context: input.context,
+      registry: registryContext.registry,
+      overrideRisks: registryContext.overrideRisks,
+    });
+    await writeInventorySameSkuSnapshot(sameSkuSnapshot, input.snapshotPath);
+    return registryContext;
+  } catch (error) {
+    log.addEvent(`inventory same-sku snapshot skipped: ${errorMessage(error)}`);
+    return null;
   }
 }
 

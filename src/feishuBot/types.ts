@@ -13,17 +13,17 @@ export type BotIntent =
   | { type: 'push_latest_report_to_group' }
   | { type: 'sync_closed_order_feedback' }
   | { type: 'run_closed_order_observation_report' }
-  | { type: 'latest_summary' }
+  | { type: 'latest_summary'; date?: string }
   | { type: 'operations_learning_quiz' }
   | { type: 'operations_learning_summary' }
   | { type: 'operations_learning_history' }
   | { type: 'agent_learning_summary' }
-  | { type: 'query_product'; keyword: string }
+  | { type: 'query_product'; keyword: string; date?: string }
   | { type: 'lookup_product_id_card' }
   | { type: 'link_registry_overview' }
   | { type: 'inventory_status_overview' }
   | { type: 'inventory_status_query'; query: string }
-  | { type: 'lookup_product_id'; query: string }
+  | { type: 'lookup_product_id'; query: string; date?: string }
   | { type: 'rental_price_change'; productId: string; request: RentalPriceChangeRequest }
   | { type: 'rental_copy'; productId: string }
   | { type: 'rental_delist'; productId: string }

@@ -65,7 +65,7 @@ describe('link registry build', () => {
       {
         internalProductId: '702',
         platformProductId: 'platform-valid',
-        shortName: 'DJI Pocket3',
+        shortName: '大疆 Pocket 3',
         sameSkuGroupId: 'dji-pocket-3',
         status: 'unknown',
         source: ['product_id_mapping', 'product_name_map'],
@@ -86,6 +86,10 @@ describe('link registry build', () => {
       {
         internalProductId: '530',
         platformProductId: 'platform-530-a',
+        shortName: 'Pocket 3',
+        categoryId: 'camera',
+        categoryName: '相机',
+        productType: 'gimbal-camera',
         sameSkuGroupId: 'dji-pocket-3',
         status: 'active',
         source: ['goods_link_lifecycle'],
@@ -93,6 +97,10 @@ describe('link registry build', () => {
       {
         internalProductId: '531',
         platformProductId: 'platform-530-b',
+        shortName: 'Pocket 3',
+        categoryId: 'camera',
+        categoryName: '相机',
+        productType: 'gimbal-camera',
         sameSkuGroupId: 'dji-pocket-3',
         status: 'active',
         source: ['goods_link_lifecycle'],
@@ -113,6 +121,10 @@ describe('link registry build', () => {
       {
         internalProductId: '560',
         platformProductId: 'platform-560-a',
+        shortName: 'Pocket 3',
+        categoryId: 'camera',
+        categoryName: '相机',
+        productType: 'gimbal-camera',
         sameSkuGroupId: 'dji-pocket-3',
         status: 'unknown',
         source: ['product_id_mapping'],
@@ -120,12 +132,69 @@ describe('link registry build', () => {
       {
         internalProductId: '561',
         platformProductId: 'platform-560-b',
+        shortName: 'Pocket 3',
+        categoryId: 'camera',
+        categoryName: '相机',
+        productType: 'gimbal-camera',
         sameSkuGroupId: 'dji-pocket-3',
         status: 'unknown',
         source: ['product_id_mapping'],
       },
     ]);
     expect(registry[0]?.aliases).toEqual(expect.arrayContaining(['DJI Pocket3 Creator']));
+  });
+
+  it('infers short names and classifications from merged same sku groups', () => {
+    const registry = buildLinkRegistry({
+      lifecycle: {
+        active: {
+          '901': { platformProductId: 'platform-901', productName: '三星 Galaxy S23 Ultra 演唱会神器' },
+          '902': { platformProductId: 'platform-902', productName: 'vivo 蔡司 2.35x增距镜演唱会神器' },
+        },
+        removedLinks: [],
+      },
+      productNameMap: {
+        '901': 's23U',
+        '902': 'vivo 蔡司增距镜',
+      },
+    });
+
+    expect(registry).toMatchObject([
+      {
+        internalProductId: '901',
+        shortName: 's23U',
+        categoryId: 'phone',
+        categoryName: '手机',
+        productType: 'smartphone',
+      },
+      {
+        internalProductId: '902',
+        shortName: 'vivo 蔡司增距镜',
+        categoryId: 'lens',
+        categoryName: '镜头',
+        productType: 'lens-accessory',
+      },
+    ]);
+  });
+
+  it('classifies common shorthand short names used in manual maintenance', () => {
+    const registry = buildLinkRegistry({
+      productNameMap: {
+        '1001': 'x200 u',
+        '1002': 'x300u',
+        '1003': 'rx10m4',
+        '1004': 'mini liplay',
+        '1005': 'Osmo Nano',
+      },
+    });
+
+    expect(registry).toMatchObject([
+      { internalProductId: '1001', categoryId: 'phone', categoryName: '手机', productType: 'smartphone' },
+      { internalProductId: '1002', categoryId: 'phone', categoryName: '手机', productType: 'smartphone' },
+      { internalProductId: '1003', categoryId: 'camera', categoryName: '相机', productType: 'camera' },
+      { internalProductId: '1004', categoryId: 'camera', categoryName: '相机', productType: 'instant-camera' },
+      { internalProductId: '1005', categoryId: 'camera', categoryName: '相机', productType: 'camera' },
+    ]);
   });
 
   it('sorts registry entries by numeric internal id', () => {

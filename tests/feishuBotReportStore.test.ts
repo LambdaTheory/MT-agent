@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { findLatestReportContext, formatLatestSummary, queryProductRows } from '../src/feishuBot/reportStore.js';
+import { findLatestReportContext, findReportContextByDate, formatLatestSummary, queryProductRows } from '../src/feishuBot/reportStore.js';
 
 const period = {
   exposure: 10,
@@ -52,6 +52,25 @@ describe('feishu bot report store', () => {
     await writeFile(join(dir, '2026-06-11', 'report-context.json'), JSON.stringify(context));
     const found = await findLatestReportContext(dir);
     expect(found?.context.date).toBe('2026-06-11');
+  });
+
+  it('finds report context by explicit date directory', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'mt-agent-bot-'));
+    await mkdir(join(dir, '2026-06-10'), { recursive: true });
+    await mkdir(join(dir, '2026-06-11'), { recursive: true });
+    await writeFile(join(dir, '2026-06-10', 'report-context.json'), JSON.stringify({ ...context, date: '2026-06-10' }));
+    await writeFile(join(dir, '2026-06-11', 'report-context.json'), JSON.stringify(context));
+
+    const found = await findReportContextByDate(dir, '2026-06-10');
+
+    expect(found?.context.date).toBe('2026-06-10');
+  });
+
+  it('returns null when an explicit report date has no context file', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'mt-agent-bot-'));
+    await mkdir(join(dir, '2026-06-10'), { recursive: true });
+
+    await expect(findReportContextByDate(dir, '2026-06-10')).resolves.toBeNull();
   });
 
   it('finds latest 公域数据上下文 file by date directory', async () => {

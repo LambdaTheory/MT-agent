@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildLinkRegistryMaintenanceReport } from '../src/linkRegistry/maintenance.js';
+import { buildLinkRegistryMaintenanceReport, isLinkRegistryMaintenanceIgnoredEntry } from '../src/linkRegistry/maintenance.js';
 import type { LinkRegistryEntry } from '../src/linkRegistry/types.js';
 import type { LinkRegistryOverrideRisk } from '../src/linkRegistry/overrides.js';
 
@@ -67,6 +67,20 @@ const entries: LinkRegistryEntry[] = [
     confidence: 0.88,
     source: ['product_id_mapping'],
   },
+  {
+    internalProductId: '706',
+    platformProductId: 'platform-706',
+    productName: 'MQ 富图宝 FY820/830 专业三脚架短租 摄影摄像稳定器 面交',
+    shortName: 'MQ 富图宝 FY820/830 三脚架',
+    sameSkuGroupId: 'mq-tripod-offline',
+    categoryId: 'accessory',
+    categoryName: '配件',
+    productType: 'tripod',
+    status: 'active',
+    updatedAt: '2026-06-24',
+    confidence: 0.9,
+    source: ['goods_first_seen'],
+  },
 ];
 
 const overrideRisks: LinkRegistryOverrideRisk[] = [
@@ -77,10 +91,10 @@ describe('link registry maintenance report', () => {
   it('builds coverage metrics and entry-level maintenance queue items', () => {
     const report = buildLinkRegistryMaintenanceReport(entries, overrideRisks, { recentWindowDays: 7, referenceDate: '2026-06-24' });
 
-    expect(report.coverage.grouped).toMatchObject({ ready: 4, total: 5 });
-    expect(report.coverage.classified).toMatchObject({ ready: 3, total: 5 });
-    expect(report.coverage.mapped).toMatchObject({ ready: 4, total: 5 });
-    expect(report.summary).toMatchObject({ totalEntries: 5, readyCount: 2 });
+    expect(report.coverage.grouped).toMatchObject({ ready: 5, total: 6 });
+    expect(report.coverage.classified).toMatchObject({ ready: 4, total: 6 });
+    expect(report.coverage.mapped).toMatchObject({ ready: 5, total: 6 });
+    expect(report.summary).toMatchObject({ totalEntries: 6, readyCount: 3 });
 
     expect(report.queue).toEqual(expect.arrayContaining([
       expect.objectContaining({
@@ -137,5 +151,15 @@ describe('link registry maintenance report', () => {
         reasonCodes: ['override_risk'],
       }),
     ]));
+  });
+
+  it('ignores MQ offline links in maintenance queues while keeping them in the registry', () => {
+    expect(isLinkRegistryMaintenanceIgnoredEntry(entries[5]!)).toBe(true);
+
+    const report = buildLinkRegistryMaintenanceReport(entries, overrideRisks, { recentWindowDays: 7, referenceDate: '2026-06-24' });
+
+    expect(report.summary.totalEntries).toBe(6);
+    expect(report.queue.some((item) => item.internalProductId === '706')).toBe(false);
+    expect(report.queue.some((item) => item.sameSkuGroupId === 'mq-tripod-offline')).toBe(false);
   });
 });

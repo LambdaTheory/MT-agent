@@ -110,6 +110,23 @@ describe('agent runtime tool registry', () => {
     expect(findAgentTool('rental.operationConfirmRequest')).toMatchObject({ risk: 'high', requiresConfirmation: true });
   });
 
+  it('allows read-only report tools to target an explicit report date', () => {
+    expect(findAgentTool('publicTraffic.latestSummary')?.inputSchema).toMatchObject({
+      properties: { date: { type: 'string' } },
+      additionalProperties: false,
+    });
+    expect(findAgentTool('product.query')?.inputSchema).toMatchObject({
+      properties: { keyword: { type: 'string' }, date: { type: 'string' } },
+      required: ['keyword'],
+      additionalProperties: false,
+    });
+    expect(findAgentTool('productId.lookup')?.inputSchema).toMatchObject({
+      properties: { keyword: { type: 'string' }, date: { type: 'string' } },
+      required: ['keyword'],
+      additionalProperties: false,
+    });
+  });
+
   it('describes dashboard refresh as a parameter-light write tool', () => {
     expect(findAgentTool('publicTraffic.refreshDashboard')?.inputSchema).toMatchObject({
       type: 'object',

@@ -62,4 +62,33 @@ describe('sendFeishuCard', () => {
     ]);
     expect(messageBodies).toMatchObject([{ receive_id: 'ou_personal' }, { receive_id: 'oc_group' }]);
   });
+
+  it('sends group cards to every configured group recipient', async () => {
+    const messageBodies: unknown[] = [];
+    const fetchImpl = async (url: string | URL | Request, init?: RequestInit) => {
+      if (String(url).includes('/auth/v3/tenant_access_token/internal')) return jsonResponse({ code: 0, tenant_access_token: 'token' });
+      messageBodies.push(JSON.parse(String(init?.body)));
+      return jsonResponse({ code: 0 });
+    };
+
+    await expect(sendFeishuCard(
+      {
+        FEISHU_APP_ID: 'cli',
+        FEISHU_APP_SECRET: 'secret',
+        FEISHU_SEND_TO: 'group',
+        FEISHU_GROUP_RECEIVE_ID_TYPE: 'chat_id',
+        FEISHU_GROUP_RECEIVE_ID: 'oc_group',
+        FEISHU_GROUP_RECEIVE_IDS: 'oc_group, oc_extra_1 oc_extra_2',
+      },
+      { schema: '2.0' },
+      'fallback',
+      fetchImpl as typeof fetch,
+    )).resolves.toEqual({ sent: true, channel: 'app' });
+
+    expect(messageBodies).toMatchObject([
+      { receive_id: 'oc_group' },
+      { receive_id: 'oc_extra_1' },
+      { receive_id: 'oc_extra_2' },
+    ]);
+  });
 });

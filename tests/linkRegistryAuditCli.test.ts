@@ -30,6 +30,7 @@ describe('link registry audit CLI', () => {
     expect(output).toContain('维护覆盖率');
     expect(output).toContain('完整就绪: 2/3');
     expect(output).toContain('待维护队列');
+    expect(output).toContain('Approval Markdown:');
   });
 
   it('prints audit JSON when requested', async () => {

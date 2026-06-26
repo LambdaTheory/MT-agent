@@ -1,5 +1,6 @@
 import { buildLinkRegistryAudit } from './audit.js';
 import type { LinkRegistryOverrideRisk } from './overrides.js';
+import { MIN_SAME_SKU_GROUP_SAMPLE_SIZE } from './queryRegistry.js';
 import type { LinkRegistryEntry } from './types.js';
 
 export type LinkRegistryMaintenanceReasonCode =
@@ -96,6 +97,23 @@ function isReady(entry: LinkRegistryEntry): boolean {
   return hasGroup(entry) && hasClassification(entry) && hasMapping(entry);
 }
 
+export function isMqOfflineLinkText(value: string): boolean {
+  return /(^|[\s\-_()])mq(?=$|[\s\-_()])/i.test(value.trim());
+}
+
+function entryTexts(entry: LinkRegistryEntry): string[] {
+  return [
+    entry.productName,
+    entry.shortName,
+    entry.sameSkuGroupId,
+    ...(entry.aliases ?? []),
+  ].flatMap((value) => (value?.trim() ? [value.trim()] : []));
+}
+
+export function isLinkRegistryMaintenanceIgnoredEntry(entry: LinkRegistryEntry): boolean {
+  return entryTexts(entry).some(isMqOfflineLinkText);
+}
+
 function parseDate(value: string | undefined): Date | null {
   if (!value?.trim()) return null;
   const date = new Date(`${value.trim()}T23:59:59.999`);
@@ -116,8 +134,8 @@ function entryReasonCodes(
   options: Required<BuildLinkRegistryMaintenanceOptions>,
 ): LinkRegistryMaintenanceReasonCode[] {
   const reasons: LinkRegistryMaintenanceReasonCode[] = [];
-  if (!hasGroup(entry)) reasons.push('same_sku_group_missing');
-  if (!hasClassification(entry)) reasons.push('classification_missing');
+  if (entry.status !== 'removed' && !hasGroup(entry)) reasons.push('same_sku_group_missing');
+  if (entry.status !== 'removed' && !hasClassification(entry)) reasons.push('classification_missing');
   if (!hasMapping(entry)) reasons.push('platform_mapping_missing');
   if (entry.status === 'active' && !isReady(entry) && isRecent(entry, options.referenceDate, options.recentWindowDays)) {
     reasons.push('recent_new_link');
@@ -205,6 +223,7 @@ export function buildLinkRegistryMaintenanceReport(
 
   const audit = buildLinkRegistryAudit(entries, overrideRisks);
   const entryQueue = entries
+    .filter((entry) => !isLinkRegistryMaintenanceIgnoredEntry(entry))
     .map((entry) => {
       const reasons = entryReasonCodes(entry, normalizedOptions);
       if (reasons.length === 0) return null;
@@ -213,15 +232,20 @@ export function buildLinkRegistryMaintenanceReport(
     .filter((item): item is LinkRegistryMaintenanceQueueItem => Boolean(item));
 
   const groupQueue = audit.sameSkuGroups
-    .filter((group) => group.sampleInsufficient)
-    .map((group) => ({
-      kind: 'same_sku_group' as const,
-      priority: 'p1' as const,
-      reasonCodes: ['same_sku_group_sample_insufficient'] as LinkRegistryMaintenanceReasonCode[],
-      reasonLabels: labelsFor(['same_sku_group_sample_insufficient']),
-      sameSkuGroupId: group.sameSkuGroupId,
-      updatedAt: group.entries.find((entry) => entry.updatedAt)?.updatedAt,
-    }));
+    .map<LinkRegistryMaintenanceQueueItem | null>((group) => {
+      const visibleEntries = group.entries.filter((entry) => !isLinkRegistryMaintenanceIgnoredEntry(entry));
+      if (visibleEntries.length === 0 || visibleEntries.length >= MIN_SAME_SKU_GROUP_SAMPLE_SIZE) return null;
+      const updatedAt = visibleEntries.find((entry) => entry.updatedAt)?.updatedAt;
+      return {
+        kind: 'same_sku_group',
+        priority: 'p1',
+        reasonCodes: ['same_sku_group_sample_insufficient'],
+        reasonLabels: labelsFor(['same_sku_group_sample_insufficient']),
+        sameSkuGroupId: group.sameSkuGroupId,
+        ...(updatedAt ? { updatedAt } : {}),
+      };
+    })
+    .filter((item): item is LinkRegistryMaintenanceQueueItem => item !== null);
 
   const riskQueue = overrideRisks.map(overrideRiskQueueItem);
   const queue = [...entryQueue, ...groupQueue, ...riskQueue].sort(queueSort);

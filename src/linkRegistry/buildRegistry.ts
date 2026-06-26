@@ -16,6 +16,9 @@ interface DraftEntry {
   internalProductId: string;
   platformProductId?: string;
   productName?: string;
+  categoryId?: string;
+  categoryName?: string;
+  productType?: string;
   shortName?: string;
   sameSkuGroupId?: string;
   status?: LinkRegistryStatus;
@@ -24,6 +27,15 @@ interface DraftEntry {
   nameHints: Set<string>;
   aliases: Set<string>;
   sources: Set<LinkRegistrySource>;
+}
+
+function normalizedShortName(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed) return undefined;
+  const canonical = canonicalProductShortName(trimmed).trim();
+  if (!canonical) return trimmed;
+  if (canonical.length <= trimmed.length || trimmed.length >= 18) return canonical;
+  return trimmed;
 }
 
 function validInternalId(value: string): string | null {
@@ -74,7 +86,7 @@ function addProductIdMapping(drafts: Map<string, DraftEntry>, mapping: ProductId
 function addProductNameMap(drafts: Map<string, DraftEntry>, productNameMap: ProductNameMap): void {
   for (const [internalProductIdValue, name] of Object.entries(productNameMap)) {
     const internalProductId = validInternalId(internalProductIdValue);
-    const shortName = name.trim();
+    const shortName = normalizedShortName(name) ?? name.trim();
     if (!internalProductId || !shortName) continue;
 
     const draft = draftFor(drafts, internalProductId);
@@ -146,6 +158,14 @@ function addProductNameHints(drafts: Map<string, DraftEntry>, productNameHints: 
   }
 }
 
+function bestNameHint(hints: Set<string>): string | undefined {
+  const candidates = [...hints]
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .sort((left, right) => left.length - right.length || left.localeCompare(right));
+  return candidates.find((value) => value.length <= 24) ?? candidates[0];
+}
+
 function sameSkuBrandPrefix(name: string): string {
   if (/^佳能/u.test(name)) return 'canon';
   if (/^索尼/u.test(name)) return 'sony';
@@ -201,6 +221,100 @@ function assignSameSkuGroupIds(drafts: Map<string, DraftEntry>): void {
   }
 }
 
+function inferredShortNameFromGroupId(groupId: string): string | undefined {
+  const trimmed = groupId.trim();
+  if (!trimmed) return undefined;
+
+  const patterns: Array<[RegExp, (...match: string[]) => string]> = [
+    [/^dji-pocket-(3|4)$/i, (model) => `Pocket ${model}`],
+    [/^dji-action-(4|5)-pro$/i, (model) => `Action ${model} Pro`],
+    [/^dji-osmo-nano$/i, () => 'Osmo Nano'],
+    [/^dji.*mobile-7p/i, () => 'mobile 7p'],
+    [/^insta360-ace-pro-2$/i, () => 'Ace Pro 2'],
+    [/^insta360-ace-pro$/i, () => 'Ace Pro'],
+    [/^insta360-go-3s$/i, () => 'GO 3S'],
+    [/^fujifilm-instax-wide-(300|400)$/i, (model) => `Wide ${model}`],
+    [/^fujifilm-instax-mini-(11|12|40|90|99)$/i, (model) => `Mini ${model}`],
+    [/^fujifilm-instax-square-(sq1|sq20|sq40)$/i, (model) => model.toUpperCase()],
+    [/^fujifilm-(mini|wide)-evo$/i, (variant) => `${variant.toLowerCase()} evo`],
+    [/^fujifilm-x-half$/i, () => 'X Half'],
+    [/^canon-sx(\d+)(?:-hs)?$/i, (model) => `SX${model}`],
+    [/^canon(?:-eos)?-r50$/i, () => 'r50'],
+    [/^canon(?:-ccd)?-ixus-?130/i, () => 'IXUS 130'],
+    [/^canon-cp1500$/i, () => 'CP1500'],
+    [/^sony-.*zv1/i, () => 'ZV-1'],
+    [/^vivo-x(\d+)-ultra$/i, (model) => `x${model} u`],
+    [/^vivo x(\d+) pro$/i, (model) => `x${model}p`],
+    [/^vivox(\d+)-pro$/i, (model) => `x${model}p`],
+    [/^三星galaxy s23ultra$/u, () => 's23U'],
+    [/^vivo-蔡司-2-35x增距镜-神器$/u, () => 'vivo 蔡司增距镜'],
+    [/^fujifilm-mini-evo$/i, () => 'mini evo'],
+    [/^fujifilm-wide-evo$/i, () => 'wide evo'],
+  ];
+
+  for (const [pattern, formatter] of patterns) {
+    const match = trimmed.match(pattern);
+    if (match) return formatter(...match.slice(1));
+  }
+
+  return undefined;
+}
+
+interface InferredClassification {
+  categoryId: string;
+  categoryName: string;
+  productType: string;
+}
+
+function inferredClassificationFrom(draft: DraftEntry): InferredClassification | undefined {
+  const key = [
+    draft.sameSkuGroupId?.trim(),
+    draft.shortName?.trim(),
+    bestNameHint(draft.nameHints),
+    draft.productName?.trim(),
+  ].filter(Boolean).join(' ').toLowerCase();
+
+  if (!key) return undefined;
+  if (/iphone|vivo x\d+|x\d+\s*u(?:ltra)?|x\d+u\b|x\d+\s*p(?:ro)?|x\d+p\b|galaxy s23|s23u/.test(key)) {
+    return { categoryId: 'phone', categoryName: '手机', productType: 'smartphone' };
+  }
+  if (/ipad/.test(key)) return { categoryId: 'tablet', categoryName: '平板', productType: 'tablet' };
+  if (/增距镜|rf |镜头|长焦镜/.test(key)) return { categoryId: 'lens', categoryName: '镜头', productType: 'lens-accessory' };
+  if (/mobile 7p|手机稳定器|手持云台/.test(key)) return { categoryId: 'gimbal', categoryName: '稳定器', productType: 'phone-gimbal' };
+  if (/tripod|三脚架|fy820|fy830/.test(key)) return { categoryId: 'accessory', categoryName: '配件', productType: 'tripod' };
+  if (/cp1500|打印机/.test(key)) return { categoryId: 'printer', categoryName: '打印机', productType: 'photo-printer' };
+  if (/action|ace pro|go 3s/.test(key)) return { categoryId: 'camera', categoryName: '运动相机', productType: 'action-camera' };
+  if (/pocket|instax|liplay|mini evo|wide evo|mini\s*(11|12|40|90|99)|wide\s*(300|400)|sq(1|20|40)|x-half|x half|x100v|rx10m4|zv-1|zv1|sx\d+|r50|ixus|g7x|g11|g12|zs\d+|fz\d+|a900|b700|p1000|osmo nano/.test(key)) {
+    const productType = /pocket/.test(key)
+      ? 'gimbal-camera'
+      : /instax|liplay|mini evo|wide evo|mini\s*(11|12|40|90|99)|wide\s*(300|400)|sq(1|20|40)/.test(key)
+        ? 'instant-camera'
+        : 'camera';
+    return { categoryId: 'camera', categoryName: '相机', productType };
+  }
+  return undefined;
+}
+
+function inferDraftMetadata(drafts: Map<string, DraftEntry>): void {
+  for (const draft of drafts.values()) {
+    draft.shortName = normalizedShortName(draft.shortName) ?? draft.shortName;
+    if (!draft.shortName) {
+      draft.shortName = inferredShortNameFromGroupId(draft.sameSkuGroupId ?? '')
+        ?? bestNameHint(draft.nameHints);
+      if (draft.shortName) addNameHint(draft, draft.shortName);
+    }
+
+    if (!draft.categoryId || !draft.categoryName || !draft.productType) {
+      const inferred = inferredClassificationFrom(draft);
+      if (inferred) {
+        draft.categoryId ??= inferred.categoryId;
+        draft.categoryName ??= inferred.categoryName;
+        draft.productType ??= inferred.productType;
+      }
+    }
+  }
+}
+
 function compareInternalProductId(left: LinkRegistryEntry, right: LinkRegistryEntry): number {
   const leftNumber = Number(left.internalProductId);
   const rightNumber = Number(right.internalProductId);
@@ -233,6 +347,9 @@ function finalizeEntry(draft: DraftEntry): LinkRegistryEntry {
     internalProductId: draft.internalProductId,
     ...(draft.platformProductId ? { platformProductId: draft.platformProductId } : {}),
     ...(draft.productName ? { productName: draft.productName } : {}),
+    ...(draft.categoryId ? { categoryId: draft.categoryId } : {}),
+    ...(draft.categoryName ? { categoryName: draft.categoryName } : {}),
+    ...(draft.productType ? { productType: draft.productType } : {}),
     ...(draft.shortName ? { shortName: draft.shortName } : {}),
     ...(aliases.length > 0 ? { aliases } : {}),
     ...(draft.sameSkuGroupId ? { sameSkuGroupId: draft.sameSkuGroupId } : {}),
@@ -254,6 +371,7 @@ export function buildLinkRegistry(input: BuildLinkRegistryInput): LinkRegistryEn
   addFirstSeen(drafts, input.firstSeen ?? {});
   if (input.lifecycle) addLifecycle(drafts, input.lifecycle);
   assignSameSkuGroupIds(drafts);
+  inferDraftMetadata(drafts);
 
   return [...drafts.values()].map(finalizeEntry).sort(compareInternalProductId);
 }

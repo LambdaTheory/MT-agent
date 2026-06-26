@@ -494,12 +494,10 @@ async function createAuditPreview(rootDir: string, productId: string, current: R
       const taskResult = await runNodeJson(taskStoreScript, ['create', `改价 商品 ${productId}`, changesFile]);
       taskId = typeof taskResult.taskId === 'string' && AUDIT_TASK_ID_PATTERN.test(taskResult.taskId) ? taskResult.taskId : undefined;
       if (taskId) {
-        await Promise.all([
-          runNodeJson(taskStoreScript, ['update', taskId, 'rollbackFile', rollbackFile]).catch(() => ({})),
-          runNodeJson(taskStoreScript, ['update', taskId, 'currentValuesFile', currentValuesFile]).catch(() => ({})),
-          runNodeJson(taskStoreScript, ['update', taskId, 'diffFile', diffFile]).catch(() => ({})),
-          ...(previewFile ? [runNodeJson(taskStoreScript, ['update', taskId, 'previewFile', previewFile]).catch(() => ({}))] : []),
-        ]);
+        await runNodeJson(taskStoreScript, ['update', taskId, 'rollbackFile', rollbackFile]).catch(() => ({}));
+        await runNodeJson(taskStoreScript, ['update', taskId, 'currentValuesFile', currentValuesFile]).catch(() => ({}));
+        await runNodeJson(taskStoreScript, ['update', taskId, 'diffFile', diffFile]).catch(() => ({}));
+        if (previewFile) await runNodeJson(taskStoreScript, ['update', taskId, 'previewFile', previewFile]).catch(() => ({}));
       }
     } catch {
       taskId = undefined;

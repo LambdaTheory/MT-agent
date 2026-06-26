@@ -16,6 +16,17 @@ describe('agent runtime planner proposal validation', () => {
     });
   });
 
+  it('validates explicit report date arguments for read tools', () => {
+    expect(validateAgentPlannerProposal('{"goal":"查询指定日期商品表现","selectedTool":"product.query","arguments":{"keyword":"733","date":"2026-06-10"},"confidence":0.91,"reason":"用户指定日期和商品"}')).toMatchObject({
+      ok: true,
+      proposal: {
+        selectedTool: 'product.query',
+        arguments: { keyword: '733', date: '2026-06-10' },
+      },
+      policy: { decision: 'allow', toolName: 'product.query', risk: 'read' },
+    });
+  });
+
   it('rejects malformed JSON and unknown tools', () => {
     expect(validateAgentPlannerProposal('不是 JSON')).toEqual({ ok: false, reason: 'invalid_json' });
     expect(validateAgentPlannerProposal('{"goal":"删除全部","selectedTool":"danger.deleteAll","arguments":{},"confidence":0.99,"reason":"bad"}')).toEqual({ ok: false, reason: 'unknown_tool' });

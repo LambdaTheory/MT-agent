@@ -1,7 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { parseAgentFirstBotIntent, parseBotIntent } from '../src/feishuBot/intent.js';
 
 describe('parseBotIntent', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('parses help intent', () => {
     expect(parseBotIntent('帮助')).toEqual({ type: 'help' });
     expect(parseBotIntent('/help')).toEqual({ type: 'help' });
@@ -53,6 +57,16 @@ describe('parseBotIntent', () => {
     expect(parseBotIntent('查看日报')).toEqual({ type: 'latest_summary' });
     expect(parseBotIntent('看下 今天数据')).toEqual({ type: 'latest_summary' });
     expect(parseBotIntent('看下 公域日报')).toEqual({ type: 'latest_summary' });
+  });
+
+  it('parses dated report and product queries promised by help text', () => {
+    expect(parseBotIntent('看 2026-06-22 的日报')).toEqual({ type: 'latest_summary', date: '2026-06-22' });
+    expect(parseBotIntent('2026-06-22 查询 733')).toEqual({ type: 'query_product', keyword: '733', date: '2026-06-22' });
+    expect(parseBotIntent('2026-06-22 查ID 565')).toEqual({ type: 'lookup_product_id', query: '565', date: '2026-06-22' });
+
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 5, 26, 8));
+    expect(parseBotIntent('查昨天日报')).toEqual({ type: 'latest_summary', date: '2026-06-25' });
   });
 
   it('parses natural read-only summary questions without triggering actions', () => {
