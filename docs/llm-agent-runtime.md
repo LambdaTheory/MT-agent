@@ -10,6 +10,8 @@ Multi-step plans may pass metadata from earlier steps into later steps with plac
 
 Plan tools can generate their own dedicated confirmation cards. Dedicated cards for `rental.priceChange`, `rental.newLinkBatchPlan`, `rental.specRemovePlan`, and `operations.refreshActivityPlan` also carry the remaining multi-step continuation. After the dedicated confirmation succeeds, the bot resumes the remaining steps; if the confirmed action fails, the remaining steps stop.
 
+Read tools that return an interactive card, such as the product ID lookup card, inventory cards, learning quiz cards, and activity setup cards, pause remaining steps instead of continuing behind the card. This keeps the card result visible and prevents later text replies from covering the interaction. The LLM prompt tells the planner to place interactive card-opening tools last or ask for clarification.
+
 For example, `operations.refreshActivityPlan` first builds the zero-order-link delist and replenishment plan. Only when the candidates, same-SKU groups, safe copy sources, and count limits all pass does it generate a hidden `operations.refreshActivityExecute` confirmation card. That execute tool is not exposed for direct planner selection; confirmation is required, and execution writes an audit file.
 
 ## Required Env

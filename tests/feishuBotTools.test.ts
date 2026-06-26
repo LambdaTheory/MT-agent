@@ -1348,6 +1348,34 @@ describe('handleBotIntent', () => {
     expect(response.card).toBeUndefined();
   });
 
+  it('pauses remaining multi-step planner steps when a read tool returns an interactive card', async () => {
+    const outputDir = await writeContext();
+    const planner: AgentPlannerProvider = {
+      async proposePlan(request) {
+        expect(request.message).toBe('打开商品ID互查卡，然后查 565');
+        return JSON.stringify({
+          goal: '先打开互查卡再查询商品',
+          steps: [
+            { toolName: 'productId.lookupCard', arguments: {}, reason: '先打开常驻商品 ID 互查卡' },
+            { toolName: 'product.query', arguments: { keyword: '565' }, reason: '再查询 565 表现' },
+          ],
+          confidence: 0.86,
+          reason: '第一步返回交互卡片，后续步骤必须暂停避免覆盖卡片',
+        });
+      },
+    };
+
+    const response = await handleBotIntent({ type: 'unknown', text: '打开商品ID互查卡，然后查 565' }, outputDir, { agentPlannerProvider: planner });
+
+    expect(response.text).toContain('步骤 1/2：productId.lookupCard');
+    expect(response.text).toContain('已打开常驻商品ID互查卡');
+    expect(response.text).toContain('后续步骤已暂停，避免覆盖卡片结果');
+    expect(response.text).not.toContain('步骤 2/2：product.query');
+    expect(response.text).not.toContain('端内ID 565 iPhone 15');
+    expect(response.card).toBeDefined();
+    expect(JSON.stringify(response.card)).toContain('id_lookup_form');
+  });
+
   it('stops multi-step planner plans at the first write confirmation', async () => {
     const outputDir = await writeContext();
     const planner: AgentPlannerProvider = {

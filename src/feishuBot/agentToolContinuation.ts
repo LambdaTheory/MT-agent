@@ -94,7 +94,13 @@ export async function continueAgentPlannerSteps(input: ContinuePlannerStepsInput
     input.textParts.push(`步骤 ${absoluteIndex + 1}/${input.totalSteps}：${step.toolName}`);
     input.textParts.push(response.text);
     rememberStepMetadata(input.metadataStore, stepId, response);
-    if (response.card) return { text: input.textParts.join('\n'), card: response.card };
+    if (response.card) {
+      if (remainingSteps.length > 0) {
+        input.textParts.push('');
+        input.textParts.push('当前步骤返回了卡片，后续步骤已暂停，避免覆盖卡片结果。');
+      }
+      return { text: input.textParts.join('\n'), card: response.card };
+    }
   }
 
   return { text: input.textParts.join('\n') };
