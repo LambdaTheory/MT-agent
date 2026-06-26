@@ -4,13 +4,19 @@ function normalize(value: string | null | undefined): string {
   return (value ?? '').replace(/\s+/g, ' ').trim();
 }
 
+const TARGET_ACCOUNT_PATTERNS = [
+  /深圳市米奇租赁有限责任公司/u,
+  /深圳.*米奇/u,
+  /米奇.*租赁/u,
+];
+const TARGET_MERCHANT_NO = '2088151393378013';
+const FALLBACK_ACCOUNT_PATTERNS = [/米奇/u];
+
 export async function selectSubAccountIfNeeded(page: Page): Promise<void> {
   if (!page.url().includes('select-identity')) {
     return;
   }
 
-  const matchers = [/深圳.*米奇/, /米奇.*租赁/];
-  const fallbackMatchers = [/米奇/];
   const accountRows = page.locator('.ant-table-tbody tr');
 
   try {
@@ -38,7 +44,9 @@ export async function selectSubAccountIfNeeded(page: Page): Promise<void> {
   for (let index = 0; index < count; index += 1) {
     const row = accountRows.nth(index);
     const text = normalize(await row.textContent());
-    if (matchers.some((matcher) => matcher.test(text)) || fallbackMatchers.some((matcher) => matcher.test(text))) {
+    const exactMatched = TARGET_ACCOUNT_PATTERNS.some((matcher) => matcher.test(text)) && text.includes(TARGET_MERCHANT_NO);
+    const fuzzyMatched = TARGET_ACCOUNT_PATTERNS.some((matcher) => matcher.test(text)) || FALLBACK_ACCOUNT_PATTERNS.some((matcher) => matcher.test(text));
+    if (exactMatched || fuzzyMatched) {
       if (await clickAndNavigate(row)) {
         return;
       }
@@ -54,5 +62,5 @@ export async function selectSubAccountIfNeeded(page: Page): Promise<void> {
   }
 
   const visibleAccounts = await accountRows.evaluateAll((rows) => rows.map((row) => String(row.textContent ?? '').replace(/\s+/g, ' ').trim()).filter(Boolean));
-  throw new Error(`Reached the account selection page, but could not find the 深圳市米奇租赁有限责任公司 sub-account. Visible accounts: ${visibleAccounts.join(' | ')}`);
+  throw new Error(`Reached the account selection page, but could not find the 深圳市米奇租赁有限责任公司 / 商户号 ${TARGET_MERCHANT_NO} sub-account. Visible accounts: ${visibleAccounts.join(' | ')}`);
 }

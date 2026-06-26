@@ -1,11 +1,16 @@
 import { readFile } from 'node:fs/promises';
 import {
+  activityAutomationOutputDir,
   activityAutomationConfigFromAgentConfig,
   createEmptyDifferentialPricingDraft,
   prepareActivityFormPage,
   type DifferentialPricingDiscountValues,
 } from '../activityAutomation/index.js';
-import type { ActivitySubmitSession } from '../activityAutomation/submitSession.js';
+import type {
+  ActivityCancellationAssistanceResult,
+  ActivityCancellationRequest,
+} from '../activityAutomation/cancelAssistance.js';
+import { readActivitySubmitSession, type ActivitySubmitSession } from '../activityAutomation/submitSession.js';
 import { loadConfig } from '../config/loadConfig.js';
 import type { FeishuCardPayload } from '../notify/feishuApp.js';
 
@@ -15,10 +20,7 @@ export interface ActivityAutomationExecutionRequest {
   discounts: DifferentialPricingDiscountValues;
 }
 
-export interface ActivityPriceCallbackConfirmRequest {
-  submitSessionPath: string;
-  productIds: string[];
-  mappedCount: number;
+export interface ActivityPriceCallbackConfirmRequest extends ActivityCancellationRequest {
   startsAt?: string;
   endsAt?: string;
 }
@@ -40,6 +42,12 @@ export interface ActivityAutomationExecutionResult {
 
 export interface ActivityAutomationSkillClient {
   execute(request: ActivityAutomationExecutionRequest): Promise<ActivityAutomationExecutionResult>;
+}
+
+export interface CancelDifferentialPricingCardResult {
+  ok: boolean;
+  text: string;
+  card?: FeishuCardPayload;
 }
 
 const DEFAULT_DISCOUNTS: DifferentialPricingDiscountValues = {
@@ -156,6 +164,25 @@ async function readSubmitSessionProductIds(submitSessionPath: string | undefined
   }
 }
 
+function buildActivityCancellationRequestFromSession(
+  submitSessionPath: string,
+  session: ActivitySubmitSession,
+): ActivityPriceCallbackConfirmRequest | null {
+  const productIds = [...new Set(
+    session.products
+      .map((product) => product.internalProductId?.trim() ?? '')
+      .filter((productId) => productId.length > 0),
+  )];
+  if (!productIds.length || session.mappedCount <= 0) return null;
+  return {
+    submitSessionPath,
+    productIds,
+    mappedCount: session.mappedCount,
+    startsAt: session.startsAt,
+    endsAt: session.endsAt,
+  };
+}
+
 export function buildActivityAutomationCard(defaults: Partial<ActivityAutomationExecutionRequest> = {}): FeishuCardPayload {
   const discounts = { ...DEFAULT_DISCOUNTS, ...defaults.discounts };
   return {
@@ -259,6 +286,36 @@ export function buildActivityPriceCallbackConfirmCard(request: ActivityPriceCall
   };
 }
 
+export function buildCancelDifferentialPricingCard(request: ActivityPriceCallbackConfirmRequest): FeishuCardPayload {
+  const content = [
+    '将为你打开差异化定价活动的上一级列表页，请在那里人工定位并取消当前正在生效的差异化定价活动。',
+    ...callbackSummaryLines(request),
+  ].join('\n');
+
+  return {
+    schema: '2.0',
+    config: { wide_screen_mode: true },
+    header: { title: { tag: 'plain_text', content: '取消差异化定价' }, template: 'orange' },
+    body: {
+      elements: [
+        { tag: 'markdown', content },
+        {
+          tag: 'action',
+          actions: [
+            {
+              tag: 'button',
+              text: { tag: 'plain_text', content: '打开取消辅助' },
+              type: 'primary',
+              name: 'cancel_differential_pricing_open_submit',
+              behaviors: [{ type: 'callback', value: { action: 'cancel_differential_pricing_open', request } }],
+            },
+          ],
+        },
+      ],
+    },
+  };
+}
+
 export function buildActivityPriceCallbackStatusCard(
   request: ActivityPriceCallbackConfirmRequest,
   options: { confirmed: boolean },
@@ -273,6 +330,83 @@ export function buildActivityPriceCallbackStatusCard(
   );
 }
 
+export function buildActivityCancelOpeningCard(request: ActivityPriceCallbackConfirmRequest): FeishuCardPayload {
+  return statusCard(
+    '活动取消辅助打开中',
+    ['正在为你打开差异化定价活动页面，请稍候。', ...callbackSummaryLines(request)].join('\n'),
+    'blue',
+  );
+}
+
+export function buildActivityCancelAssistanceCard(
+  request: ActivityPriceCallbackConfirmRequest,
+  assistance: ActivityCancellationAssistanceResult,
+): FeishuCardPayload {
+  const content = [
+    assistance.requiresManualLogin
+      ? '已打开取消辅助页面，但当前需要你先登录或确认子账号。'
+      : '已打开取消辅助页面，请在本机浏览器中完成最后的人工确认。',
+    ...assistance.lines,
+    `当前页面: ${assistance.openedUrl}`,
+    ...callbackSummaryLines(request),
+  ].join('\n');
+
+  return {
+    schema: '2.0',
+    config: { wide_screen_mode: true },
+    header: { title: { tag: 'plain_text', content: '活动取消人工辅助' }, template: 'orange' },
+    body: {
+      elements: [
+        { tag: 'markdown', content },
+        {
+          tag: 'action',
+          actions: [
+            {
+              tag: 'button',
+              text: { tag: 'plain_text', content: '我已取消活动' },
+              type: 'primary',
+              name: 'cancel_differential_pricing_done_submit',
+              behaviors: [{ type: 'callback', value: { action: 'cancel_differential_pricing_done', request } }],
+            },
+            {
+              tag: 'button',
+              text: { tag: 'plain_text', content: '先保留活动' },
+              type: 'default',
+              name: 'cancel_differential_pricing_abort_submit',
+              behaviors: [{ type: 'callback', value: { action: 'cancel_differential_pricing_abort', request } }],
+            },
+          ],
+        },
+      ],
+    },
+  };
+}
+
+export function buildActivityCancelStatusCard(
+  request: ActivityPriceCallbackConfirmRequest,
+  options: { cancelled: boolean },
+): FeishuCardPayload {
+  return statusCard(
+    options.cancelled ? '差异化定价活动已取消' : '差异化定价活动暂时保留',
+    [
+      options.cancelled ? '已记录你确认完成了活动取消。' : '已保留当前活动，可稍后继续决定是否取消。',
+      ...callbackSummaryLines(request),
+    ].join('\n'),
+    options.cancelled ? 'green' : 'grey',
+  );
+}
+
+export function buildActivityCancelFailureCard(
+  request: ActivityPriceCallbackConfirmRequest,
+  message: string,
+): FeishuCardPayload {
+  return statusCard(
+    '活动取消辅助打开失败',
+    ['未能自动打开辅助页面，请手动检查本机浏览器与登录状态。', message, ...callbackSummaryLines(request)].join('\n'),
+    'red',
+  );
+}
+
 export function buildActivityPriceCallbackRequest(result: ActivityAutomationExecutionResult): ActivityPriceCallbackConfirmRequest | null {
   if (!result.submitSessionPath) return null;
   const productIds = result.callbackProductIds?.filter((item) => item.trim()) ?? [];
@@ -284,6 +418,36 @@ export function buildActivityPriceCallbackRequest(result: ActivityAutomationExec
     startsAt: result.request.startsAt,
     endsAt: result.request.endsAt,
   };
+}
+
+export async function buildCancelDifferentialPricingCardResult(outputDir: string): Promise<CancelDifferentialPricingCardResult> {
+  const submitSessionPath = `${activityAutomationOutputDir({ outputDir })}/activity-submit-session.json`;
+  try {
+    const session = await readActivitySubmitSession(submitSessionPath);
+    const request = buildActivityCancellationRequestFromSession(submitSessionPath, session);
+    if (!request) {
+      return {
+        ok: false,
+        text: '最近一次差异化定价记录里没有可取消的已映射商品，暂时无法生成取消卡片。',
+      };
+    }
+    if (session.status === 'cancelled') {
+      return {
+        ok: false,
+        text: '最近一次差异化定价活动已经标记为已取消。',
+      };
+    }
+    return {
+      ok: true,
+      text: '取消差异化定价卡片已打开，请确认后进入活动列表页处理取消。',
+      card: buildCancelDifferentialPricingCard(request),
+    };
+  } catch {
+    return {
+      ok: false,
+      text: '还没有找到可取消的差异化定价提交记录，请先执行差异化定价或确认本地会话文件是否存在。',
+    };
+  }
 }
 
 export function parseActivityAutomationConfirmRequest(formValue: unknown): ActivityAutomationExecutionRequest | null {

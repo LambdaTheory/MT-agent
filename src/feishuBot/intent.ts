@@ -51,6 +51,7 @@ export function parseExactBotIntent(input: string): BotIntent {
   if (/^(运营学习|学习反馈).*(汇总|总结)$/.test(text)) return { type: 'operations_learning_summary' };
   if (/^(运营学习|学习测验|今日测验|loop测验|运营测验|测验)$|学习\s*loop|运营学习\s*loop/i.test(text)) return { type: 'operations_learning_quiz' };
   if (/^(差异化定价|配置差异化定价)$/.test(text)) return { type: 'differential_pricing_card' };
+  if (/^取消差异化定价$/.test(text)) return { type: 'cancel_differential_pricing_card' };
   if (/^库存情况$/.test(text)) return { type: 'inventory_status_overview' };
   const inventoryQuery = /^库存情况\s+(.+)$/.exec(text);
   if (inventoryQuery) return { type: 'inventory_status_query', query: inventoryQuery[1].trim() };

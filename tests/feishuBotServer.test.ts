@@ -170,6 +170,46 @@ function fakeRentalPriceClient() {
   return client;
 }
 
+function fakeActivityCancellationAssistant() {
+  return {
+    requests: [] as unknown[],
+    async open(request: unknown) {
+      this.requests.push(request);
+      return {
+        openedUrl: 'https://b.alipay.com/page/commodity-operation/activity/list?appId=2021005181665859&productCode=PROMO_ZHIMA_REDUCTION',
+        requiresManualLogin: true,
+        lines: [
+          '已打开差异化定价活动页面。',
+          '当前页面可能需要登录、切换子账号，或手动完成最后的取消确认。',
+        ],
+      };
+    },
+  };
+}
+
+async function writeActivitySubmitSessionFixture(status: string = 'price_callback_pending'): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), 'mt-agent-activity-cancel-http-'));
+  const submitSessionPath = join(dir, 'activity-submit-session.json');
+  await writeFile(submitSessionPath, `${JSON.stringify({
+    status,
+    submittedAt: '2026-06-24T08:00:00.000Z',
+    submittedUrl: 'https://b.alipay.com/page/commodity-operation/activity/activityForm?appId=2021005181665859&productCode=PROMO_ZHIMA_REDUCTION',
+    confirmationText: '返回活动列表',
+    startsAt: '2026-06-24',
+    endsAt: '2026-07-01',
+    mappedCount: 1,
+    unmappedCount: 0,
+    products: [
+      {
+        platformProductId: '2026062322000235349104',
+        merchantProductId: '81665859-886-06231159',
+        internalProductId: '886',
+      },
+    ],
+  }, null, 2)}\n`, 'utf8');
+  return submitSessionPath;
+}
+
 describe('extractTextMessage', () => {
   it('extracts Feishu text content', () => {
     expect(extractTextMessage({ event: { message: { message_id: 'mid', message_type: 'text', content: JSON.stringify({ text: '今日概况' }) } } } as any)).toEqual({ messageId: 'mid', text: '今日概况' });
@@ -561,6 +601,7 @@ describe('startFeishuBotServer', () => {
       expect(cards).toHaveLength(1);
       expect(cards[0]?.messageId).toBe('mid-http-activity-card');
       expect(JSON.stringify(cards[0]?.card)).toContain('activity_price_callback_confirm');
+      expect(JSON.stringify(cards[0]?.card)).not.toContain('activity_cancel_open');
       expect(JSON.stringify(cards[0]?.card)).toContain('activity-submit-session.json');
       expect(JSON.stringify(cards[0]?.card)).toContain('770');
     } finally {
@@ -627,6 +668,110 @@ describe('startFeishuBotServer', () => {
       expect(cards).toHaveLength(1);
       expect(cards[0]?.messageId).toBe('mid-http-activity-card-nested');
       expect(JSON.stringify(cards[0]?.card)).toContain('activity_price_callback_confirm');
+    } finally {
+      server.close();
+    }
+  });
+
+  it('returns a human-assisted cancellation card for submitted activities', async () => {
+    const activityCancellationAssistant = fakeActivityCancellationAssistant();
+    const submitSessionPath = await writeActivitySubmitSessionFixture();
+    const server = startFeishuBotServer({
+      port: 0,
+      appId: 'app',
+      appSecret: 'secret',
+      outputDir: 'output',
+      activityCancellationAssistant,
+    } as any);
+    try {
+      await new Promise<void>((resolve) => server.once('listening', resolve));
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+
+      const response = await fetch(`http://127.0.0.1:${address.port}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          header: { event_type: 'card.action.trigger' },
+          event: {
+            context: { open_message_id: 'mid-http-activity-cancel-open' },
+            action: {
+              name: 'cancel_differential_pricing_open_submit',
+              value: {
+                action: 'cancel_differential_pricing_open',
+                request: {
+                  submitSessionPath,
+                  productIds: ['886'],
+                  mappedCount: 1,
+                  startsAt: '2026-06-24',
+                  endsAt: '2026-07-01',
+                },
+              },
+            },
+          },
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      const card = await response.json();
+      expect(JSON.stringify(card)).toContain('cancel_differential_pricing_done');
+      expect(JSON.stringify(card)).toContain('cancel_differential_pricing_abort');
+      expect(activityCancellationAssistant.requests).toEqual([
+        {
+          submitSessionPath,
+          productIds: ['886'],
+          mappedCount: 1,
+          startsAt: '2026-06-24',
+          endsAt: '2026-07-01',
+        },
+      ]);
+      await expect(readFile(submitSessionPath, 'utf8')).resolves.toContain('"status": "cancel_assistance_opened"');
+    } finally {
+      server.close();
+    }
+  });
+
+  it('marks the submitted activity as cancelled for HTTP card callbacks', async () => {
+    const submitSessionPath = await writeActivitySubmitSessionFixture('cancel_assistance_opened');
+    const server = startFeishuBotServer({
+      port: 0,
+      appId: 'app',
+      appSecret: 'secret',
+      outputDir: 'output',
+    });
+    try {
+      await new Promise<void>((resolve) => server.once('listening', resolve));
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+
+      const response = await fetch(`http://127.0.0.1:${address.port}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          header: { event_type: 'card.action.trigger' },
+          event: {
+            context: { open_message_id: 'mid-http-activity-cancel-done' },
+            action: {
+              name: 'cancel_differential_pricing_done_submit',
+              value: {
+                action: 'cancel_differential_pricing_done',
+                request: {
+                  submitSessionPath,
+                  productIds: ['886'],
+                  mappedCount: 1,
+                  startsAt: '2026-06-24',
+                  endsAt: '2026-07-01',
+                },
+              },
+            },
+          },
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      const card = await response.json();
+      expect(JSON.stringify(card)).toContain('差异化定价活动已取消');
+      await expect(readFile(submitSessionPath, 'utf8')).resolves.toContain('"status": "cancelled"');
     } finally {
       server.close();
     }
