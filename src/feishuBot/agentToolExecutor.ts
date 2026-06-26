@@ -14,12 +14,14 @@ import { sendFeishuCard } from '../notify/feishu.js';
 import { buildPublicTrafficCard } from '../publicTraffic/buildPublicTrafficCard.js';
 import { buildPublicTrafficFeishuText } from '../publicTraffic/buildPublicTrafficFeishu.js';
 import { runDashboardRefresh } from '../publicTraffic/dashboardRefresh.js';
+import type { PublicTrafficDataReportContext, PublicTrafficProductDataRow } from '../publicTraffic/types.js';
 import { startOperationsLearningSession } from '../operationsLearningLoop/session.js';
 import type { BotResponse } from './types.js';
 import type { FeishuSendTo } from './types.js';
 import { buildClosedOrderObservationCard } from './closedOrderObservationCard.js';
 import { formatIdLookupResult, lookupProductId } from './idLookup.js';
 import {
+  buildRentalOperationConfirmCard,
   buildRentalPricePreviewCard,
   createRentalPriceSkillClient,
   executeRentalOperationConfirmRequest,
@@ -27,6 +29,7 @@ import {
   rentalPriceChangeRequestFromToolArguments,
   rentalPriceRollbackRequestFromToolArguments,
   type RentalOperationConfirmRequest,
+  type RentalSpecRemoveItemConfirmRequest,
   type RentalPriceReadResult,
   type RentalPriceSkillClient,
 } from './rentalPrice.js';
@@ -42,6 +45,9 @@ export interface AgentToolExecutionOptions {
 let publicTrafficReportRunning = false;
 
 const RENTAL_PRICE_SNAPSHOT_MAX_PRODUCTS = 20;
+const RENTAL_SPEC_REMOVE_PLAN_MAX_PRODUCTS = 12;
+const RENTAL_SPEC_REMOVE_PLAN_MAX_ITEMS = 20;
+const REFRESH_ACTIVITY_DEFAULT_MAX_CANDIDATES = 30;
 const RENT_FIELD_ORDER: Array<{ field: string; label: string }> = [
   { field: 'rent1day', label: '1天' },
   { field: 'rent2day', label: '2天' },
@@ -113,11 +119,11 @@ function resolveRentalPriceSnapshotEntries(
   registry: ReturnType<typeof createLinkRegistry>,
 ): { ok: true; sameSkuGroupId: string | null; entries: LinkRegistryEntry[]; matchText: string } | { ok: false; text: string } {
   const normalized = query.trim();
-  if (!normalized) return { ok: false, text: '请提供要查询定价情况的商品、端内ID或同款组。' };
+  if (!normalized) return { ok: false, text: '请提供要定位的商品、端内ID或同款组。' };
 
   if (/^\d+$/.test(normalized)) {
     const entry = registry.getByInternalId(normalized);
-    if (!entry) return { ok: false, text: `链接维护档案未找到端内ID ${normalized}，无法查询定价情况。` };
+    if (!entry) return { ok: false, text: `链接维护档案未找到端内ID ${normalized}，无法定位商品组。` };
     const sameSkuGroupId = entry.sameSkuGroupId?.trim() ?? null;
     const entries = sameSkuGroupId ? queryableEntries(registry.listBySameSkuGroup(sameSkuGroupId, { includeUnknown: true })) : queryableEntries([entry]);
     return { ok: true, sameSkuGroupId, entries: entries.length ? entries : [entry], matchText: sameSkuGroupId ? `按端内ID ${normalized} 命中同款组 ${sameSkuGroupId}` : `按端内ID ${normalized} 查询单商品` };
@@ -129,7 +135,7 @@ function resolveRentalPriceSnapshotEntries(
   }
 
   const alias = registry.resolveAlias(normalized);
-  if (alias.status === 'not_found') return { ok: false, text: `链接维护档案未匹配到“${query}”，无法安全判断要查询哪组定价。` };
+  if (alias.status === 'not_found') return { ok: false, text: `链接维护档案未匹配到“${query}”，无法安全判断要处理哪组商品。` };
   if (alias.status === 'multiple') {
     const candidates = alias.candidates
       .slice(0, 5)
@@ -260,6 +266,227 @@ async function rentalPriceSnapshotResponse(
   return { text: formatRentalPriceSnapshot(query, resolution, reads) };
 }
 
+function normalizeMatchText(value: string): string {
+  return value.toLowerCase().replace(/\s+/g, '');
+}
+
+function itemMatchesKeyword(title: string, keyword: string): boolean {
+  const normalizedTitle = normalizeMatchText(title);
+  const normalizedKeyword = normalizeMatchText(keyword);
+  return Boolean(normalizedKeyword && normalizedTitle.includes(normalizedKeyword));
+}
+
+function compactName(entry: LinkRegistryEntry): string {
+  return entry.shortName?.trim() || entry.productName?.trim() || entry.internalProductId;
+}
+
+function formatSpecRemovePlanLines(
+  query: string,
+  keyword: string,
+  resolution: { sameSkuGroupId: string | null; entries: LinkRegistryEntry[]; matchText: string },
+  matches: RentalSpecRemoveItemConfirmRequest[],
+  blocked: string[],
+  failedReads: string[],
+): string {
+  const shown = matches.slice(0, 12).map((item, index) => {
+    const dimension = item.dimensionTitle ? `${item.dimensionTitle} / ` : '';
+    const itemId = item.itemId ? `，itemId ${item.itemId}` : '';
+    return `${index + 1}. 商品 ${item.productId}：${dimension}${item.itemTitle}（维度 ${item.specDimId}${itemId}）`;
+  });
+  return [
+    `规格项删除计划：${query} / 关键词「${keyword}」`,
+    resolution.sameSkuGroupId ? `同款组：${resolution.sameSkuGroupId}` : undefined,
+    `匹配依据：${resolution.matchText}`,
+    `命中规格项：${matches.length} 个`,
+    '',
+    ...shown,
+    matches.length > shown.length ? `还有 ${matches.length - shown.length} 个命中项未展示。` : undefined,
+    '',
+    '安全边界：只删除命中的规格项，不删除规格维度；规格维度只剩 1 个 item 时会被阻断。',
+    ...(blocked.length ? ['', '已阻断项：', ...blocked.slice(0, 8)] : []),
+    ...(failedReads.length ? ['', '读取失败：', ...failedReads.slice(0, 8)] : []),
+  ].filter((line): line is string => Boolean(line)).join('\n');
+}
+
+async function rentalSpecRemovePlanResponse(
+  query: string,
+  keyword: string,
+  reason: string,
+  client: RentalPriceSkillClient,
+  options: AgentToolExecutionOptions,
+): Promise<BotResponse> {
+  const registryContext = await loadClosedOrderRegistryContext(options.closedOrderRegistryPaths);
+  const registry = createLinkRegistry(registryContext.registry);
+  const resolution = resolveRentalPriceSnapshotEntries(query, registry);
+  if (!resolution.ok) return { text: resolution.text };
+  if (resolution.entries.length === 0) return { text: `链接维护档案已匹配到“${query}”，但没有可处理的未下架商品。` };
+  if (resolution.entries.length > RENTAL_SPEC_REMOVE_PLAN_MAX_PRODUCTS) {
+    return { text: `“${query}”命中 ${resolution.entries.length} 个未下架商品，超过单次规格删除预览上限 ${RENTAL_SPEC_REMOVE_PLAN_MAX_PRODUCTS} 个。请补充更具体的端内ID或子分组。` };
+  }
+
+  const reads = await Promise.all(resolution.entries.map(async (entry) => {
+    try {
+      const result = await client.specDiscover(entry.internalProductId);
+      return { entry, result };
+    } catch (error) {
+      return { entry, error: error instanceof Error ? error.message : String(error) };
+    }
+  }));
+
+  const matches: RentalSpecRemoveItemConfirmRequest[] = [];
+  const blocked: string[] = [];
+  const failedReads: string[] = [];
+  for (const read of reads) {
+    if (!read.result?.ok) {
+      failedReads.push(`- ${read.entry.internalProductId} ${compactName(read.entry)}：${read.error ?? read.result?.lines.join('；') ?? '规格读取失败'}`);
+      continue;
+    }
+
+    for (const dimension of read.result.dimensions) {
+      const matchedItems = dimension.items.filter((item) => itemMatchesKeyword(item.title, keyword));
+      if (matchedItems.length === 0 && itemMatchesKeyword(dimension.title, keyword)) {
+        blocked.push(`- 商品 ${read.entry.internalProductId}：关键词只命中规格维度「${dimension.title}」，未命中具体规格项，已阻断维度删除。`);
+        continue;
+      }
+      for (const item of matchedItems) {
+        if (dimension.items.length <= 1) {
+          blocked.push(`- 商品 ${read.entry.internalProductId}：维度「${dimension.title}」只剩 1 个规格项「${item.title}」，删除会清空维度，已阻断。`);
+          continue;
+        }
+        matches.push({
+          productId: read.entry.internalProductId,
+          specDimId: dimension.specId,
+          ...(dimension.title.trim() ? { dimensionTitle: dimension.title.trim() } : {}),
+          ...(item.id && item.id !== '?' ? { itemId: item.id } : {}),
+          itemTitle: item.title,
+          keyword,
+        });
+      }
+    }
+  }
+
+  if (matches.length === 0) {
+    return {
+      text: [
+        `没有找到可安全删除的规格项：${query} / 关键词「${keyword}」`,
+        resolution.sameSkuGroupId ? `同款组：${resolution.sameSkuGroupId}` : undefined,
+        `匹配依据：${resolution.matchText}`,
+        ...(blocked.length ? ['', '阻断原因：', ...blocked.slice(0, 8)] : []),
+        ...(failedReads.length ? ['', '读取失败：', ...failedReads.slice(0, 8)] : []),
+      ].filter((line): line is string => Boolean(line)).join('\n'),
+    };
+  }
+
+  if (matches.length > RENTAL_SPEC_REMOVE_PLAN_MAX_ITEMS) {
+    return {
+      text: [
+        `“${query}”中关键词「${keyword}」命中 ${matches.length} 个规格项，超过单次确认上限 ${RENTAL_SPEC_REMOVE_PLAN_MAX_ITEMS} 个。`,
+        '请缩小到更具体的端内ID、子分组或规格关键词后再执行。',
+      ].join('\n'),
+    };
+  }
+
+  const request: RentalOperationConfirmRequest = {
+    action: 'spec-remove-items',
+    productId: matches[0]!.productId,
+    query,
+    keyword,
+    ...(resolution.sameSkuGroupId ? { sameSkuGroupId: resolution.sameSkuGroupId } : {}),
+    items: matches,
+  };
+  return {
+    text: formatSpecRemovePlanLines(query, keyword, resolution, matches, blocked, failedReads),
+    card: buildRentalOperationConfirmCard(request, reason),
+  };
+}
+
+function extractInternalProductId(displayProductId: string): string | null {
+  return /^端内ID\s*(\d+)$/i.exec(displayProductId.trim())?.[1] ?? null;
+}
+
+function findReportRowForEntry(context: PublicTrafficDataReportContext, entry: LinkRegistryEntry): PublicTrafficProductDataRow | undefined {
+  return context.rows.find((row) => {
+    const internalProductId = extractInternalProductId(row.displayProductId);
+    return internalProductId === entry.internalProductId || (!!entry.platformProductId && row.platformProductId === entry.platformProductId);
+  });
+}
+
+function readMaxCandidates(value: unknown): number {
+  if (value === undefined) return REFRESH_ACTIVITY_DEFAULT_MAX_CANDIDATES;
+  const numeric = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(numeric) || numeric < 1) return REFRESH_ACTIVITY_DEFAULT_MAX_CANDIDATES;
+  return Math.min(Math.floor(numeric), 100);
+}
+
+function groupRefreshActivityCandidates(candidates: Array<{ entry: LinkRegistryEntry; row: PublicTrafficProductDataRow }>) {
+  const groups = new Map<string, { label: string; category: string; sameSkuGroupId: string; items: Array<{ entry: LinkRegistryEntry; row: PublicTrafficProductDataRow }> }>();
+  for (const candidate of candidates) {
+    const sameSkuGroupId = candidate.entry.sameSkuGroupId?.trim() || '未分组';
+    const category = candidate.entry.categoryName?.trim() || candidate.entry.productType?.trim() || '未分类';
+    const label = candidate.entry.shortName?.trim() || candidate.entry.productName?.trim() || sameSkuGroupId;
+    const key = `${category}::${sameSkuGroupId}`;
+    const group = groups.get(key) ?? { label, category, sameSkuGroupId, items: [] };
+    group.items.push(candidate);
+    groups.set(key, group);
+  }
+  return [...groups.values()].sort((left, right) => right.items.length - left.items.length || left.label.localeCompare(right.label, 'zh-CN'));
+}
+
+async function refreshActivityPlanResponse(outputDir: string, args: Record<string, unknown>, options: AgentToolExecutionOptions): Promise<BotResponse> {
+  const date = readOptionalDate(args.date);
+  const report = await findReportContextForTool(outputDir, date);
+  if (!report) return { text: missingReportContextText(date) };
+  const registryContext = await loadClosedOrderRegistryContext(options.closedOrderRegistryPaths);
+  const maxCandidates = readMaxCandidates(args.maxCandidates);
+
+  const candidates: Array<{ entry: LinkRegistryEntry; row: PublicTrafficProductDataRow }> = [];
+  const skipped = { missingRow: 0, missing30dDashboard: 0, inactive: 0 };
+  for (const entry of registryContext.registry) {
+    if (entry.status !== 'active') {
+      skipped.inactive += 1;
+      continue;
+    }
+    const row = findReportRowForEntry(report.context, entry);
+    if (!row) {
+      skipped.missingRow += 1;
+      continue;
+    }
+    const thirty = row.periods['30d'];
+    if (!thirty.hasDashboardData) {
+      skipped.missing30dDashboard += 1;
+      continue;
+    }
+    if (thirty.createdOrders === 0) candidates.push({ entry, row });
+  }
+
+  const groups = groupRefreshActivityCandidates(candidates);
+  const shownCandidates = candidates
+    .sort((left, right) =>
+      left.row.periods['30d'].publicVisits - right.row.periods['30d'].publicVisits
+      || left.row.periods['30d'].exposure - right.row.periods['30d'].exposure
+      || Number(left.entry.internalProductId) - Number(right.entry.internalProductId))
+    .slice(0, maxCandidates);
+  const shownGroups = groupRefreshActivityCandidates(shownCandidates);
+  const groupLines = shownGroups.slice(0, 12).map((group, index) => {
+    const ids = group.items.map((item) => item.entry.internalProductId).join('、');
+    return `${index + 1}. ${group.label}｜${group.category}｜${group.sameSkuGroupId}：待下架 ${group.items.length} 条，建议补回 ${group.items.length} 条新链；端内ID ${ids}`;
+  });
+
+  return {
+    text: [
+      `活跃度刷新计划（仅预览，不执行）：${report.context.date}`,
+      '筛选口径：active 链接，30日访问页数据已抓取，近 30 天创单为 0。',
+      `待下架候选：${candidates.length} 条；涉及种类/同款组 ${groups.length} 个。`,
+      `本次展示：${shownCandidates.length}/${candidates.length} 条。`,
+      '',
+      ...(groupLines.length ? groupLines : ['没有找到符合条件的零创单 active 链接。']),
+      '',
+      `跳过：非 active ${skipped.inactive} 条，无日报行 ${skipped.missingRow} 条，30日访问页缺失 ${skipped.missing30dDashboard} 条。`,
+      '下一步安全边界：真正下架和补链仍需要按商品/同款组生成确认卡；不会因为本计划直接执行写操作。',
+    ].join('\n'),
+  };
+}
+
 async function runReadOnlyAgentIntent(
   outputDir: string,
   intent: Exclude<AgentIntent, { type: 'unknown' }>,
@@ -301,6 +528,8 @@ function rentalAgentToolRequest(toolName: string, args: Record<string, unknown>)
         productId: requireProductId(args.productId, 'productId'),
         itemTitle: requireString(args.itemTitle, 'itemTitle'),
       };
+    case 'rental.specRemovePlan':
+      return null;
     default:
       return null;
   }
@@ -451,6 +680,8 @@ export async function executeAgentToolRequest(
         ].join('\n'),
       };
     }
+    case 'operations.refreshActivityPlan':
+      return refreshActivityPlanResponse(outputDir, request.arguments, options);
     case 'rental.copy':
     case 'rental.delist':
     case 'rental.tenancySet':
@@ -460,6 +691,11 @@ export async function executeAgentToolRequest(
       if (!rentalRequest) throw new Error('租赁商品操作参数无效，请重新发起。');
       const result = await executeRentalOperationConfirmRequest(options.rentalPriceClient ?? createRentalPriceSkillClient(), rentalRequest);
       return { text: result.text };
+    }
+    case 'rental.specRemovePlan': {
+      const query = requireString(request.arguments.query, 'query');
+      const keyword = requireString(request.arguments.keyword, 'keyword');
+      return rentalSpecRemovePlanResponse(query, keyword, request.reason, options.rentalPriceClient ?? createRentalPriceSkillClient(), options);
     }
     case 'rental.operationConfirmRequest': {
       const rentalRequest = parseRentalOperationConfirmRequest({ request: request.arguments });

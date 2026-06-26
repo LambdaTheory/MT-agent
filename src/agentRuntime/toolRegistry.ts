@@ -49,6 +49,23 @@ const specAddAndRefreshArgumentsSchema = {
   required: ['productId', 'itemTitle'],
   additionalProperties: false,
 };
+const specRemovePlanArgumentsSchema = {
+  type: 'object',
+  properties: {
+    query: { type: 'string' },
+    keyword: { type: 'string' },
+  },
+  required: ['query', 'keyword'],
+  additionalProperties: false,
+};
+const refreshActivityPlanArgumentsSchema = {
+  type: 'object',
+  properties: {
+    date: { type: 'string' },
+    maxCandidates: { type: 'number' },
+  },
+  additionalProperties: false,
+};
 const rentalPriceChangeArgumentsSchema = {
   type: 'object',
   properties: {
@@ -77,6 +94,10 @@ const rentalOperationArgumentsSchema = {
     productId: { type: 'string' },
     days: { type: 'string' },
     itemTitle: { type: 'string' },
+    query: { type: 'string' },
+    keyword: { type: 'string' },
+    sameSkuGroupId: { type: 'string' },
+    items: { type: 'array' },
   },
   required: ['action', 'productId'],
   additionalProperties: false,
@@ -182,6 +203,13 @@ const agentTools: AgentToolDefinition[] = [
     inputSchema: optionalDashboardRefreshArgumentsSchema,
   },
   {
+    name: 'operations.refreshActivityPlan',
+    description: '按最新或指定日期公域日报筛选近 30 天创单为 0 的 active 链接，按链接档案汇总待下架链接和补链建议。只生成计划，不直接下架或补链。',
+    risk: 'read',
+    requiresConfirmation: false,
+    inputSchema: refreshActivityPlanArgumentsSchema,
+  },
+  {
     name: 'closedOrder.syncFeedback',
     description: '同步关单反馈到本地状态',
     risk: 'write',
@@ -229,6 +257,13 @@ const agentTools: AgentToolDefinition[] = [
     risk: 'high',
     requiresConfirmation: true,
     inputSchema: specAddAndRefreshArgumentsSchema,
+  },
+  {
+    name: 'rental.specRemovePlan',
+    description: '按商品名/端内ID/同款组和规格关键词生成规格项删除预览；只匹配规格项，不删除规格维度；命中明确后展示专用确认卡再执行。',
+    risk: 'high',
+    requiresConfirmation: true,
+    inputSchema: specRemovePlanArgumentsSchema,
   },
   {
     name: 'rental.priceChange',

@@ -85,7 +85,8 @@ const HELP_TEXT = `📋 查询与分析
 🤖 复合目标
   数据最好的SQ1是哪条？按这个ID复制5条新链
   数据最好的wide300、wide400分别复制5条新链
-  刷新活跃度 — 这类高风险批量运营动作会先生成计划/澄清，不会直接执行
+  x300u 含手柄的sku都得下掉 — 先按规格项生成删除预览和确认卡
+  刷新活跃度 — 先生成近30天零创单链接下架与补链计划，不直接执行
 
 🎓 运营学习
   运营学习 — 开始运营学习测验
@@ -342,6 +343,13 @@ async function agentPlannerResponse(
     const rentalPriceClient = options.rentalPriceClient ?? createRentalPriceSkillClient();
     const preview = await rentalPriceClient.preview(rentalRequest);
     return { text: `请确认商品 ${rentalRequest.productId} 改价`, card: buildRentalPricePreviewCard(preview) };
+  }
+  if (parsed.proposal.selectedTool === 'rental.specRemovePlan') {
+    return executeAgentToolRequest(request, outputDir, {
+      rentalPriceClient: options.rentalPriceClient,
+      closedOrderFetchImpl: options.closedOrderFetchImpl,
+      closedOrderRegistryPaths: options.closedOrderRegistryPaths,
+    });
   }
   if (parsed.policy.decision === 'allow') {
     return executeAgentToolRequest(request, outputDir, {

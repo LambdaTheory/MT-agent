@@ -23,6 +23,7 @@ describe('agent runtime tool registry', () => {
       'publicTraffic.resendLatestReport',
       'publicTraffic.pushLatestReportToGroup',
       'publicTraffic.refreshDashboard',
+      'operations.refreshActivityPlan',
       'closedOrder.syncFeedback',
       'closedOrder.runObservationReport',
       'rental.copy',
@@ -30,6 +31,7 @@ describe('agent runtime tool registry', () => {
       'rental.tenancySet',
       'rental.specDiscover',
       'rental.specAddAndRefresh',
+      'rental.specRemovePlan',
       'rental.priceChange',
       'rental.priceSnapshot',
       'rental.priceRollback',
@@ -46,7 +48,7 @@ describe('agent runtime tool registry', () => {
 
     const tools = listAgentTools();
     tools.pop();
-    expect(listAgentTools()).toHaveLength(25);
+    expect(listAgentTools()).toHaveLength(27);
   });
 
   it('returns defensive copies of tool metadata', () => {
@@ -97,6 +99,7 @@ describe('agent runtime tool registry', () => {
     expect(findAgentTool('publicTraffic.resendLatestReport')).toMatchObject({ risk: 'write', requiresConfirmation: true });
     expect(findAgentTool('publicTraffic.pushLatestReportToGroup')).toMatchObject({ risk: 'write', requiresConfirmation: true });
     expect(findAgentTool('publicTraffic.refreshDashboard')).toMatchObject({ risk: 'write', requiresConfirmation: true });
+    expect(findAgentTool('operations.refreshActivityPlan')).toMatchObject({ risk: 'read', requiresConfirmation: false });
     expect(findAgentTool('closedOrder.syncFeedback')).toMatchObject({ risk: 'write', requiresConfirmation: true });
     expect(findAgentTool('closedOrder.runObservationReport')).toMatchObject({ risk: 'write', requiresConfirmation: true });
     expect(findAgentTool('rental.copy')).toMatchObject({ risk: 'high', requiresConfirmation: true });
@@ -104,6 +107,7 @@ describe('agent runtime tool registry', () => {
     expect(findAgentTool('rental.tenancySet')).toMatchObject({ risk: 'high', requiresConfirmation: true });
     expect(findAgentTool('rental.specDiscover')).toMatchObject({ risk: 'high', requiresConfirmation: true });
     expect(findAgentTool('rental.specAddAndRefresh')).toMatchObject({ risk: 'high', requiresConfirmation: true });
+    expect(findAgentTool('rental.specRemovePlan')).toMatchObject({ risk: 'high', requiresConfirmation: true });
     expect(findAgentTool('rental.priceChange')).toMatchObject({ risk: 'high', requiresConfirmation: true });
     expect(findAgentTool('rental.priceSnapshot')).toMatchObject({ risk: 'read', requiresConfirmation: false });
     expect(findAgentTool('rental.priceRollback')).toMatchObject({ risk: 'high', requiresConfirmation: true });
@@ -156,6 +160,7 @@ describe('agent runtime tool registry', () => {
       'publicTraffic.resendLatestReport',
       'publicTraffic.pushLatestReportToGroup',
       'publicTraffic.refreshDashboard',
+      'operations.refreshActivityPlan',
       'closedOrder.syncFeedback',
       'closedOrder.runObservationReport',
       'rental.copy',
@@ -163,6 +168,7 @@ describe('agent runtime tool registry', () => {
       'rental.tenancySet',
       'rental.specDiscover',
       'rental.specAddAndRefresh',
+      'rental.specRemovePlan',
       'rental.priceChange',
       'rental.priceSnapshot',
       'rental.priceRollback',
@@ -192,6 +198,21 @@ describe('agent runtime tool registry', () => {
         itemTitle: { type: 'string' },
       },
       required: ['productId', 'itemTitle'],
+      additionalProperties: false,
+    });
+    expect(findAgentTool('rental.specRemovePlan')?.inputSchema).toMatchObject({
+      properties: {
+        query: { type: 'string' },
+        keyword: { type: 'string' },
+      },
+      required: ['query', 'keyword'],
+      additionalProperties: false,
+    });
+    expect(findAgentTool('operations.refreshActivityPlan')?.inputSchema).toMatchObject({
+      properties: {
+        date: { type: 'string' },
+        maxCandidates: { type: 'number' },
+      },
       additionalProperties: false,
     });
     expect(findAgentTool('rental.priceChange')?.inputSchema).toMatchObject({

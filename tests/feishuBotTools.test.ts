@@ -251,6 +251,110 @@ async function writeX200PriceSnapshotRegistryFixtures(rootDir: string): Promise<
   };
 }
 
+async function writeX300SpecRemoveRegistryFixtures(rootDir: string): Promise<{
+  productIdMapPath: string;
+  productNameMapPath: string;
+  firstSeenPath: string;
+  lifecyclePath: string;
+  overridesPath: string;
+  artifactsDir: string;
+}> {
+  const configDir = join(rootDir, 'config');
+  const outputDir = join(rootDir, 'output');
+  const stateDir = join(outputDir, 'state');
+  await mkdir(configDir, { recursive: true });
+  await mkdir(stateDir, { recursive: true });
+  await writeFile(join(configDir, 'product-id-map.json'), JSON.stringify({ p501: '501', p502: '502' }), 'utf8');
+  await writeFile(join(configDir, 'product-name-map.json'), JSON.stringify({ '501': 'vivo X300 Ultra 手柄套装', '502': 'vivo X300 Ultra 标准套装' }), 'utf8');
+  await writeFile(join(configDir, 'link-registry-overrides.json'), JSON.stringify({
+    version: 1,
+    entries: [
+      { internalProductId: '501', productName: 'vivo X300 Ultra 手柄套装', shortName: 'vivo X300 Ultra', aliases: ['x300u', 'X300U'], sameSkuGroupId: 'vivo-x300-ultra', updatedAt: '2026-06-26' },
+      { internalProductId: '502', productName: 'vivo X300 Ultra 标准套装', shortName: 'vivo X300 Ultra', aliases: ['x300u', 'X300U'], sameSkuGroupId: 'vivo-x300-ultra', updatedAt: '2026-06-26' },
+    ],
+    sameSkuGroupAliasRules: [{ sameSkuGroupId: 'vivo-x300-ultra', aliases: ['x300u', 'X300U'] }],
+  }), 'utf8');
+  return {
+    productIdMapPath: join(configDir, 'product-id-map.json'),
+    productNameMapPath: join(configDir, 'product-name-map.json'),
+    firstSeenPath: join(stateDir, 'goods-first-seen.json'),
+    lifecyclePath: join(stateDir, 'goods-link-lifecycle.json'),
+    overridesPath: join(configDir, 'link-registry-overrides.json'),
+    artifactsDir: outputDir,
+  };
+}
+
+async function writeRefreshActivityFixtures(): Promise<{
+  outputDir: string;
+  registryPaths: {
+    productIdMapPath: string;
+    productNameMapPath: string;
+    firstSeenPath: string;
+    lifecyclePath: string;
+    overridesPath: string;
+    artifactsDir: string;
+  };
+}> {
+  const rootDir = await mkdtemp(join(tmpdir(), 'mt-agent-refresh-activity-'));
+  const outputDir = join(rootDir, 'output');
+  const configDir = join(rootDir, 'config');
+  const stateDir = join(outputDir, 'state');
+  await mkdir(join(outputDir, '2026-06-11'), { recursive: true });
+  await mkdir(configDir, { recursive: true });
+  await mkdir(stateDir, { recursive: true });
+  const zero30d = { ...metric, exposure: 300, publicVisits: 30, dashboardVisits: 20, createdOrders: 0, hasDashboardData: true };
+  const active30d = { ...metric, exposure: 600, publicVisits: 80, dashboardVisits: 60, createdOrders: 3, hasDashboardData: true };
+  const missing30d = { ...metric, exposure: 100, publicVisits: 0, dashboardVisits: 0, createdOrders: 0, hasDashboardData: false };
+  await writeFile(join(outputDir, '2026-06-11', 'report-context.json'), JSON.stringify({
+    date: '2026-06-11',
+    summary: { '1d': summary, '7d': summary, '30d': summary },
+    conclusions: [],
+    rows: [
+      { productName: 'Pocket3 零创单 A', platformProductId: 'p901', displayProductId: '端内ID 901', custodyDays: 35, periods: { '1d': metric, '7d': metric, '30d': zero30d } },
+      { productName: 'Pocket3 零创单 B', platformProductId: 'p902', displayProductId: '端内ID 902', custodyDays: 40, periods: { '1d': metric, '7d': metric, '30d': zero30d } },
+      { productName: 'SQ1 有创单', platformProductId: 'p903', displayProductId: '端内ID 903', custodyDays: 40, periods: { '1d': metric, '7d': metric, '30d': active30d } },
+      { productName: 'Wide 300 缺访问页', platformProductId: 'p904', displayProductId: '端内ID 904', custodyDays: 40, periods: { '1d': metric, '7d': metric, '30d': missing30d } },
+    ],
+    lowExposure: [],
+    weakClick: [],
+    weakConversion: [],
+    highPotential: [],
+    newProductObservation: [],
+    lifecycleGovernance: [],
+    recommendedActions: [],
+    emptySectionNotes: {},
+  }), 'utf8');
+  await writeFile(join(configDir, 'product-id-map.json'), JSON.stringify({ p901: '901', p902: '902', p903: '903', p904: '904' }), 'utf8');
+  await writeFile(join(configDir, 'product-name-map.json'), JSON.stringify({
+    '901': 'Pocket3 零创单 A',
+    '902': 'Pocket3 零创单 B',
+    '903': 'SQ1 有创单',
+    '904': 'Wide 300 缺访问页',
+  }), 'utf8');
+  await writeFile(join(configDir, 'link-registry-overrides.json'), JSON.stringify({
+    version: 1,
+    entries: [
+      { internalProductId: '901', shortName: 'DJI Pocket 3', sameSkuGroupId: 'dji-pocket-3', categoryName: '云台相机', status: 'active' },
+      { internalProductId: '902', shortName: 'DJI Pocket 3', sameSkuGroupId: 'dji-pocket-3', categoryName: '云台相机', status: 'active' },
+      { internalProductId: '903', shortName: 'SQ1', sameSkuGroupId: 'instax-sq1', categoryName: '拍立得', status: 'active' },
+      { internalProductId: '904', shortName: 'Wide 300', sameSkuGroupId: 'instax-wide300', categoryName: '拍立得', status: 'active' },
+      { internalProductId: '905', shortName: 'Removed item', sameSkuGroupId: 'removed-group', categoryName: '其他', status: 'removed' },
+    ],
+  }), 'utf8');
+
+  return {
+    outputDir,
+    registryPaths: {
+      productIdMapPath: join(configDir, 'product-id-map.json'),
+      productNameMapPath: join(configDir, 'product-name-map.json'),
+      firstSeenPath: join(stateDir, 'goods-first-seen.json'),
+      lifecyclePath: join(stateDir, 'goods-link-lifecycle.json'),
+      overridesPath: join(configDir, 'link-registry-overrides.json'),
+      artifactsDir: outputDir,
+    },
+  };
+}
+
 async function writeClosedOrderRegistryFixtures(rootDir: string): Promise<{
   productIdMapPath: string;
   productNameMapPath: string;
@@ -710,7 +814,8 @@ describe('handleBotIntent', () => {
 🤖 复合目标
   数据最好的SQ1是哪条？按这个ID复制5条新链
   数据最好的wide300、wide400分别复制5条新链
-  刷新活跃度 — 这类高风险批量运营动作会先生成计划/澄清，不会直接执行
+  x300u 含手柄的sku都得下掉 — 先按规格项生成删除预览和确认卡
+  刷新活跃度 — 先生成近30天零创单链接下架与补链计划，不直接执行
 
 🎓 运营学习
   运营学习 — 开始运营学习测验
@@ -1151,6 +1256,138 @@ describe('handleBotIntent', () => {
     expect(response.text).toContain('7天 ¥65');
     expect(response.text).toContain('黑色 128G：1天 ¥15');
     expect(response.text).toContain('读取商品：成功 2/2');
+  });
+
+  it('turns Agent-planned same-sku spec removal into a dedicated confirmation card', async () => {
+    const outputDir = await writeContext();
+    const registryRoot = await mkdtemp(join(tmpdir(), 'mt-agent-x300-spec-remove-'));
+    const registryPaths = await writeX300SpecRemoveRegistryFixtures(registryRoot);
+    const planner: AgentPlannerProvider = {
+      async proposePlan(request) {
+        expect(request.message).toBe('x300u 含手柄的sku 都得下掉');
+        expect(request.tools.map((tool) => tool.name)).toContain('rental.specRemovePlan');
+        return JSON.stringify({
+          goal: '删除 x300u 同款组里含手柄的规格项',
+          selectedTool: 'rental.specRemovePlan',
+          arguments: { query: 'x300u', keyword: '手柄' },
+          confidence: 0.91,
+          reason: '用户要求删除同款组内含手柄的 SKU，属于高风险规格项删除，必须先预览并确认',
+        });
+      },
+    };
+    const specDiscoverCalls: string[] = [];
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run for spec removal plan'); },
+      async execute() { throw new Error('execute should not run for spec removal plan'); },
+      async copy() { throw new Error('copy should not run'); },
+      async delist() { throw new Error('delist should not run'); },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover(productId) {
+        specDiscoverCalls.push(productId);
+        return {
+          productId,
+          ok: true,
+          dimensions: [
+            { specId: 'color', title: '颜色', items: [{ id: 'black', title: '黑色' }, { id: 'white', title: '白色' }] },
+            { specId: 'kit', title: '套装', items: [{ id: 'standard', title: '标准' }, { id: 'handle', title: '含手柄' }] },
+          ],
+          lines: ['spec-discover: ok'],
+        };
+      },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+      async specRemoveItem() { throw new Error('specRemoveItem should not run before confirmation'); },
+    };
+
+    const response = await handleBotIntent({ type: 'unknown', text: 'x300u 含手柄的sku 都得下掉' }, outputDir, {
+      agentPlannerProvider: planner,
+      rentalPriceClient,
+      closedOrderRegistryPaths: registryPaths,
+    });
+
+    const cardText = JSON.stringify(response.card);
+    expect(specDiscoverCalls.sort()).toEqual(['501', '502']);
+    expect(response.text).toContain('规格项删除计划：x300u / 关键词「手柄」');
+    expect(response.text).toContain('命中规格项：2 个');
+    expect(response.text).toContain('商品 501：套装 / 含手柄');
+    expect(response.text).toContain('只删除命中的规格项，不删除规格维度');
+    expect(response.card).toBeDefined();
+    expect(cardText).toContain('rental_operation_confirm');
+    expect(cardText).toContain('spec-remove-items');
+    expect(cardText).toContain('"itemTitle":"含手柄"');
+    expect(cardText).not.toContain('agent_tool_confirm');
+  });
+
+  it('blocks spec removal when a keyword only matches the parent dimension', async () => {
+    const outputDir = await writeContext();
+    const registryRoot = await mkdtemp(join(tmpdir(), 'mt-agent-x300-spec-remove-block-'));
+    const registryPaths = await writeX300SpecRemoveRegistryFixtures(registryRoot);
+    const response = await executeAgentToolRequest(
+      { toolName: 'rental.specRemovePlan', arguments: { query: 'x300u', keyword: '套装' }, reason: '测试只命中父级维度时的阻断' },
+      outputDir,
+      {
+        closedOrderRegistryPaths: registryPaths,
+        rentalPriceClient: {
+          async preview() { throw new Error('preview should not run'); },
+          async execute() { throw new Error('execute should not run'); },
+          async copy() { throw new Error('copy should not run'); },
+          async delist() { throw new Error('delist should not run'); },
+          async tenancySet() { throw new Error('tenancySet should not run'); },
+          async specDiscover(productId) {
+            return {
+              productId,
+              ok: true,
+              dimensions: [{ specId: 'kit', title: '套装', items: [{ id: 'standard', title: '标准' }, { id: 'handle', title: '含手柄' }] }],
+              lines: ['spec-discover: ok'],
+            };
+          },
+          async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+        },
+      },
+    );
+
+    expect(response.text).toContain('没有找到可安全删除的规格项');
+    expect(response.text).toContain('只命中规格维度');
+    expect(response.card).toBeUndefined();
+  });
+
+  it('lets the Agent planner generate an activity refresh plan without executing writes', async () => {
+    const { outputDir, registryPaths } = await writeRefreshActivityFixtures();
+    const planner: AgentPlannerProvider = {
+      async proposePlan(request) {
+        expect(request.message).toBe('刷新活跃度');
+        expect(request.tools.map((tool) => tool.name)).toContain('operations.refreshActivityPlan');
+        return JSON.stringify({
+          goal: '生成活跃度刷新计划',
+          selectedTool: 'operations.refreshActivityPlan',
+          arguments: {},
+          confidence: 0.9,
+          reason: '用户要求刷新活跃度，应先筛选近30天零创单链接并生成计划',
+        });
+      },
+    };
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run'); },
+      async execute() { throw new Error('execute should not run'); },
+      async copy() { throw new Error('copy should not run'); },
+      async delist() { throw new Error('delist should not run'); },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+
+    const response = await handleBotIntent({ type: 'unknown', text: '刷新活跃度' }, outputDir, {
+      agentPlannerProvider: planner,
+      rentalPriceClient,
+      closedOrderRegistryPaths: registryPaths,
+    });
+
+    expect(response.text).toContain('活跃度刷新计划（仅预览，不执行）：2026-06-11');
+    expect(response.text).toContain('待下架候选：2 条');
+    expect(response.text).toContain('DJI Pocket 3｜云台相机｜dji-pocket-3：待下架 2 条，建议补回 2 条新链');
+    expect(response.text).toContain('端内ID 901、902');
+    expect(response.text).toContain('30日访问页缺失 1 条');
+    expect(response.text).toContain('真正下架和补链仍需要按商品/同款组生成确认卡');
+    expect(response.card).toBeUndefined();
   });
 
   it('passes silent learning hints into the generic agent planner', async () => {

@@ -504,8 +504,22 @@ describe('rental price card action', () => {
 
   it('rejects forged rental operation confirmations', () => {
     expect(parseRentalOperationConfirmRequest({ request: { action: 'delist', productId: '761' } })).toEqual({ action: 'delist', productId: '761' });
+    expect(parseRentalOperationConfirmRequest({
+      request: {
+        action: 'spec-remove-items',
+        productId: '761',
+        keyword: '手柄',
+        items: [{ productId: '761', specDimId: 'kit', dimensionTitle: '套装', itemId: 'handle', itemTitle: '含手柄' }],
+      },
+    })).toEqual({
+      action: 'spec-remove-items',
+      productId: '761',
+      keyword: '手柄',
+      items: [{ productId: '761', specDimId: 'kit', dimensionTitle: '套装', itemId: 'handle', itemTitle: '含手柄' }],
+    });
     expect(parseRentalOperationConfirmRequest({ request: { action: 'delete-everything', productId: '761' } })).toBeNull();
     expect(parseRentalOperationConfirmRequest({ request: { action: 'tenancy-set', productId: '761', days: '1,abc' } })).toBeNull();
+    expect(parseRentalOperationConfirmRequest({ request: { action: 'spec-remove-items', productId: '761', keyword: '手柄', items: [{ productId: 'abc', specDimId: 'kit', itemTitle: '含手柄' }] } })).toBeNull();
   });
 
   it('does not submit when the external apply step is partial', async () => {
@@ -524,6 +538,45 @@ describe('rental price card action', () => {
 
       expect(result).toEqual({ productId: '761', ok: false, lines: ['apply: partial', 'submit: skipped', 'verify: skipped'] });
       expect(commands).toEqual(['apply']);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('removes a specific spec item with refresh, submit, verify, and an audit file', async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), 'mt-agent-rental-spec-remove-'));
+    const commands: Array<Record<string, unknown>> = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (_input, init) => {
+      const command = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      commands.push(command);
+      if (command.action === 'spec-discover') {
+        return new Response(JSON.stringify({
+          status: 'ok',
+          dimensions: [{ specId: 'kit', title: '套装', items: command.productId === '761' && commands.length > 4 ? [{ id: 'std', title: '标准' }] : [{ id: 'std', title: '标准' }, { id: 'handle', title: '含手柄' }] }],
+        }));
+      }
+      return new Response(JSON.stringify({ status: 'ok' }));
+    };
+
+    try {
+      const client = createRentalPriceSkillClient({ rootDir, daemonUrl: 'http://127.0.0.1:1' });
+      const result = await client.specRemoveItem!({ productId: '761', specDimId: 'kit', itemId: 'handle', itemTitle: '含手柄' });
+
+      expect(result.ok).toBe(true);
+      expect(commands.map((command) => command.action)).toEqual(['spec-discover', 'spec-remove-item', 'spec-refresh', 'submit', 'spec-discover']);
+      expect(commands[1]).toMatchObject({
+        action: 'spec-remove-item',
+        productId: '761',
+        expectedProductId: '761',
+        specDimId: 'kit',
+        itemId: 'handle',
+        itemTitle: '含手柄',
+      });
+      expect(commands[2]).toMatchObject({ action: 'spec-refresh', allowCurrentPage: true, expectedProductId: '761' });
+      expect(result.lines).toContain('item: removed');
+      expect(result.audit?.resultFile).toContain('spec-remove-761-');
+      expect(await readFile(result.audit!.resultFile!, 'utf8')).toContain('"itemTitle": "含手柄"');
     } finally {
       globalThis.fetch = originalFetch;
     }

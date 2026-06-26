@@ -441,13 +441,40 @@ async function actionSpecAddItem(specDimId, itemTitle) {
   return { status: "ok", action: "add-item", specDimId, itemTitle: normalizedTitle };
 }
 
-async function actionSpecRemoveItem(specDimId) {
+function normalizeSpecItemTitle(value) {
+  return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+async function actionSpecRemoveItem(specDimId, itemId, itemTitle) {
   const containerSel = (config.selectors.spec || {}).specItemContainer ? (config.selectors.spec || {}).specItemContainer.replace("{dimId}", specDimId) : "#spec_item_" + specDimId;
   const rows = await page.$$(containerSel + " .spec_item_title");
   if (rows.length <= 1) return { status: "error", message: "Cannot remove last item" };
 
-  const lastRow = rows[rows.length - 1];
-  const parent = await lastRow.evaluateHandle(el => el.closest("div,tr,li"));
+  let targetRow = rows[rows.length - 1];
+  if (itemId || itemTitle) {
+    const normalizedTitle = normalizeSpecItemTitle(itemTitle);
+    let matchedRow = null;
+    for (const row of rows) {
+      const matched = await row.evaluate((el, expected) => {
+        const container = el.closest('[id^="spec_item_"],div,tr,li');
+        const idEl = container ? container.querySelector(".spec_item_id") : null;
+        const actualId = idEl ? String(idEl.value || "").trim() : "";
+        const actualTitle = String(el.value || "").replace(/\s+/g, " ").trim();
+        return Boolean(
+          (expected.itemId && actualId === String(expected.itemId)) ||
+          (expected.itemTitle && actualTitle === expected.itemTitle)
+        );
+      }, { itemId: itemId ? String(itemId) : "", itemTitle: normalizedTitle });
+      if (matched) {
+        matchedRow = row;
+        break;
+      }
+    }
+    if (!matchedRow) return { status: "error", message: "Target spec item not found", specDimId, itemId, itemTitle: normalizedTitle };
+    targetRow = matchedRow;
+  }
+
+  const parent = await targetRow.evaluateHandle(el => el.closest("div,tr,li"));
 
   // Try multiple strategies to find the delete button
   let delBtn = await parent.$("a[onclick*='remove'],a[onclick*='delete'],a.btn-danger,a[class*='del'],a[class*='remove']");
@@ -474,7 +501,7 @@ async function actionSpecRemoveItem(specDimId) {
       const links = row.querySelectorAll("a[onclick]");
       if (links.length > 0) links[links.length - 1].click();
     }, specDimId);
-    return { status: "ok", action: "remove-item", specDimId };
+    return { status: "ok", action: "remove-item", specDimId, itemId, itemTitle: normalizeSpecItemTitle(itemTitle) };
   } catch (e) {
     log("spec-remove-item fallback failed: " + e.message);
   }
@@ -1031,7 +1058,7 @@ async function ensureBrowser() {
 }
 
 async function handleCommand(cmd) {
-  const { action, productId, fields, changesFile, specDimId, itemTitle, days, allowCurrentPage, expectedProductId } = cmd;
+  const { action, productId, fields, changesFile, specDimId, itemId, itemTitle, days, allowCurrentPage, expectedProductId } = cmd;
 
   // Lazy init browser
   if (action !== "ping") {
@@ -1064,7 +1091,7 @@ async function handleCommand(cmd) {
       else if (!allowCurrentPage) return { status: "error", message: "productId is required unless allowCurrentPage is true", expectedProductId };
       const currentCheck = assertCurrentProduct(expectedProductId || productId);
       if (!currentCheck.ok) return { status: "error", message: "Current page product mismatch", ...currentCheck };
-      if (action === "spec-remove-item") return await actionSpecRemoveItem(specDimId);
+      if (action === "spec-remove-item") return await actionSpecRemoveItem(specDimId, itemId, itemTitle);
       if (action === "spec-remove-dim") return await actionSpecRemoveDim(specDimId);
       break;
     }

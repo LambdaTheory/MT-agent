@@ -2,6 +2,7 @@ import { copyFile, mkdir, mkdtemp, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { executeAgentToolRequest } from '../src/feishuBot/agentToolExecutor.js';
 import { parseBotIntent } from '../src/feishuBot/intent.js';
 import { handleBotIntent } from '../src/feishuBot/tools.js';
 import { createRentalPriceSkillClient, type RentalPriceSkillClient } from '../src/feishuBot/rentalPrice.js';
@@ -10,7 +11,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function fakeClient(): RentalPriceSkillClient & { previews: unknown[]; executions: unknown[]; copies: unknown[]; delists: unknown[]; tenancySets: unknown[]; specDiscovers: unknown[]; specAdds: unknown[] } {
+function fakeClient(): RentalPriceSkillClient & { previews: unknown[]; executions: unknown[]; copies: unknown[]; delists: unknown[]; tenancySets: unknown[]; specDiscovers: unknown[]; specAdds: unknown[]; specRemoves: unknown[] } {
   return {
     previews: [],
     executions: [],
@@ -19,6 +20,7 @@ function fakeClient(): RentalPriceSkillClient & { previews: unknown[]; execution
     tenancySets: [],
     specDiscovers: [],
     specAdds: [],
+    specRemoves: [],
     async preview(request) {
       this.previews.push(request);
       return {
@@ -51,6 +53,10 @@ function fakeClient(): RentalPriceSkillClient & { previews: unknown[]; execution
     async specAddAndRefresh(productId, itemTitle) {
       this.specAdds.push({ productId, itemTitle });
       return { productId, ok: true, itemTitle, lines: ['spec-add-and-refresh: ok'] };
+    },
+    async specRemoveItem(request) {
+      this.specRemoves.push(request);
+      return { ...request, ok: true, lines: ['precheck: ok', 'remove: ok', 'refresh: ok', 'submit: ok', 'verify: ok'] };
     },
   };
 }
@@ -211,6 +217,36 @@ describe('rental price Feishu integration', () => {
     expect(JSON.stringify(response.card)).toContain('rental_operation_confirm');
     expect(JSON.stringify(response.card)).toContain('spec-add-and-refresh');
     expect(JSON.stringify(response.card)).toContain('128G');
+  });
+
+  it('executes confirmed spec remove items through the hidden rental operation path', async () => {
+    const client = fakeClient();
+    const response = await executeAgentToolRequest(
+      {
+        toolName: 'rental.operationConfirmRequest',
+        arguments: {
+          action: 'spec-remove-items',
+          productId: '761',
+          query: 'x300u',
+          keyword: '手柄',
+          sameSkuGroupId: 'vivo-x300-ultra',
+          items: [
+            { productId: '761', specDimId: 'kit', dimensionTitle: '套装', itemId: 'handle', itemTitle: '含手柄', keyword: '手柄' },
+            { productId: '762', specDimId: 'kit', dimensionTitle: '套装', itemId: 'handle', itemTitle: '含手柄', keyword: '手柄' },
+          ],
+        },
+        reason: '用户确认删除含手柄规格项',
+      },
+      'output',
+      { rentalPriceClient: client },
+    );
+
+    expect(client.specRemoves).toEqual([
+      { productId: '761', specDimId: 'kit', itemId: 'handle', itemTitle: '含手柄' },
+      { productId: '762', specDimId: 'kit', itemId: 'handle', itemTitle: '含手柄' },
+    ]);
+    expect(response.text).toContain('规格项删除完成：成功 2/2');
+    expect(response.text).toContain('同款组：vivo-x300-ultra');
   });
 });
 

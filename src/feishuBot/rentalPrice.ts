@@ -117,6 +117,16 @@ export interface RentalPriceSpecAddResult {
   lines: string[];
 }
 
+export interface RentalPriceSpecRemoveResult {
+  productId: string;
+  ok: boolean;
+  specDimId: string;
+  itemId?: string;
+  itemTitle: string;
+  lines: string[];
+  audit?: { resultFile?: string };
+}
+
 export interface RentalPriceSkillClient {
   preview(request: RentalPriceChangeRequest): Promise<RentalPricePreview>;
   execute(request: Extract<RentalPriceChangeRequest, { mode: 'explicit_fields' }>): Promise<RentalPriceExecutionResult>;
@@ -127,6 +137,16 @@ export interface RentalPriceSkillClient {
   tenancySet(productId: string, days: string): Promise<RentalPriceTenancySetResult>;
   specDiscover(productId: string): Promise<RentalPriceSpecDiscoverResult>;
   specAddAndRefresh(productId: string, itemTitle: string): Promise<RentalPriceSpecAddResult>;
+  specRemoveItem?(request: { productId: string; specDimId: string; itemId?: string; itemTitle: string }): Promise<RentalPriceSpecRemoveResult>;
+}
+
+export interface RentalSpecRemoveItemConfirmRequest {
+  productId: string;
+  specDimId: string;
+  dimensionTitle?: string;
+  itemId?: string;
+  itemTitle: string;
+  keyword?: string;
 }
 
 export type RentalOperationConfirmRequest =
@@ -134,7 +154,8 @@ export type RentalOperationConfirmRequest =
   | { action: 'delist'; productId: string }
   | { action: 'tenancy-set'; productId: string; days: string }
   | { action: 'spec-discover'; productId: string }
-  | { action: 'spec-add-and-refresh'; productId: string; itemTitle: string };
+  | { action: 'spec-add-and-refresh'; productId: string; itemTitle: string }
+  | { action: 'spec-remove-items'; productId: string; query?: string; keyword: string; sameSkuGroupId?: string; items: RentalSpecRemoveItemConfirmRequest[] };
 
 interface RentalPriceSkillClientOptions {
   rootDir?: string;
@@ -271,18 +292,39 @@ function rentalOperationTitle(request: RentalOperationConfirmRequest): string {
       return `查看商品 ${request.productId} 规格`;
     case 'spec-add-and-refresh':
       return `给商品 ${request.productId} 添加规格 ${request.itemTitle}`;
+    case 'spec-remove-items':
+      return `删除 ${request.items.length} 个规格项（关键词 ${request.keyword}）`;
   }
+}
+
+function rentalOperationDetailMarkdown(request: RentalOperationConfirmRequest): string {
+  if (request.action !== 'spec-remove-items') return '';
+  const lines = request.items.slice(0, 12).map((item, index) => {
+    const dimension = item.dimensionTitle ? `${item.dimensionTitle} / ` : '';
+    const itemId = item.itemId ? `，itemId ${item.itemId}` : '';
+    return `${index + 1}. 商品 ${item.productId}：${dimension}${item.itemTitle}（维度 ${item.specDimId}${itemId}）`;
+  });
+  const omitted = request.items.length - lines.length;
+  return [
+    '',
+    '**将删除以下规格项，不会删除整个规格维度：**',
+    ...lines,
+    ...(omitted > 0 ? [`还有 ${omitted} 个规格项未在卡片中展示。`] : []),
+    request.sameSkuGroupId ? `同款组：${request.sameSkuGroupId}` : undefined,
+    request.query ? `原始商品条件：${request.query}` : undefined,
+  ].filter((line): line is string => Boolean(line)).join('\n');
 }
 
 export function buildRentalOperationConfirmCard(request: RentalOperationConfirmRequest, reason: string): FeishuCardPayload {
   const title = rentalOperationTitle(request);
+  const details = rentalOperationDetailMarkdown(request);
   return {
     schema: '2.0',
     config: { wide_screen_mode: true },
     header: { title: { tag: 'plain_text', content: '租赁商品操作确认' }, template: 'orange' },
     body: {
       elements: [
-        { tag: 'markdown', content: `**是否要执行：${title}？**\n\nLLM 理解原因：${reason}` },
+        { tag: 'markdown', content: `**是否要执行：${title}？**${details}\n\nLLM 理解原因：${reason}` },
         {
           tag: 'form',
           name: 'rental_operation_confirm_form',
@@ -860,6 +902,103 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
       const status = commandStatus(result);
       return { productId, ok: status === 'ok', itemTitle, lines: [`spec-add-and-refresh: ${status}`] };
     },
+    async specRemoveItem(request) {
+      const before = await send({ action: 'spec-discover', productId: request.productId });
+      const beforeStatus = commandStatus(before);
+      if (beforeStatus !== 'ok') {
+        return {
+          productId: request.productId,
+          ok: false,
+          specDimId: request.specDimId,
+          ...(request.itemId ? { itemId: request.itemId } : {}),
+          itemTitle: request.itemTitle,
+          lines: [`precheck: ${beforeStatus}`, optionalString(before, 'message') ?? 'spec discover failed'],
+        };
+      }
+
+      const remove = await send({
+        action: 'spec-remove-item',
+        productId: request.productId,
+        expectedProductId: request.productId,
+        specDimId: request.specDimId,
+        ...(request.itemId ? { itemId: request.itemId } : {}),
+        itemTitle: request.itemTitle,
+      });
+      const removeStatus = commandStatus(remove);
+      if (removeStatus !== 'ok') {
+        return {
+          productId: request.productId,
+          ok: false,
+          specDimId: request.specDimId,
+          ...(request.itemId ? { itemId: request.itemId } : {}),
+          itemTitle: request.itemTitle,
+          lines: [`precheck: ${beforeStatus}`, `remove: ${removeStatus}`, optionalString(remove, 'message') ?? 'remove failed'],
+        };
+      }
+
+      const refresh = await send({
+        action: 'spec-refresh',
+        allowCurrentPage: true,
+        expectedProductId: request.productId,
+      });
+      const refreshStatus = commandStatus(refresh);
+      if (refreshStatus !== 'ok') {
+        return {
+          productId: request.productId,
+          ok: false,
+          specDimId: request.specDimId,
+          ...(request.itemId ? { itemId: request.itemId } : {}),
+          itemTitle: request.itemTitle,
+          lines: [`precheck: ${beforeStatus}`, `remove: ${removeStatus}`, `refresh: ${refreshStatus}`, optionalString(refresh, 'message') ?? 'refresh failed'],
+        };
+      }
+
+      const submit = await send({ action: 'submit' });
+      const submitStatus = commandStatus(submit);
+      if (submitStatus !== 'ok') {
+        return {
+          productId: request.productId,
+          ok: false,
+          specDimId: request.specDimId,
+          ...(request.itemId ? { itemId: request.itemId } : {}),
+          itemTitle: request.itemTitle,
+          lines: [`precheck: ${beforeStatus}`, `remove: ${removeStatus}`, `refresh: ${refreshStatus}`, `submit: ${submitStatus}`, optionalString(submit, 'message') ?? 'submit failed'],
+        };
+      }
+
+      const after = await send({ action: 'spec-discover', productId: request.productId });
+      const afterStatus = commandStatus(after);
+      const afterDimensions = Array.isArray(after.dimensions) ? after.dimensions as RentalPriceSpecDiscoverResult['dimensions'] : [];
+      const targetDim = afterDimensions.find((dimension) => String(dimension.specId) === String(request.specDimId));
+      const stillExists = Boolean(targetDim?.items.some((item) =>
+        (request.itemId && String(item.id) === request.itemId) ||
+        item.title.replace(/\s+/g, ' ').trim() === request.itemTitle.replace(/\s+/g, ' ').trim(),
+      ));
+      const ok = afterStatus === 'ok' && !stillExists;
+      const resultFile = join(rootDir, 'tasks', `spec-remove-${request.productId}-${timestampToken()}.json`);
+      await writeJsonFile(resultFile, {
+        productId: request.productId,
+        specDimId: request.specDimId,
+        itemId: request.itemId,
+        itemTitle: request.itemTitle,
+        ok,
+        before,
+        remove,
+        refresh,
+        submit,
+        after,
+        createdAt: new Date().toISOString(),
+      });
+      return {
+        productId: request.productId,
+        ok,
+        specDimId: request.specDimId,
+        ...(request.itemId ? { itemId: request.itemId } : {}),
+        itemTitle: request.itemTitle,
+        lines: [`precheck: ${beforeStatus}`, `remove: ${removeStatus}`, `refresh: ${refreshStatus}`, `submit: ${submitStatus}`, `verify: ${afterStatus}`, `item: ${stillExists ? 'still_exists' : 'removed'}`, `auditFile: ${resultFile}`],
+        audit: { resultFile },
+      };
+    },
   };
 }
 
@@ -914,6 +1053,30 @@ function readString(value: unknown): string | null {
 function readProductId(value: unknown): string | null {
   const raw = readString(value);
   return raw && /^\d+$/.test(raw) ? raw : null;
+}
+
+function parseSpecRemoveItems(value: unknown): RentalSpecRemoveItemConfirmRequest[] | null {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 20) return null;
+  const items: RentalSpecRemoveItemConfirmRequest[] = [];
+  for (const item of value) {
+    if (!isRecord(item)) return null;
+    const productId = readProductId(item.productId);
+    const specDimId = readString(item.specDimId);
+    const dimensionTitle = readString(item.dimensionTitle) ?? undefined;
+    const itemId = readString(item.itemId) ?? undefined;
+    const itemTitle = readString(item.itemTitle);
+    const keyword = readString(item.keyword) ?? undefined;
+    if (!productId || !specDimId || !itemTitle) return null;
+    items.push({
+      productId,
+      specDimId,
+      ...(dimensionTitle ? { dimensionTitle } : {}),
+      ...(itemId ? { itemId } : {}),
+      itemTitle,
+      ...(keyword ? { keyword } : {}),
+    });
+  }
+  return items;
 }
 
 export function rentalPriceChangeRequestFromToolArguments(args: Record<string, unknown>): RentalPriceChangeRequest | null {
@@ -1006,6 +1169,21 @@ export function parseRentalOperationConfirmRequest(value: unknown): RentalOperat
     const itemTitle = readString(request.itemTitle);
     return itemTitle ? { action, productId, itemTitle } : null;
   }
+  if (action === 'spec-remove-items') {
+    const keyword = readString(request.keyword);
+    const items = parseSpecRemoveItems(request.items);
+    if (!keyword || !items || items[0]?.productId !== productId) return null;
+    const query = readString(request.query) ?? undefined;
+    const sameSkuGroupId = readString(request.sameSkuGroupId) ?? undefined;
+    return {
+      action,
+      productId,
+      ...(query ? { query } : {}),
+      keyword,
+      ...(sameSkuGroupId ? { sameSkuGroupId } : {}),
+      items,
+    };
+  }
   return null;
 }
 
@@ -1038,6 +1216,34 @@ export async function executeRentalOperationConfirmRequest(client: RentalPriceSk
     case 'spec-add-and-refresh': {
       const result = await client.specAddAndRefresh(request.productId, request.itemTitle);
       return { ok: result.ok, text: result.ok ? `规格添加成功：商品 ${result.productId}，新增 ${result.itemTitle}` : `规格添加失败：商品 ${result.productId}\n${result.lines.join('\n')}` };
+    }
+    case 'spec-remove-items': {
+      if (!client.specRemoveItem) return { ok: false, text: '当前租赁商品客户端不支持规格项删除。' };
+      const results = [];
+      for (const item of request.items) {
+        results.push(await client.specRemoveItem({
+          productId: item.productId,
+          specDimId: item.specDimId,
+          ...(item.itemId ? { itemId: item.itemId } : {}),
+          itemTitle: item.itemTitle,
+        }));
+      }
+      const success = results.filter((result) => result.ok);
+      const failed = results.filter((result) => !result.ok);
+      const lines = results.map((result) => {
+        const status = result.ok ? '成功' : '失败';
+        return `- ${status}：商品 ${result.productId} / 维度 ${result.specDimId} / ${result.itemTitle}\n  ${result.lines.join('\n  ')}`;
+      });
+      return {
+        ok: failed.length === 0,
+        text: [
+          `规格项删除完成：成功 ${success.length}/${results.length}`,
+          request.sameSkuGroupId ? `同款组：${request.sameSkuGroupId}` : undefined,
+          `关键词：${request.keyword}`,
+          '',
+          ...lines,
+        ].filter((line): line is string => Boolean(line)).join('\n'),
+      };
     }
   }
 }
