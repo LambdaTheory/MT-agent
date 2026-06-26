@@ -28,6 +28,7 @@
 - `operations.refreshActivityExecute` 不对 planner 暴露，只能由确认卡触发；执行结果写入 `output/agent-audit/refresh-activity/`。
 - `rental.priceChange` 的 Agent-planned 确认卡现在带 planner 判断原因，便于后续排查误判。
 - 生产飞书入口配置 LLM planner 后，未知自然语言不会再回落到旧 deterministic 路由执行。
+- 共享 `handleBotIntent()` 在配置 `agentPlannerProvider` 时会拒绝旧 exact intent 直通，避免测试、适配器或后续入口绕开 planner-first 边界。
 
 ## 测试证据
 
@@ -39,6 +40,7 @@
   - 活跃度刷新：原句 `刷新活跃度`
   - S23U 最佳链接：原句 `s23u最好的链接是哪条?`
   - 复合新链、多商品新链、确认续跑、旧 workflow 拒绝
+  - exact intent 防绕路：带 planner 时 `run_public_traffic_report`、`rental_copy` 不会走旧路由
 - `tests/agentRuntimeLlmPlanner.test.ts`
   - LLM prompt 不暴露 legacy workflow，并明确提示定价快照、规格删除计划。
 - `tests/agentRuntimeToolRegistry.test.ts`
@@ -56,3 +58,5 @@
 - 多步骤目标通过 planner `steps` 和占位符传参组合，不把“工程流程”固化成业务 workflow。
 
 剩余依赖主要是链接档案质量：别名、同款组、品类和状态越完整，LLM 选择工具后本地解析越稳定。
+
+本轮自审结论：已填写的语料功能均有注册工具、确认边界、关键回归测试和交付说明；空白占位行仍等待业务语料，不计入本轮完成范围。

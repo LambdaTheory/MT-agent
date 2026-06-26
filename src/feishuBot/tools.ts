@@ -54,6 +54,8 @@ const NEW_LINK_WRITE_INTENT_PLAN_FAILED =
   '这像是新链批量铺设写操作，但 Agent planner 没有生成有效的新链批量铺设计划。为避免误执行或误答只读新链接池，本次不执行；请换个说法或检查 LLM 输出。';
 const LEGACY_WORKFLOW_PLAN_REJECTED =
   'Agent planner 返回了 legacy workflow 格式（selectedWorkflow），但当前飞书路径只接受 registered tool 或 steps 多步骤计划。未执行任何操作；请让 LLM 改为 selectedTool 或 steps。';
+const PLANNER_FIRST_EXACT_INTENT_BLOCKED =
+  'Agent planner 已配置，但本次请求已被提前解析成旧 exact intent。为避免绕过 LLM 判断和确认边界，本次未执行旧路由；请通过原始文本 unknown intent 进入 planner-first 路径。';
 
 const HELP_TEXT = `📋 查询与分析
   今日概况 — 查看最新公域日报概况
@@ -327,6 +329,10 @@ async function agentPlannerResponse(
 }
 
 export async function handleBotIntent(intent: BotIntent, outputDir = 'output', options: HandleBotIntentOptions = {}): Promise<BotResponse> {
+  if (options.agentPlannerProvider && intent.type !== 'unknown') {
+    return { text: `${PLANNER_FIRST_EXACT_INTENT_BLOCKED}\nintent.type=${intent.type}` };
+  }
+
   if (intent.type === 'help') {
     return { text: HELP_TEXT };
   }

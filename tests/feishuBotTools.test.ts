@@ -1301,6 +1301,33 @@ describe('handleBotIntent', () => {
     expect(response.card).toBeUndefined();
   });
 
+  it('blocks pre-parsed exact intents from bypassing planner-first handling', async () => {
+    let plannerCalled = false;
+    const planner: AgentPlannerProvider = {
+      async proposePlan() {
+        plannerCalled = true;
+        return JSON.stringify({
+          goal: 'should not be used without raw text',
+          selectedTool: 'publicTraffic.runReport',
+          arguments: {},
+          confidence: 1,
+          reason: 'test',
+        });
+      },
+    };
+
+    const reportResponse = await handleBotIntent({ type: 'run_public_traffic_report' }, 'output', { agentPlannerProvider: planner });
+    const copyResponse = await handleBotIntent({ type: 'rental_copy', productId: '761' }, 'output', { agentPlannerProvider: planner });
+
+    expect(plannerCalled).toBe(false);
+    expect(reportResponse.text).toContain('Agent planner 已配置');
+    expect(reportResponse.text).toContain('intent.type=run_public_traffic_report');
+    expect(reportResponse.text).toContain('本次未执行旧路由');
+    expect(reportResponse.card).toBeUndefined();
+    expect(copyResponse.text).toContain('intent.type=rental_copy');
+    expect(copyResponse.card).toBeUndefined();
+  });
+
   it('lets the Agent planner handle help as a registered tool', async () => {
     const planner: AgentPlannerProvider = {
       async proposePlan(request) {

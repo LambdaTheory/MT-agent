@@ -51,6 +51,8 @@ The line never prints the API key. If the planner is disabled, it prints the mis
 
 When the LLM planner is configured, both production Feishu entries (`feishuBotSdk.ts` long connection and `feishuBot.ts` HTTP server) route non-empty text through the planner-first resolver. Legacy exact commands such as `跑日报`, `运营学习`, and `复制商品 761` are no longer allowed to bypass the planner in those entries.
 
+The shared `handleBotIntent()` entry also rejects pre-parsed exact intents when an `agentPlannerProvider` is present. This protects tests, adapters, or future callers from accidentally calling the legacy deterministic branch while production is supposed to be planner-first. Those callers must pass the raw text as `{ type: 'unknown', text }` so the planner can choose a registered tool or ask for clarification.
+
 Write or high-risk selections from these old command phrases still stop at confirmation cards. The regression tests cover SDK and HTTP text events for those examples.
 
 ## Smoke Test
