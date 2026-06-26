@@ -3,6 +3,7 @@ import type { LlmIntentProposalProvider } from '../feishuBot/llmIntentProposal.j
 import type { LlmToolSelectionProvider } from '../feishuBot/llmProvider.js';
 import type { RentalPriceSkillClient } from '../feishuBot/rentalPrice.js';
 import type { ActivityAutomationSkillClient } from '../feishuBot/activityAutomation.js';
+import type { ClosedOrderRegistryPathsInput } from '../closedOrderFeedback/runtime.js';
 import { handleBotIntent } from '../feishuBot/tools.js';
 import type { BotIntent, BotResponse } from '../feishuBot/types.js';
 import type { AgentPlannerProvider } from './planner.js';
@@ -19,6 +20,8 @@ export interface AgentRuntimeConfig {
   agentPlannerProvider?: AgentPlannerProvider;
   rentalPriceClient?: RentalPriceSkillClient;
   activityAutomationClient?: ActivityAutomationSkillClient;
+  closedOrderFetchImpl?: typeof fetch;
+  closedOrderRegistryPaths?: ClosedOrderRegistryPathsInput;
 }
 
 export interface AgentRuntime {
@@ -33,6 +36,8 @@ export function createAgentRuntime(config: AgentRuntimeConfig = {}): AgentRuntim
     agentPlannerProvider: config.agentPlannerProvider,
     rentalPriceClient: config.rentalPriceClient,
     activityAutomationClient: config.activityAutomationClient,
+    closedOrderFetchImpl: config.closedOrderFetchImpl,
+    closedOrderRegistryPaths: config.closedOrderRegistryPaths,
   }));
 
   return {

@@ -6,6 +6,7 @@ import { parseAgentToolConfirmRequest, type AgentToolConfirmRequest } from '../a
 import { buildClarifiedMessage, parseAgentClarificationCustomSelection, parseAgentClarificationSelection } from '../agentRuntime/clarificationCard.js';
 import type { AgentPlannerProvider } from '../agentRuntime/planner.js';
 import { recordAgentLearningEvent, type AgentLearningEventInput } from '../agentLearning/store.js';
+import type { ClosedOrderRegistryPathsInput } from '../closedOrderFeedback/runtime.js';
 import { handleLinkRegistryGovernanceCardAction } from '../linkRegistry/governanceSession.js';
 import { handleLinkRegistryMaintenanceCardAction } from '../linkRegistry/maintenanceSession.js';
 import { handleOperationsLearningFeedback, handleOperationsLearningStop } from '../operationsLearningLoop/session.js';
@@ -134,6 +135,8 @@ export interface FeishuSdkBotConfig {
   logError?: (error: unknown, context: { messageId: string; phase: 'reply' | 'dispatch' }) => void;
   rentalPriceClient?: RentalPriceSkillClient;
   activityAutomationClient?: ActivityAutomationSkillClient;
+  closedOrderFetchImpl?: typeof fetch;
+  closedOrderRegistryPaths?: ClosedOrderRegistryPathsInput;
   activityCancellationAssistant?: ActivityCancellationAssistant;
   sdk?: FeishuSdkModule;
 }
@@ -434,12 +437,19 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
     agentPlannerProvider: config.agentPlannerProvider,
     rentalPriceClient: config.rentalPriceClient,
     activityAutomationClient: config.activityAutomationClient,
+    closedOrderFetchImpl: config.closedOrderFetchImpl,
+    closedOrderRegistryPaths: config.closedOrderRegistryPaths,
   }).dispatch;
   const logError = config.logError ?? ((error: unknown, context: { messageId: string; phase: 'reply' | 'dispatch' }) => console.error(`飞书SDK消息处理失败 ${context.phase} ${context.messageId}:`, error));
   const rentalPriceClient = config.rentalPriceClient ?? createRentalPriceSkillClient();
   const activityAutomationClient = config.activityAutomationClient ?? createActivityAutomationSkillClient();
   const activityCancellationAssistant = config.activityCancellationAssistant ?? createActivityCancellationAssistant();
   const outputDir = config.outputDir ?? 'output';
+  const agentToolExecutionOptions = {
+    rentalPriceClient,
+    closedOrderFetchImpl: config.closedOrderFetchImpl,
+    closedOrderRegistryPaths: config.closedOrderRegistryPaths,
+  };
 
   async function deliverContinuationResult(
     messageId: string,
@@ -448,7 +458,7 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
     titles: { success: string; failure: string },
     ok: boolean,
   ): Promise<void> {
-    const finalResponse = await continueAgentPlannerStepsAfterResponse(request, response, outputDir, { rentalPriceClient });
+    const finalResponse = await continueAgentPlannerStepsAfterResponse(request, response, outputDir, agentToolExecutionOptions);
     if (finalResponse.card) {
       await deliverCard(client, messageId, finalResponse.card, logError);
       return;
@@ -693,7 +703,7 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
           void (async () => {
             await deliverCard(client, messageId, statusCard('Agent 操作处理中', `工具 ${request.toolName} 已收到确认，正在执行。`, 'blue'), logError);
             try {
-              const response = await executeAgentToolRequestWithContinuation(request, config.outputDir ?? 'output', { rentalPriceClient });
+              const response = await executeAgentToolRequestWithContinuation(request, config.outputDir ?? 'output', agentToolExecutionOptions);
               setRentalActionStatus(claim.key, 'completed');
               recordLearning({
                 type: 'tool_completed',

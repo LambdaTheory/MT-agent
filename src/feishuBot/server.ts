@@ -7,6 +7,7 @@ import type { AgentPlannerProvider } from '../agentRuntime/planner.js';
 import { recordAgentLearningEvent } from '../agentLearning/store.js';
 import { handleLinkRegistryGovernanceCardAction } from '../linkRegistry/governanceSession.js';
 import { handleLinkRegistryMaintenanceCardAction } from '../linkRegistry/maintenanceSession.js';
+import type { ClosedOrderRegistryPathsInput } from '../closedOrderFeedback/runtime.js';
 import { replyFeishuMessageCard, replyFeishuMessageText, type FeishuAppSendResult, type FeishuCardPayload, type FeishuReplyConfig } from '../notify/feishuApp.js';
 import { handleOperationsLearningFeedback, handleOperationsLearningStop } from '../operationsLearningLoop/session.js';
 import { findLatestReportContext } from './reportStore.js';
@@ -58,6 +59,8 @@ export interface FeishuBotServerConfig {
   replyCard?: (config: FeishuReplyConfig, card: FeishuCardPayload) => Promise<FeishuAppSendResult>;
   rentalPriceClient?: RentalPriceSkillClient;
   activityAutomationClient?: ActivityAutomationSkillClient;
+  closedOrderFetchImpl?: typeof fetch;
+  closedOrderRegistryPaths?: ClosedOrderRegistryPathsInput;
   activityCancellationAssistant?: ActivityCancellationAssistant;
   llmIntentProposalProvider?: LlmIntentProposalProvider;
   agentPlannerProvider?: AgentPlannerProvider;
@@ -320,6 +323,8 @@ async function handleCardActionTrigger(
   ): Promise<BotResponse> {
     return continueAgentPlannerStepsAfterResponse(request, response, outputDir, {
       rentalPriceClient: config.rentalPriceClient,
+      closedOrderFetchImpl: config.closedOrderFetchImpl,
+      closedOrderRegistryPaths: config.closedOrderRegistryPaths,
     });
   }
 
@@ -503,6 +508,8 @@ async function handleCardActionTrigger(
     });
     const response = await executeAgentToolRequestWithContinuation(request, config.outputDir ?? 'output', {
       rentalPriceClient: config.rentalPriceClient,
+      closedOrderFetchImpl: config.closedOrderFetchImpl,
+      closedOrderRegistryPaths: config.closedOrderRegistryPaths,
     });
     setServerCardActionStatus(claim.key, 'completed');
     await recordAgentLearningEvent(outputDir, {
@@ -817,6 +824,8 @@ export function startFeishuBotServer(config: FeishuBotServerConfig) {
     handleIntent: config.handleIntent,
     rentalPriceClient: config.rentalPriceClient,
     activityAutomationClient: config.activityAutomationClient,
+    closedOrderFetchImpl: config.closedOrderFetchImpl,
+    closedOrderRegistryPaths: config.closedOrderRegistryPaths,
     llmIntentProposalProvider: config.llmIntentProposalProvider,
     agentPlannerProvider: config.agentPlannerProvider,
   });

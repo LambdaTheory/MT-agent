@@ -55,6 +55,65 @@ async function writeLearningContext(): Promise<string> {
   return dir;
 }
 
+async function writeRankingContinuationContext(): Promise<{
+  outputDir: string;
+  registryPaths: {
+    productIdMapPath: string;
+    productNameMapPath: string;
+    firstSeenPath: string;
+    lifecyclePath: string;
+    overridesPath: string;
+    artifactsDir: string;
+  };
+}> {
+  const rootDir = await mkdtemp(join(tmpdir(), 'mt-agent-http-continuation-registry-'));
+  const outputDir = join(rootDir, 'output');
+  const configDir = join(rootDir, 'config');
+  const stateDir = join(outputDir, 'state');
+  await mkdir(join(outputDir, '2026-06-11'), { recursive: true });
+  await mkdir(configDir, { recursive: true });
+  await mkdir(stateDir, { recursive: true });
+  await writeFile(join(outputDir, '2026-06-11', 'report-context.json'), JSON.stringify({
+    date: '2026-06-11',
+    summary: { '1d': metric, '7d': metric, '30d': metric },
+    conclusions: [],
+    rows: [
+      { productName: 'Alpha 低表现链接', platformProductId: 'p710', displayProductId: '端内ID 710', custodyDays: 10, periods: { '1d': metric, '7d': { ...metric, exposure: 100, publicVisits: 8, shippedOrders: 0, amount: 0 }, '30d': metric } },
+      { productName: 'Alpha 高表现链接', platformProductId: 'p711', displayProductId: '端内ID 711', custodyDays: 10, periods: { '1d': metric, '7d': { ...metric, exposure: 500, publicVisits: 80, shippedOrders: 1, amount: 199 }, '30d': metric } },
+    ],
+    recommendedActions: [],
+    lowExposure: [],
+    weakClick: [],
+    weakConversion: [],
+    highPotential: [],
+    newProductObservation: [],
+    lifecycleGovernance: [],
+    agentData: { removedLinks: [] },
+    emptySectionNotes: {},
+  }), 'utf8');
+  await writeFile(join(configDir, 'product-id-map.json'), JSON.stringify({ p710: '710', p711: '711' }), 'utf8');
+  await writeFile(join(configDir, 'product-name-map.json'), JSON.stringify({ '710': 'Alpha 低表现链接', '711': 'Alpha 高表现链接' }), 'utf8');
+  await writeFile(join(configDir, 'link-registry-overrides.json'), JSON.stringify({
+    version: 1,
+    entries: [
+      { internalProductId: '710', productName: 'Alpha 低表现链接', shortName: 'Alpha', aliases: ['alpha'], sameSkuGroupId: 'alpha-group', status: 'active' },
+      { internalProductId: '711', productName: 'Alpha 高表现链接', shortName: 'Alpha', aliases: ['alpha'], sameSkuGroupId: 'alpha-group', status: 'active' },
+    ],
+    sameSkuGroupAliasRules: [{ sameSkuGroupId: 'alpha-group', aliases: ['alpha'] }],
+  }), 'utf8');
+  return {
+    outputDir,
+    registryPaths: {
+      productIdMapPath: join(configDir, 'product-id-map.json'),
+      productNameMapPath: join(configDir, 'product-name-map.json'),
+      firstSeenPath: join(stateDir, 'goods-first-seen.json'),
+      lifecyclePath: join(stateDir, 'goods-link-lifecycle.json'),
+      overridesPath: join(configDir, 'link-registry-overrides.json'),
+      artifactsDir: outputDir,
+    },
+  };
+}
+
 const linkMaintenanceRegistry: LinkRegistryEntry[] = [
   {
     internalProductId: '701',
@@ -999,6 +1058,70 @@ describe('startFeishuBotServer', () => {
       expect(rentalPriceClient.calls).toEqual(['875']);
       expect(replies).toHaveLength(1);
       expect(JSON.stringify(await second.json())).toContain('已经执行完成');
+    } finally {
+      server.close();
+    }
+  });
+
+  it('passes registry paths into HTTP Agent continuation steps after a confirmed write', async () => {
+    const replies: Array<{ messageId: string; text: string }> = [];
+    const fixtures = await writeRankingContinuationContext();
+    const rentalPriceClient = fakeRentalPriceClient();
+    const server = startFeishuBotServer({
+      port: 0,
+      appId: 'app',
+      appSecret: 'secret',
+      outputDir: fixtures.outputDir,
+      rentalPriceClient,
+      closedOrderRegistryPaths: fixtures.registryPaths,
+      replyText: async ({ messageId }, text) => {
+        replies.push({ messageId, text });
+        return { sent: true, channel: 'app' };
+      },
+    });
+    try {
+      await new Promise<void>((resolve) => server.once('listening', resolve));
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+      const response = await fetch(`http://127.0.0.1:${address.port}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          header: { event_type: 'card.action.trigger' },
+          event: {
+            context: { open_message_id: 'mid-http-agent-continuation-registry' },
+            action: {
+              value: {
+                action: 'agent_tool_confirm',
+                confirmationKey: 'copy-then-rank-alpha',
+                request: {
+                  toolName: 'rental.copy',
+                  arguments: { productId: '875' },
+                  reason: '先复制，再查询 alpha 最佳链接',
+                  continuation: {
+                    goal: '先复制再查 alpha 最佳链接',
+                    reason: '确认后继续读链接档案',
+                    steps: [
+                      { toolName: 'product.rankBestSameSku', arguments: { query: 'alpha' }, reason: '查询 alpha 同款组最佳链接' },
+                    ],
+                    nextIndex: 1,
+                    totalSteps: 2,
+                    currentStepId: 'copy',
+                    currentStepIndex: 0,
+                    metadataStore: {},
+                  },
+                },
+              },
+            },
+          },
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(rentalPriceClient.calls).toEqual(['875']);
+      expect(replies).toHaveLength(1);
+      expect(replies[0].text).toContain('步骤 2/2：product.rankBestSameSku');
+      expect(replies[0].text).toContain('数据最好的 alpha 是：端内ID 711');
     } finally {
       server.close();
     }

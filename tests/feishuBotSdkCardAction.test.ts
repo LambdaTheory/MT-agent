@@ -146,6 +146,66 @@ async function writeContext(): Promise<string> {
   return dir;
 }
 
+async function writeRankingContinuationContext(): Promise<{
+  outputDir: string;
+  registryPaths: {
+    productIdMapPath: string;
+    productNameMapPath: string;
+    firstSeenPath: string;
+    lifecyclePath: string;
+    overridesPath: string;
+    artifactsDir: string;
+  };
+}> {
+  const rootDir = await mkdtemp(join(tmpdir(), 'mt-agent-sdk-continuation-registry-'));
+  const outputDir = join(rootDir, 'output');
+  const configDir = join(rootDir, 'config');
+  const stateDir = join(outputDir, 'state');
+  await mkdir(join(outputDir, '2026-06-11'), { recursive: true });
+  await mkdir(configDir, { recursive: true });
+  await mkdir(stateDir, { recursive: true });
+  await writeFile(join(outputDir, '2026-06-11', 'report-context.json'), JSON.stringify({
+    date: '2026-06-11',
+    summary: { '1d': metric, '7d': metric, '30d': metric },
+    conclusions: [],
+    rows: [
+      { productName: 'Alpha 低表现链接', platformProductId: 'p710', displayProductId: '端内ID 710', custodyDays: 10, periods: { '1d': metric, '7d': { ...metric, exposure: 100, publicVisits: 8, shippedOrders: 0, amount: 0 }, '30d': metric } },
+      { productName: 'Alpha 高表现链接', platformProductId: 'p711', displayProductId: '端内ID 711', custodyDays: 10, periods: { '1d': metric, '7d': { ...metric, exposure: 500, publicVisits: 80, shippedOrders: 1, amount: 199 }, '30d': metric } },
+    ],
+    lowExposure: [],
+    weakClick: [],
+    weakConversion: [],
+    highPotential: [],
+    newProductObservation: [],
+    lifecycleGovernance: [],
+    recommendedActions: [],
+    emptySectionNotes: {},
+    orderAnalysis: { runDate: '2026-06-11', pages: {} },
+    agentData: { removedLinks: [] },
+  }), 'utf8');
+  await writeFile(join(configDir, 'product-id-map.json'), JSON.stringify({ p710: '710', p711: '711' }), 'utf8');
+  await writeFile(join(configDir, 'product-name-map.json'), JSON.stringify({ '710': 'Alpha 低表现链接', '711': 'Alpha 高表现链接' }), 'utf8');
+  await writeFile(join(configDir, 'link-registry-overrides.json'), JSON.stringify({
+    version: 1,
+    entries: [
+      { internalProductId: '710', productName: 'Alpha 低表现链接', shortName: 'Alpha', aliases: ['alpha'], sameSkuGroupId: 'alpha-group', status: 'active' },
+      { internalProductId: '711', productName: 'Alpha 高表现链接', shortName: 'Alpha', aliases: ['alpha'], sameSkuGroupId: 'alpha-group', status: 'active' },
+    ],
+    sameSkuGroupAliasRules: [{ sameSkuGroupId: 'alpha-group', aliases: ['alpha'] }],
+  }), 'utf8');
+  return {
+    outputDir,
+    registryPaths: {
+      productIdMapPath: join(configDir, 'product-id-map.json'),
+      productNameMapPath: join(configDir, 'product-name-map.json'),
+      firstSeenPath: join(stateDir, 'goods-first-seen.json'),
+      lifecyclePath: join(stateDir, 'goods-link-lifecycle.json'),
+      overridesPath: join(configDir, 'link-registry-overrides.json'),
+      artifactsDir: outputDir,
+    },
+  };
+}
+
 async function writeLearningContext(): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), 'mt-agent-learning-card-action-'));
   await mkdir(join(dir, '2026-06-11'), { recursive: true });
@@ -391,6 +451,72 @@ describe('createFeishuSdkBot card.action.trigger', () => {
     }
 
     expect(calls).toEqual(['copy:761', 'delist:762']);
+  });
+
+  it('passes registry paths into SDK Agent continuation steps after a confirmed write', async () => {
+    const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
+    const sent: unknown[] = [];
+    const fixtures = await writeRankingContinuationContext();
+    const calls: string[] = [];
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run'); },
+      async execute() { throw new Error('execute should not run'); },
+      async copy(productId) {
+        calls.push(productId);
+        return { productId, ok: true, newProductId: '901', lines: ['copy: ok'] };
+      },
+      async delist() { throw new Error('delist should not run'); },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+    const bot = createFeishuSdkBot({
+      appId: 'app',
+      appSecret: 'x',
+      outputDir: fixtures.outputDir,
+      rentalPriceClient,
+      closedOrderRegistryPaths: fixtures.registryPaths,
+      sdk: fakeSdk(sent, registered),
+    });
+
+    bot.start();
+    const card = buildAgentToolConfirmCard({
+      toolName: 'rental.copy',
+      arguments: { productId: '875' },
+      reason: '先复制，再查询 alpha 最佳链接',
+      continuation: {
+        goal: '先复制再查 alpha 最佳链接',
+        reason: '确认后继续读链接档案',
+        steps: [
+          { toolName: 'product.rankBestSameSku', arguments: { query: 'alpha' }, reason: '查询 alpha 同款组最佳链接' },
+        ],
+        nextIndex: 1,
+        totalSteps: 2,
+        currentStepId: 'copy',
+        currentStepIndex: 0,
+        metadataStore: {},
+      },
+    });
+
+    await registered['card.action.trigger']({
+      event: {
+        context: { open_message_id: 'om-agent-tool-continuation-registry' },
+        operator: { open_id: 'ou_agent' },
+        action: {
+          tag: 'button',
+          name: 'agent_tool_confirm_submit',
+          behaviors: [{ type: 'callback', value: agentToolConfirmActionValue(card) }],
+        },
+      },
+    });
+
+    for (let attempt = 0; attempt < 100 && !sent.some((item) => JSON.stringify(item).includes('数据最好的 alpha 是：端内ID 711')); attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    expect(calls).toEqual(['875']);
+    expect(JSON.stringify(sent)).toContain('步骤 2/2：product.rankBestSameSku');
+    expect(JSON.stringify(sent)).toContain('数据最好的 alpha 是：端内ID 711');
   });
 
   it('continues a planner sequence after a dedicated new-link confirmation succeeds', async () => {
