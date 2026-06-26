@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createFeishuSdkBot, extractSdkTextMessage } from '../src/feishuBot/sdkClient.js';
+import type { AgentPlannerProvider } from '../src/agentRuntime/planner.js';
 import type { LlmToolSelectionProvider } from '../src/feishuBot/llmProvider.js';
 import type { FeishuBotIncomingTextMessage } from '../src/feishuBot/types.js';
 
@@ -36,7 +37,7 @@ async function writeContext(): Promise<string> {
     highPotential: [],
     newProductObservation: [],
     lifecycleGovernance: [],
-    recommendedActions: [],
+    recommendedActions: [{ identifier: '端内ID 565', action: '补曝光', reason: '曝光不足', priority: 'high' }],
     newProductPoolItems: [],
     orderAnalysis: { runDate: '2026-06-11', pages: {} },
     agentData: { removedLinks: [] },
@@ -232,5 +233,88 @@ describe('createFeishuSdkBot', () => {
     });
 
     expect(JSON.stringify(sent)).toContain('端内ID 565 iPhone 15');
+  });
+
+  it('routes legacy exact SDK text commands through the Agent planner when configured', async () => {
+    const outputDir = await writeContext();
+    const registered: Record<string, (data: unknown) => Promise<void>> = {};
+    const sent: unknown[] = [];
+    const plannerMessages: string[] = [];
+    const planner: AgentPlannerProvider = {
+      async proposePlan(request) {
+        plannerMessages.push(request.message);
+        expect(request.workflows).toEqual([]);
+        if (request.message === '跑日报') {
+          return JSON.stringify({
+            goal: '生成公域日报',
+            selectedTool: 'publicTraffic.runReport',
+            arguments: {},
+            confidence: 0.95,
+            reason: '用户要求跑日报，写操作必须确认',
+          });
+        }
+        if (request.message === '运营学习') {
+          return JSON.stringify({
+            goal: '开始运营学习测验',
+            selectedTool: 'operationsLearning.startQuiz',
+            arguments: {},
+            confidence: 0.93,
+            reason: '用户要求开始运营学习',
+          });
+        }
+        if (request.message === '复制商品 761') {
+          return JSON.stringify({
+            goal: '复制商品 761',
+            selectedTool: 'rental.copy',
+            arguments: { productId: '761' },
+            confidence: 0.96,
+            reason: '用户要求复制商品，必须确认',
+          });
+        }
+        throw new Error(`unexpected planner message: ${request.message}`);
+      },
+    };
+
+    class FakeClient {
+      im = { v1: { message: { reply: async (request: unknown) => sent.push(request) } } };
+    }
+
+    class FakeWSClient {
+      start() {
+        return undefined;
+      }
+    }
+
+    class FakeEventDispatcher {
+      register(handlers: Record<string, (data: unknown) => Promise<void>>) {
+        Object.assign(registered, handlers);
+        return this;
+      }
+    }
+
+    const bot = createFeishuSdkBot({
+      appId: 'app',
+      appSecret: 'secret',
+      outputDir,
+      agentPlannerProvider: planner,
+      sdk: { Client: FakeClient, WSClient: FakeWSClient, EventDispatcher: FakeEventDispatcher },
+    });
+
+    bot.start();
+    for (const [index, text] of ['跑日报', '运营学习', '复制商品 761'].entries()) {
+      await registered['im.message.receive_v1']({
+        message: { message_id: `mid-sdk-planner-first-${index}`, message_type: 'text', content: JSON.stringify({ text }) },
+      });
+    }
+
+    const contents = sent.map((item) => JSON.parse((item as { data: { content: string } }).data.content));
+    expect(plannerMessages).toEqual(['跑日报', '运营学习', '复制商品 761']);
+    expect(sent.map((item) => (item as { data: { msg_type: string } }).data.msg_type)).toEqual(['interactive', 'interactive', 'interactive']);
+    expect(JSON.stringify(contents[0])).toContain('publicTraffic.runReport');
+    expect(JSON.stringify(contents[0])).toContain('agent_tool_confirm');
+    expect(JSON.stringify(contents[0])).not.toContain('公域日报已生成');
+    expect(JSON.stringify(contents[1])).toContain('运营学习 loop 测验');
+    expect(JSON.stringify(contents[2])).toContain('rental.copy');
+    expect(JSON.stringify(contents[2])).toContain('agent_tool_confirm');
   });
 });

@@ -45,6 +45,12 @@ MT-agent LLM planner: enabled (provider=openai-compatible, model=your-model-name
 
 The line never prints the API key. If the planner is disabled, it prints the missing config keys.
 
+## Production Entry Boundary
+
+When the LLM planner is configured, both production Feishu entries (`feishuBotSdk.ts` long connection and `feishuBot.ts` HTTP server) route non-empty text through the planner-first resolver. Legacy exact commands such as `跑日报`, `运营学习`, and `复制商品 761` are no longer allowed to bypass the planner in those entries.
+
+Write or high-risk selections from these old command phrases still stop at confirmation cards. The regression tests cover SDK and HTTP text events for those examples.
+
 ## Smoke Test
 
 After PM2 restarts, send this in Feishu:

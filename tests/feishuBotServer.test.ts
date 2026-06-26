@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import type { AgentPlannerProvider } from '../src/agentRuntime/planner.js';
 import { extractTextMessage, startFeishuBotServer } from '../src/feishuBot/server.js';
 import type { ActivityAutomationSkillClient } from '../src/feishuBot/activityAutomation.js';
 import { openLinkRegistryGovernancePrompt } from '../src/linkRegistry/governanceSession.js';
@@ -336,6 +337,100 @@ describe('startFeishuBotServer', () => {
       expect(response.status).toBe(200);
       await replySent;
       expect(cards).toEqual([{ messageId: 'mid-http-card', card }]);
+    } finally {
+      server.close();
+    }
+  });
+
+  it('routes legacy exact HTTP text commands through the Agent planner when configured', async () => {
+    const outputDir = await writeLearningContext();
+    const cards: Array<{ messageId: string; card: Record<string, unknown> }> = [];
+    const texts: Array<{ messageId: string; text: string }> = [];
+    const plannerMessages: string[] = [];
+    let resolveCardsSent!: () => void;
+    const cardsSent = Promise.race([
+      new Promise<void>((resolve) => {
+        resolveCardsSent = resolve;
+      }),
+      new Promise<void>((_, reject) => setTimeout(() => reject(new Error('timed out waiting for planner-first cards')), 2000)),
+    ]);
+    const planner: AgentPlannerProvider = {
+      async proposePlan(request) {
+        plannerMessages.push(request.message);
+        expect(request.workflows).toEqual([]);
+        if (request.message === '跑日报') {
+          return JSON.stringify({
+            goal: '生成公域日报',
+            selectedTool: 'publicTraffic.runReport',
+            arguments: {},
+            confidence: 0.95,
+            reason: '用户要求跑日报，写操作必须确认',
+          });
+        }
+        if (request.message === '运营学习') {
+          return JSON.stringify({
+            goal: '开始运营学习测验',
+            selectedTool: 'operationsLearning.startQuiz',
+            arguments: {},
+            confidence: 0.93,
+            reason: '用户要求开始运营学习',
+          });
+        }
+        if (request.message === '复制商品 761') {
+          return JSON.stringify({
+            goal: '复制商品 761',
+            selectedTool: 'rental.copy',
+            arguments: { productId: '761' },
+            confidence: 0.96,
+            reason: '用户要求复制商品，必须确认',
+          });
+        }
+        throw new Error(`unexpected planner message: ${request.message}`);
+      },
+    };
+    const server = startFeishuBotServer({
+      port: 0,
+      appId: 'app',
+      appSecret: 'secret',
+      outputDir,
+      agentPlannerProvider: planner,
+      replyCard: async ({ messageId }, card) => {
+        cards.push({ messageId, card });
+        if (cards.length === 3) resolveCardsSent();
+        return { sent: true, channel: 'app' };
+      },
+      replyText: async ({ messageId }, text) => {
+        texts.push({ messageId, text });
+        return { sent: true, channel: 'app' };
+      },
+    });
+    try {
+      await new Promise<void>((resolve) => server.once('listening', resolve));
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+
+      for (const [index, text] of ['跑日报', '运营学习', '复制商品 761'].entries()) {
+        const response = await fetch(`http://127.0.0.1:${address.port}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ event: { message: { message_id: `mid-http-planner-first-${index}`, message_type: 'text', content: JSON.stringify({ text }) } } }),
+        });
+        expect(response.status).toBe(200);
+      }
+
+      await cardsSent;
+      expect(plannerMessages).toEqual(['跑日报', '运营学习', '复制商品 761']);
+      expect(texts).toEqual([]);
+      const cardByMessageId = new Map(cards.map((item) => [item.messageId, item.card]));
+      const runReportCard = JSON.stringify(cardByMessageId.get('mid-http-planner-first-0'));
+      const learningCard = JSON.stringify(cardByMessageId.get('mid-http-planner-first-1'));
+      const copyCard = JSON.stringify(cardByMessageId.get('mid-http-planner-first-2'));
+      expect(runReportCard).toContain('publicTraffic.runReport');
+      expect(runReportCard).toContain('agent_tool_confirm');
+      expect(runReportCard).not.toContain('公域日报已生成');
+      expect(learningCard).toContain('运营学习 loop 测验');
+      expect(copyCard).toContain('rental.copy');
+      expect(copyCard).toContain('agent_tool_confirm');
     } finally {
       server.close();
     }
