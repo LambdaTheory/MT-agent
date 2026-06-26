@@ -29,6 +29,7 @@
 - `rental.priceChange` 的 Agent-planned 确认卡现在带 planner 判断原因，便于后续排查误判。
 - 生产飞书入口配置 LLM planner 后，未知自然语言不会再回落到旧 deterministic 路由执行。
 - 共享 `handleBotIntent()` 在配置 `agentPlannerProvider` 时会拒绝旧 exact intent 直通，避免测试、适配器或后续入口绕开 planner-first 边界。
+- `agent:dry-run` 默认也走 planner-first 解析；旧 deterministic 结果只作为 `legacyIntent` 对照，或通过 `--legacy` 显式查看。
 
 ## 测试证据
 
@@ -47,6 +48,8 @@
   - planner-visible 工具与隐藏执行工具边界。
 - `tests/feishuBotRentalPriceAction.test.ts`
   - 规格删除执行链路与审计文件。
+- `tests/agentDryRunCliSource.test.ts`
+  - dry-run 默认 planner-first；`--legacy` 仅用于旧解析对照。
 
 ## 复盘
 
