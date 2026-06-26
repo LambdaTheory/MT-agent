@@ -24,6 +24,8 @@ describe('agent runtime tool registry', () => {
       'rental.tenancySet',
       'rental.specDiscover',
       'rental.specAddAndRefresh',
+      'rental.priceChange',
+      'rental.priceRollback',
       'rental.operationConfirmRequest',
     ]);
     expect(listAgentTools().map((tool) => tool.name)).not.toContain('rental.newLinkBatchPlan');
@@ -37,7 +39,7 @@ describe('agent runtime tool registry', () => {
 
     const tools = listAgentTools();
     tools.pop();
-    expect(listAgentTools()).toHaveLength(16);
+    expect(listAgentTools()).toHaveLength(18);
   });
 
   it('returns defensive copies of tool metadata', () => {
@@ -89,6 +91,8 @@ describe('agent runtime tool registry', () => {
     expect(findAgentTool('rental.tenancySet')).toMatchObject({ risk: 'high', requiresConfirmation: true });
     expect(findAgentTool('rental.specDiscover')).toMatchObject({ risk: 'high', requiresConfirmation: true });
     expect(findAgentTool('rental.specAddAndRefresh')).toMatchObject({ risk: 'high', requiresConfirmation: true });
+    expect(findAgentTool('rental.priceChange')).toMatchObject({ risk: 'high', requiresConfirmation: true });
+    expect(findAgentTool('rental.priceRollback')).toMatchObject({ risk: 'high', requiresConfirmation: true });
     expect(findAgentTool('rental.operationConfirmRequest')).toMatchObject({ risk: 'high', requiresConfirmation: true });
   });
 
@@ -122,6 +126,8 @@ describe('agent runtime tool registry', () => {
       'rental.tenancySet',
       'rental.specDiscover',
       'rental.specAddAndRefresh',
+      'rental.priceChange',
+      'rental.priceRollback',
     ]);
     expect(plannerToolNames).not.toContain('rental.operationConfirmRequest');
   });
@@ -148,6 +154,25 @@ describe('agent runtime tool registry', () => {
         itemTitle: { type: 'string' },
       },
       required: ['productId', 'itemTitle'],
+      additionalProperties: false,
+    });
+    expect(findAgentTool('rental.priceChange')?.inputSchema).toMatchObject({
+      properties: {
+        productId: { type: 'string' },
+        fields: { type: 'object' },
+        discount: { type: 'number' },
+        scope: { type: 'string' },
+      },
+      required: ['productId'],
+      additionalProperties: false,
+    });
+    expect(findAgentTool('rental.priceRollback')?.inputSchema).toMatchObject({
+      properties: {
+        productId: { type: 'string' },
+        taskId: { type: 'string' },
+        rollbackFile: { type: 'string' },
+      },
+      required: ['productId'],
       additionalProperties: false,
     });
     expect(findAgentTool('rental.operationConfirmRequest')?.inputSchema).toMatchObject({

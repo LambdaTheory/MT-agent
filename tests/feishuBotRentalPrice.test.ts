@@ -1,3 +1,6 @@
+import { copyFile, mkdir, mkdtemp, readFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { parseBotIntent } from '../src/feishuBot/intent.js';
 import { handleBotIntent } from '../src/feishuBot/tools.js';
@@ -78,6 +81,63 @@ describe('rental price Feishu integration', () => {
     expect(response.text).toContain('请确认商品 761 改价');
     expect(JSON.stringify(response.card)).toContain('确认改价');
     expect(JSON.stringify(response.card)).toContain('rental_price_confirm');
+  });
+
+  it('renders rental price audit details in the confirmation card when preview provides them', async () => {
+    const client = fakeClient();
+    client.preview = async (request) => {
+      client.previews.push(request);
+      return {
+        productId: request.productId,
+        fields: { rent1day: '22.00' },
+        lines: ['1天租金: 30.00 -> 22.00'],
+        warnings: ['变动 26.7% 超过阈值 20%'],
+        audit: {
+          taskId: 'task_1_abcd1234',
+          changesFile: 'C:/tmp/changes.json',
+          rollbackFile: 'C:/tmp/rollback.json',
+          previewFile: 'C:/tmp/preview.html',
+          diff: [{ field: 'rent1day', label: '1天租金', old: '30.00', new: '22.00', change: '-8.00', changePct: '-26.7%', issues: [{ level: 'warn', msg: '变动超过阈值' }] }],
+          hasErrors: false,
+          hasWarnings: true,
+        },
+      };
+    };
+
+    const response = await handleBotIntent(parseBotIntent('改价 商品761 1天22'), 'output', { rentalPriceClient: client });
+    const serialized = JSON.stringify(response.card);
+
+    expect(serialized).toContain('审计预览');
+    expect(serialized).toContain('task_1_abcd1234');
+    expect(serialized).toContain('回滚文件');
+    expect(serialized).toContain('确认改价');
+    expect(serialized).toContain('task_1_abcd1234');
+  });
+
+  it('blocks rental price confirmation when audit preview has rule errors', async () => {
+    const client = fakeClient();
+    client.preview = async (request) => {
+      client.previews.push(request);
+      return {
+        productId: request.productId,
+        fields: { rent1day: '0.00' },
+        lines: ['1天租金: 30.00 -> 0.00'],
+        warnings: ['低于最小价格'],
+        audit: {
+          changesFile: 'C:/tmp/changes.json',
+          diff: [{ field: 'rent1day', label: '1天租金', old: '30.00', new: '0.00', change: '-30.00', changePct: '-100.0%', issues: [{ level: 'error', msg: '低于最小价格' }] }],
+          hasErrors: true,
+          hasWarnings: false,
+        },
+      };
+    };
+
+    const response = await handleBotIntent(parseBotIntent('改价 商品761 1天0'), 'output', { rentalPriceClient: client });
+    const serialized = JSON.stringify(response.card);
+
+    expect(serialized).toContain('审计发现错误，已阻断执行');
+    expect(serialized).not.toContain('rental_price_confirm');
+    expect(serialized).not.toContain('确认改价');
   });
 
   it('parses copy product commands and returns a confirmation card without executing', async () => {
@@ -190,4 +250,76 @@ describe('rental price skill client copy diagnostics', () => {
     expect(result.lines).toContain('sideEffectPossible: true');
     expect(result.lines).toContain('retrySafe: false');
   });
+
+  it('generates diff audit, task log, and rollback artifact for price preview and updates the task after execution', async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), 'mt-agent-rental-price-audit-'));
+    await copyRentalPriceAuditScripts(rootDir);
+    const currentValues = { rent1day: '30.00', rent10day: '80.00' };
+    vi.stubGlobal('fetch', vi.fn(async (_input, init) => {
+      const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+      if (body.action === 'read') {
+        return new Response(JSON.stringify({
+          status: 'ok',
+          productId: '761',
+          values: currentValues,
+          specs: [],
+        }));
+      }
+      if (body.action === 'apply' && typeof body.changesFile === 'string') {
+        const changes = JSON.parse(await readFile(body.changesFile, 'utf8')) as Record<string, string>;
+        if (typeof changes.rent1day === 'string') currentValues.rent1day = changes.rent1day;
+        return new Response(JSON.stringify({ status: 'ok' }));
+      }
+      return new Response(JSON.stringify({ status: 'ok' }));
+    }));
+    const client = createRentalPriceSkillClient({ rootDir, daemonUrl: 'http://127.0.0.1:9223' });
+
+    const preview = await client.preview({ mode: 'explicit_fields', productId: '761', fields: { rent1day: '22.00' } });
+
+    expect(preview.audit?.taskId).toMatch(/^task_/);
+    expect(preview.audit?.changesFile).toContain('changes_');
+    expect(preview.audit?.rollbackFile).toContain('rollback_');
+    expect(preview.audit!.diff![0]).toMatchObject({ field: 'rent1day', old: '30.00', new: '22.00' });
+    expect(preview.lines.join('\n')).toContain('审计任务');
+    expect(await readFile(preview.audit!.rollbackFile!, 'utf8')).toContain('"rent1day": "30.00"');
+
+    const result = await client.execute({ mode: 'explicit_fields', productId: '761', fields: preview.fields, audit: preview.audit });
+
+    expect(result.ok).toBe(true);
+    expect(result.audit?.taskId).toBe(preview.audit?.taskId);
+    expect(result.lines.join('\n')).toContain(`auditTask: ${preview.audit?.taskId}`);
+    const task = JSON.parse(await readFile(join(rootDir, 'tasks', `${preview.audit?.taskId}.json`), 'utf8')) as { status: string; evidence: Array<{ type: string }> };
+    expect(task.status).toBe('completed');
+    expect(task.evidence.some((item) => item.type === 'verify_result')).toBe(true);
+
+    const rollback = await client.rollback!({ productId: '761', taskId: preview.audit!.taskId! });
+
+    expect(rollback.ok).toBe(true);
+    expect(rollback.lines.join('\n')).toContain(`auditTask: ${preview.audit?.taskId}`);
+    expect(currentValues.rent1day).toBe('30.00');
+    const rolledBackTask = JSON.parse(await readFile(join(rootDir, 'tasks', `${preview.audit?.taskId}.json`), 'utf8')) as { status: string; evidence: Array<{ type: string }> };
+    expect(rolledBackTask.status).toBe('rolled_back');
+    expect(rolledBackTask.evidence.some((item) => item.type === 'rollback_verify_result')).toBe(true);
+  });
 });
+
+async function copyRentalPriceAuditScripts(rootDir: string): Promise<void> {
+  const sourceRoot = new URL('../vendor/rental-price-agent/', import.meta.url);
+  const files = [
+    'scripts/diff-generator.js',
+    'scripts/task-store.js',
+    'scripts/lib/config-loader.js',
+    'scripts/lib/rule-checker.js',
+  ];
+  for (const file of files) {
+    const target = join(rootDir, file);
+    await mkdir(dirname(target), { recursive: true });
+    await copyFile(new URL(file, sourceRoot), target);
+  }
+  await writeAuditConfig(rootDir);
+}
+
+async function writeAuditConfig(rootDir: string): Promise<void> {
+  const { writeFile } = await import('node:fs/promises');
+  await writeFile(join(rootDir, 'config.json'), JSON.stringify({ rules: { minPrice: 1, maxPrice: 9999, maxChangePercent: 20 } }, null, 2), 'utf8');
+}

@@ -17,9 +17,12 @@ import type { FeishuSendTo } from './types.js';
 import { buildClosedOrderObservationCard } from './closedOrderObservationCard.js';
 import { formatIdLookupResult, lookupProductId } from './idLookup.js';
 import {
+  buildRentalPricePreviewCard,
   createRentalPriceSkillClient,
   executeRentalOperationConfirmRequest,
   parseRentalOperationConfirmRequest,
+  rentalPriceChangeRequestFromToolArguments,
+  rentalPriceRollbackRequestFromToolArguments,
   type RentalOperationConfirmRequest,
   type RentalPriceSkillClient,
 } from './rentalPrice.js';
@@ -214,6 +217,21 @@ export async function executeAgentToolRequest(
       if (!rentalRequest) throw new Error('租赁商品操作参数无效，请重新发起。');
       const result = await executeRentalOperationConfirmRequest(options.rentalPriceClient ?? createRentalPriceSkillClient(), rentalRequest);
       return { text: result.text };
+    }
+    case 'rental.priceChange': {
+      const rentalRequest = rentalPriceChangeRequestFromToolArguments(request.arguments);
+      if (!rentalRequest) throw new Error('租赁商品改价参数无效，请重新发起。');
+      const client = options.rentalPriceClient ?? createRentalPriceSkillClient();
+      const preview = await client.preview(rentalRequest);
+      return { text: `请确认商品 ${rentalRequest.productId} 改价`, card: buildRentalPricePreviewCard(preview) };
+    }
+    case 'rental.priceRollback': {
+      const rollbackRequest = rentalPriceRollbackRequestFromToolArguments(request.arguments);
+      if (!rollbackRequest) throw new Error('租赁商品改价回滚参数无效，请提供 productId，并提供 taskId 或 rollbackFile。');
+      const client = options.rentalPriceClient ?? createRentalPriceSkillClient();
+      if (!client.rollback) throw new Error('当前租赁改价客户端不支持回滚。');
+      const result = await client.rollback(rollbackRequest);
+      return { text: `${result.ok ? '改价回滚成功' : '改价回滚失败'}：商品 ${result.productId}\n${result.lines.join('\n')}` };
     }
     case 'closedOrder.syncFeedback': {
       const result = await syncClosedOrderFeedbackFromApi(

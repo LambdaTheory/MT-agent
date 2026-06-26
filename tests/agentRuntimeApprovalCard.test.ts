@@ -56,6 +56,14 @@ describe('agent runtime approval card', () => {
         reason: 'bad',
       },
     })).toBeNull();
+
+    expect(parseAgentToolConfirmRequest({
+      request: {
+        toolName: 'rental.priceChange',
+        arguments: { productId: '761', fields: 'rent1day=22' },
+        reason: 'bad',
+      },
+    })).toBeNull();
   });
 
   it('builds and parses a clarification card without executable tool payloads', () => {
