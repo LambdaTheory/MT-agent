@@ -322,6 +322,7 @@ async function writeRefreshActivityFixtures(): Promise<{
     summary: { '1d': summary, '7d': summary, '30d': summary },
     conclusions: [],
     rows: [
+      { productName: 'Pocket3 健康源', platformProductId: 'p900', displayProductId: '端内ID 900', custodyDays: 50, periods: { '1d': metric, '7d': metric, '30d': active30d } },
       { productName: 'Pocket3 零创单 A', platformProductId: 'p901', displayProductId: '端内ID 901', custodyDays: 35, periods: { '1d': metric, '7d': metric, '30d': zero30d } },
       { productName: 'Pocket3 零创单 B', platformProductId: 'p902', displayProductId: '端内ID 902', custodyDays: 40, periods: { '1d': metric, '7d': metric, '30d': zero30d } },
       { productName: 'SQ1 有创单', platformProductId: 'p903', displayProductId: '端内ID 903', custodyDays: 40, periods: { '1d': metric, '7d': metric, '30d': active30d } },
@@ -336,8 +337,9 @@ async function writeRefreshActivityFixtures(): Promise<{
     recommendedActions: [],
     emptySectionNotes: {},
   }), 'utf8');
-  await writeFile(join(configDir, 'product-id-map.json'), JSON.stringify({ p901: '901', p902: '902', p903: '903', p904: '904' }), 'utf8');
+  await writeFile(join(configDir, 'product-id-map.json'), JSON.stringify({ p900: '900', p901: '901', p902: '902', p903: '903', p904: '904' }), 'utf8');
   await writeFile(join(configDir, 'product-name-map.json'), JSON.stringify({
+    '900': 'Pocket3 健康源',
     '901': 'Pocket3 零创单 A',
     '902': 'Pocket3 零创单 B',
     '903': 'SQ1 有创单',
@@ -346,6 +348,7 @@ async function writeRefreshActivityFixtures(): Promise<{
   await writeFile(join(configDir, 'link-registry-overrides.json'), JSON.stringify({
     version: 1,
     entries: [
+      { internalProductId: '900', shortName: 'DJI Pocket 3', sameSkuGroupId: 'dji-pocket-3', categoryName: '云台相机', status: 'active' },
       { internalProductId: '901', shortName: 'DJI Pocket 3', sameSkuGroupId: 'dji-pocket-3', categoryName: '云台相机', status: 'active' },
       { internalProductId: '902', shortName: 'DJI Pocket 3', sameSkuGroupId: 'dji-pocket-3', categoryName: '云台相机', status: 'active' },
       { internalProductId: '903', shortName: 'SQ1', sameSkuGroupId: 'instax-sq1', categoryName: '拍立得', status: 'active' },
@@ -827,7 +830,7 @@ describe('handleBotIntent', () => {
   数据最好的SQ1是哪条？按这个ID复制5条新链
   数据最好的wide300、wide400分别复制5条新链
   x300u 含手柄的sku都得下掉 — 先按规格项生成删除预览和确认卡
-  刷新活跃度 — 先生成近30天零创单链接下架与补链计划，不直接执行
+  刷新活跃度 — 先生成近30天零创单链接下架与补链计划，确认后执行
 
 🎓 运营学习
   运营学习 — 开始运营学习测验
@@ -1190,7 +1193,7 @@ describe('handleBotIntent', () => {
       async proposePlan(request) {
         expect(request.message).toBe('帮我看看苹果手机');
         expect(request.tools.map((tool) => tool.name)).toContain('product.query');
-        expect(request.workflows.map((workflow) => workflow.name)).toContain('rental.newLinkBatch');
+        expect(request.workflows).toEqual([]);
         return JSON.stringify({
           goal: '查询商品表现',
           selectedTool: 'product.query',
@@ -1684,7 +1687,7 @@ describe('handleBotIntent', () => {
     expect(response.card).toBeUndefined();
   });
 
-  it('lets the Agent planner generate an activity refresh plan without executing writes', async () => {
+  it('lets the Agent planner generate an activity refresh plan and execution confirmation without executing writes', async () => {
     const { outputDir, registryPaths } = await writeRefreshActivityFixtures();
     const planner: AgentPlannerProvider = {
       async proposePlan(request) {
@@ -1715,13 +1718,60 @@ describe('handleBotIntent', () => {
       closedOrderRegistryPaths: registryPaths,
     });
 
-    expect(response.text).toContain('活跃度刷新计划（仅预览，不执行）：2026-06-11');
+    expect(response.text).toContain('活跃度刷新计划：2026-06-11');
     expect(response.text).toContain('待下架候选：2 条');
     expect(response.text).toContain('DJI Pocket 3｜云台相机｜dji-pocket-3：待下架 2 条，建议补回 2 条新链');
+    expect(response.text).toContain('补链源 900 Pocket3 健康源');
     expect(response.text).toContain('端内ID 901、902');
     expect(response.text).toContain('30日访问页缺失 1 条');
-    expect(response.text).toContain('真正下架和补链仍需要按商品/同款组生成确认卡');
-    expect(response.card).toBeUndefined();
+    expect(response.text).toContain('已生成执行确认卡；确认前不会下架或补链');
+    expect(response.card).toBeDefined();
+    const request = readAgentToolConfirmRequestFromCard(response.card);
+    expect(request.toolName).toBe('operations.refreshActivityExecute');
+    expect(request.arguments).toMatchObject({
+      date: '2026-06-11',
+      delistProductIds: ['901', '902'],
+      newLinkItems: [{ keyword: 'DJI Pocket 3', count: 2, sourceProductId: '900', sourceProductName: 'Pocket3 健康源', sameSkuGroupId: 'dji-pocket-3' }],
+    });
+  });
+
+  it('executes a confirmed activity refresh plan with audit output', async () => {
+    const { outputDir, registryPaths } = await writeRefreshActivityFixtures();
+    const plan = await executeAgentToolRequest(
+      { toolName: 'operations.refreshActivityPlan', arguments: {}, reason: '测试生成活跃度刷新计划' },
+      outputDir,
+      { closedOrderRegistryPaths: registryPaths },
+    );
+    const request = readAgentToolConfirmRequestFromCard(plan.card);
+    const calls: string[] = [];
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run'); },
+      async execute() { throw new Error('execute should not run'); },
+      async copy(productId) {
+        calls.push(`copy:${productId}`);
+        return { productId, ok: true, newProductId: `new-${calls.length}`, lines: ['copy: ok'] };
+      },
+      async delist(productId) {
+        calls.push(`delist:${productId}`);
+        return { productId, ok: true, lines: ['delist: ok'] };
+      },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+
+    const response = await executeAgentToolRequest(request, outputDir, { rentalPriceClient });
+
+    expect(calls).toEqual(['delist:901', 'delist:902', 'copy:900', 'copy:900']);
+    expect(response.text).toContain('活跃度刷新执行完成：2026-06-11');
+    expect(response.text).toContain('下架：成功 2/2');
+    expect(response.text).toContain('补链：成功，完成 2/2 条');
+    expect(response.text).toContain('审计文件：');
+    const auditPath = response.metadata?.auditPath;
+    expect(typeof auditPath).toBe('string');
+    const audit = JSON.parse(await readFile(auditPath as string, 'utf8')) as { ok?: boolean; request?: { delistProductIds?: string[] } };
+    expect(audit.ok).toBe(true);
+    expect(audit.request?.delistProductIds).toEqual(['901', '902']);
   });
 
   it('passes silent learning hints into the generic agent planner', async () => {
@@ -1858,7 +1908,8 @@ describe('handleBotIntent', () => {
     const { outputDir, registryPaths } = await writeNewLinkWorkflowContext();
     const planner: AgentPlannerProvider = {
       async proposePlan(request) {
-        expect(request.workflows.map((workflow) => workflow.name)).toContain('rental.newLinkBatch');
+        expect(request.workflows).toEqual([]);
+        expect(request.tools.map((tool) => tool.name)).toContain('rental.newLinkBatchPlan');
         return JSON.stringify({
           goal: '铺设 pocket3 新链',
           selectedWorkflow: 'rental.newLinkBatch',

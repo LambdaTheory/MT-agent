@@ -2,9 +2,13 @@
 
 This project uses an OpenAI-compatible `/chat/completions` provider for Feishu natural-language agent planning.
 
-The LLM only selects a registered tool or workflow and extracts arguments. Local code still performs data lookup, approval card generation, and execution. Write or high-risk operations must pass through a Feishu confirmation card before any side effect.
+The LLM selects registered tools, or composes a multi-step plan from registered tools, and extracts arguments. Local code still performs data lookup, approval card generation, and execution. Write or high-risk operations must pass through a Feishu confirmation card before any side effect.
+
+Composite workflows remain in code only as a legacy compatibility path. Normal Feishu planner requests intentionally expose `workflows: []`, so new behavior should be expressed as one tool call or a `steps` plan rather than `selectedWorkflow`.
 
 Multi-step plans may pass metadata from earlier steps into later steps with placeholders such as `${rank.bestProductId}`. When a normal write/high-risk step is reached, the Agent confirmation card stores the remaining plan as a continuation. After the user confirms, the bot executes that one write step and then resumes the remaining steps. If another write/high-risk step appears later, it stops again and asks for a fresh confirmation.
+
+Plan tools can generate their own dedicated confirmation cards. For example, `operations.refreshActivityPlan` first builds the zero-order-link delist and replenishment plan. Only when the candidates, same-SKU groups, safe copy sources, and count limits all pass does it generate a hidden `operations.refreshActivityExecute` confirmation card. That execute tool is not exposed for direct planner selection; confirmation is required, and execution writes an audit file.
 
 ## Required Env
 

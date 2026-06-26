@@ -1,6 +1,5 @@
 import type { LlmProvider } from '../llm/provider.js';
 import { listAgentPlannerTools, type AgentPlannerProvider, type AgentPlannerRequest } from './planner.js';
-import { listAgentWorkflows } from './workflowRegistry.js';
 
 export type AgentPlanInput = Omit<AgentPlannerRequest, 'tools' | 'workflows'>;
 
@@ -22,7 +21,7 @@ export function createAgentPlannerProvider(provider: LlmProvider): AgentPlannerP
       const plannerRequest: AgentPlannerRequest = {
         ...request,
         tools: listAgentPlannerTools(),
-        workflows: listAgentWorkflows(),
+        workflows: [],
       };
       const result = await provider.generateJson({
         temperature: 0,
@@ -30,18 +29,19 @@ export function createAgentPlannerProvider(provider: LlmProvider): AgentPlannerP
           {
             role: 'system',
             content: [
-              'You are an operations agent planner. Select exactly one registered tool or workflow for the user message.',
-              'Never invent tool/workflow names or arguments.',
+              'You are an operations agent planner. Select exactly one registered tool, or return a multi-step plan composed only of registered tools.',
+              'Never invent tool names or arguments.',
               'For atomic actions, return only a bare JSON object with goal, selectedTool, arguments, confidence, reason, and optional requiresConfirmation.',
-              'For composite flows, return selectedWorkflow instead of selectedTool; local deterministic code will build the plan and execute only after confirmation.',
-              'For multi-step goals that can be completed by several registered tools, return only a bare JSON object with goal, steps, confidence, and reason. Each step must contain toolName, arguments, and reason; it may include a stable id such as "rank".',
+              'For composite goals, return only a bare JSON object with goal, steps, confidence, and reason. Each step must contain toolName, arguments, and reason; it may include a stable id such as "rank".',
               'Later steps may reference metadata from earlier steps with string placeholders such as "${rank.bestProductId}", "${rank.best.internalProductId}", or "${steps.rank.sameSkuGroupId}". Only reference prior step ids.',
               'For "find the best link/product, then copy/create/fill new links", use product.rankBestSameSku first with id "rank", then rental.newLinkBatchPlan with sourceProductId "${rank.bestProductId}". This still only creates a confirmation card before copy execution.',
-              'If a later step depends on a previous result that cannot be expressed with these placeholders, ask for clarification or use a registered workflow.',
-              'If the goal, tool, workflow, or required arguments are unclear, return only a bare JSON object with goal, needsClarification:true, originalMessage, question, options, confidence, and reason.',
+              'For activity refresh goals, use operations.refreshActivityPlan; it will generate a safe execution confirmation card only when candidates, same-SKU groups, and copy sources are valid.',
+              'Do not return selectedWorkflow unless the input explicitly includes a non-empty workflows list; normal Feishu planning intentionally exposes workflows as an empty legacy list.',
+              'If a later step depends on a previous result that cannot be expressed with these placeholders, ask for clarification.',
+              'If the goal, tool, or required arguments are unclear, return only a bare JSON object with goal, needsClarification:true, originalMessage, question, options, confidence, and reason.',
               'Clarification options must be natural-language restatements that can be planned again, each with label, message, and optional description; provide 2 to 4 options.',
               'When learningHints are present and relevant, prefer the historically selected restatement, but still validate required arguments and never skip confirmation for write or high-risk actions.',
-              'For write or high-risk tools/workflows, set requiresConfirmation to true. Do not claim execution has happened.',
+              'For write or high-risk tools, set requiresConfirmation to true. Do not claim execution has happened.',
               `Current date in Asia/Shanghai is ${currentDate}; when the user asks for a report by date or a relative date such as today/yesterday, pass date as YYYY-MM-DD when the selected tool supports a date argument.`,
             ].join(' '),
           },

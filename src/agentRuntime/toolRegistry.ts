@@ -67,6 +67,16 @@ const refreshActivityPlanArgumentsSchema = {
   },
   additionalProperties: false,
 };
+const refreshActivityExecuteArgumentsSchema = {
+  type: 'object',
+  properties: {
+    date: { type: 'string' },
+    delistProductIds: { type: 'array' },
+    newLinkItems: { type: 'array' },
+  },
+  required: ['date', 'delistProductIds', 'newLinkItems'],
+  additionalProperties: false,
+};
 const rentalPriceChangeArgumentsSchema = {
   type: 'object',
   properties: {
@@ -286,10 +296,18 @@ const agentTools: AgentToolDefinition[] = [
   },
   {
     name: 'operations.refreshActivityPlan',
-    description: '按最新或指定日期公域日报筛选近 30 天创单为 0 的 active 链接，按链接档案汇总待下架链接和补链建议。只生成计划，不直接下架或补链。',
+    description: '按最新或指定日期公域日报筛选近 30 天创单为 0 的 active 链接，按链接档案汇总待下架链接和补链建议；命中安全源商品后生成执行确认卡，确认前不下架、不补链。',
     risk: 'read',
     requiresConfirmation: false,
     inputSchema: refreshActivityPlanArgumentsSchema,
+  },
+  {
+    name: 'operations.refreshActivityExecute',
+    description: '确认后执行活跃度刷新计划：批量下架近 30 天零创单链接，并按同款组补回新链',
+    risk: 'high',
+    requiresConfirmation: true,
+    plannerVisible: false,
+    inputSchema: refreshActivityExecuteArgumentsSchema,
   },
   {
     name: 'closedOrder.syncFeedback',

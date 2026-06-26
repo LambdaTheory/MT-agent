@@ -34,6 +34,7 @@ describe('agent runtime tool registry', () => {
       'publicTraffic.pushLatestReportToGroup',
       'publicTraffic.refreshDashboard',
       'operations.refreshActivityPlan',
+      'operations.refreshActivityExecute',
       'closedOrder.syncFeedback',
       'closedOrder.runObservationReport',
       'rental.copy',
@@ -59,7 +60,7 @@ describe('agent runtime tool registry', () => {
 
     const tools = listAgentTools();
     tools.pop();
-    expect(listAgentTools()).toHaveLength(38);
+    expect(listAgentTools()).toHaveLength(39);
   });
 
   it('returns defensive copies of tool metadata', () => {
@@ -121,6 +122,7 @@ describe('agent runtime tool registry', () => {
     expect(findAgentTool('publicTraffic.pushLatestReportToGroup')).toMatchObject({ risk: 'write', requiresConfirmation: true });
     expect(findAgentTool('publicTraffic.refreshDashboard')).toMatchObject({ risk: 'write', requiresConfirmation: true });
     expect(findAgentTool('operations.refreshActivityPlan')).toMatchObject({ risk: 'read', requiresConfirmation: false });
+    expect(findAgentTool('operations.refreshActivityExecute')).toMatchObject({ risk: 'high', requiresConfirmation: true });
     expect(findAgentTool('closedOrder.syncFeedback')).toMatchObject({ risk: 'write', requiresConfirmation: true });
     expect(findAgentTool('closedOrder.runObservationReport')).toMatchObject({ risk: 'write', requiresConfirmation: true });
     expect(findAgentTool('rental.copy')).toMatchObject({ risk: 'high', requiresConfirmation: true });
@@ -212,6 +214,7 @@ describe('agent runtime tool registry', () => {
       'rental.priceRollback',
     ]);
     expect(plannerToolNames).not.toContain('rental.operationConfirmRequest');
+    expect(plannerToolNames).not.toContain('operations.refreshActivityExecute');
   });
 
   it('describes rental operation metadata per executable action', () => {
@@ -251,6 +254,15 @@ describe('agent runtime tool registry', () => {
         date: { type: 'string' },
         maxCandidates: { type: 'number' },
       },
+      additionalProperties: false,
+    });
+    expect(findAgentTool('operations.refreshActivityExecute')?.inputSchema).toMatchObject({
+      properties: {
+        date: { type: 'string' },
+        delistProductIds: { type: 'array' },
+        newLinkItems: { type: 'array' },
+      },
+      required: ['date', 'delistProductIds', 'newLinkItems'],
       additionalProperties: false,
     });
     expect(findAgentTool('rental.priceChange')?.inputSchema).toMatchObject({

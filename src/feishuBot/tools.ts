@@ -3,7 +3,6 @@ import { buildAgentToolConfirmCard } from '../agentRuntime/approvalCard.js';
 import { buildAgentClarificationCard } from '../agentRuntime/clarificationCard.js';
 import { listAgentPlannerTools, validateAgentMultiStepPlannerProposal, validateAgentPlannerClarificationProposal, validateAgentPlannerProposal, type AgentPlannerProvider } from '../agentRuntime/planner.js';
 import { validateAgentWorkflowPlannerProposal } from '../agentRuntime/workflowPlanner.js';
-import { listAgentWorkflows } from '../agentRuntime/workflowRegistry.js';
 import { buildAgentLearningPlannerHints, summarizeAgentLearning } from '../agentLearning/store.js';
 import { parseAgentDataIntent } from '../agentData/intent.js';
 import { loadClosedOrderRegistryContext, type ClosedOrderRegistryPathsInput } from '../closedOrderFeedback/runtime.js';
@@ -88,7 +87,7 @@ const HELP_TEXT = `📋 查询与分析
   数据最好的SQ1是哪条？按这个ID复制5条新链
   数据最好的wide300、wide400分别复制5条新链
   x300u 含手柄的sku都得下掉 — 先按规格项生成删除预览和确认卡
-  刷新活跃度 — 先生成近30天零创单链接下架与补链计划，不直接执行
+  刷新活跃度 — 先生成近30天零创单链接下架与补链计划，确认后执行
 
 🎓 运营学习
   运营学习 — 开始运营学习测验
@@ -326,7 +325,7 @@ async function agentPlannerResponse(
   const rawProposal = await options.agentPlannerProvider.proposePlan({
     message,
     tools: listAgentPlannerTools(),
-    workflows: listAgentWorkflows(),
+    workflows: [],
     ...(learningHints.length ? { learningHints } : {}),
   });
   const parsed = validateAgentPlannerProposal(rawProposal);

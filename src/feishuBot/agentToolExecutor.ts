@@ -1,4 +1,6 @@
+import { mkdir, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
+import { buildAgentToolConfirmCard } from '../agentRuntime/approvalCard.js';
 import { runPublicTrafficReportCli } from '../cli/publicTrafficReport.js';
 import type { AgentToolConfirmRequest } from '../agentRuntime/approvalCard.js';
 import { loadConfig } from '../config/loadConfig.js';
@@ -17,9 +19,15 @@ import {
   buildNewLinkBatchConfirmCard,
   buildNewLinkBatchMultiConfirmCard,
   buildNewLinkBatchPlan,
+  executeNewLinkBatchConfirmRequest,
+  executeNewLinkBatchMultiConfirmRequest,
   formatNewLinkBatchPlan,
   formatNewLinkBatchMultiPlan,
+  MAX_NEW_LINK_BATCH_COUNT,
+  NEW_LINK_BATCH_CONFIRMATION_VERSION,
+  NEW_LINK_BATCH_WORKFLOW_NAME,
   readNewLinkBatchWorkflowRequests,
+  type NewLinkBatchConfirmRequest,
 } from '../newLinkWorkflow/batch.js';
 import { sendFeishuCard } from '../notify/feishu.js';
 import { summarizeOperationsLearningHistory, summarizeOperationsLearningSession } from '../operationsLearningLoop/session.js';
@@ -72,7 +80,8 @@ let publicTrafficReportRunning = false;
 const RENTAL_PRICE_SNAPSHOT_MAX_PRODUCTS = 20;
 const RENTAL_SPEC_REMOVE_PLAN_MAX_PRODUCTS = 12;
 const RENTAL_SPEC_REMOVE_PLAN_MAX_ITEMS = 20;
-const REFRESH_ACTIVITY_DEFAULT_MAX_CANDIDATES = 30;
+const REFRESH_ACTIVITY_DEFAULT_MAX_CANDIDATES = 20;
+const REFRESH_ACTIVITY_EXECUTION_MAX_PRODUCTS = 20;
 const RENT_FIELD_ORDER: Array<{ field: string; label: string }> = [
   { field: 'rent1day', label: '1天' },
   { field: 'rent2day', label: '2天' },
@@ -487,6 +496,159 @@ function groupRefreshActivityCandidates(candidates: Array<{ entry: LinkRegistryE
   return [...groups.values()].sort((left, right) => right.items.length - left.items.length || left.label.localeCompare(right.label, 'zh-CN'));
 }
 
+interface RefreshActivityNewLinkItem {
+  keyword: string;
+  count: number;
+  sourceProductId: string;
+  sourceProductName: string;
+  sameSkuGroupId?: string;
+}
+
+interface RefreshActivityExecuteRequest {
+  date: string;
+  delistProductIds: string[];
+  newLinkItems: RefreshActivityNewLinkItem[];
+}
+
+function refreshActivitySourceScore(row: PublicTrafficProductDataRow): number {
+  const one = row.periods['1d'];
+  const seven = row.periods['7d'];
+  const thirty = row.periods['30d'];
+  return (
+    seven.shippedOrders * 1000
+    + seven.amount * 2
+    + seven.publicVisits * 5
+    + one.shippedOrders * 300
+    + one.amount * 3
+    + thirty.shippedOrders * 100
+    + thirty.createdOrders * 50
+    + Math.min(seven.exposure, 5000) * 0.1
+  );
+}
+
+function buildRefreshActivityNewLinkItems(
+  groups: ReturnType<typeof groupRefreshActivityCandidates>,
+  context: PublicTrafficDataReportContext,
+  registryEntries: LinkRegistryEntry[],
+  delistProductIds: Set<string>,
+): { items: RefreshActivityNewLinkItem[]; blockers: string[] } {
+  const items: RefreshActivityNewLinkItem[] = [];
+  const blockers: string[] = [];
+
+  for (const group of groups) {
+    if (group.sameSkuGroupId === '未分组') {
+      blockers.push(`${group.label} 没有同款组，无法安全选择补链源商品。`);
+      continue;
+    }
+
+    const source = registryEntries
+      .filter((entry) =>
+        entry.status === 'active'
+        && entry.sameSkuGroupId?.trim() === group.sameSkuGroupId
+        && !delistProductIds.has(entry.internalProductId))
+      .map((entry) => {
+        const row = findReportRowForEntry(context, entry);
+        return row ? { entry, row, score: refreshActivitySourceScore(row) } : null;
+      })
+      .filter((candidate): candidate is { entry: LinkRegistryEntry; row: PublicTrafficProductDataRow; score: number } => Boolean(candidate && candidate.score > 0))
+      .sort((left, right) => right.score - left.score || Number(left.entry.internalProductId) - Number(right.entry.internalProductId))[0];
+
+    if (!source) {
+      blockers.push(`${group.label}｜${group.sameSkuGroupId} 没有可用的安全源商品；不会从即将下架的链接复制新链。`);
+      continue;
+    }
+
+    items.push({
+      keyword: group.label,
+      count: group.items.length,
+      sourceProductId: source.entry.internalProductId,
+      sourceProductName: source.row.productName || source.entry.productName || source.entry.shortName || source.entry.internalProductId,
+      sameSkuGroupId: group.sameSkuGroupId,
+    });
+  }
+
+  const totalNewLinks = items.reduce((sum, item) => sum + item.count, 0);
+  if (totalNewLinks > MAX_NEW_LINK_BATCH_COUNT) {
+    blockers.push(`补链总数 ${totalNewLinks} 条超过单次复制上限 ${MAX_NEW_LINK_BATCH_COUNT} 条，请缩小候选数量后再执行。`);
+  }
+
+  return { items, blockers };
+}
+
+function buildRefreshActivityExecuteRequest(
+  date: string,
+  groups: ReturnType<typeof groupRefreshActivityCandidates>,
+  context: PublicTrafficDataReportContext,
+  registryEntries: LinkRegistryEntry[],
+): { request?: RefreshActivityExecuteRequest; blockers: string[] } {
+  const delistProductIds = groups.flatMap((group) => group.items.map((item) => item.entry.internalProductId));
+  const blockers: string[] = [];
+  if (delistProductIds.length === 0) blockers.push('没有待下架候选。');
+  if (delistProductIds.length > REFRESH_ACTIVITY_EXECUTION_MAX_PRODUCTS) {
+    blockers.push(`待下架候选 ${delistProductIds.length} 条超过单次执行上限 ${REFRESH_ACTIVITY_EXECUTION_MAX_PRODUCTS} 条，请缩小候选数量后再执行。`);
+  }
+
+  const newLinks = buildRefreshActivityNewLinkItems(groups, context, registryEntries, new Set(delistProductIds));
+  blockers.push(...newLinks.blockers);
+
+  if (blockers.length > 0) return { blockers };
+  return {
+    request: { date, delistProductIds, newLinkItems: newLinks.items },
+    blockers,
+  };
+}
+
+function readStringArray(value: unknown, fieldName: string, maxItems: number): string[] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > maxItems) {
+    throw new Error(`${fieldName} must be a non-empty array up to ${maxItems} items`);
+  }
+  const values = value.map((item) => requireProductId(item, fieldName));
+  if (new Set(values).size !== values.length) throw new Error(`${fieldName} contains duplicate product ids`);
+  return values;
+}
+
+function readRefreshActivityNewLinkItems(value: unknown): RefreshActivityNewLinkItem[] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > REFRESH_ACTIVITY_EXECUTION_MAX_PRODUCTS) {
+    throw new Error(`newLinkItems must be a non-empty array up to ${REFRESH_ACTIVITY_EXECUTION_MAX_PRODUCTS} items`);
+  }
+  const items = value.map((item) => {
+    if (typeof item !== 'object' || item === null || Array.isArray(item)) throw new Error('newLinkItems item must be an object');
+    const record = item as Record<string, unknown>;
+    const keyword = requireString(record.keyword, 'keyword');
+    const sourceProductId = requireProductId(record.sourceProductId, 'sourceProductId');
+    const sourceProductName = requireString(record.sourceProductName, 'sourceProductName');
+    const count = typeof record.count === 'number' ? record.count : Number(record.count);
+    if (!Number.isInteger(count) || count < 1 || count > MAX_NEW_LINK_BATCH_COUNT) throw new Error('newLinkItems count must be a positive integer within copy limit');
+    const sameSkuGroupId = readString(record.sameSkuGroupId) ?? undefined;
+    return { keyword, count, sourceProductId, sourceProductName, ...(sameSkuGroupId ? { sameSkuGroupId } : {}) };
+  });
+  const totalCount = items.reduce((sum, item) => sum + item.count, 0);
+  if (totalCount > MAX_NEW_LINK_BATCH_COUNT) throw new Error(`new link total count must be <= ${MAX_NEW_LINK_BATCH_COUNT}`);
+  return items;
+}
+
+function readRefreshActivityExecuteRequest(args: Record<string, unknown>): RefreshActivityExecuteRequest {
+  const date = requireString(args.date, 'date');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error('date must be YYYY-MM-DD');
+  return {
+    date,
+    delistProductIds: readStringArray(args.delistProductIds, 'delistProductIds', REFRESH_ACTIVITY_EXECUTION_MAX_PRODUCTS),
+    newLinkItems: readRefreshActivityNewLinkItems(args.newLinkItems),
+  };
+}
+
+function timestampToken(): string {
+  return new Date().toISOString().replace(/[-:.TZ]/g, '');
+}
+
+async function writeRefreshActivityAudit(outputDir: string, value: unknown): Promise<string> {
+  const dir = join(outputDir, 'agent-audit', 'refresh-activity');
+  await mkdir(dir, { recursive: true });
+  const path = join(dir, `refresh-activity-${timestampToken()}.json`);
+  await writeFile(path, JSON.stringify(value, null, 2), 'utf8');
+  return path;
+}
+
 async function refreshActivityPlanResponse(outputDir: string, args: Record<string, unknown>, options: AgentToolExecutionOptions): Promise<BotResponse> {
   const date = readOptionalDate(args.date);
   const report = await findReportContextForTool(outputDir, date);
@@ -522,14 +684,27 @@ async function refreshActivityPlanResponse(outputDir: string, args: Record<strin
       || Number(left.entry.internalProductId) - Number(right.entry.internalProductId))
     .slice(0, maxCandidates);
   const shownGroups = groupRefreshActivityCandidates(shownCandidates);
+  const execution = buildRefreshActivityExecuteRequest(report.context.date, shownGroups, report.context, registryContext.registry);
   const groupLines = shownGroups.slice(0, 12).map((group, index) => {
     const ids = group.items.map((item) => item.entry.internalProductId).join('、');
-    return `${index + 1}. ${group.label}｜${group.category}｜${group.sameSkuGroupId}：待下架 ${group.items.length} 条，建议补回 ${group.items.length} 条新链；端内ID ${ids}`;
+    const newLinkItem = execution.request?.newLinkItems.find((item) => item.sameSkuGroupId === group.sameSkuGroupId);
+    const source = newLinkItem ? `；补链源 ${newLinkItem.sourceProductId} ${newLinkItem.sourceProductName}` : '';
+    return `${index + 1}. ${group.label}｜${group.category}｜${group.sameSkuGroupId}：待下架 ${group.items.length} 条，建议补回 ${group.items.length} 条新链；端内ID ${ids}${source}`;
   });
+
+  const confirmRequest = execution.request ? {
+    toolName: 'operations.refreshActivityExecute',
+    arguments: {
+      date: execution.request.date,
+      delistProductIds: execution.request.delistProductIds,
+      newLinkItems: execution.request.newLinkItems,
+    },
+    reason: '用户要求刷新活跃度：先下架近30天零创单链接，再按同款组补回新链。',
+  } : null;
 
   return {
     text: [
-      `活跃度刷新计划（仅预览，不执行）：${report.context.date}`,
+      `活跃度刷新计划：${report.context.date}`,
       '筛选口径：active 链接，30日访问页数据已抓取，近 30 天创单为 0。',
       `待下架候选：${candidates.length} 条；涉及种类/同款组 ${groups.length} 个。`,
       `本次展示：${shownCandidates.length}/${candidates.length} 条。`,
@@ -537,8 +712,94 @@ async function refreshActivityPlanResponse(outputDir: string, args: Record<strin
       ...(groupLines.length ? groupLines : ['没有找到符合条件的零创单 active 链接。']),
       '',
       `跳过：非 active ${skipped.inactive} 条，无日报行 ${skipped.missingRow} 条，30日访问页缺失 ${skipped.missing30dDashboard} 条。`,
-      '下一步安全边界：真正下架和补链仍需要按商品/同款组生成确认卡；不会因为本计划直接执行写操作。',
+      execution.request ? '已生成执行确认卡；确认前不会下架或补链。' : '未生成执行确认卡；请先处理以下阻断项。',
+      ...(!execution.request && execution.blockers.length ? ['', ...execution.blockers.map((blocker) => `- ${blocker}`)] : []),
     ].join('\n'),
+    ...(confirmRequest ? { card: buildAgentToolConfirmCard(confirmRequest) } : {}),
+    metadata: {
+      toolName: 'operations.refreshActivityPlan',
+      date: report.context.date,
+      candidateCount: candidates.length,
+      shownCandidateCount: shownCandidates.length,
+      executeRequest: execution.request ?? null,
+      blockers: execution.blockers,
+    },
+  };
+}
+
+async function refreshActivityExecuteResponse(
+  outputDir: string,
+  args: Record<string, unknown>,
+  client: RentalPriceSkillClient,
+): Promise<BotResponse> {
+  const request = readRefreshActivityExecuteRequest(args);
+  const delistResults = [];
+  for (const productId of request.delistProductIds) {
+    const result = await client.delist(productId);
+    delistResults.push(result);
+    if (!result.ok) break;
+  }
+
+  const delistSuccess = delistResults.filter((result) => result.ok);
+  const allDelisted = delistResults.length === request.delistProductIds.length && delistSuccess.length === request.delistProductIds.length;
+
+  let newLinkResult: Awaited<ReturnType<typeof executeNewLinkBatchConfirmRequest>> | Awaited<ReturnType<typeof executeNewLinkBatchMultiConfirmRequest>> | null = null;
+  if (allDelisted) {
+    const items: NewLinkBatchConfirmRequest[] = request.newLinkItems.map((item) => ({
+      safetyVersion: NEW_LINK_BATCH_CONFIRMATION_VERSION,
+      workflowName: NEW_LINK_BATCH_WORKFLOW_NAME,
+      keyword: item.keyword,
+      count: item.count,
+      sourceProductId: item.sourceProductId,
+      sourceProductName: item.sourceProductName,
+      dataDate: request.date,
+      reason: '活跃度刷新计划确认执行',
+    }));
+    newLinkResult = items.length === 1
+      ? await executeNewLinkBatchConfirmRequest(client, items[0]!)
+      : await executeNewLinkBatchMultiConfirmRequest(client, {
+        safetyVersion: NEW_LINK_BATCH_CONFIRMATION_VERSION,
+        workflowName: NEW_LINK_BATCH_WORKFLOW_NAME,
+        mode: 'multi-source',
+        items,
+        dataDate: request.date,
+        reason: '活跃度刷新计划确认执行',
+      });
+  }
+
+  const auditPath = await writeRefreshActivityAudit(outputDir, {
+    request,
+    delistResults,
+    newLinkResult,
+    ok: allDelisted && Boolean(newLinkResult?.ok),
+    createdAt: new Date().toISOString(),
+  });
+
+  const typeLines = request.newLinkItems.map((item, index) =>
+    `${index + 1}. ${item.keyword}${item.sameSkuGroupId ? `｜${item.sameSkuGroupId}` : ''}：下架/补链 ${item.count} 条，补链源 ${item.sourceProductId} ${item.sourceProductName}`);
+  const delistLines = delistResults.map((result) => `- ${result.ok ? '成功' : '失败'}：商品 ${result.productId}${result.lines.length ? `｜${result.lines.join('；')}` : ''}`);
+  return {
+    text: [
+      `${allDelisted && newLinkResult?.ok ? '活跃度刷新执行完成' : '活跃度刷新执行中断'}：${request.date}`,
+      `下架：成功 ${delistSuccess.length}/${request.delistProductIds.length}`,
+      `补链：${newLinkResult ? `${newLinkResult.ok ? '成功' : '失败'}，完成 ${newLinkResult.completedCount}/${request.newLinkItems.reduce((sum, item) => sum + item.count, 0)} 条` : '因下架未全部成功，已跳过'}`,
+      '',
+      '处理种类：',
+      ...typeLines,
+      '',
+      '下架明细：',
+      ...delistLines,
+      ...(newLinkResult ? ['', '补链明细：', newLinkResult.text] : []),
+      '',
+      `审计文件：${auditPath}`,
+    ].join('\n'),
+    metadata: {
+      toolName: 'operations.refreshActivityExecute',
+      auditPath,
+      delistedProductIds: delistSuccess.map((result) => result.productId),
+      newProductIds: newLinkResult?.newProductIds ?? [],
+      ok: allDelisted && Boolean(newLinkResult?.ok),
+    },
   };
 }
 
@@ -765,6 +1026,8 @@ export async function executeAgentToolRequest(
     }
     case 'operations.refreshActivityPlan':
       return refreshActivityPlanResponse(outputDir, request.arguments, options);
+    case 'operations.refreshActivityExecute':
+      return refreshActivityExecuteResponse(outputDir, request.arguments, options.rentalPriceClient ?? createRentalPriceSkillClient());
     case 'rental.copy':
     case 'rental.delist':
     case 'rental.tenancySet':
