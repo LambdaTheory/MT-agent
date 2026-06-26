@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { parseAgentToolConfirmRequest } from '../agentRuntime/approvalCard.js';
-import { parseAgentClarificationCustomSelection, parseAgentClarificationSelection } from '../agentRuntime/clarificationCard.js';
+import { buildClarifiedMessage, parseAgentClarificationCustomSelection, parseAgentClarificationSelection } from '../agentRuntime/clarificationCard.js';
 import type { AgentPlannerProvider } from '../agentRuntime/planner.js';
 import { recordAgentLearningEvent } from '../agentLearning/store.js';
 import { handleLinkRegistryGovernanceCardAction } from '../linkRegistry/governanceSession.js';
@@ -371,7 +371,7 @@ async function handleCardActionTrigger(
     });
     const response = await dispatchMessage({
       messageId: `${messageId}:clarify:${Buffer.from(selection.label).toString('hex').slice(0, 16)}`,
-      text: selection.selectedMessage,
+      text: buildClarifiedMessage(selection),
       source: 'http',
       chatType: 'p2p',
     });
@@ -403,7 +403,7 @@ async function handleCardActionTrigger(
     });
     const response = await dispatchMessage({
       messageId: `${messageId}:clarify:${Buffer.from(selection.selectedMessage).toString('hex').slice(0, 16)}`,
-      text: selection.selectedMessage,
+      text: buildClarifiedMessage(selection),
       source: 'http',
       chatType: 'p2p',
     });

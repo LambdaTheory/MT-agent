@@ -57,6 +57,7 @@ export function schemaAllowsArguments(schema: unknown, value: Record<string, unk
 
   const required = Array.isArray(schema.required) ? schema.required : [];
   if (!required.every((key): key is string => typeof key === 'string' && Object.hasOwn(value, key))) return false;
+  if (typeof schema.minProperties === 'number' && Object.keys(value).length < schema.minProperties) return false;
 
   const properties = isRecord(schema.properties) ? schema.properties : {};
   if (schema.additionalProperties === false) {

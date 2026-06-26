@@ -312,6 +312,42 @@ describe('rental price card action', () => {
     expect(learning).toContain('ou_custom');
   });
 
+  it('keeps the original rollback context when a custom clarification only provides a task id', async () => {
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run from rollback clarification'); },
+      async execute() { throw new Error('execute should not run from rollback clarification'); },
+      async rollback() { throw new Error('rollback should not run before confirmation'); },
+      async copy() { throw new Error('copy should not run from rollback clarification'); },
+      async delist() { throw new Error('delist should not run from rollback clarification'); },
+      async tenancySet() { throw new Error('tenancySet should not run from rollback clarification'); },
+      async specDiscover() { throw new Error('specDiscover should not run from rollback clarification'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run from rollback clarification'); },
+    };
+    const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
+    const sent: unknown[] = [];
+    const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', outputDir: await mkdtemp(join(tmpdir(), 'mt-agent-sdk-rollback-clarify-')), sdk: fakeSdk(sent, registered), rentalPriceClient });
+
+    bot.start();
+    const callbackResult = await registered['card.action.trigger']({
+      event: {
+        context: { open_message_id: 'om-agent-rollback-clarify' },
+        action: {
+          value: {
+            action: 'agent_clarify_custom',
+            originalMessage: '请回滚刚才的改价',
+          },
+          form_value: { custom_message: 'task_1782451929574_977a5f62' },
+        },
+      },
+    });
+
+    expect(JSON.stringify(callbackResult)).toContain('Agent 已收到你的补充');
+    await waitFor(() => sent.some((item) => JSON.stringify(item).includes('rental.priceRollback')));
+    expect(sent.some((item) => JSON.stringify(item).includes('agent_tool_confirm'))).toBe(true);
+    expect(sent.some((item) => JSON.stringify(item).includes('task_1782451929574_977a5f62'))).toBe(true);
+    expect(sent.some((item) => JSON.stringify(item).includes('"kind":"reply"'))).toBe(false);
+  });
+
   it('executes new-link batch confirmations by copying the selected source repeatedly', async () => {
     const calls: string[] = [];
     const rentalPriceClient: RentalPriceSkillClient = {

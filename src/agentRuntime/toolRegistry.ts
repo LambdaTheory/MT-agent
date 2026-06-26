@@ -57,7 +57,7 @@ const rentalPriceRollbackArgumentsSchema = {
     taskId: { type: 'string' },
     rollbackFile: { type: 'string' },
   },
-  required: ['productId'],
+  minProperties: 1,
   additionalProperties: false,
 };
 const rentalOperationArgumentsSchema = {

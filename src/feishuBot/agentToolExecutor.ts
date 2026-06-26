@@ -227,7 +227,7 @@ export async function executeAgentToolRequest(
     }
     case 'rental.priceRollback': {
       const rollbackRequest = rentalPriceRollbackRequestFromToolArguments(request.arguments);
-      if (!rollbackRequest) throw new Error('租赁商品改价回滚参数无效，请提供 productId，并提供 taskId 或 rollbackFile。');
+      if (!rollbackRequest) throw new Error('租赁商品改价回滚参数无效，请提供 taskId 或 rollbackFile；productId 可选。');
       const client = options.rentalPriceClient ?? createRentalPriceSkillClient();
       if (!client.rollback) throw new Error('当前租赁改价客户端不支持回滚。');
       const result = await client.rollback(rollbackRequest);

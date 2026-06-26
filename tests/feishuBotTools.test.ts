@@ -1321,14 +1321,23 @@ describe('handleBotIntent', () => {
     expect(JSON.stringify(response.card)).not.toContain('agent_tool_confirm');
   });
 
-  it('executes rental.priceRollback through the confirmed Agent tool path', async () => {
+  it('returns a rollback confirmation card when a message contains rollback and an audit task id', async () => {
+    const response = await handleBotIntent({ type: 'unknown', text: '回滚商品改价任务 task_1782451929574_977a5f62' }, 'output');
+
+    expect(response.text).toContain('请确认 Agent 操作：rental.priceRollback');
+    expect(JSON.stringify(response.card)).toContain('agent_tool_confirm');
+    expect(JSON.stringify(response.card)).toContain('rental.priceRollback');
+    expect(JSON.stringify(response.card)).toContain('task_1782451929574_977a5f62');
+  });
+
+  it('executes rental.priceRollback through the confirmed Agent tool path with task id only', async () => {
     const calls: unknown[] = [];
     const rentalPriceClient: RentalPriceSkillClient = {
       async preview() { throw new Error('preview should not run for rollback'); },
       async execute() { throw new Error('execute should not run for rollback'); },
       async rollback(request) {
         calls.push(request);
-        return { productId: request.productId, ok: true, lines: ['rollbackApply: ok', 'submit: ok', 'verify: ok'] };
+        return { productId: '761', ok: true, lines: ['rollbackApply: ok', 'submit: ok', 'verify: ok'] };
       },
       async copy() { throw new Error('copy should not run'); },
       async delist() { throw new Error('delist should not run'); },
@@ -1338,12 +1347,12 @@ describe('handleBotIntent', () => {
     };
 
     const response = await executeAgentToolRequest(
-      { toolName: 'rental.priceRollback', arguments: { productId: '761', taskId: 'task_123_abcd1234' }, reason: '用户要求回滚改价任务' },
+      { toolName: 'rental.priceRollback', arguments: { taskId: 'task_123_abcd1234' }, reason: '用户要求回滚改价任务' },
       'output',
       { rentalPriceClient },
     );
 
-    expect(calls).toEqual([{ productId: '761', taskId: 'task_123_abcd1234' }]);
+    expect(calls).toEqual([{ taskId: 'task_123_abcd1234' }]);
     expect(response.text).toContain('改价回滚成功：商品 761');
   });
 

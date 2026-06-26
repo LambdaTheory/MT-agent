@@ -255,6 +255,7 @@ describe('rental price skill client copy diagnostics', () => {
     const rootDir = await mkdtemp(join(tmpdir(), 'mt-agent-rental-price-audit-'));
     await copyRentalPriceAuditScripts(rootDir);
     const currentValues = { rent1day: '30.00', rent10day: '80.00' };
+    const applyProductIds: unknown[] = [];
     vi.stubGlobal('fetch', vi.fn(async (_input, init) => {
       const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
       if (body.action === 'read') {
@@ -266,6 +267,7 @@ describe('rental price skill client copy diagnostics', () => {
         }));
       }
       if (body.action === 'apply' && typeof body.changesFile === 'string') {
+        applyProductIds.push(body.productId);
         const changes = JSON.parse(await readFile(body.changesFile, 'utf8')) as Record<string, string>;
         if (typeof changes.rent1day === 'string') currentValues.rent1day = changes.rent1day;
         return new Response(JSON.stringify({ status: 'ok' }));
@@ -292,10 +294,12 @@ describe('rental price skill client copy diagnostics', () => {
     expect(task.status).toBe('completed');
     expect(task.evidence.some((item) => item.type === 'verify_result')).toBe(true);
 
-    const rollback = await client.rollback!({ productId: '761', taskId: preview.audit!.taskId! });
+    const rollback = await client.rollback!({ taskId: preview.audit!.taskId! });
 
     expect(rollback.ok).toBe(true);
+    expect(rollback.productId).toBe('761');
     expect(rollback.lines.join('\n')).toContain(`auditTask: ${preview.audit?.taskId}`);
+    expect(applyProductIds).toEqual(['761', '761']);
     expect(currentValues.rent1day).toBe('30.00');
     const rolledBackTask = JSON.parse(await readFile(join(rootDir, 'tasks', `${preview.audit?.taskId}.json`), 'utf8')) as { status: string; evidence: Array<{ type: string }> };
     expect(rolledBackTask.status).toBe('rolled_back');

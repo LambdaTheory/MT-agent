@@ -134,6 +134,23 @@ function agentToolConfirmResponse(toolName: string, args: Record<string, unknown
   };
 }
 
+function rollbackTaskConfirmResponse(text: string): BotResponse | null {
+  if (!/回滚|rollback/i.test(text)) return null;
+  const taskId = /\btask_\d+_[a-f0-9]+\b/i.exec(text)?.[0];
+  const productId = /(?:商品|端内ID|productId)\s*(\d+)/i.exec(text)?.[1];
+  const rollbackFile = /[A-Za-z]:[\\/][^\s"'，。；;]+rollback_[^\s"'，。；;]+\.json/i.exec(text)?.[0];
+  if (!taskId && !rollbackFile) return null;
+  return agentToolConfirmResponse(
+    'rental.priceRollback',
+    {
+      ...(productId ? { productId } : {}),
+      ...(taskId ? { taskId } : {}),
+      ...(rollbackFile ? { rollbackFile } : {}),
+    },
+    '识别到租赁改价回滚请求；回滚属于高风险写操作，需要二次确认。',
+  );
+}
+
 function looksLikeNewLinkWriteIntent(text: string): boolean {
   const compact = text.toLowerCase().replace(/\s+/g, '');
   const hasNewLink = /新链|新链接|(?:条|个|款)新(?=$|[?？。!！；;,，、])/.test(compact);
@@ -599,6 +616,9 @@ export async function handleBotIntent(intent: BotIntent, outputDir = 'output', o
   }
 
   if (intent.type === 'unknown') {
+    const rollbackResponse = rollbackTaskConfirmResponse(intent.text);
+    if (rollbackResponse) return rollbackResponse;
+
     if (options.llmIntentProposalProvider) {
       const rawProposal = await options.llmIntentProposalProvider.proposeIntent({ message: intent.text, intents: getSupportedLlmIntentProposals() });
       const parsedProposal = parseLlmIntentProposal(rawProposal);

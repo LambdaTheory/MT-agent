@@ -57,7 +57,7 @@ export interface RentalPriceExecutionResult {
 }
 
 export interface RentalPriceRollbackRequest {
-  productId: string;
+  productId?: string;
   rollbackFile?: string;
   taskId?: string;
 }
@@ -555,25 +555,45 @@ async function readJsonRecord(path: string): Promise<Record<string, unknown>> {
   return parsed;
 }
 
-async function resolveRollbackReference(rootDir: string, request: RentalPriceRollbackRequest): Promise<{ audit: RentalPriceAuditReference; fields: Record<string, string> }> {
+function productIdFromTaskRecord(task: Record<string, unknown>): string | undefined {
+  const direct = readProductId(task.productId);
+  if (direct) return direct;
+  const instruction = readString(task.instruction);
+  const instructionMatch = instruction ? /商品\s*(\d+)/.exec(instruction) : null;
+  return instructionMatch?.[1];
+}
+
+function productIdFromRollbackFile(path: string): string | undefined {
+  return /(?:^|[\\/])rollback_(\d+)[-_]/.exec(path)?.[1];
+}
+
+async function resolveRollbackReference(rootDir: string, request: RentalPriceRollbackRequest): Promise<{ productId: string; audit: RentalPriceAuditReference; fields: Record<string, string> }> {
   const audit: RentalPriceAuditReference = {};
   if (request.taskId && AUDIT_TASK_ID_PATTERN.test(request.taskId)) audit.taskId = request.taskId;
 
+  let productId = request.productId;
   let rollbackFile = safeAuditPath(rootDir, request.rollbackFile);
   if (!rollbackFile && audit.taskId) {
     const taskFile = join(rootDir, 'tasks', `${audit.taskId}.json`);
     if (!(await fileExists(taskFile))) throw new Error(`审计任务不存在：${audit.taskId}`);
     const task = await readJsonRecord(taskFile);
+    productId = productId ?? productIdFromTaskRecord(task);
+    const currentValuesFile = safeAuditPath(rootDir, task.currentValuesFile);
+    if (!productId && currentValuesFile && await fileExists(currentValuesFile)) {
+      productId = readProductId((await readJsonRecord(currentValuesFile)).productId) ?? undefined;
+    }
     rollbackFile = safeAuditPath(rootDir, task.rollbackFile);
   }
 
   if (!rollbackFile) throw new Error('回滚需要 rollbackFile，或提供包含 rollbackFile 的 taskId。');
   if (!(await fileExists(rollbackFile))) throw new Error(`回滚文件不存在：${rollbackFile}`);
+  productId = productId ?? productIdFromRollbackFile(rollbackFile);
+  if (!productId) throw new Error('回滚需要 productId；如果只提供 taskId，该审计任务中必须包含商品信息。');
 
   const fields = normalizePriceFields(await readJsonRecord(rollbackFile));
   if (!fields) throw new Error(`回滚文件没有可执行的价格字段：${rollbackFile}`);
   audit.rollbackFile = rollbackFile;
-  return { audit, fields };
+  return { productId, audit, fields };
 }
 
 async function readOptionalText(path: string): Promise<string | null> {
@@ -707,17 +727,17 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
     async rollback(request) {
       const tasksDir = join(rootDir, 'tasks');
       await mkdir(tasksDir, { recursive: true });
-      const { audit, fields } = await resolveRollbackReference(rootDir, request);
+      const { productId, audit, fields } = await resolveRollbackReference(rootDir, request);
       const auditLines = [
         ...(audit.taskId ? [`auditTask: ${audit.taskId}`] : []),
         ...(audit.rollbackFile ? [`rollbackFile: ${audit.rollbackFile}`] : []),
       ];
-      const apply = await send({ action: 'apply', productId: request.productId, changesFile: audit.rollbackFile });
+      const apply = await send({ action: 'apply', productId, changesFile: audit.rollbackFile });
       const applyStatus = commandStatus(apply);
       if (applyStatus !== 'ok') {
         await updateAuditTask(rootDir, audit, 'rollback_failed');
         return {
-          productId: request.productId,
+          productId,
           ok: false,
           lines: [`rollbackApply: ${applyStatus}`, 'submit: skipped', 'verify: skipped', ...auditLines],
           audit: { ...(audit.taskId ? { taskId: audit.taskId } : {}), status: audit.taskId ? 'rollback_failed' : 'untracked', ...(audit.rollbackFile ? { rollbackFile: audit.rollbackFile } : {}) },
@@ -729,21 +749,21 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
       if (submitStatus !== 'ok') {
         await updateAuditTask(rootDir, audit, 'rollback_failed');
         return {
-          productId: request.productId,
+          productId,
           ok: false,
           lines: [`rollbackApply: ${applyStatus}`, `submit: ${submitStatus}`, 'verify: skipped', ...auditLines],
           audit: { ...(audit.taskId ? { taskId: audit.taskId } : {}), status: audit.taskId ? 'rollback_failed' : 'untracked', ...(audit.rollbackFile ? { rollbackFile: audit.rollbackFile } : {}) },
         };
       }
 
-      const verified = await send({ action: 'read', productId: request.productId });
+      const verified = await send({ action: 'read', productId });
       const verifyStatus = commandStatus(verified);
       const fieldsMatch = verifiedFields(verified, fields);
       const ok = verifyStatus !== 'error' && fieldsMatch;
       const auditStatus: 'rolled_back' | 'rollback_verify_failed' = ok ? 'rolled_back' : 'rollback_verify_failed';
-      const resultFile = join(tasksDir, `rollback-verify-${request.productId}-${timestampToken()}.json`);
+      const resultFile = join(tasksDir, `rollback-verify-${productId}-${timestampToken()}.json`);
       await writeJsonFile(resultFile, {
-        productId: request.productId,
+        productId,
         ok,
         expectedFields: fields,
         applyStatus,
@@ -756,7 +776,7 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
       });
       await updateAuditTask(rootDir, audit, auditStatus, resultFile, 'rollback_verify_result');
       return {
-        productId: request.productId,
+        productId,
         ok,
         lines: [`rollbackApply: ${applyStatus}`, `submit: ${submitStatus}`, `verify: ${verifyStatus}`, `fields: ${fieldsMatch ? 'matched' : 'mismatch'}`, ...auditLines, `verifyFile: ${resultFile}`],
         audit: { ...(audit.taskId ? { taskId: audit.taskId } : {}), status: audit.taskId ? auditStatus : 'untracked', resultFile, ...(audit.rollbackFile ? { rollbackFile: audit.rollbackFile } : {}) },
@@ -888,14 +908,13 @@ export function rentalPriceChangeRequestFromToolArguments(args: Record<string, u
 }
 
 export function rentalPriceRollbackRequestFromToolArguments(args: Record<string, unknown>): RentalPriceRollbackRequest | null {
-  const productId = readProductId(args.productId);
-  if (!productId) return null;
+  const productId = readProductId(args.productId) ?? undefined;
   const taskId = readString(args.taskId);
   const rollbackFile = readString(args.rollbackFile);
   if (!taskId && !rollbackFile) return null;
   if (taskId && !AUDIT_TASK_ID_PATTERN.test(taskId)) return null;
   return {
-    productId,
+    ...(productId ? { productId } : {}),
     ...(taskId ? { taskId } : {}),
     ...(rollbackFile ? { rollbackFile } : {}),
   };

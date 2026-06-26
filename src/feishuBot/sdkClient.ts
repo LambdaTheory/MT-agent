@@ -1,7 +1,7 @@
 import * as lark from '@larksuiteoapi/node-sdk';
 import { createHash } from 'node:crypto';
 import { parseAgentToolConfirmRequest } from '../agentRuntime/approvalCard.js';
-import { parseAgentClarificationCustomSelection, parseAgentClarificationSelection } from '../agentRuntime/clarificationCard.js';
+import { buildClarifiedMessage, parseAgentClarificationCustomSelection, parseAgentClarificationSelection } from '../agentRuntime/clarificationCard.js';
 import type { AgentPlannerProvider } from '../agentRuntime/planner.js';
 import { recordAgentLearningEvent, type AgentLearningEventInput } from '../agentLearning/store.js';
 import { handleLinkRegistryGovernanceCardAction } from '../linkRegistry/governanceSession.js';
@@ -509,25 +509,29 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
             selectedMessage: selection.selectedMessage,
             label: selection.label,
           }, messageId);
-          await updateCard(client, messageId, statusCard('Agent 已收到你的选择', `已选择：${selection.label}\n\n正在按新指令继续理解：${selection.selectedMessage}`, 'blue')).catch(() => false);
-          try {
-            const response = await dispatchMessage({
-              messageId: `${messageId}:clarify:${claim.key.slice(0, 16)}`,
-              text: selection.selectedMessage,
-              source: 'sdk',
-              chatType: 'p2p',
-            });
-            setRentalActionStatus(claim.key, 'completed');
-            if (!response.skipped) {
-              if (response.card) await replyCard(client, messageId, response.card);
-              else await replyText(client, messageId, response.text);
+          const clarifiedMessage = buildClarifiedMessage(selection);
+          const processingCard = statusCard('Agent 已收到你的选择', `已选择：${selection.label}\n\n正在结合原始指令继续理解：${selection.selectedMessage}`, 'blue');
+          void updateCard(client, messageId, processingCard).catch(() => false);
+          void (async () => {
+            try {
+              const response = await dispatchMessage({
+                messageId: `${messageId}:clarify:${claim.key.slice(0, 16)}`,
+                text: clarifiedMessage,
+                source: 'sdk',
+                chatType: 'p2p',
+              });
+              setRentalActionStatus(claim.key, 'completed');
+              if (!response.skipped) {
+                if (response.card) await updateCard(client, messageId, response.card).catch(() => false);
+                else await updateCard(client, messageId, statusCard('Agent 澄清处理完成', response.text, 'green')).catch(() => false);
+              }
+            } catch (error) {
+              setRentalActionStatus(claim.key, 'failed');
+              await updateCard(client, messageId, statusCard('Agent 澄清处理失败', error instanceof Error ? error.message : String(error), 'red')).catch(() => false);
+              logError(error, { messageId, phase: 'reply' });
             }
-          } catch (error) {
-            setRentalActionStatus(claim.key, 'failed');
-            await updateCard(client, messageId, statusCard('Agent 澄清处理失败', error instanceof Error ? error.message : String(error), 'red')).catch(() => false);
-            logError(error, { messageId, phase: 'reply' });
-          }
-          return;
+          })();
+          return cardActionUpdateResponse(processingCard);
         }
 
         if (actionName === 'agent_clarify_custom') {
@@ -550,25 +554,29 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
             selectedMessage: selection.selectedMessage,
             label: selection.label,
           }, messageId);
-          await updateCard(client, messageId, statusCard('Agent 已收到你的补充', `正在按补充说明继续理解：${selection.selectedMessage}`, 'blue')).catch(() => false);
-          try {
-            const response = await dispatchMessage({
-              messageId: `${messageId}:clarify:${claim.key.slice(0, 16)}`,
-              text: selection.selectedMessage,
-              source: 'sdk',
-              chatType: 'p2p',
-            });
-            setRentalActionStatus(claim.key, 'completed');
-            if (!response.skipped) {
-              if (response.card) await replyCard(client, messageId, response.card);
-              else await replyText(client, messageId, response.text);
+          const clarifiedMessage = buildClarifiedMessage(selection);
+          const processingCard = statusCard('Agent 已收到你的补充', `正在结合原始指令继续理解：${selection.selectedMessage}`, 'blue');
+          void updateCard(client, messageId, processingCard).catch(() => false);
+          void (async () => {
+            try {
+              const response = await dispatchMessage({
+                messageId: `${messageId}:clarify:${claim.key.slice(0, 16)}`,
+                text: clarifiedMessage,
+                source: 'sdk',
+                chatType: 'p2p',
+              });
+              setRentalActionStatus(claim.key, 'completed');
+              if (!response.skipped) {
+                if (response.card) await updateCard(client, messageId, response.card).catch(() => false);
+                else await updateCard(client, messageId, statusCard('Agent 澄清处理完成', response.text, 'green')).catch(() => false);
+              }
+            } catch (error) {
+              setRentalActionStatus(claim.key, 'failed');
+              await updateCard(client, messageId, statusCard('Agent 澄清处理失败', error instanceof Error ? error.message : String(error), 'red')).catch(() => false);
+              logError(error, { messageId, phase: 'reply' });
             }
-          } catch (error) {
-            setRentalActionStatus(claim.key, 'failed');
-            await updateCard(client, messageId, statusCard('Agent 澄清处理失败', error instanceof Error ? error.message : String(error), 'red')).catch(() => false);
-            logError(error, { messageId, phase: 'reply' });
-          }
-          return;
+          })();
+          return cardActionUpdateResponse(processingCard);
         }
 
         if (actionName === 'agent_clarify_cancel') {

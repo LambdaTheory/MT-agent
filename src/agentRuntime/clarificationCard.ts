@@ -138,3 +138,21 @@ export function parseAgentClarificationCustomSelection(value: unknown, customMes
   if (!originalMessage || !selectedMessage || selectedMessage.length > 300) return null;
   return { originalMessage, selectedMessage, label: '自定义澄清' };
 }
+
+function looksLikeBareSupplement(message: string): boolean {
+  return (
+    /\btask_\d+_[a-f0-9]+\b/i.test(message)
+    || /rollback_[^\s"'，。；;]+\.json/i.test(message)
+    || /^\d+(?:[,\s，、]+\d+)*$/.test(message)
+  );
+}
+
+export function buildClarifiedMessage(selection: AgentClarificationSelection): string {
+  if (selection.label !== '自定义澄清' || !looksLikeBareSupplement(selection.selectedMessage)) {
+    return selection.selectedMessage;
+  }
+  return [
+    `原始指令：${selection.originalMessage}`,
+    `补充说明：${selection.selectedMessage}`,
+  ].join('\n');
+}

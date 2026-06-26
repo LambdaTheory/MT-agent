@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildAgentToolConfirmCard, parseAgentToolConfirmRequest } from '../src/agentRuntime/approvalCard.js';
-import { buildAgentClarificationCard, parseAgentClarificationCustomSelection, parseAgentClarificationSelection } from '../src/agentRuntime/clarificationCard.js';
+import { buildAgentClarificationCard, buildClarifiedMessage, parseAgentClarificationCustomSelection, parseAgentClarificationSelection } from '../src/agentRuntime/clarificationCard.js';
 
 describe('agent runtime approval card', () => {
   it('builds a generic Feishu confirmation card for registered agent tools', () => {
@@ -64,6 +64,26 @@ describe('agent runtime approval card', () => {
         reason: 'bad',
       },
     })).toBeNull();
+
+    expect(parseAgentToolConfirmRequest({
+      request: {
+        toolName: 'rental.priceRollback',
+        arguments: { taskId: 'task_1782451929574_977a5f62' },
+        reason: '按审计任务回滚',
+      },
+    })).toEqual({
+      toolName: 'rental.priceRollback',
+      arguments: { taskId: 'task_1782451929574_977a5f62' },
+      reason: '按审计任务回滚',
+    });
+
+    expect(parseAgentToolConfirmRequest({
+      request: {
+        toolName: 'rental.priceRollback',
+        arguments: {},
+        reason: 'bad',
+      },
+    })).toBeNull();
   });
 
   it('builds and parses a clarification card without executable tool payloads', () => {
@@ -115,5 +135,17 @@ describe('agent runtime approval card', () => {
       action: 'agent_clarify_custom',
       originalMessage: '帮我处理一下 pocket3',
     }, '')).toBeNull();
+
+    expect(buildClarifiedMessage({
+      originalMessage: '请回滚刚才的改价',
+      selectedMessage: 'task_1782451929574_977a5f62',
+      label: '自定义澄清',
+    })).toContain('原始指令：请回滚刚才的改价');
+
+    expect(buildClarifiedMessage({
+      originalMessage: '帮我处理一下 875',
+      selectedMessage: '复制商品 875',
+      label: '自定义澄清',
+    })).toBe('复制商品 875');
   });
 });
