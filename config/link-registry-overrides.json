@@ -2,6 +2,38 @@
   "version": 1,
   "entries": [
     {
+      "internalProductId": "764",
+      "productName": "SEAYEO大排灯美容仪经典款 光子嫩肤面罩",
+      "categoryId": "beauty-device",
+      "categoryName": "美容仪",
+      "productType": "led-face-mask",
+      "shortName": "SEAYEO 大排灯美容仪",
+      "aliases": [
+        "SEAYEO 大排灯美容仪",
+        "SEAYEO大排灯",
+        "大排灯美容仪"
+      ],
+      "sameSkuGroupId": "seayeo-led-face-mask",
+      "status": "active",
+      "confidence": 0.95,
+      "reason": "daemon_live_catalog_review",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "internalProductId": "929",
+      "shortName": "rx10m4",
+      "aliases": [
+        "RX10M4",
+        "rx10m4",
+        "索尼 RX10M4"
+      ],
+      "confidence": 0.95,
+      "reason": "daemon_live_short_name_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
       "internalProductId": "218",
       "sameSkuGroupId": "vivo-蔡司-2-35x增距镜-神器",
       "confidence": 0.95,
@@ -801,7 +833,7 @@
     },
     {
       "internalProductId": "527",
-      "shortName": "x300u",
+      "shortName": "x300 u",
       "aliases": [
         "x 300u",
         "x300 u",
@@ -862,7 +894,7 @@
     },
     {
       "internalProductId": "544",
-      "shortName": "x300u",
+      "shortName": "x300 u",
       "aliases": [
         "x 300u",
         "x300 u",
@@ -1160,7 +1192,7 @@
     },
     {
       "internalProductId": "649",
-      "shortName": "x300u",
+      "shortName": "x300 u",
       "aliases": [
         "x 300u",
         "x300 u",
@@ -1173,7 +1205,7 @@
     },
     {
       "internalProductId": "650",
-      "shortName": "x300u",
+      "shortName": "x300 u",
       "aliases": [
         "x 300u",
         "x300 u",
@@ -1186,15 +1218,77 @@
     },
     {
       "internalProductId": "653",
-      "shortName": "ipod touch 6",
+      "categoryId": "media-player",
+      "categoryName": "播放器",
+      "productType": "music-player",
+      "shortName": "iPod touch 6",
       "aliases": [
+        "iPod touch 6",
         "ipod touch 6",
         "ipodtouch6"
       ],
+      "sameSkuGroupId": "ipod-touch-6",
       "confidence": 0.95,
-      "reason": "link_registry_group_review_approval",
-      "maintainer": "group_review_csv",
-      "updatedAt": "2026-06-26"
+      "reason": "ipod_touch_cleanup",
+      "maintainer": "codex",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "internalProductId": "761",
+      "productName": "Ipod touch6 顺丰发货，1天起租---skills测试用，请勿下单",
+      "categoryId": "media-player",
+      "categoryName": "播放器",
+      "productType": "music-player",
+      "shortName": "iPod touch 6",
+      "aliases": [
+        "iPod touch 6",
+        "ipod touch 6",
+        "ipodtouch6"
+      ],
+      "sameSkuGroupId": "ipod-touch-6",
+      "status": "active",
+      "confidence": 0.95,
+      "reason": "manual_live_only_link_seed",
+      "maintainer": "codex",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "internalProductId": "763",
+      "productName": "Ipod touch6 顺丰发货，1天起租---skills测试用，请勿下单",
+      "categoryId": "media-player",
+      "categoryName": "播放器",
+      "productType": "music-player",
+      "shortName": "iPod touch 6",
+      "aliases": [
+        "iPod touch 6",
+        "ipod touch 6",
+        "ipodtouch6"
+      ],
+      "sameSkuGroupId": "ipod-touch-6",
+      "status": "active",
+      "confidence": 0.95,
+      "reason": "manual_live_only_link_seed",
+      "maintainer": "codex",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "internalProductId": "876",
+      "productName": "Ipod touch6 顺丰发货，1天起租---skills测试用，请勿下单",
+      "categoryId": "media-player",
+      "categoryName": "播放器",
+      "productType": "music-player",
+      "shortName": "iPod touch 6",
+      "aliases": [
+        "iPod touch 6",
+        "ipod touch 6",
+        "ipodtouch6"
+      ],
+      "sameSkuGroupId": "ipod-touch-6",
+      "status": "active",
+      "confidence": 0.95,
+      "reason": "manual_live_only_link_seed",
+      "maintainer": "codex",
+      "updatedAt": "2026-06-27"
     },
     {
       "internalProductId": "663",
@@ -2075,7 +2169,7 @@
     },
     {
       "internalProductId": "857",
-      "shortName": "x300u",
+      "shortName": "x300 u",
       "aliases": [
         "x 300u",
         "x300 u",
@@ -2224,7 +2318,7 @@
     },
     {
       "internalProductId": "889",
-      "shortName": "X200 Ultra",
+      "shortName": "x200 u",
       "aliases": [
         "X 200 Ultra",
         "X200 Ultra",
@@ -2237,7 +2331,7 @@
     },
     {
       "internalProductId": "890",
-      "shortName": "X200 Ultra",
+      "shortName": "x200 u",
       "aliases": [
         "X 200 Ultra",
         "X200 Ultra",
@@ -2250,7 +2344,7 @@
     },
     {
       "internalProductId": "892",
-      "shortName": "X200 Ultra",
+      "shortName": "x200 u",
       "aliases": [
         "X 200 Ultra",
         "X200 Ultra",
@@ -2326,7 +2420,7 @@
     },
     {
       "internalProductId": "911",
-      "shortName": "X200 Ultra",
+      "shortName": "x200 u",
       "aliases": [
         "X 200 Ultra",
         "X200 Ultra",
@@ -2339,7 +2433,7 @@
     },
     {
       "internalProductId": "913",
-      "shortName": "X200 Ultra",
+      "shortName": "x200 u",
       "aliases": [
         "X 200 Ultra",
         "X200 Ultra",
@@ -2354,13 +2448,16 @@
       "internalProductId": "914",
       "categoryName": "相机",
       "productType": "gimbal-camera",
-      "shortName": "pocket 4p",
+      "shortName": "Pocket 4 Pro",
       "aliases": [
+        "Pocket 4 Pro",
+        "Pocket4Pro",
+        "Pocket 4P",
         "pocket 4 p",
         "pocket 4p",
         "pocket4p"
       ],
-      "sameSkuGroupId": "dji-pocket-4",
+      "sameSkuGroupId": "dji-pocket-4-pro",
       "confidence": 0.95,
       "reason": "link_registry_audit_review_approval",
       "maintainer": "audit_review_markdown",
@@ -2370,13 +2467,16 @@
       "internalProductId": "915",
       "categoryName": "相机",
       "productType": "gimbal-camera",
-      "shortName": "pocket 4p",
+      "shortName": "Pocket 4 Pro",
       "aliases": [
+        "Pocket 4 Pro",
+        "Pocket4Pro",
+        "Pocket 4P",
         "pocket 4 p",
         "pocket 4p",
         "pocket4p"
       ],
-      "sameSkuGroupId": "dji-pocket-4",
+      "sameSkuGroupId": "dji-pocket-4-pro",
       "confidence": 0.95,
       "reason": "link_registry_audit_review_approval",
       "maintainer": "audit_review_markdown",
@@ -2386,13 +2486,16 @@
       "internalProductId": "916",
       "categoryName": "相机",
       "productType": "gimbal-camera",
-      "shortName": "pocket 4p",
+      "shortName": "Pocket 4 Pro",
       "aliases": [
+        "Pocket 4 Pro",
+        "Pocket4Pro",
+        "Pocket 4P",
         "pocket 4 p",
         "pocket 4p",
         "pocket4p"
       ],
-      "sameSkuGroupId": "dji-pocket-4",
+      "sameSkuGroupId": "dji-pocket-4-pro",
       "confidence": 0.95,
       "reason": "link_registry_audit_review_approval",
       "maintainer": "audit_review_markdown",
@@ -2402,13 +2505,16 @@
       "internalProductId": "917",
       "categoryName": "相机",
       "productType": "gimbal-camera",
-      "shortName": "pocket 4p",
+      "shortName": "Pocket 4 Pro",
       "aliases": [
+        "Pocket 4 Pro",
+        "Pocket4Pro",
+        "Pocket 4P",
         "pocket 4 p",
         "pocket 4p",
         "pocket4p"
       ],
-      "sameSkuGroupId": "dji-pocket-4",
+      "sameSkuGroupId": "dji-pocket-4-pro",
       "confidence": 0.95,
       "reason": "link_registry_audit_review_approval",
       "maintainer": "audit_review_markdown",
@@ -2418,17 +2524,1092 @@
       "internalProductId": "918",
       "categoryName": "相机",
       "productType": "gimbal-camera",
-      "shortName": "pocket 4p",
+      "shortName": "Pocket 4 Pro",
       "aliases": [
+        "Pocket 4 Pro",
+        "Pocket4Pro",
+        "Pocket 4P",
         "pocket 4 p",
         "pocket 4p",
         "pocket4p"
       ],
-      "sameSkuGroupId": "dji-pocket-4",
+      "sameSkuGroupId": "dji-pocket-4-pro",
       "confidence": 0.95,
       "reason": "link_registry_audit_review_approval",
       "maintainer": "audit_review_markdown",
       "updatedAt": "2026-06-26"
+    }
+  ],
+  "sameSkuGroupRules": [
+    {
+      "matchSameSkuGroupId": "canon r50",
+      "shortName": "R50",
+      "aliases": [
+        "R50",
+        "r50",
+        "EOS R50"
+      ],
+      "sameSkuGroupId": "canon-eos-r50",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "canon-eos-r50",
+      "shortName": "R50",
+      "aliases": [
+        "R50",
+        "r50",
+        "EOS R50"
+      ],
+      "sameSkuGroupId": "canon-eos-r50",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "三星galaxy s23ultra",
+      "categoryId": "phone",
+      "categoryName": "手机",
+      "productType": "smartphone",
+      "shortName": "S23U",
+      "aliases": [
+        "S23U",
+        "s23u",
+        "Galaxy S23 Ultra"
+      ],
+      "sameSkuGroupId": "samsung-galaxy-s23-ultra",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "三星galaxys24ultra-神器高",
+      "categoryId": "phone",
+      "categoryName": "手机",
+      "productType": "smartphone",
+      "shortName": "S24U",
+      "aliases": [
+        "S24U",
+        "s24u",
+        "Galaxy S24 Ultra"
+      ],
+      "sameSkuGroupId": "samsung-galaxy-s24-ultra",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "89元租七天大疆限时抢购-大疆",
+      "shortName": "Pocket 3",
+      "aliases": [
+        "Pocket 3",
+        "Pocket3",
+        "pocket 3",
+        "pocket3"
+      ],
+      "sameSkuGroupId": "dji-pocket-3",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "dji-pocket-3",
+      "shortName": "Pocket 3",
+      "aliases": [
+        "Pocket 3",
+        "Pocket3",
+        "pocket 3",
+        "pocket3"
+      ],
+      "sameSkuGroupId": "dji-pocket-3",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "dji-action-5-pro",
+      "shortName": "Action 5 Pro",
+      "aliases": [
+        "Action 5 Pro",
+        "Action5Pro",
+        "DJI Action 5 Pro",
+        "大疆 Action 5 Pro"
+      ],
+      "sameSkuGroupId": "dji-action-5-pro",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "fujifilm-instax-mini-12",
+      "shortName": "Mini 12",
+      "aliases": [
+        "Mini 12",
+        "Mini12",
+        "mini 12",
+        "mini12"
+      ],
+      "sameSkuGroupId": "fujifilm-instax-mini-12",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "canon-ixus-130",
+      "shortName": "IXUS 130",
+      "aliases": [
+        "IXUS 130",
+        "Ixus 130",
+        "Ixus130"
+      ],
+      "sameSkuGroupId": "canon-ixus-130",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "fujifilm-mini-liplay",
+      "shortName": "mini LiPlay",
+      "aliases": [
+        "mini LiPlay",
+        "mini liplay",
+        "mini-liplay",
+        "LiPlay",
+        "富士 mini LiPlay"
+      ],
+      "sameSkuGroupId": "fujifilm-mini-liplay",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "panasonic-zs99",
+      "shortName": "ZS99",
+      "aliases": [
+        "ZS99",
+        "ZS 99",
+        "TZ99",
+        "松下 ZS99"
+      ],
+      "sameSkuGroupId": "panasonic-zs99",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "panasonic-fz80d",
+      "shortName": "FZ80D",
+      "aliases": [
+        "FZ80D",
+        "FZ 80D",
+        "fz80d",
+        "松下 FZ80D"
+      ],
+      "sameSkuGroupId": "panasonic-fz80d",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "fujifilm-mini-evo",
+      "shortName": "mini EVO",
+      "aliases": [
+        "mini EVO",
+        "mini Evo",
+        "mini-evo",
+        "Mini EVO",
+        "富士 mini EVO"
+      ],
+      "sameSkuGroupId": "fujifilm-instax-mini-evo",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "fujifilm-instax-mini-evo",
+      "shortName": "mini EVO",
+      "aliases": [
+        "mini EVO",
+        "mini Evo",
+        "mini-evo",
+        "Mini EVO",
+        "富士 mini EVO"
+      ],
+      "sameSkuGroupId": "fujifilm-instax-mini-evo",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "vivo x300 pro",
+      "shortName": "vivo X300 Pro",
+      "aliases": [
+        "vivo X300 Pro",
+        "X300 Pro",
+        "x300 pro"
+      ],
+      "sameSkuGroupId": "vivo-x300-pro",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "vivo x301 pro",
+      "shortName": "vivo X300 Pro",
+      "aliases": [
+        "vivo X300 Pro",
+        "X300 Pro",
+        "x300 pro"
+      ],
+      "sameSkuGroupId": "vivo-x300-pro",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "vivo x302 pro",
+      "shortName": "vivo X300 Pro",
+      "aliases": [
+        "vivo X300 Pro",
+        "X300 Pro",
+        "x300 pro"
+      ],
+      "sameSkuGroupId": "vivo-x300-pro",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "vivo x303 pro",
+      "shortName": "vivo X300 Pro",
+      "aliases": [
+        "vivo X300 Pro",
+        "X300 Pro",
+        "x300 pro"
+      ],
+      "sameSkuGroupId": "vivo-x300-pro",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "vivo x304 pro",
+      "shortName": "vivo X300 Pro",
+      "aliases": [
+        "vivo X300 Pro",
+        "X300 Pro",
+        "x300 pro"
+      ],
+      "sameSkuGroupId": "vivo-x300-pro",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "vivo-x300-pro",
+      "shortName": "vivo X300 Pro",
+      "aliases": [
+        "vivo X300 Pro",
+        "X300 Pro",
+        "x300 pro"
+      ],
+      "sameSkuGroupId": "vivo-x300-pro",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "99新-vivo蔡司2-35x-长焦增距镜仅x200u使用",
+      "shortName": "vivo 蔡司增距镜",
+      "aliases": [
+        "vivo 蔡司增距镜",
+        "vivo蔡司增距镜",
+        "X200U 增距镜",
+        "X200 Ultra 增距镜",
+        "蔡司 2.35x 增距镜"
+      ],
+      "sameSkuGroupId": "vivo-zeiss-telephoto-lens",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "vivox200ultra增距镜-蔡司2-35倍长焦-追星-免押",
+      "shortName": "vivo 蔡司增距镜",
+      "aliases": [
+        "vivo 蔡司增距镜",
+        "vivo蔡司增距镜",
+        "X200U 增距镜",
+        "X200 Ultra 增距镜",
+        "蔡司 2.35x 增距镜"
+      ],
+      "sameSkuGroupId": "vivo-zeiss-telephoto-lens",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "vivo-蔡司-2-35x增距镜-神器",
+      "shortName": "vivo 蔡司增距镜",
+      "aliases": [
+        "vivo 蔡司增距镜",
+        "vivo蔡司增距镜",
+        "X200U 增距镜",
+        "X300 Pro 增距镜",
+        "蔡司 2.35x 增距镜"
+      ],
+      "sameSkuGroupId": "vivo-zeiss-telephoto-lens",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "vivo-zeiss-telephoto-lens",
+      "shortName": "vivo 蔡司增距镜",
+      "aliases": [
+        "vivo 蔡司增距镜",
+        "vivo蔡司增距镜",
+        "X200U 增距镜",
+        "X200 Ultra 增距镜",
+        "X300 Pro 增距镜",
+        "蔡司 2.35x 增距镜"
+      ],
+      "sameSkuGroupId": "vivo-zeiss-telephoto-lens",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "canon-rf-100-400mm-镜头",
+      "shortName": "RF 100-400",
+      "aliases": [
+        "RF 100-400",
+        "RF100-400",
+        "RF100-400mm",
+        "佳能 RF 100-400mm 镜头"
+      ],
+      "sameSkuGroupId": "canon-rf-100-400",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "rf100-400mm-f5-6-8-is-usm镜头-追星-打鸟防抖高清",
+      "shortName": "RF 100-400",
+      "aliases": [
+        "RF 100-400",
+        "RF100-400",
+        "RF100-400mm",
+        "佳能 RF 100-400mm 镜头"
+      ],
+      "sameSkuGroupId": "canon-rf-100-400",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "fujifilm-mini-99-拍立得-复古颜值自动曝光免押短租",
+      "shortName": "Mini 99",
+      "aliases": [
+        "Mini 99",
+        "Mini99",
+        "mini 99",
+        "mini99"
+      ],
+      "sameSkuGroupId": "fujifilm-instax-mini-99",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "fujifilm-instax-mini-99",
+      "shortName": "Mini 99",
+      "aliases": [
+        "Mini 99",
+        "Mini99",
+        "mini 99",
+        "mini99"
+      ],
+      "sameSkuGroupId": "fujifilm-instax-mini-99",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "fujifilm-in-ta-mini90一次成像-婚礼聚",
+      "shortName": "Mini 90",
+      "aliases": [
+        "Mini 90",
+        "Mini90",
+        "mini 90",
+        "mini90"
+      ],
+      "sameSkuGroupId": "fujifilm-instax-mini-90",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "fujifilm-instax-mini-13-拍立得相机合影自拍神器安心保",
+      "shortName": "Mini 13",
+      "aliases": [
+        "Mini 13",
+        "Mini13",
+        "mini 13",
+        "mini13"
+      ],
+      "sameSkuGroupId": "fujifilm-instax-mini-13",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "fujifilm-instax-mini-13-拍立得相机合影",
+      "shortName": "Mini 13",
+      "aliases": [
+        "Mini 13",
+        "Mini13",
+        "mini 13",
+        "mini13"
+      ],
+      "sameSkuGroupId": "fujifilm-instax-mini-13",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "fujifilm-mini40-拍立得-复古氛围感-口",
+      "shortName": "Mini 40",
+      "aliases": [
+        "Mini 40",
+        "Mini40",
+        "mini 40",
+        "mini40"
+      ],
+      "sameSkuGroupId": "fujifilm-instax-mini-40",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "fujifilm-拍立得wide-evo-数码混合相机可打印宽幅照片",
+      "shortName": "Wide EVO",
+      "aliases": [
+        "Wide EVO",
+        "wide EVO",
+        "wide evo",
+        "WideEVO"
+      ],
+      "sameSkuGroupId": "fujifilm-instax-wide-evo",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "fujifilm wide evo",
+      "shortName": "Wide EVO",
+      "aliases": [
+        "Wide EVO",
+        "wide EVO",
+        "wide evo",
+        "WideEVO"
+      ],
+      "sameSkuGroupId": "fujifilm-instax-wide-evo",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "fujifilm-mini-link3-照片打印机-蓝牙即印免押短租",
+      "shortName": "Mini Link 3",
+      "aliases": [
+        "Mini Link 3",
+        "MiniLink3",
+        "mini link3",
+        "mini link 3"
+      ],
+      "sameSkuGroupId": "fujifilm-instax-mini-link-3",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "fujifilm-mini-link3-手机照片打印机短",
+      "shortName": "Mini Link 3",
+      "aliases": [
+        "Mini Link 3",
+        "MiniLink3",
+        "mini link3",
+        "mini link 3"
+      ],
+      "sameSkuGroupId": "fujifilm-instax-mini-link-3",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "大疆 mobile",
+      "shortName": "Osmo Mobile 7P",
+      "aliases": [
+        "Osmo Mobile 7P",
+        "Mobile 7P",
+        "DJI Mobile 7P",
+        "大疆 Mobile 7P"
+      ],
+      "sameSkuGroupId": "dji-osmo-mobile-7p",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "富图宝-fy820-830-专业三脚架短租",
+      "shortName": "FY820/830 三脚架",
+      "aliases": [
+        "FY820/830 三脚架",
+        "FY820",
+        "FY830",
+        "富图宝 FY820/830 三脚架"
+      ],
+      "sameSkuGroupId": "fotopro-fy820-830-tripod",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "fujifilm-instax-wide-400",
+      "shortName": "Wide 400",
+      "aliases": [
+        "Wide 400",
+        "Wide400",
+        "wide 400",
+        "wide400"
+      ],
+      "sameSkuGroupId": "fujifilm-instax-wide-400",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "canon-ccd-ixus130-卡片相机-复古",
+      "shortName": "IXUS 130",
+      "aliases": [
+        "IXUS 130",
+        "Ixus 130",
+        "ixus 130",
+        "Ixus130"
+      ],
+      "sameSkuGroupId": "canon-ixus-130",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "fujifilm-x100v-旁轴-复古胶片",
+      "shortName": "X100V",
+      "aliases": [
+        "X100V",
+        "x100v",
+        "富士 X100V"
+      ],
+      "sameSkuGroupId": "fujifilm-x100v",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "sony zv1",
+      "shortName": "ZV-1",
+      "aliases": [
+        "ZV-1",
+        "ZV1",
+        "zv1",
+        "索尼 ZV1"
+      ],
+      "sameSkuGroupId": "sony-zv1",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "免押租vivox200ultra-神器长焦拍照手机",
+      "shortName": "x200 u",
+      "aliases": [
+        "x200 u",
+        "X200 Ultra",
+        "X200U",
+        "vivo X200 Ultra"
+      ],
+      "sameSkuGroupId": "vivo-x200-ultra",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "免押租vivox200ultra-长焦微单手机-安心保障",
+      "shortName": "x200 u",
+      "aliases": [
+        "x200 u",
+        "X200 Ultra",
+        "X200U",
+        "vivo X200 Ultra"
+      ],
+      "sameSkuGroupId": "vivo-x200-ultra",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "vivox200ultra-长焦-微单手机-免押租-安心保障",
+      "shortName": "x200 u",
+      "aliases": [
+        "x200 u",
+        "X200 Ultra",
+        "X200U",
+        "vivo X200 Ultra"
+      ],
+      "sameSkuGroupId": "vivo-x200-ultra",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "fujifilm-mini-link2-手机照片打印机短",
+      "shortName": "Mini Link 2",
+      "aliases": [
+        "Mini Link 2",
+        "MiniLink2",
+        "mini link2",
+        "mini link 2"
+      ],
+      "sameSkuGroupId": "fujifilm-instax-mini-link-2",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "fujifilm-instax-mini-se拍立得-自拍合影",
+      "shortName": "Mini SE",
+      "aliases": [
+        "Mini SE",
+        "MiniSE",
+        "mini se",
+        "miniSE"
+      ],
+      "sameSkuGroupId": "fujifilm-instax-mini-se",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "canon-ccd-ixus100is-带内置闪光灯-ccd相机-佳能-ixus-系列",
+      "shortName": "IXUS 100IS",
+      "aliases": ["IXUS 100IS", "Ixus 100IS", "ixus100is"],
+      "sameSkuGroupId": "canon-ixus-100is",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "canon-ccd-ixus105-带内置闪光灯-ccd相机-佳能-ixus-系列",
+      "shortName": "IXUS 105",
+      "aliases": ["IXUS 105", "Ixus 105", "ixus105"],
+      "sameSkuGroupId": "canon-ixus-105",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "canon-ccd-ixus110is-带内置闪光灯-ccd相机-佳能-ixus-系列",
+      "shortName": "IXUS 110IS",
+      "aliases": ["IXUS 110IS", "Ixus 110IS", "ixus110is"],
+      "sameSkuGroupId": "canon-ixus-110is",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "canon-ccd-ixus115hs-带内置闪光灯-ccd相机-佳能-ixus-系列",
+      "shortName": "IXUS 115HS",
+      "aliases": ["IXUS 115HS", "Ixus 115HS", "ixus115hs"],
+      "sameSkuGroupId": "canon-ixus-115hs",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "canon-ccd-ixus120is-带内置闪光灯-ccd相机-佳能-ixus-系列",
+      "shortName": "IXUS 120IS",
+      "aliases": ["IXUS 120IS", "Ixus 120IS", "ixus120is"],
+      "sameSkuGroupId": "canon-ixus-120is",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "canon-ccd-ixus132-带内置闪光灯-ccd相机-佳能-ixus-系列",
+      "shortName": "IXUS 132",
+      "aliases": ["IXUS 132", "Ixus 132", "ixus132"],
+      "sameSkuGroupId": "canon-ixus-132",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "canon-ccd-ixus145-带内置闪光灯-ccd相机-佳能-ixus-系列",
+      "shortName": "IXUS 145",
+      "aliases": ["IXUS 145", "Ixus 145", "ixus145"],
+      "sameSkuGroupId": "canon-ixus-145",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "canon-ccd-ixus200is-带内置闪光灯-ccd相机-佳能-ixus-系列",
+      "shortName": "IXUS 200IS",
+      "aliases": ["IXUS 200IS", "Ixus 200IS", "ixus200is"],
+      "sameSkuGroupId": "canon-ixus-200is",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "canon-ccd-ixus220hs-带内置闪光灯-ccd相机-佳能-ixus-系列",
+      "shortName": "IXUS 220HS",
+      "aliases": ["IXUS 220HS", "Ixus 220HS", "ixus220hs"],
+      "sameSkuGroupId": "canon-ixus-220hs",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "canon-ccd-ixus230hs-带内置闪光灯-ccd相机-佳能-ixus-系列",
+      "shortName": "IXUS 230HS",
+      "aliases": ["IXUS 230HS", "Ixus 230HS", "ixus230hs"],
+      "sameSkuGroupId": "canon-ixus-230hs",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "canon-ccd-ixus240hs-带内置闪光灯-ccd相机-佳能-ixus-系列",
+      "shortName": "IXUS 240HS",
+      "aliases": ["IXUS 240HS", "Ixus 240HS", "ixus240hs"],
+      "sameSkuGroupId": "canon-ixus-240hs",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "canon-ccd-ixus300hs-带内置闪光灯-ccd相机-佳能-ixus-系列",
+      "shortName": "IXUS 300HS",
+      "aliases": ["IXUS 300HS", "Ixus 300HS", "ixus300hs"],
+      "sameSkuGroupId": "canon-ixus-300hs",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "canon-ccd-ixus310hs-带内置闪光灯-ccd相机-佳能-ixus-系列",
+      "shortName": "IXUS 310HS",
+      "aliases": ["IXUS 310HS", "Ixus 310HS", "ixus310hs"],
+      "sameSkuGroupId": "canon-ixus-310hs",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "canon-ccd-ixus500hs-带内置闪光灯-ccd相机-佳能-ixus-系列",
+      "shortName": "IXUS 500HS",
+      "aliases": ["IXUS 500HS", "Ixus 500HS", "ixus500hs"],
+      "sameSkuGroupId": "canon-ixus-500hs",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "canon-ccd-ixus510hs-带内置闪光灯-ccd相机-佳能-ixus-系列",
+      "shortName": "IXUS 510HS",
+      "aliases": ["IXUS 510HS", "Ixus 510HS", "ixus510hs"],
+      "sameSkuGroupId": "canon-ixus-510hs",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "canon-ccd-ixus70-带内置闪光灯-ccd相机-佳能-ixus-系列",
+      "shortName": "IXUS 70",
+      "aliases": ["IXUS 70", "Ixus 70", "ixus70"],
+      "sameSkuGroupId": "canon-ixus-70",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "canon-ccd-ixus700-带内置闪光灯-ccd相机-佳能-ixus-系列",
+      "shortName": "IXUS 700",
+      "aliases": ["IXUS 700", "Ixus 700", "ixus700"],
+      "sameSkuGroupId": "canon-ixus-700",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "canon-ccd-ixus80is-带内置闪光灯-ccd相机-佳能-ixus-系列",
+      "shortName": "IXUS 80IS",
+      "aliases": ["IXUS 80IS", "Ixus 80IS", "ixus80is"],
+      "sameSkuGroupId": "canon-ixus-80is",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "canon-ccd-ixus85is-带内置闪光灯-ccd相机-佳能-ixus-系列",
+      "shortName": "IXUS 85IS",
+      "aliases": ["IXUS 85IS", "Ixus 85IS", "ixus85is"],
+      "sameSkuGroupId": "canon-ixus-85is",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "canon-ccd-ixus860is-带内置闪光灯-ccd相机-佳能-ixus-系列",
+      "shortName": "IXUS 860IS",
+      "aliases": ["IXUS 860IS", "Ixus 860IS", "ixus860is"],
+      "sameSkuGroupId": "canon-ixus-860is",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "canon-ccd-ixus870is-带内置闪光灯-ccd相机-佳能-ixus-系列",
+      "shortName": "IXUS 870IS",
+      "aliases": ["IXUS 870IS", "Ixus 870IS", "ixus870is"],
+      "sameSkuGroupId": "canon-ixus-870is",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "canon-ccd-ixus90is-带内置闪光灯-ccd相机-佳能-ixus-系列",
+      "shortName": "IXUS 90IS",
+      "aliases": ["IXUS 90IS", "Ixus 90IS", "ixus90is"],
+      "sameSkuGroupId": "canon-ixus-90is",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "canon-ccd-ixus95is-带内置闪光灯-ccd相机-佳能-ixus-系列",
+      "shortName": "IXUS 95IS",
+      "aliases": ["IXUS 95IS", "Ixus 95IS", "ixus95is"],
+      "sameSkuGroupId": "canon-ixus-95is",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "canon-rf-50mm-f1-8-镜头",
+      "shortName": "RF 50 F1.8",
+      "aliases": ["RF 50 F1.8", "RF50 F1.8", "rf 50 f1.8", "rf50f1.8"],
+      "sameSkuGroupId": "canon-rf-50-f1-8",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "canon-rfs18-150mm-镜头旅游一镜走天下-追星高清体验",
+      "shortName": "RF-S 18-150",
+      "aliases": ["RF-S 18-150", "RFS18-150", "rf-s 18-150", "rfs18-150"],
+      "sameSkuGroupId": "canon-rf-s-18-150",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "fujifilm-拍立得mini11-入门级拍立得",
+      "shortName": "Mini 11",
+      "aliases": ["Mini 11", "Mini11", "mini 11", "mini11"],
+      "sameSkuGroupId": "fujifilm-instax-mini-11",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "fujifilm-拍立得mini12-入门级拍立得",
+      "shortName": "Mini 12",
+      "aliases": ["Mini 12", "Mini12", "mini 12", "mini12"],
+      "sameSkuGroupId": "fujifilm-instax-mini-12",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "fujifilm-拍立得sq20-数码混合相机-可打印方形照片",
+      "shortName": "SQ20",
+      "aliases": ["SQ20", "sq20", "instax SQ20"],
+      "sameSkuGroupId": "fujifilm-instax-square-sq20",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "fujifilm-拍立得sq40-方形画幅",
+      "shortName": "SQ40",
+      "aliases": ["SQ40", "sq40", "instax SQ40"],
+      "sameSkuGroupId": "fujifilm-instax-square-sq40",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "fujifilm-mini12-拍照神器",
+      "shortName": "Mini 12",
+      "aliases": ["Mini 12", "Mini12", "mini 12", "mini12"],
+      "sameSkuGroupId": "fujifilm-instax-mini-12",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "ipad-air-7-2025款",
+      "shortName": "iPad Air 7",
+      "aliases": ["iPad Air 7", "ipad air 7", "ipadair7"],
+      "sameSkuGroupId": "ipad-air-7",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "ipad-mini6-2021款",
+      "shortName": "iPad mini 6",
+      "aliases": ["iPad mini 6", "ipad mini 6", "ipadmini6"],
+      "sameSkuGroupId": "ipad-mini-6",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "ipad-mini7-2024款",
+      "shortName": "iPad mini 7",
+      "aliases": ["iPad mini 7", "ipad mini 7", "ipadmini7"],
+      "sameSkuGroupId": "ipad-mini-7",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "nikon-coolpix-a900-长焦相机-光学",
+      "shortName": "A900",
+      "aliases": ["A900", "a900", "Coolpix A900", "nikon a900"],
+      "sameSkuGroupId": "nikon-coolpix-a900",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "大疆action6-漳州古城线下自提-ypx",
+      "shortName": "Action 6",
+      "aliases": ["Action 6", "Action6", "DJI Action 6", "大疆 Action 6"],
+      "sameSkuGroupId": "dji-action-6",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "觅光-amiro-彩虹光面罩abm502",
+      "categoryId": "beauty-device",
+      "categoryName": "美容仪",
+      "productType": "led-face-mask",
+      "shortName": "AMIRO ABM502",
+      "aliases": ["AMIRO ABM502", "AMIRO 彩虹光面罩", "觅光 彩虹光面罩", "彩虹光面罩ABM502"],
+      "sameSkuGroupId": "amiro-rainbow-light-mask-abm502",
+      "confidence": 0.95,
+      "reason": "daemon_live_group_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
     }
   ]
 }

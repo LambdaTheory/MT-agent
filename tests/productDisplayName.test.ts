@@ -102,4 +102,15 @@ describe('product display names', () => {
     expect(canonicalProductShortName('X200 Ultra')).toBe('vivo X200 Ultra');
     expect(canonicalProductShortName('pocket3')).toBe('大疆 Pocket 3');
   });
+
+  it('normalizes bare catalog model names that commonly arrive from daemon sync', () => {
+    expect(canonicalProductShortName('ixus100is')).toBe('佳能 IXUS 100IS');
+    expect(canonicalProductShortName('rf50f1.8')).toBe('佳能 RF 50mm F1.8 镜头');
+    expect(canonicalProductShortName('rfs18-150')).toBe('佳能 RF-S 18-150mm 镜头');
+    expect(canonicalProductShortName('mini link2')).toBe('富士 instax mini Link 2');
+    expect(canonicalProductShortName('mini se')).toBe('富士 instax mini SE');
+    expect(canonicalProductShortName('sq20')).toBe('富士 instax SQUARE SQ20');
+    expect(canonicalProductShortName('action6')).toBe('大疆 Action 6');
+    expect(canonicalProductShortName('AMIRO 彩虹光面罩ABM502')).toBe('AMIRO ABM502');
+  });
 });

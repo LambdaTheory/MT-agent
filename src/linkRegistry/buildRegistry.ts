@@ -1,6 +1,8 @@
+import type { DaemonCatalogSnapshot } from './daemonCatalog.js';
 import type { ProductIdMapping } from '../mapping/productIdMapping.js';
 import type { GoodsLinkLifecycleState, GoodsRemovedLinkItem } from '../publicTraffic/goodsLinkLifecycle.js';
 import type { GoodsFirstSeenIndex } from '../publicTraffic/goodsSnapshot.js';
+import type { GoodsSnapshotItem } from '../publicTraffic/types.js';
 import { canonicalProductShortName, type ProductNameMap } from '../publicTraffic/productDisplayName.js';
 import type { LinkRegistryEntry, LinkRegistrySource, LinkRegistryStatus } from './types.js';
 
@@ -8,22 +10,33 @@ export interface BuildLinkRegistryInput {
   productIdMapping?: ProductIdMapping;
   productNameMap?: ProductNameMap;
   productNameHints?: Record<string, string | string[]>;
+  goodsSnapshot?: GoodsSnapshotItem[];
   firstSeen?: GoodsFirstSeenIndex;
   lifecycle?: GoodsLinkLifecycleState | null;
+  daemonCatalog?: DaemonCatalogSnapshot | null;
 }
 
 interface DraftEntry {
   internalProductId: string;
   platformProductId?: string;
   productName?: string;
+  productNamePriority?: number;
   categoryId?: string;
   categoryName?: string;
   productType?: string;
   shortName?: string;
   sameSkuGroupId?: string;
   status?: LinkRegistryStatus;
+  statusPriority?: number;
   firstSeenDate?: string;
   lastSeenDate?: string;
+  daemonStatusText?: string;
+  daemonSyncStatus?: string;
+  daemonChannels?: Set<string>;
+  daemonTags?: Set<string>;
+  daemonStockText?: string;
+  daemonRowText?: string;
+  daemonSnapshotAt?: string;
   nameHints: Set<string>;
   aliases: Set<string>;
   sources: Set<LinkRegistrySource>;
@@ -57,9 +70,39 @@ function setPlatformProductId(draft: DraftEntry, platformProductId: string): voi
   if (trimmed && !draft.platformProductId) draft.platformProductId = trimmed;
 }
 
-function setProductName(draft: DraftEntry, productName: string): void {
+function setProductName(draft: DraftEntry, productName: string, priority = 1): void {
   const trimmed = productName.trim();
-  if (trimmed && !draft.productName) draft.productName = trimmed;
+  if (!trimmed) return;
+  const currentPriority = draft.productNamePriority ?? 0;
+  if (!draft.productName || priority >= currentPriority) {
+    draft.productName = trimmed;
+    draft.productNamePriority = priority;
+  }
+}
+
+function setStatus(draft: DraftEntry, status: LinkRegistryStatus, priority = 1): void {
+  const currentPriority = draft.statusPriority ?? 0;
+  if (!draft.status || priority >= currentPriority) {
+    draft.status = status;
+    draft.statusPriority = priority;
+  }
+}
+
+function addDaemonStrings(target: Set<string> | undefined, values: string[] | undefined): Set<string> | undefined {
+  if (!values || values.length === 0) return target;
+  const next = target ?? new Set<string>();
+  for (const value of values.map((item) => item.trim()).filter(Boolean)) next.add(value);
+  return next;
+}
+
+function addDaemonMetadata(draft: DraftEntry, item: NonNullable<BuildLinkRegistryInput['daemonCatalog']>['entries'][number]): void {
+  draft.daemonStatusText ??= item.listingStatusText?.trim();
+  draft.daemonSyncStatus ??= item.syncStatus?.trim();
+  draft.daemonChannels = addDaemonStrings(draft.daemonChannels, item.channels);
+  draft.daemonTags = addDaemonStrings(draft.daemonTags, item.tags);
+  draft.daemonStockText ??= item.stockText?.trim();
+  draft.daemonRowText ??= item.rowText?.trim();
+  draft.daemonSnapshotAt ??= item.discoveredAt?.trim();
 }
 
 function addNameHint(draft: DraftEntry, value: string | undefined): void {
@@ -96,6 +139,20 @@ function addProductNameMap(drafts: Map<string, DraftEntry>, productNameMap: Prod
   }
 }
 
+function addGoodsSnapshot(drafts: Map<string, DraftEntry>, goodsSnapshot: GoodsSnapshotItem[]): void {
+  for (const item of goodsSnapshot) {
+    const internalProductId = validInternalId(item.internalProductId);
+    if (!internalProductId) continue;
+
+    const draft = draftFor(drafts, internalProductId);
+    setPlatformProductId(draft, item.platformProductId);
+    setProductName(draft, item.productName, 3);
+    setStatus(draft, 'active', 3);
+    addNameHint(draft, item.productName);
+    draft.sources.add('goods_snapshot');
+  }
+}
+
 function addFirstSeen(drafts: Map<string, DraftEntry>, firstSeen: GoodsFirstSeenIndex): void {
   for (const [internalProductIdValue, entry] of Object.entries(firstSeen)) {
     const internalProductId = validInternalId(internalProductIdValue);
@@ -103,7 +160,7 @@ function addFirstSeen(drafts: Map<string, DraftEntry>, firstSeen: GoodsFirstSeen
 
     const draft = draftFor(drafts, internalProductId);
     setPlatformProductId(draft, entry.platformProductId);
-    setProductName(draft, entry.productName);
+    setProductName(draft, entry.productName, 2);
     draft.firstSeenDate = entry.firstSeenDate;
     addNameHint(draft, entry.productName);
     draft.sources.add('goods_first_seen');
@@ -129,8 +186,8 @@ function addLifecycle(drafts: Map<string, DraftEntry>, lifecycle: GoodsLinkLifec
 
     const draft = draftFor(drafts, internalProductId);
     setPlatformProductId(draft, entry.platformProductId);
-    setProductName(draft, entry.productName);
-    draft.status = 'active';
+    setProductName(draft, entry.productName, 2);
+    setStatus(draft, 'active', 2);
     addNameHint(draft, entry.productName);
     draft.sources.add('goods_link_lifecycle');
   }
@@ -138,13 +195,27 @@ function addLifecycle(drafts: Map<string, DraftEntry>, lifecycle: GoodsLinkLifec
   for (const [internalProductId, item] of latestRemovedByInternalId(lifecycle.removedLinks)) {
     const draft = draftFor(drafts, internalProductId);
     setPlatformProductId(draft, item.platformProductId);
-    setProductName(draft, item.productName);
+    setProductName(draft, item.productName, 2);
     addNameHint(draft, item.productName);
     if (draft.status !== 'active') {
-      draft.status = 'removed';
+      setStatus(draft, 'removed', 1);
       draft.lastSeenDate = item.removedDate;
     }
     draft.sources.add('goods_link_lifecycle');
+  }
+}
+
+function addDaemonCatalog(drafts: Map<string, DraftEntry>, daemonCatalog: DaemonCatalogSnapshot): void {
+  for (const item of daemonCatalog.entries) {
+    const internalProductId = validInternalId(item.internalProductId);
+    if (!internalProductId) continue;
+
+    const draft = draftFor(drafts, internalProductId);
+    setProductName(draft, item.productName, 4);
+    setStatus(draft, 'active', 4);
+    addNameHint(draft, item.productName);
+    addDaemonMetadata(draft, item);
+    draft.sources.add('daemon_catalog');
   }
 }
 
@@ -175,10 +246,40 @@ function sameSkuBrandPrefix(name: string): string {
   if (/^尼康/u.test(name)) return 'nikon';
   if (/^松下/u.test(name)) return 'panasonic';
   if (/^vivo(?:\s|$)/iu.test(name)) return 'vivo';
+  if (/^ipod(?:\s|$)/iu.test(name)) return 'ipod';
   if (/^iPhone(?:\s|$)/iu.test(name)) return 'iphone';
   if (/^iPad(?:\s|$)/iu.test(name)) return 'ipad';
   if (/^苹果/u.test(name)) return 'apple';
+  if (/^AMIRO(?:\s|$)/iu.test(name)) return 'amiro';
+  if (/^SEAYEO(?:\s|$)/iu.test(name)) return 'seayeo';
+  if (/^Ulike(?:\s|$)/iu.test(name)) return 'ulike';
   return '';
+}
+
+function inferredSpecialSameSkuGroupId(name: string): string | undefined {
+  const trimmed = name.trim();
+  if (!trimmed) return undefined;
+
+  const canonIxus = trimmed.match(/^(?:佳能|canon)\s+IXUS\s*([0-9]{2,3}(?:IS|HS)?)/iu);
+  if (canonIxus) return `canon-ixus-${canonIxus[1].toLowerCase()}`;
+
+  if (/^(?:佳能|canon)\s+RF\s+50mm\s+F1\.8\s+镜头$/iu.test(trimmed)) return 'canon-rf-50-f1-8';
+  if (/^(?:佳能|canon)\s+RF-S\s+18-150mm\s+镜头$/iu.test(trimmed)) return 'canon-rf-s-18-150';
+  if (/^(?:佳能|canon)\s+RF\s+100-400mm\s+镜头$/iu.test(trimmed)) return 'canon-rf-100-400';
+
+  const fujiSquare = trimmed.match(/^富士\s+instax\s+SQUARE\s+SQ(1|20|40)$/iu);
+  if (fujiSquare) return `fujifilm-instax-square-sq${fujiSquare[1]}`;
+
+  const fujiMiniLink = trimmed.match(/^富士\s+instax\s+mini\s+Link\s*(2|3)$/iu);
+  if (fujiMiniLink) return `fujifilm-instax-mini-link-${fujiMiniLink[1]}`;
+
+  if (/^富士\s+instax\s+mini\s+SE$/iu.test(trimmed)) return 'fujifilm-instax-mini-se';
+  if (/^(?:大疆|dji)\s+Action\s+6$/iu.test(trimmed)) return 'dji-action-6';
+  if (/^AMIRO\s+ABM502$/i.test(trimmed)) return 'amiro-rainbow-light-mask-abm502';
+  if (/^SEAYEO\s+.*大排灯美容仪$/u.test(trimmed)) return 'seayeo-led-face-mask';
+  if (/^Ulike\s+Air\s+3$/i.test(trimmed)) return 'ulike-air-3';
+
+  return undefined;
 }
 
 function sameSkuSlug(name: string): string {
@@ -193,6 +294,7 @@ function sameSkuSlug(name: string): string {
         .replace(/^尼康\s*/u, '')
         .replace(/^松下\s*/u, '')
         .replace(/^vivo\s*/iu, '')
+        .replace(/^ipod\s*/iu, '')
         .replace(/^iPhone\s*/iu, '')
         .replace(/^iPad\s*/iu, '')
         .replace(/^苹果\s*/u, '')
@@ -216,12 +318,12 @@ function assignSameSkuGroupIds(drafts: Map<string, DraftEntry>): void {
     if (!preferredName) continue;
     const canonical = canonicalProductShortName(preferredName);
     if (!canInferSameSkuGroup(canonical)) continue;
-    const groupId = sameSkuSlug(canonical);
+    const groupId = inferredSpecialSameSkuGroupId(canonical) ?? sameSkuSlug(canonical);
     if (groupId) draft.sameSkuGroupId = groupId;
   }
 }
 
-function inferredShortNameFromGroupId(groupId: string): string | undefined {
+export function preferredShortNameForSameSkuGroup(groupId: string): string | undefined {
   const trimmed = groupId.trim();
   if (!trimmed) return undefined;
 
@@ -239,9 +341,14 @@ function inferredShortNameFromGroupId(groupId: string): string | undefined {
     [/^fujifilm-(mini|wide)-evo$/i, (variant) => `${variant.toLowerCase()} evo`],
     [/^fujifilm-x-half$/i, () => 'X Half'],
     [/^canon-sx(\d+)(?:-hs)?$/i, (model) => `SX${model}`],
-    [/^canon(?:-eos)?-r50$/i, () => 'r50'],
+    [/^canon(?:-eos)?-r50$/i, () => 'R50'],
     [/^canon(?:-ccd)?-ixus-?130/i, () => 'IXUS 130'],
+    [/^canon-ixus-(\d+(?:is|hs)?)$/i, (model) => `IXUS ${model.toUpperCase()}`],
     [/^canon-cp1500$/i, () => 'CP1500'],
+    [/^canon-rf-100-400$/i, () => 'RF 100-400'],
+    [/^canon-rf-50-f1-8$/i, () => 'RF 50 F1.8'],
+    [/^canon-rf-s-18-150$/i, () => 'RF-S 18-150'],
+    [/^ipod-touch-(\d+)$/i, (model) => `iPod touch ${model}`],
     [/^sony-.*zv1/i, () => 'ZV-1'],
     [/^vivo-x(\d+)-ultra$/i, (model) => `x${model} u`],
     [/^vivo x(\d+) pro$/i, (model) => `x${model}p`],
@@ -250,6 +357,12 @@ function inferredShortNameFromGroupId(groupId: string): string | undefined {
     [/^vivo-蔡司-2-35x增距镜-神器$/u, () => 'vivo 蔡司增距镜'],
     [/^fujifilm-mini-evo$/i, () => 'mini evo'],
     [/^fujifilm-wide-evo$/i, () => 'wide evo'],
+    [/^fujifilm-instax-mini-link-(2|3)$/i, (model) => `Mini Link ${model}`],
+    [/^fujifilm-instax-mini-se$/i, () => 'Mini SE'],
+    [/^dji-action-6$/i, () => 'Action 6'],
+    [/^amiro-rainbow-light-mask-abm502$/i, () => 'AMIRO ABM502'],
+    [/^seayeo-led-face-mask$/i, () => 'SEAYEO 大排灯美容仪'],
+    [/^ulike-air-3$/i, () => 'Ulike Air 3'],
   ];
 
   for (const [pattern, formatter] of patterns) {
@@ -258,6 +371,26 @@ function inferredShortNameFromGroupId(groupId: string): string | undefined {
   }
 
   return undefined;
+}
+
+function comparableShortName(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/^(?:佳能|富士|大疆|影石|索尼|尼康|松下)\s*/gu, '')
+    .replace(/^vivo\s*/giu, '')
+    .replace(/\binstax\b/giu, '')
+    .replace(/\bmm\b/giu, '')
+    .replace(/镜头/gu, '')
+    .replace(/[^\p{Letter}\p{Number}]+/gu, '');
+}
+
+function shouldPreferInferredShortName(current: string | undefined, inferred: string | undefined): boolean {
+  const currentTrimmed = current?.trim();
+  const inferredTrimmed = inferred?.trim();
+  if (!currentTrimmed || !inferredTrimmed) return false;
+  if (currentTrimmed === inferredTrimmed) return false;
+  return comparableShortName(currentTrimmed) === comparableShortName(inferredTrimmed);
 }
 
 interface InferredClassification {
@@ -275,6 +408,13 @@ function inferredClassificationFrom(draft: DraftEntry): InferredClassification |
   ].filter(Boolean).join(' ').toLowerCase();
 
   if (!key) return undefined;
+  if (/ipod|ipod touch|touch\s*\d+/.test(key)) {
+    return { categoryId: 'media-player', categoryName: '播放器', productType: 'music-player' };
+  }
+  if (/amiro|abm502|ulike air 3|seayeo|大排灯美容仪/.test(key)) {
+    const productType = /ulike air 3/.test(key) ? 'hair-removal-device' : 'led-face-mask';
+    return { categoryId: 'beauty-device', categoryName: '美容仪', productType };
+  }
   if (/iphone|vivo x\d+|x\d+\s*u(?:ltra)?|x\d+u\b|x\d+\s*p(?:ro)?|x\d+p\b|galaxy s23|s23u/.test(key)) {
     return { categoryId: 'phone', categoryName: '手机', productType: 'smartphone' };
   }
@@ -298,8 +438,13 @@ function inferredClassificationFrom(draft: DraftEntry): InferredClassification |
 function inferDraftMetadata(drafts: Map<string, DraftEntry>): void {
   for (const draft of drafts.values()) {
     draft.shortName = normalizedShortName(draft.shortName) ?? draft.shortName;
+    const inferredShortName = preferredShortNameForSameSkuGroup(draft.sameSkuGroupId ?? '');
+    if (shouldPreferInferredShortName(draft.shortName, inferredShortName)) {
+      draft.shortName = inferredShortName;
+      if (draft.shortName) addNameHint(draft, draft.shortName);
+    }
     if (!draft.shortName) {
-      draft.shortName = inferredShortNameFromGroupId(draft.sameSkuGroupId ?? '')
+      draft.shortName = inferredShortName
         ?? bestNameHint(draft.nameHints);
       if (draft.shortName) addNameHint(draft, draft.shortName);
     }
@@ -330,6 +475,7 @@ function confidenceFor(draft: DraftEntry): number {
   if (draft.status && draft.status !== 'unknown') score += 0.1;
   if (draft.firstSeenDate || draft.lastSeenDate) score += 0.1;
   if (draft.sources.size >= 3) score += 0.1;
+  if (draft.sources.has('daemon_catalog')) score += 0.05;
   return Math.max(0, Math.min(1, Number(score.toFixed(2))));
 }
 
@@ -356,6 +502,13 @@ function finalizeEntry(draft: DraftEntry): LinkRegistryEntry {
     status: draft.status ?? 'unknown',
     ...(draft.firstSeenDate ? { firstSeenDate: draft.firstSeenDate } : {}),
     ...(draft.lastSeenDate ? { lastSeenDate: draft.lastSeenDate } : {}),
+    ...(draft.daemonStatusText ? { daemonStatusText: draft.daemonStatusText } : {}),
+    ...(draft.daemonSyncStatus ? { daemonSyncStatus: draft.daemonSyncStatus } : {}),
+    ...(draft.daemonChannels && draft.daemonChannels.size > 0 ? { daemonChannels: [...draft.daemonChannels].sort() } : {}),
+    ...(draft.daemonTags && draft.daemonTags.size > 0 ? { daemonTags: [...draft.daemonTags].sort() } : {}),
+    ...(draft.daemonStockText ? { daemonStockText: draft.daemonStockText } : {}),
+    ...(draft.daemonRowText ? { daemonRowText: draft.daemonRowText } : {}),
+    ...(draft.daemonSnapshotAt ? { daemonSnapshotAt: draft.daemonSnapshotAt } : {}),
     confidence: confidenceFor(draft),
     ...(updatedAtFor(draft) ? { updatedAt: updatedAtFor(draft) } : {}),
     source: [...draft.sources].sort(),
@@ -368,8 +521,10 @@ export function buildLinkRegistry(input: BuildLinkRegistryInput): LinkRegistryEn
   addProductIdMapping(drafts, input.productIdMapping ?? {});
   addProductNameMap(drafts, input.productNameMap ?? {});
   addProductNameHints(drafts, input.productNameHints ?? {});
+  addGoodsSnapshot(drafts, input.goodsSnapshot ?? []);
   addFirstSeen(drafts, input.firstSeen ?? {});
   if (input.lifecycle) addLifecycle(drafts, input.lifecycle);
+  if (input.daemonCatalog) addDaemonCatalog(drafts, input.daemonCatalog);
   assignSameSkuGroupIds(drafts);
   inferDraftMetadata(drafts);
 

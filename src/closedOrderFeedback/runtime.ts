@@ -1,20 +1,24 @@
 import { access, readdir, readFile } from 'node:fs/promises';
 import { isAbsolute, resolve } from 'node:path';
 import { buildLinkRegistry } from '../linkRegistry/buildRegistry.js';
+import { loadOptionalDaemonCatalogSnapshot } from '../linkRegistry/daemonCatalog.js';
 import { applyLinkRegistryOverrides, parseLinkRegistryOverrides, type LinkRegistryOverrideRisk } from '../linkRegistry/overrides.js';
 import { createLinkRegistryQuery, type LinkRegistryQuery } from '../linkRegistry/queryRegistry.js';
 import type { LinkRegistryEntry } from '../linkRegistry/types.js';
 import { loadProductIdMapping, type ProductIdMapping } from '../mapping/productIdMapping.js';
 import type { GoodsLinkLifecycleState } from '../publicTraffic/goodsLinkLifecycle.js';
 import type { GoodsFirstSeenIndex } from '../publicTraffic/goodsSnapshot.js';
+import type { GoodsSnapshotItem } from '../publicTraffic/types.js';
 import { buildPublicTrafficPaths } from '../publicTraffic/paths.js';
 import { loadProductNameMap } from '../publicTraffic/productDisplayName.js';
 
 export interface ClosedOrderRegistryPathsInput {
   productIdMapPath?: string;
   productNameMapPath?: string;
+  goodsSnapshotPath?: string;
   firstSeenPath?: string;
   lifecyclePath?: string;
+  daemonCatalogPath?: string;
   overridesPath?: string;
   artifactsDir?: string;
 }
@@ -22,8 +26,10 @@ export interface ClosedOrderRegistryPathsInput {
 export interface ResolvedClosedOrderRegistryPaths {
   productIdMapPath: string;
   productNameMapPath: string;
+  goodsSnapshotPath: string;
   firstSeenPath: string;
   lifecyclePath: string;
+  daemonCatalogPath: string;
   overridesPath: string;
   artifactsDir: string;
 }
@@ -166,23 +172,29 @@ export async function resolveClosedOrderRegistryPaths(
 ): Promise<ResolvedClosedOrderRegistryPaths> {
   const productIdMapPath = input.productIdMapPath ?? 'config/product-id-map.json';
   const productNameMapPath = input.productNameMapPath ?? 'config/product-name-map.json';
+  const goodsSnapshotPath = input.goodsSnapshotPath ?? 'output/state/goods-current-snapshot.json';
   const firstSeenPath = input.firstSeenPath ?? 'output/state/goods-first-seen.json';
   const lifecyclePath = input.lifecyclePath ?? 'output/state/goods-link-lifecycle.json';
+  const daemonCatalogPath = input.daemonCatalogPath ?? 'output/state/link-registry-daemon-catalog.json';
   const overridesPath = input.overridesPath ?? 'config/link-registry-overrides.json';
   const artifactsDir = input.artifactsDir ?? 'output';
 
   const [
     resolvedProductIdMapPath,
     resolvedProductNameMapPath,
+    resolvedGoodsSnapshotPath,
     resolvedFirstSeenPath,
     resolvedLifecyclePath,
+    resolvedDaemonCatalogPath,
     resolvedOverridesPath,
     resolvedArtifactsDir,
   ] = await Promise.all([
     preferExistingPath(productIdMapPath, cwd),
     preferExistingPath(productNameMapPath, cwd),
+    preferExistingPath(goodsSnapshotPath, cwd),
     preferExistingPath(firstSeenPath, cwd),
     preferExistingPath(lifecyclePath, cwd),
+    preferExistingPath(daemonCatalogPath, cwd),
     preferExistingPath(overridesPath, cwd),
     preferExistingPath(artifactsDir, cwd, hasDatedOutputDirs),
   ]);
@@ -190,8 +202,10 @@ export async function resolveClosedOrderRegistryPaths(
   return {
     productIdMapPath: resolvedProductIdMapPath,
     productNameMapPath: resolvedProductNameMapPath,
+    goodsSnapshotPath: resolvedGoodsSnapshotPath,
     firstSeenPath: resolvedFirstSeenPath,
     lifecyclePath: resolvedLifecyclePath,
+    daemonCatalogPath: resolvedDaemonCatalogPath,
     overridesPath: resolvedOverridesPath,
     artifactsDir: resolvedArtifactsDir,
   };
@@ -202,25 +216,29 @@ export async function loadClosedOrderRegistryContext(
   cwd = process.cwd(),
 ): Promise<ClosedOrderRegistryContext> {
   const resolvedPaths = await resolveClosedOrderRegistryPaths(input, cwd);
-  const [productIdMapping, productNameMap, firstSeen, lifecycle] = await Promise.all([
+  const [productIdMapping, productNameMap, goodsSnapshot, firstSeen, lifecycle] = await Promise.all([
     loadProductIdMapping(resolvedPaths.productIdMapPath).catch((error) => {
       if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return {};
       throw error;
     }),
     loadProductNameMap(resolvedPaths.productNameMapPath, (message) => console.warn(message)),
+    loadOptionalJson<GoodsSnapshotItem[]>(resolvedPaths.goodsSnapshotPath, []),
     loadOptionalJson<GoodsFirstSeenIndex>(resolvedPaths.firstSeenPath, {}),
     loadOptionalJson<GoodsLinkLifecycleState | null>(resolvedPaths.lifecyclePath, null),
   ]);
-  const [productNameHints, rawOverrides] = await Promise.all([
+  const [productNameHints, daemonCatalog, rawOverrides] = await Promise.all([
     collectArtifactProductNameHints(resolvedPaths.artifactsDir, productIdMapping),
+    loadOptionalDaemonCatalogSnapshot(resolvedPaths.daemonCatalogPath),
     loadOptionalJson<unknown | null>(resolvedPaths.overridesPath, null),
   ]);
   const baseRegistry = buildLinkRegistry({
     productIdMapping,
     productNameMap,
     productNameHints,
+    goodsSnapshot,
     firstSeen,
     lifecycle,
+    daemonCatalog,
   });
   const overrideResult = rawOverrides === null
     ? { entries: baseRegistry, risks: [] }

@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { applyLinkRegistryOverrides, parseLinkRegistryOverrides } from '../src/linkRegistry/overrides.js';
 import type { LinkRegistryEntry } from '../src/linkRegistry/types.js';
@@ -54,6 +55,23 @@ describe('link registry overrides', () => {
     expect(result.entries[0]?.source).toContain('same_sku_group_alias_rule');
   });
 
+  it('applies same sku group rules to every matching entry', () => {
+    const result = applyLinkRegistryOverrides(entries, {
+      version: 1,
+      entries: [{ internalProductId: '701', sameSkuGroupId: 'canon r50' }],
+      sameSkuGroupRules: [{ matchSameSkuGroupId: 'canon r50', sameSkuGroupId: 'canon-eos-r50', shortName: 'R50', aliases: ['EOS R50'] }],
+    });
+
+    expect(result.entries[0]).toMatchObject({
+      sameSkuGroupId: 'canon-eos-r50',
+      shortName: 'R50',
+      classificationSource: 'manual_override',
+    });
+    expect(result.entries[0]?.aliases).toEqual(expect.arrayContaining(['EOS R50']));
+    expect(result.entries[0]?.source).toContain('same_sku_group_rule');
+    expect(result.risks).toEqual([]);
+  });
+
   it('fails fast for duplicate manual overrides', () => {
     expect(() => applyLinkRegistryOverrides(entries, {
       version: 1,
@@ -65,9 +83,22 @@ describe('link registry overrides', () => {
   });
 
   it('parses and rejects malformed override contracts', () => {
-    expect(parseLinkRegistryOverrides({ version: 1, entries: [{ internalProductId: '701', sameSkuGroupId: 'canon-sx70' }], sameSkuGroupAliasRules: [{ sameSkuGroupId: 'canon-sx70', aliases: ['SX70'] }] })).toEqual({ version: 1, entries: [{ internalProductId: '701', sameSkuGroupId: 'canon-sx70' }], shortNameRules: undefined, sameSkuGroupAliasRules: [{ sameSkuGroupId: 'canon-sx70', aliases: ['SX70'] }] });
+    expect(parseLinkRegistryOverrides({ version: 1, entries: [{ internalProductId: '701', sameSkuGroupId: 'canon-sx70' }], sameSkuGroupRules: [{ matchSameSkuGroupId: 'canon r50', sameSkuGroupId: 'canon-eos-r50', shortName: 'R50' }], sameSkuGroupAliasRules: [{ sameSkuGroupId: 'canon-sx70', aliases: ['SX70'] }] })).toEqual({ version: 1, entries: [{ internalProductId: '701', sameSkuGroupId: 'canon-sx70', productName: undefined, categoryId: undefined, categoryName: undefined, productType: undefined, shortName: undefined, aliases: undefined, status: undefined, confidence: undefined, reason: undefined, maintainer: undefined, updatedAt: undefined, disabled: undefined }], shortNameRules: undefined, sameSkuGroupRules: [{ matchSameSkuGroupId: 'canon r50', sameSkuGroupId: 'canon-eos-r50', productName: undefined, categoryId: undefined, categoryName: undefined, productType: undefined, shortName: 'R50', aliases: undefined, confidence: undefined, reason: undefined, maintainer: undefined, updatedAt: undefined, disabled: undefined }], sameSkuGroupAliasRules: [{ sameSkuGroupId: 'canon-sx70', aliases: ['SX70'], reason: undefined, maintainer: undefined, updatedAt: undefined, disabled: undefined }] });
     expect(() => parseLinkRegistryOverrides({ version: 1, entries: [{ internalProductId: 'bad', sameSkuGroupId: 'Canon SX70' }] })).toThrow('Invalid entry override internalProductId');
     expect(() => parseLinkRegistryOverrides({ version: 2 })).toThrow('version must be 1');
+  });
+
+  it('normalizes known broken same sku group ids instead of crashing the registry load', () => {
+    const parsed = parseLinkRegistryOverrides({
+      version: 1,
+      entries: [{ internalProductId: '701', sameSkuGroupId: 'vivo-钄-2-35x-澧炶窛-绁炲櫒' }],
+      shortNameRules: [{ shortName: 'broken vivo telephoto', sameSkuGroupId: 'vivo-钄-2-35x-澧炶窛-绁炲櫒' }],
+      sameSkuGroupAliasRules: [{ sameSkuGroupId: 'vivo-钄-2-35x-澧炶窛-绁炲櫒', aliases: ['broken telephoto alias'] }],
+    });
+
+    expect(parsed.entries?.[0]?.sameSkuGroupId).toBe('vivo-zeiss-telephoto-lens');
+    expect(parsed.shortNameRules?.[0]?.sameSkuGroupId).toBe('vivo-zeiss-telephoto-lens');
+    expect(parsed.sameSkuGroupAliasRules?.[0]?.sameSkuGroupId).toBe('vivo-zeiss-telephoto-lens');
   });
 
   it('records unknown manual override targets without polluting entries', () => {
@@ -75,5 +106,97 @@ describe('link registry overrides', () => {
 
     expect(result.entries).toEqual(entries);
     expect(result.risks).toEqual([{ type: 'unknown_internal_product_id', message: 'Override target not found: 999', internalProductId: '999' }]);
+  });
+
+  it('seeds a manual entry when the override points to a live-only internal id', () => {
+    const result = applyLinkRegistryOverrides(entries, {
+      version: 1,
+      entries: [{
+        internalProductId: '999',
+        productName: 'Ipod touch6 顺丰发货，1天起租---skills测试用，请勿下单',
+        categoryId: 'media-player',
+        categoryName: '播放器',
+        productType: 'music-player',
+        shortName: 'iPod touch 6',
+        aliases: ['iPod touch 6', 'ipodtouch6'],
+        sameSkuGroupId: 'ipod-touch-6',
+        status: 'active',
+        confidence: 0.95,
+        updatedAt: '2026-06-27',
+      }],
+    });
+
+    expect(result.entries).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        internalProductId: '999',
+        productName: 'Ipod touch6 顺丰发货，1天起租---skills测试用，请勿下单',
+        categoryId: 'media-player',
+        categoryName: '播放器',
+        productType: 'music-player',
+        shortName: 'iPod touch 6',
+        sameSkuGroupId: 'ipod-touch-6',
+        status: 'active',
+        confidence: 0.95,
+        classificationSource: 'manual_override',
+        source: ['link_registry_override'],
+      }),
+    ]));
+    expect(result.entries.find((entry) => entry.internalProductId === '999')?.aliases).toEqual(['iPod touch 6', 'ipodtouch6']);
+    expect(result.risks).toEqual([]);
+  });
+
+  it('keeps the checked-in group normalization rules aligned for known dirty historical groups', () => {
+    const overrides = parseLinkRegistryOverrides(
+      JSON.parse(readFileSync(new URL('../config/link-registry-overrides.json', import.meta.url), 'utf8')) as unknown,
+    );
+    const sampleEntries: LinkRegistryEntry[] = [
+      { internalProductId: '1001', shortName: 'pocket3', sameSkuGroupId: '89元租七天大疆限时抢购-大疆', status: 'active', source: ['daemon_catalog'] },
+      { internalProductId: '1002', shortName: 'vivo X300 Pro', sameSkuGroupId: 'vivo x301 pro', status: 'active', source: ['daemon_catalog'] },
+      { internalProductId: '1003', shortName: 'mini EVO', sameSkuGroupId: 'fujifilm-mini-evo', status: 'active', source: ['daemon_catalog'] },
+      { internalProductId: '1004', shortName: 'vivo 蔡司增距镜', sameSkuGroupId: 'vivo-蔡司-2-35x增距镜-神器', status: 'active', source: ['daemon_catalog'] },
+      { internalProductId: '1005', shortName: '富士 mini 99 拍立得 复古颜值自动曝光免押短租', sameSkuGroupId: 'fujifilm-mini-99-拍立得-复古颜值自动曝光免押短租', status: 'active', source: ['daemon_catalog'] },
+      { internalProductId: '1006', shortName: '富士拍立得wide EVO 数码混合相机可打印宽幅照片', sameSkuGroupId: 'fujifilm wide evo', status: 'active', source: ['daemon_catalog'] },
+      { internalProductId: '1007', shortName: '富图宝 FY820/830 三脚架', sameSkuGroupId: '富图宝-fy820-830-专业三脚架短租', status: 'active', source: ['daemon_catalog'] },
+      { internalProductId: '1008', shortName: 'ixus 130', sameSkuGroupId: 'canon-ccd-ixus130-卡片相机-复古', status: 'active', source: ['daemon_catalog'] },
+      { internalProductId: '1009', shortName: 'x100v', sameSkuGroupId: 'fujifilm-x100v-旁轴-复古胶片', status: 'active', source: ['daemon_catalog'] },
+      { internalProductId: '1010', shortName: 'ZV-1', sameSkuGroupId: 'sony zv1', status: 'active', source: ['daemon_catalog'] },
+      { internalProductId: '1011', shortName: '免押租vivoX200Ultra 神器长焦拍照手机', sameSkuGroupId: '免押租vivox200ultra-神器长焦拍照手机', status: 'active', source: ['daemon_catalog'] },
+      { internalProductId: '1012', shortName: 'mini link2', sameSkuGroupId: 'fujifilm-mini-link2-手机照片打印机短', status: 'active', source: ['daemon_catalog'] },
+      { internalProductId: '1013', shortName: 'mini se', sameSkuGroupId: 'fujifilm-instax-mini-se拍立得-自拍合影', status: 'active', source: ['daemon_catalog'] },
+      { internalProductId: '1014', shortName: '佳能CCD ixus100is 带内置闪光灯 [CCD相机-佳能-IXUS 系列]', sameSkuGroupId: 'canon-ccd-ixus100is-带内置闪光灯-ccd相机-佳能-ixus-系列', status: 'active', source: ['daemon_catalog'] },
+      { internalProductId: '1015', shortName: '佳能 RFS18-150mm 镜头旅游一镜走天下 追星高清体验', sameSkuGroupId: 'canon-rfs18-150mm-镜头旅游一镜走天下-追星高清体验', status: 'active', source: ['daemon_catalog'] },
+      { internalProductId: '1016', shortName: '富士拍立得mini11 入门级拍立得', sameSkuGroupId: 'fujifilm-拍立得mini11-入门级拍立得', status: 'active', source: ['daemon_catalog'] },
+      { internalProductId: '1017', shortName: '富士拍立得SQ20 数码混合相机 可打印方形照片', sameSkuGroupId: 'fujifilm-拍立得sq20-数码混合相机-可打印方形照片', status: 'active', source: ['daemon_catalog'] },
+      { internalProductId: '1018', shortName: 'ipad air 7', sameSkuGroupId: 'ipad-air-7-2025款', status: 'active', source: ['daemon_catalog'] },
+      { internalProductId: '1019', shortName: 'nikon a900', sameSkuGroupId: 'nikon-coolpix-a900-长焦相机-光学', status: 'active', source: ['daemon_catalog'] },
+      { internalProductId: '1020', shortName: '大疆action6 漳州古城线下自提 YPX', sameSkuGroupId: '大疆action6-漳州古城线下自提-ypx', status: 'active', source: ['daemon_catalog'] },
+      { internalProductId: '1021', shortName: '觅光 彩虹光面罩', sameSkuGroupId: '觅光-amiro-彩虹光面罩abm502', status: 'active', source: ['daemon_catalog'] },
+    ];
+
+    const result = applyLinkRegistryOverrides(sampleEntries, overrides);
+
+    expect(result.entries).toEqual(expect.arrayContaining([
+      expect.objectContaining({ internalProductId: '1001', shortName: 'Pocket 3', sameSkuGroupId: 'dji-pocket-3' }),
+      expect.objectContaining({ internalProductId: '1002', shortName: 'vivo X300 Pro', sameSkuGroupId: 'vivo-x300-pro' }),
+      expect.objectContaining({ internalProductId: '1003', shortName: 'mini EVO', sameSkuGroupId: 'fujifilm-instax-mini-evo' }),
+      expect.objectContaining({ internalProductId: '1004', shortName: 'vivo 蔡司增距镜', sameSkuGroupId: 'vivo-zeiss-telephoto-lens' }),
+      expect.objectContaining({ internalProductId: '1005', shortName: 'Mini 99', sameSkuGroupId: 'fujifilm-instax-mini-99' }),
+      expect.objectContaining({ internalProductId: '1006', shortName: 'Wide EVO', sameSkuGroupId: 'fujifilm-instax-wide-evo' }),
+      expect.objectContaining({ internalProductId: '1007', shortName: 'FY820/830 三脚架', sameSkuGroupId: 'fotopro-fy820-830-tripod' }),
+      expect.objectContaining({ internalProductId: '1008', shortName: 'IXUS 130', sameSkuGroupId: 'canon-ixus-130' }),
+      expect.objectContaining({ internalProductId: '1009', shortName: 'X100V', sameSkuGroupId: 'fujifilm-x100v' }),
+      expect.objectContaining({ internalProductId: '1010', shortName: 'ZV-1', sameSkuGroupId: 'sony-zv1' }),
+      expect.objectContaining({ internalProductId: '1011', shortName: 'x200 u', sameSkuGroupId: 'vivo-x200-ultra' }),
+      expect.objectContaining({ internalProductId: '1012', shortName: 'Mini Link 2', sameSkuGroupId: 'fujifilm-instax-mini-link-2' }),
+      expect.objectContaining({ internalProductId: '1013', shortName: 'Mini SE', sameSkuGroupId: 'fujifilm-instax-mini-se' }),
+      expect.objectContaining({ internalProductId: '1014', shortName: 'IXUS 100IS', sameSkuGroupId: 'canon-ixus-100is' }),
+      expect.objectContaining({ internalProductId: '1015', shortName: 'RF-S 18-150', sameSkuGroupId: 'canon-rf-s-18-150' }),
+      expect.objectContaining({ internalProductId: '1016', shortName: 'Mini 11', sameSkuGroupId: 'fujifilm-instax-mini-11' }),
+      expect.objectContaining({ internalProductId: '1017', shortName: 'SQ20', sameSkuGroupId: 'fujifilm-instax-square-sq20' }),
+      expect.objectContaining({ internalProductId: '1018', shortName: 'iPad Air 7', sameSkuGroupId: 'ipad-air-7' }),
+      expect.objectContaining({ internalProductId: '1019', shortName: 'A900', sameSkuGroupId: 'nikon-coolpix-a900' }),
+      expect.objectContaining({ internalProductId: '1020', shortName: 'Action 6', sameSkuGroupId: 'dji-action-6' }),
+      expect.objectContaining({ internalProductId: '1021', shortName: 'AMIRO ABM502', sameSkuGroupId: 'amiro-rainbow-light-mask-abm502', categoryId: 'beauty-device', productType: 'led-face-mask' }),
+    ]));
   });
 });

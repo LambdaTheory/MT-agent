@@ -310,10 +310,9 @@ If mirror search returns **zero** results, use the SaaS platform as the fallback
 
 After mirror search or platform fallback search, automatically exclude:
 
-- Link products whose rental/list price is `0.01` or `0.1`. These are treated as links/placeholders, not normal rentable products.
 - Products whose product name starts with `MQ` (case-insensitive). For platform fallback, row text may also be used when the list row exposes the product name directly. These are maintained by a dedicated owner and must not enter generated batch specs.
 
-Filtered products are returned in `excluded` with a reason such as `link-price` or `mq-maintained`; do not silently re-add them unless the user explicitly overrides the rule.
+Filtered products are returned in `excluded` with reason `mq-maintained`; do not silently re-add them unless the user explicitly overrides the rule.
 
 Notes:
 - Do not trigger fallback for "possibly incomplete" mirror results. Only fallback when mirror returns zero results.

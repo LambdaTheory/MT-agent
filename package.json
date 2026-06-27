@@ -16,6 +16,7 @@
     "closed-order-feedback:preview": "tsx src/cli/closedOrderFeedbackPreview.ts",
     "closed-order-observation:report": "tsx src/cli/closedOrderObservationReport.ts",
     "link-registry:audit": "tsx src/cli/linkRegistryAudit.ts",
+    "link-registry:refresh-daemon": "tsx src/cli/linkRegistryRefreshDaemon.ts",
     "link-registry:apply-audit-review": "tsx src/cli/linkRegistryApplyAuditReview.ts",
     "link-registry:group-review": "tsx src/cli/linkRegistryGroupReview.ts",
     "link-registry:apply-group-review": "tsx src/cli/linkRegistryApplyGroupReview.ts",

@@ -91,34 +91,12 @@ function normalizeText(val) {
   return String(val || "").trim();
 }
 
-function extractNumericPrices(val) {
-  const raw = normalizeText(val).replace(/[,，￥¥]/g, "");
-  return (raw.match(/\d+(?:\.\d+)?/g) || [])
-    .map(x => Number(x))
-    .filter(n => Number.isFinite(n));
-}
-
-function isLinkPrice(val) {
-  return extractNumericPrices(val).some(n => Math.abs(n - 0.01) < 0.000001 || Math.abs(n - 0.1) < 0.000001);
-}
-
 function isMqMaintainedProduct(product) {
   return /^MQ/i.test(normalizeText(product && product.name));
 }
 
-function hasLinkPriceSku(product) {
-  for (const sku of product.skus || []) {
-    for (const [key, val] of Object.entries(sku || {})) {
-      const k = normalizeText(key);
-      if ((k.includes("租金") || k === "价格" || k === "售价") && isLinkPrice(val)) return true;
-    }
-  }
-  return false;
-}
-
 function classifyProductExclusion(product) {
   if (isMqMaintainedProduct(product)) return { excluded: true, reason: "mq-maintained", message: "Product name starts with MQ" };
-  if (hasLinkPriceSku(product)) return { excluded: true, reason: "link-price", message: "Product has link price 0.01/0.1" };
   return { excluded: false };
 }
 
@@ -236,7 +214,7 @@ async function main() {
         return { productId: product.id, name: product.name, mirrorFields: fields, changed: false };
       });
 
-      output({ items, excluded: filtered.excluded, filterRules: ["exclude MQ-maintained products", "exclude link-price products with rental price 0.01/0.1"] });
+      output({ items, excluded: filtered.excluded, filterRules: ["exclude MQ-maintained products"] });
       if (filtered.excluded.length > 0) log("Excluded " + filtered.excluded.length + " products by search filter rules");
       log("Run: batch-runner.js preview <this-file>");
       break;

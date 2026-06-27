@@ -10,7 +10,15 @@ import { buildInventorySameSkuSnapshot } from '../inventoryStatus/snapshot.js';
 import { writeInventorySameSkuSnapshot } from '../inventoryStatus/store.js';
 import { openLinkRegistryGovernancePrompt } from '../linkRegistry/governanceSession.js';
 import { openLinkRegistryMaintenancePrompt } from '../linkRegistry/maintenanceSession.js';
+import {
+  fetchDaemonCatalogSnapshot,
+  loadOptionalDaemonCatalogSnapshot,
+  mergeGoodsSnapshotWithDaemon,
+  saveDaemonCatalogSnapshot,
+  type DaemonCatalogSnapshot,
+} from '../linkRegistry/daemonCatalog.js';
 import { annotateGoodsExportWorkbookWithInternalId } from '../mapping/annotateGoodsExportWorkbook.js';
+import { parseGoodsExportSnapshot } from '../mapping/goodsExportMapping.js';
 import { loadProductIdMapping, type ProductIdMapping } from '../mapping/productIdMapping.js';
 import { writeProductIdMappingFromExport } from '../mapping/refreshProductIdMapping.js';
 import { sendFeishuCard } from '../notify/feishu.js';
@@ -295,6 +303,33 @@ function goodsSnapshotFromMapping(mapping: ProductIdMapping): GoodsSnapshotItem[
   return items;
 }
 
+async function loadGoodsSnapshotFromExport(path: string, log: ReturnType<typeof createRunLog>): Promise<GoodsSnapshotItem[] | null> {
+  try {
+    const snapshot = parseGoodsExportSnapshot(path);
+    log.addEvent(`?????????????? ${snapshot.length} ??active ???`);
+    return snapshot;
+  } catch (error) {
+    log.addEvent(`??????????????????????product-id-map: ${error instanceof Error ? error.message : String(error)}`);
+    return null;
+  }
+}
+
+async function refreshDaemonCatalogForReport(path: string, log: ReturnType<typeof createRunLog>): Promise<DaemonCatalogSnapshot | null> {
+  try {
+    const snapshot = await fetchDaemonCatalogSnapshot({ cwd: process.cwd() });
+    await saveDaemonCatalogSnapshot(path, snapshot);
+    log.addEvent(`daemon 链接总表已刷新: active=${snapshot.count}, excluded=${snapshot.excludedCount}${snapshot.pagesScraped ? `, pages=${snapshot.pagesScraped}` : ''}`);
+    return snapshot;
+  } catch (error) {
+    log.addEvent(`daemon 链接总表刷新失败，沿用现有快照/总表: ${error instanceof Error ? error.message : String(error)}`);
+    const fallback = await loadOptionalDaemonCatalogSnapshot(path).catch(() => null);
+    if (fallback) {
+      log.addEvent(`daemon catalog fallback loaded: active=${fallback.count}, excluded=${fallback.excludedCount}`);
+    }
+    return fallback;
+  }
+}
+
 function newGoodsPlatformIdsFromFirstSeen(currentGoods: GoodsSnapshotItem[], firstSeen: GoodsFirstSeenIndex, currentDate: string): string[] {
   return currentGoods.flatMap((item) => {
     const internalId = item.internalProductId.trim();
@@ -440,8 +475,16 @@ export async function runPublicTrafficReportCli(): Promise<PublicTrafficReportCl
     const { goodsExportPath, exposure: crawlResult, dashboard: rawTables, orderAnalysis: orderAnalysisCapture } = await crawlPublicTrafficSources(config, paths.goodsExportWorkbook);
     await refreshProductIdMappingForReport(goodsExportPath, mappingPath, paths.productIdMappingSyncLog, log);
     const mapping = await loadMappingSafely(mappingPath, log);
-    const currentGoodsSnapshot = goodsSnapshotFromMapping(mapping);
+    const goodsSnapshotFromExport = await loadGoodsSnapshotFromExport(goodsExportPath, log);
+    const daemonCatalog = await refreshDaemonCatalogForReport(paths.daemonCatalogState, log);
+    const currentGoodsSnapshot = mergeGoodsSnapshotWithDaemon(
+      goodsSnapshotFromExport ?? goodsSnapshotFromMapping(mapping),
+      daemonCatalog?.entries ?? [],
+    );
+    await mkdir(dirname(paths.goodsCurrentSnapshotState), { recursive: true });
     await writeFile(paths.goodsListSnapshot, JSON.stringify(currentGoodsSnapshot, null, 2), 'utf8');
+    await writeFile(paths.goodsCurrentSnapshotState, JSON.stringify(currentGoodsSnapshot, null, 2), 'utf8');
+    log.addEvent(`鍟嗗搧褰撳墠蹇収宸蹭繚瀛? ${currentGoodsSnapshot.length} 鏉? daemon=${daemonCatalog?.entries.length ?? 0}`);
     const previousFirstSeen = await loadGoodsFirstSeenState(paths.goodsFirstSeenState);
     const firstSeenState = updateGoodsFirstSeen({
       currentDate: runDate,

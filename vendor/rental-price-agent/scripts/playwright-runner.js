@@ -833,27 +833,12 @@ function normalizeText(val) {
   return String(val || "").trim();
 }
 
-function extractNumericPrices(val) {
-  const raw = normalizeText(val).replace(/[,，￥¥]/g, "");
-  return (raw.match(/\d+(?:\.\d+)?/g) || [])
-    .map(x => Number(x))
-    .filter(n => Number.isFinite(n));
-}
-
-function rowHasLinkPrice(row) {
-  for (const val of row.cells || []) {
-    if (extractNumericPrices(val).some(n => Math.abs(n - 0.01) < 0.000001 || Math.abs(n - 0.1) < 0.000001)) return true;
-  }
-  return false;
-}
-
 function rowStartsWithMq(row) {
   return [row.name, ...(row.cells || [])].some(v => /^MQ/i.test(normalizeText(v)));
 }
 
 function classifyPlatformSearchExclusion(row) {
   if (rowStartsWithMq(row)) return { excluded: true, reason: "mq-maintained", message: "Product name or platform row text starts with MQ" };
-  if (rowHasLinkPrice(row)) return { excluded: true, reason: "link-price", message: "Product row contains link price 0.01/0.1" };
   return { excluded: false };
 }
 
@@ -893,6 +878,59 @@ async function scrapeProductRows() {
   });
 }
 
+async function scrapeProductRowsPageMeta() {
+  return await page.evaluate(() => {
+    const parsePageNumber = (href) => {
+      try {
+        const url = new URL(href, window.location.href);
+        const raw = url.searchParams.get("page") || url.searchParams.get("p") || "";
+        const pageNumber = Number(raw);
+        return Number.isFinite(pageNumber) && pageNumber > 0 ? pageNumber : null;
+      } catch {
+        return null;
+      }
+    };
+
+    const rows = [];
+    for (const row of document.querySelectorAll("tbody tr")) {
+      const editLink = row.querySelector("a[href*='goods.edit'][href*='id=']");
+      if (!editLink) continue;
+      const href = editLink.getAttribute("href") || "";
+      const idMatch = href.match(/[?&]id=(\d+)/);
+      if (!idMatch) continue;
+      const cells = Array.from(row.querySelectorAll("td")).map(td => td.innerText.replace(/\s+/g, " ").trim()).filter(Boolean);
+      const copyLink = row.querySelector("a[data-toggle='ajaxModal'][href*='copyGoods']");
+      rows.push({
+        id: idMatch[1],
+        name: (cells.find(t => !/^\d+$/.test(t) && t.length > 2) || "").substring(0, 120),
+        text: cells.join(" | ").substring(0, 500),
+        cells,
+        editUrl: href,
+        copyAvailable: Boolean(copyLink),
+      });
+    }
+
+    const anchors = Array.from(document.querySelectorAll("a[href]"));
+    const pageCandidates = anchors
+      .map(anchor => ({ href: anchor.href, text: (anchor.textContent || "").replace(/\s+/g, " ").trim(), pageNumber: parsePageNumber(anchor.href) }))
+      .filter(item => item.pageNumber !== null);
+    const maxPage = pageCandidates.reduce((max, item) => Math.max(max, item.pageNumber || 0), 1);
+    const url = new URL(window.location.href);
+    const currentPage = Number(url.searchParams.get("page") || url.searchParams.get("p") || "1") || 1;
+    const nextPageCandidate = pageCandidates
+      .filter(item => (item.pageNumber || 0) > currentPage)
+      .sort((left, right) => (left.pageNumber || 0) - (right.pageNumber || 0))[0];
+    const labelledNext = anchors.find(anchor => /下一页|下页|next/i.test((anchor.textContent || "").replace(/\s+/g, " ").trim()));
+
+    return {
+      rows,
+      currentPage,
+      maxPage,
+      nextHref: nextPageCandidate?.href || labelledNext?.href || "",
+    };
+  });
+}
+
 // --- Platform search: scrape product list by keyword ---
 async function actionPlatformSearch(keyword) {
   await page.goto(buildListUrl({ pagesize: 100 }), { waitUntil: "networkidle" });
@@ -911,7 +949,49 @@ async function actionPlatformSearch(keyword) {
     products: filtered.products,
     excluded: filtered.excluded,
     excludedCount: filtered.excluded.length,
-    filterRules: ["exclude MQ-maintained products", "exclude link-price products with row price 0.01/0.1"],
+    filterRules: ["exclude MQ-maintained products"],
+  };
+}
+
+async function actionPlatformSearchAll() {
+  await page.goto(buildListUrl({ pagesize: 100 }), { waitUntil: "networkidle" });
+  await ensureLogin();
+  await page.waitForTimeout(1000);
+
+  const seenUrls = new Set();
+  const seenIds = new Set();
+  const rows = [];
+  let excluded = [];
+  let pagesScraped = 0;
+
+  while (pagesScraped < 100) {
+    const currentUrl = page.url();
+    if (seenUrls.has(currentUrl)) break;
+    seenUrls.add(currentUrl);
+
+    const pageData = await scrapeProductRowsPageMeta();
+    pagesScraped += 1;
+    for (const row of pageData.rows || []) {
+      if (seenIds.has(row.id)) continue;
+      seenIds.add(row.id);
+      rows.push(row);
+    }
+
+    if (!pageData.nextHref || pageData.currentPage >= pageData.maxPage) break;
+    await page.goto(pageData.nextHref, { waitUntil: "networkidle" });
+    await page.waitForTimeout(1200);
+  }
+
+  const filtered = filterPlatformProducts(rows);
+  excluded = filtered.excluded;
+  return {
+    status: "ok",
+    count: filtered.products.length,
+    products: filtered.products,
+    excluded,
+    excludedCount: excluded.length,
+    pagesScraped,
+    filterRules: ["exclude MQ-maintained products"],
   };
 }
 
@@ -1167,6 +1247,8 @@ async function handleCommand(cmd) {
       return await actionCopyProduct(productId);
     case "platform-search":
       return await actionPlatformSearch(cmd.keyword || productId);
+    case "platform-search-all":
+      return await actionPlatformSearchAll();
     case "batch-read":
       return await actionBatchRead(cmd.productIds, cmd.fields);
     default: return { status: "error", message: "Unknown action: " + action };
@@ -1268,6 +1350,7 @@ async function handleLegacyAction(action, args) {
     case "delist": return await actionDelist(args[0]);
     case "copy":   return await actionCopyProduct(args[0]);
     case "platform-search": return await actionPlatformSearch(args[0]);
+    case "platform-search-all": return await actionPlatformSearchAll();
     case "batch-read": {
       const ids = args[0] ? args[0].split(",") : [];
       return await actionBatchRead(ids);

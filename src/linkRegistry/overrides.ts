@@ -1,3 +1,4 @@
+import { preferredShortNameForSameSkuGroup } from './buildRegistry.js';
 import type { LinkRegistryEntry, LinkRegistrySource, LinkRegistryStatus } from './types.js';
 
 export interface LinkRegistryEntryOverride {
@@ -41,14 +42,31 @@ export interface LinkRegistrySameSkuGroupAliasRule {
   disabled?: boolean;
 }
 
+export interface LinkRegistrySameSkuGroupRule {
+  matchSameSkuGroupId: string;
+  productName?: string;
+  categoryId?: string;
+  categoryName?: string;
+  productType?: string;
+  shortName?: string;
+  aliases?: string[];
+  sameSkuGroupId?: string;
+  confidence?: number;
+  reason?: string;
+  maintainer?: string;
+  updatedAt?: string;
+  disabled?: boolean;
+}
+
 export interface LinkRegistryOverrides {
   version: 1;
   entries?: LinkRegistryEntryOverride[];
   shortNameRules?: LinkRegistryShortNameRule[];
+  sameSkuGroupRules?: LinkRegistrySameSkuGroupRule[];
   sameSkuGroupAliasRules?: LinkRegistrySameSkuGroupAliasRule[];
 }
 
-export type LinkRegistryOverrideRiskType = 'duplicate_manual_assignment' | 'duplicate_short_name_rule' | 'duplicate_same_sku_group_alias_rule' | 'unknown_internal_product_id' | 'unknown_same_sku_group_id' | 'malformed_override' | 'disabled_override';
+export type LinkRegistryOverrideRiskType = 'duplicate_manual_assignment' | 'duplicate_short_name_rule' | 'duplicate_same_sku_group_rule' | 'duplicate_same_sku_group_alias_rule' | 'unknown_internal_product_id' | 'unknown_same_sku_group_id' | 'malformed_override' | 'disabled_override';
 
 export interface LinkRegistryOverrideRisk {
   type: LinkRegistryOverrideRiskType;
@@ -64,6 +82,8 @@ export interface ApplyLinkRegistryOverridesResult {
 
 type ClassificationPatch = Partial<Pick<LinkRegistryEntry, 'productName' | 'categoryId' | 'categoryName' | 'productType' | 'shortName' | 'aliases' | 'sameSkuGroupId' | 'status' | 'confidence' | 'updatedAt'>>;
 
+const MANUAL_SEED_CONFIDENCE = 0.6;
+
 function trimmed(value: string | undefined): string | undefined {
   const next = value?.trim();
   return next ? next : undefined;
@@ -75,6 +95,12 @@ function validInternalProductId(value: string): boolean {
 
 function validSameSkuGroupId(value: string): boolean {
   return /^[\p{Letter}\p{Number}][\p{Letter}\p{Number}\s_-]{1,63}$/u.test(value.trim());
+}
+
+function normalizeKnownBrokenSameSkuGroupId(value: string): string {
+  const trimmed = value.trim();
+  if (/^vivo-.*2-35x.*$/iu.test(trimmed) && /钄|澧炶窛|绁炲櫒|�/u.test(trimmed)) return 'vivo-zeiss-telephoto-lens';
+  return trimmed;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -116,16 +142,18 @@ function optionalStringArray(record: Record<string, unknown>, key: string): stri
   return value;
 }
 
-function validateSameSkuGroupId(value: string | undefined): void {
-  if (value && !validSameSkuGroupId(value)) throw new Error(`Invalid sameSkuGroupId: ${value}`);
+function parseSameSkuGroupId(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const normalized = normalizeKnownBrokenSameSkuGroupId(value);
+  if (!validSameSkuGroupId(normalized)) throw new Error(`Invalid sameSkuGroupId: ${value}`);
+  return normalized;
 }
 
 function parseEntryOverride(value: unknown): LinkRegistryEntryOverride {
   if (!isRecord(value)) throw new Error('Invalid entry override: expected object');
   const internalProductId = optionalString(value, 'internalProductId')?.trim();
   if (!internalProductId || !validInternalProductId(internalProductId)) throw new Error('Invalid entry override internalProductId');
-  const sameSkuGroupId = optionalString(value, 'sameSkuGroupId');
-  validateSameSkuGroupId(sameSkuGroupId);
+  const sameSkuGroupId = parseSameSkuGroupId(optionalString(value, 'sameSkuGroupId'));
   return {
     internalProductId,
     productName: optionalString(value, 'productName'),
@@ -148,8 +176,7 @@ function parseShortNameRule(value: unknown): LinkRegistryShortNameRule {
   if (!isRecord(value)) throw new Error('Invalid shortName rule: expected object');
   const shortName = optionalString(value, 'shortName')?.trim();
   if (!shortName) throw new Error('Invalid shortName rule shortName');
-  const sameSkuGroupId = optionalString(value, 'sameSkuGroupId');
-  validateSameSkuGroupId(sameSkuGroupId);
+  const sameSkuGroupId = parseSameSkuGroupId(optionalString(value, 'sameSkuGroupId'));
   return {
     shortName,
     productName: optionalString(value, 'productName'),
@@ -168,13 +195,35 @@ function parseShortNameRule(value: unknown): LinkRegistryShortNameRule {
 
 function parseSameSkuGroupAliasRule(value: unknown): LinkRegistrySameSkuGroupAliasRule {
   if (!isRecord(value)) throw new Error('Invalid sameSkuGroup alias rule: expected object');
-  const sameSkuGroupId = optionalString(value, 'sameSkuGroupId')?.trim();
-  if (!sameSkuGroupId || !validSameSkuGroupId(sameSkuGroupId)) throw new Error('Invalid sameSkuGroup alias rule sameSkuGroupId');
+  const sameSkuGroupId = parseSameSkuGroupId(optionalString(value, 'sameSkuGroupId'));
+  if (!sameSkuGroupId) throw new Error('Invalid sameSkuGroup alias rule sameSkuGroupId');
   const aliases = optionalStringArray(value, 'aliases')?.map((item) => item.trim()).filter(Boolean) ?? [];
   if (aliases.length === 0) throw new Error('Invalid sameSkuGroup alias rule aliases');
   return {
     sameSkuGroupId,
     aliases,
+    reason: optionalString(value, 'reason'),
+    maintainer: optionalString(value, 'maintainer'),
+    updatedAt: optionalString(value, 'updatedAt'),
+    disabled: optionalBoolean(value, 'disabled'),
+  };
+}
+
+function parseSameSkuGroupRule(value: unknown): LinkRegistrySameSkuGroupRule {
+  if (!isRecord(value)) throw new Error('Invalid sameSkuGroup rule: expected object');
+  const matchSameSkuGroupId = parseSameSkuGroupId(optionalString(value, 'matchSameSkuGroupId'));
+  if (!matchSameSkuGroupId) throw new Error('Invalid sameSkuGroup rule matchSameSkuGroupId');
+  const sameSkuGroupId = parseSameSkuGroupId(optionalString(value, 'sameSkuGroupId'));
+  return {
+    matchSameSkuGroupId,
+    productName: optionalString(value, 'productName'),
+    categoryId: optionalString(value, 'categoryId'),
+    categoryName: optionalString(value, 'categoryName'),
+    productType: optionalString(value, 'productType'),
+    shortName: optionalString(value, 'shortName'),
+    aliases: optionalStringArray(value, 'aliases'),
+    sameSkuGroupId,
+    confidence: optionalNumber(value, 'confidence'),
     reason: optionalString(value, 'reason'),
     maintainer: optionalString(value, 'maintainer'),
     updatedAt: optionalString(value, 'updatedAt'),
@@ -196,6 +245,7 @@ export function parseLinkRegistryOverrides(value: unknown): LinkRegistryOverride
     version: 1,
     entries: optionalArray(value, 'entries')?.map(parseEntryOverride),
     shortNameRules: optionalArray(value, 'shortNameRules')?.map(parseShortNameRule),
+    sameSkuGroupRules: optionalArray(value, 'sameSkuGroupRules')?.map(parseSameSkuGroupRule),
     sameSkuGroupAliasRules: optionalArray(value, 'sameSkuGroupAliasRules')?.map(parseSameSkuGroupAliasRule),
   };
 }
@@ -219,9 +269,77 @@ function patchFrom(value: ClassificationPatch): ClassificationPatch {
   };
 }
 
+function normalizedAliases(values: string[] | undefined): string[] | undefined {
+  const aliases = [...new Set((values ?? []).map((item) => item.trim()).filter(Boolean))].sort();
+  return aliases.length > 0 ? aliases : undefined;
+}
+
+function comparableShortName(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/^(?:佳能|富士|大疆|影石|索尼|尼康|松下)\s*/gu, '')
+    .replace(/^vivo\s*/giu, '')
+    .replace(/\binstax\b/giu, '')
+    .replace(/\bmm\b/giu, '')
+    .replace(/镜头/gu, '')
+    .replace(/[^\p{Letter}\p{Number}]+/gu, '');
+}
+
+function normalizePreferredGroupShortNames(entries: LinkRegistryEntry[]): LinkRegistryEntry[] {
+  return entries.map((entry) => {
+    const sameSkuGroupId = entry.sameSkuGroupId?.trim();
+    const currentShortName = entry.shortName?.trim();
+    if (!sameSkuGroupId || !currentShortName) return entry;
+
+    const preferredShortName = preferredShortNameForSameSkuGroup(sameSkuGroupId)?.trim();
+    if (!preferredShortName || currentShortName === preferredShortName) return entry;
+    if (comparableShortName(currentShortName) !== comparableShortName(preferredShortName)) return entry;
+
+    return {
+      ...entry,
+      shortName: preferredShortName,
+      aliases: normalizedAliases([...(entry.aliases ?? []), currentShortName, preferredShortName]),
+    };
+  });
+}
+
+function compareInternalProductId(left: LinkRegistryEntry, right: LinkRegistryEntry): number {
+  const leftNumber = Number(left.internalProductId);
+  const rightNumber = Number(right.internalProductId);
+  return leftNumber - rightNumber || left.internalProductId.localeCompare(right.internalProductId);
+}
+
+function canSeedEntryFromOverride(override: LinkRegistryEntryOverride): boolean {
+  return Boolean(
+    trimmed(override.productName)
+    || trimmed(override.shortName)
+    || trimmed(override.sameSkuGroupId),
+  );
+}
+
+function seedEntryFromOverride(override: LinkRegistryEntryOverride): LinkRegistryEntry {
+  const aliases = normalizedAliases(override.aliases);
+  return {
+    internalProductId: override.internalProductId.trim(),
+    ...(trimmed(override.productName) ? { productName: trimmed(override.productName) } : {}),
+    ...(trimmed(override.categoryId) ? { categoryId: trimmed(override.categoryId) } : {}),
+    ...(trimmed(override.categoryName) ? { categoryName: trimmed(override.categoryName) } : {}),
+    ...(trimmed(override.productType) ? { productType: trimmed(override.productType) } : {}),
+    ...(trimmed(override.shortName) ? { shortName: trimmed(override.shortName) } : {}),
+    ...(aliases ? { aliases } : {}),
+    ...(trimmed(override.sameSkuGroupId) ? { sameSkuGroupId: trimmed(override.sameSkuGroupId) } : {}),
+    status: override.status ?? 'unknown',
+    confidence: override.confidence ?? MANUAL_SEED_CONFIDENCE,
+    ...(trimmed(override.updatedAt) ? { updatedAt: trimmed(override.updatedAt) } : {}),
+    classificationSource: 'manual_override',
+    source: ['link_registry_override'],
+  };
+}
+
 function applyPatch(entry: LinkRegistryEntry, patch: ClassificationPatch, source: LinkRegistrySource): LinkRegistryEntry {
   const nextPatch = patchFrom(patch);
-  const aliases = [...new Set([...(entry.aliases ?? []), ...(nextPatch.aliases ?? [])].map((item) => item.trim()).filter(Boolean))].sort();
+  const aliases = normalizedAliases([...(entry.aliases ?? []), ...(nextPatch.aliases ?? [])]);
   return {
     ...entry,
     ...(nextPatch.productName ? { productName: nextPatch.productName } : {}),
@@ -229,12 +347,12 @@ function applyPatch(entry: LinkRegistryEntry, patch: ClassificationPatch, source
     ...(nextPatch.categoryName ? { categoryName: nextPatch.categoryName } : {}),
     ...(nextPatch.productType ? { productType: nextPatch.productType } : {}),
     ...(nextPatch.shortName ? { shortName: nextPatch.shortName } : {}),
-    ...(aliases.length > 0 ? { aliases } : {}),
+    ...(aliases ? { aliases } : {}),
     ...(nextPatch.sameSkuGroupId ? { sameSkuGroupId: nextPatch.sameSkuGroupId } : {}),
     ...(nextPatch.status ? { status: nextPatch.status } : {}),
     ...(nextPatch.confidence !== undefined ? { confidence: nextPatch.confidence } : {}),
     ...(nextPatch.updatedAt ? { updatedAt: nextPatch.updatedAt } : {}),
-    classificationSource: source === 'link_registry_override' ? 'manual_override' : 'short_name_rule',
+    classificationSource: source === 'short_name_rule' ? 'short_name_rule' : 'manual_override',
     source: sourceWith(entry, source),
   };
 }
@@ -245,6 +363,9 @@ function addDisabledRisks(overrides: LinkRegistryOverrides, risks: LinkRegistryO
   }
   for (const rule of overrides.shortNameRules ?? []) {
     if (rule.disabled === true) risks.push({ type: 'disabled_override', message: `Disabled shortName rule ignored: ${rule.shortName}`, shortName: rule.shortName });
+  }
+  for (const rule of overrides.sameSkuGroupRules ?? []) {
+    if (rule.disabled === true) risks.push({ type: 'disabled_override', message: `Disabled sameSkuGroup rule ignored: ${rule.matchSameSkuGroupId}`, shortName: rule.matchSameSkuGroupId });
   }
   for (const rule of overrides.sameSkuGroupAliasRules ?? []) {
     if (rule.disabled === true) risks.push({ type: 'disabled_override', message: `Disabled sameSkuGroup alias rule ignored: ${rule.sameSkuGroupId}`, shortName: rule.sameSkuGroupId });
@@ -257,6 +378,10 @@ function enabledEntryOverrides(overrides: LinkRegistryOverrides): LinkRegistryEn
 
 function enabledShortNameRules(overrides: LinkRegistryOverrides): LinkRegistryShortNameRule[] {
   return (overrides.shortNameRules ?? []).filter((item) => item.disabled !== true);
+}
+
+function enabledSameSkuGroupRules(overrides: LinkRegistryOverrides): LinkRegistrySameSkuGroupRule[] {
+  return (overrides.sameSkuGroupRules ?? []).filter((item) => item.disabled !== true);
 }
 
 function enabledSameSkuGroupAliasRules(overrides: LinkRegistryOverrides): LinkRegistrySameSkuGroupAliasRule[] {
@@ -280,6 +405,15 @@ function assertUniqueShortNameRules(rules: LinkRegistryShortNameRule[]): void {
   }
 }
 
+function assertUniqueSameSkuGroupRules(rules: LinkRegistrySameSkuGroupRule[]): void {
+  const seen = new Set<string>();
+  for (const rule of rules) {
+    const key = rule.matchSameSkuGroupId.trim();
+    if (seen.has(key)) throw new Error(`Duplicate sameSkuGroup rule for ${key}`);
+    seen.add(key);
+  }
+}
+
 function assertUniqueSameSkuGroupAliasRules(rules: LinkRegistrySameSkuGroupAliasRule[]): void {
   const seen = new Set<string>();
   for (const rule of rules) {
@@ -294,9 +428,11 @@ export function applyLinkRegistryOverrides(entries: LinkRegistryEntry[], overrid
   addDisabledRisks(overrides, risks);
   const entryOverrides = enabledEntryOverrides(overrides);
   const shortNameRules = enabledShortNameRules(overrides);
+  const sameSkuGroupRules = enabledSameSkuGroupRules(overrides);
   const sameSkuGroupAliasRules = enabledSameSkuGroupAliasRules(overrides);
   assertUniqueEntryOverrides(entryOverrides);
   assertUniqueShortNameRules(shortNameRules);
+  assertUniqueSameSkuGroupRules(sameSkuGroupRules);
   assertUniqueSameSkuGroupAliasRules(sameSkuGroupAliasRules);
 
   const overrideById = new Map(entryOverrides.map((override) => [override.internalProductId.trim(), override]));
@@ -315,8 +451,29 @@ export function applyLinkRegistryOverrides(entries: LinkRegistryEntry[], overrid
     return rule ? applyPatch(entry, rule, 'short_name_rule') : entry;
   });
 
+  const seededEntries = entryOverrides
+    .filter((override) => !matchedOverrideIds.has(override.internalProductId.trim()))
+    .flatMap((override) => {
+      if (!canSeedEntryFromOverride(override)) return [];
+      matchedOverrideIds.add(override.internalProductId.trim());
+      return [seedEntryFromOverride(override)];
+    });
+
   const matchedSameSkuGroups = new Set<string>();
-  const nextEntries = patchedEntries.map((entry) => {
+  const patchedBySameSkuGroup = [...patchedEntries, ...seededEntries]
+    .sort(compareInternalProductId)
+    .map((entry) => {
+      const sameSkuGroupId = entry.sameSkuGroupId?.trim();
+      if (!sameSkuGroupId) return entry;
+      const rule = sameSkuGroupRules.find((item) => item.matchSameSkuGroupId.trim() === sameSkuGroupId);
+      if (!rule) return entry;
+      matchedSameSkuGroups.add(sameSkuGroupId);
+      return applyPatch(entry, rule, 'same_sku_group_rule');
+    });
+
+  const nextEntries = patchedBySameSkuGroup
+    .sort(compareInternalProductId)
+    .map((entry) => {
     const sameSkuGroupId = entry.sameSkuGroupId?.trim();
     if (!sameSkuGroupId) return entry;
     const rule = sameSkuGroupAliasRules.find((item) => item.sameSkuGroupId.trim() === sameSkuGroupId);
@@ -328,14 +485,17 @@ export function applyLinkRegistryOverrides(entries: LinkRegistryEntry[], overrid
       ...(rule.updatedAt ? { updatedAt: rule.updatedAt } : {}),
       source: sourceWith(entry, 'same_sku_group_alias_rule'),
     };
-  });
+    });
 
   for (const override of entryOverrides) {
     if (!matchedOverrideIds.has(override.internalProductId.trim())) risks.push({ type: 'unknown_internal_product_id', message: `Override target not found: ${override.internalProductId}`, internalProductId: override.internalProductId });
+  }
+  for (const rule of sameSkuGroupRules) {
+    if (!matchedSameSkuGroups.has(rule.matchSameSkuGroupId.trim())) risks.push({ type: 'unknown_same_sku_group_id', message: `Same sku group rule target not found: ${rule.matchSameSkuGroupId}`, internalProductId: undefined, shortName: rule.matchSameSkuGroupId });
   }
   for (const rule of sameSkuGroupAliasRules) {
     if (!matchedSameSkuGroups.has(rule.sameSkuGroupId.trim())) risks.push({ type: 'unknown_same_sku_group_id', message: `Same sku group alias rule target not found: ${rule.sameSkuGroupId}`, internalProductId: undefined, shortName: rule.sameSkuGroupId });
   }
 
-  return { entries: nextEntries, risks };
+  return { entries: normalizePreferredGroupShortNames(nextEntries), risks };
 }

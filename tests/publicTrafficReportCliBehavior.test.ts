@@ -22,6 +22,9 @@ const mocks = vi.hoisted(() => ({
   writeInventorySameSkuSnapshot: vi.fn(),
   openLinkRegistryMaintenancePrompt: vi.fn(),
   openLinkRegistryGovernancePrompt: vi.fn(),
+  fetchDaemonCatalogSnapshot: vi.fn(),
+  loadOptionalDaemonCatalogSnapshot: vi.fn(),
+  saveDaemonCatalogSnapshot: vi.fn(),
 }));
 
 vi.mock('../src/config/loadEnv.js', () => ({
@@ -79,6 +82,16 @@ vi.mock('../src/linkRegistry/maintenanceSession.js', () => ({
 vi.mock('../src/linkRegistry/governanceSession.js', () => ({
   openLinkRegistryGovernancePrompt: mocks.openLinkRegistryGovernancePrompt,
 }));
+
+vi.mock('../src/linkRegistry/daemonCatalog.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/linkRegistry/daemonCatalog.js')>();
+  return {
+    ...actual,
+    fetchDaemonCatalogSnapshot: mocks.fetchDaemonCatalogSnapshot,
+    loadOptionalDaemonCatalogSnapshot: mocks.loadOptionalDaemonCatalogSnapshot,
+    saveDaemonCatalogSnapshot: mocks.saveDaemonCatalogSnapshot,
+  };
+});
 
 describe('runPublicTrafficReportCli public traffic sequencing', () => {
   beforeEach(async () => {
@@ -152,6 +165,9 @@ describe('runPublicTrafficReportCli public traffic sequencing', () => {
     mocks.writeInventorySameSkuSnapshot.mockResolvedValue(undefined);
     mocks.openLinkRegistryMaintenancePrompt.mockResolvedValue(null);
     mocks.openLinkRegistryGovernancePrompt.mockResolvedValue(null);
+    mocks.fetchDaemonCatalogSnapshot.mockRejectedValue(new Error('daemon unavailable'));
+    mocks.loadOptionalDaemonCatalogSnapshot.mockResolvedValue(null);
+    mocks.saveDaemonCatalogSnapshot.mockResolvedValue(undefined);
 
     const historicalPaths = buildPublicTrafficPaths(mocks.outputDir, '2026-06-09');
     await mkdir(historicalPaths.dir, { recursive: true });
@@ -232,6 +248,45 @@ describe('runPublicTrafficReportCli public traffic sequencing', () => {
       expect.objectContaining({ productId: '701', productName: '新品 Alpha', stock: 8, skuCount: 2 }),
     ]);
     await expect(readFile(todayPaths.log, 'utf8')).resolves.toContain('goods-manager 新品池: 2 个商品');
+  });
+
+  it('writes merged current goods snapshot from mapping fallback and daemon live catalog', async () => {
+    mocks.loadProductIdMapping.mockResolvedValueOnce({ p701: '701' });
+    mocks.fetchDaemonCatalogSnapshot.mockResolvedValueOnce({
+      generatedAt: '2026-06-10T12:00:00Z',
+      count: 2,
+      excludedCount: 0,
+      entries: [
+        {
+          internalProductId: '701',
+          productName: 'Daemon Alpha',
+          discoveredAt: '2026-06-10T12:00:00Z',
+        },
+        {
+          internalProductId: '876',
+          productName: 'Daemon Ipod',
+          discoveredAt: '2026-06-10T12:00:00Z',
+        },
+      ],
+    });
+    const { runPublicTrafficReportCli } = await import('../src/cli/publicTrafficReport.js');
+
+    await runPublicTrafficReportCli();
+
+    const todayPaths = buildPublicTrafficPaths(mocks.outputDir, '2026-06-10');
+    const snapshot = JSON.parse(await readFile(todayPaths.goodsCurrentSnapshotState, 'utf8')) as Array<{
+      internalProductId: string;
+      platformProductId: string;
+      productName: string;
+    }>;
+    expect(snapshot).toEqual([
+      { internalProductId: '701', platformProductId: 'p701', productName: 'Daemon Alpha' },
+      { internalProductId: '876', platformProductId: '', productName: 'Daemon Ipod' },
+    ]);
+    expect(mocks.saveDaemonCatalogSnapshot).toHaveBeenCalledWith(
+      todayPaths.daemonCatalogState,
+      expect.objectContaining({ count: 2 }),
+    );
   });
 
   it('filters goods-manager new links by current goods export membership and first-seen date', async () => {

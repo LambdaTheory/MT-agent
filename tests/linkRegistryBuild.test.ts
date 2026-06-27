@@ -24,7 +24,7 @@ describe('link registry build', () => {
       {
         internalProductId: '701',
         platformProductId: 'platform-701-map',
-        productName: 'Old name',
+        productName: 'Live name',
         shortName: 'Canon SX70',
         sameSkuGroupId: 'canon-sx70',
         status: 'active',
@@ -65,7 +65,7 @@ describe('link registry build', () => {
       {
         internalProductId: '702',
         platformProductId: 'platform-valid',
-        shortName: '大疆 Pocket 3',
+        shortName: 'Pocket 3',
         sameSkuGroupId: 'dji-pocket-3',
         status: 'unknown',
         source: ['product_id_mapping', 'product_name_map'],
@@ -201,5 +201,108 @@ describe('link registry build', () => {
     expect(buildLinkRegistry({
       productNameMap: { '10': 'Ten', '2': 'Two' },
     }).map((entry) => entry.internalProductId)).toEqual(['2', '10']);
+  });
+
+  it('prefers daemon catalog names and keeps daemon-only live links after merging', () => {
+    const registry = buildLinkRegistry({
+      productIdMapping: {
+        'platform-876': '876',
+      },
+      goodsSnapshot: [
+        { platformProductId: 'platform-876', internalProductId: '876', productName: 'Old mapped name' },
+      ],
+      daemonCatalog: {
+        generatedAt: '2026-06-27T10:00:00.000Z',
+        count: 2,
+        excludedCount: 0,
+        entries: [
+          {
+            internalProductId: '876',
+            productName: 'Ipod touch6 顺丰发货，1天起租',
+            listingStatusText: '上架 展示',
+            syncStatus: '未同步',
+            channels: ['支付宝', '小程序'],
+            tags: ['新品', '热租'],
+            discoveredAt: '2026-06-27T10:00:00.000Z',
+          },
+          {
+            internalProductId: '999',
+            productName: 'Pocket 3 Creator Combo',
+            listingStatusText: '上架 展示',
+            discoveredAt: '2026-06-27T10:00:00.000Z',
+          },
+        ],
+      },
+    });
+
+    expect(registry).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        internalProductId: '876',
+        platformProductId: 'platform-876',
+        productName: 'Ipod touch6 顺丰发货，1天起租',
+        status: 'active',
+        daemonStatusText: '上架 展示',
+        daemonSyncStatus: '未同步',
+        daemonChannels: ['小程序', '支付宝'],
+        daemonTags: ['新品', '热租'],
+        source: expect.arrayContaining(['product_id_mapping', 'goods_snapshot', 'daemon_catalog']),
+      }),
+      expect.objectContaining({
+        internalProductId: '999',
+        productName: 'Pocket 3 Creator Combo',
+        status: 'active',
+        source: ['daemon_catalog'],
+      }),
+    ]));
+  });
+
+  it('normalizes bare daemon catalog model names into stable groups without manual overrides', () => {
+    const registry = buildLinkRegistry({
+      daemonCatalog: {
+        generatedAt: '2026-06-27T10:00:00.000Z',
+        count: 8,
+        excludedCount: 0,
+        entries: [
+          { internalProductId: '1101', productName: 'ixus100is', discoveredAt: '2026-06-27T10:00:00.000Z' },
+          { internalProductId: '1102', productName: 'rf50f1.8', discoveredAt: '2026-06-27T10:00:00.000Z' },
+          { internalProductId: '1103', productName: 'rfs18-150', discoveredAt: '2026-06-27T10:00:00.000Z' },
+          { internalProductId: '1104', productName: 'mini link2', discoveredAt: '2026-06-27T10:00:00.000Z' },
+          { internalProductId: '1105', productName: 'mini se', discoveredAt: '2026-06-27T10:00:00.000Z' },
+          { internalProductId: '1106', productName: 'sq20', discoveredAt: '2026-06-27T10:00:00.000Z' },
+          { internalProductId: '1107', productName: 'action6', discoveredAt: '2026-06-27T10:00:00.000Z' },
+          { internalProductId: '1108', productName: 'AMIRO 彩虹光面罩ABM502', discoveredAt: '2026-06-27T10:00:00.000Z' },
+        ],
+      },
+    });
+
+    expect(registry).toEqual(expect.arrayContaining([
+      expect.objectContaining({ internalProductId: '1101', shortName: 'IXUS 100IS', sameSkuGroupId: 'canon-ixus-100is', categoryId: 'camera', productType: 'camera' }),
+      expect.objectContaining({ internalProductId: '1102', shortName: 'RF 50 F1.8', sameSkuGroupId: 'canon-rf-50-f1-8', categoryId: 'lens', productType: 'lens-accessory' }),
+      expect.objectContaining({ internalProductId: '1103', shortName: 'RF-S 18-150', sameSkuGroupId: 'canon-rf-s-18-150', categoryId: 'lens', productType: 'lens-accessory' }),
+      expect.objectContaining({ internalProductId: '1104', shortName: 'Mini Link 2', sameSkuGroupId: 'fujifilm-instax-mini-link-2', categoryId: 'camera', productType: 'instant-camera' }),
+      expect.objectContaining({ internalProductId: '1105', shortName: 'Mini SE', sameSkuGroupId: 'fujifilm-instax-mini-se', categoryId: 'camera', productType: 'instant-camera' }),
+      expect.objectContaining({ internalProductId: '1106', shortName: 'SQ20', sameSkuGroupId: 'fujifilm-instax-square-sq20', categoryId: 'camera', productType: 'instant-camera' }),
+      expect.objectContaining({ internalProductId: '1107', shortName: 'Action 6', sameSkuGroupId: 'dji-action-6', categoryId: 'camera', productType: 'action-camera' }),
+      expect.objectContaining({ internalProductId: '1108', shortName: 'AMIRO ABM502', sameSkuGroupId: 'amiro-rainbow-light-mask-abm502', categoryId: 'beauty-device', productType: 'led-face-mask' }),
+    ]));
+  });
+
+  it('prefers the inferred group short name when equivalent variants only differ by casing or marketing wrapper', () => {
+    const registry = buildLinkRegistry({
+      daemonCatalog: {
+        generatedAt: '2026-06-27T10:00:00.000Z',
+        count: 2,
+        excludedCount: 0,
+        entries: [
+          { internalProductId: '1201', productName: '佳能 RF100-400mm 长焦镜头演唱会追星出游打鸟防抖高清体验租赁 ZFB', discoveredAt: '2026-06-27T10:00:00.000Z' },
+          { internalProductId: '1202', productName: '富士 mini link3 手机照片打印机短租 旅游拍照神器', discoveredAt: '2026-06-27T10:00:00.000Z' },
+        ],
+      },
+    });
+
+    expect(registry).toEqual(expect.arrayContaining([
+      expect.objectContaining({ internalProductId: '1201', shortName: 'RF 100-400', sameSkuGroupId: 'canon-rf-100-400' }),
+      expect.objectContaining({ internalProductId: '1202', shortName: 'Mini Link 3', sameSkuGroupId: 'fujifilm-instax-mini-link-3' }),
+    ]));
   });
 });
