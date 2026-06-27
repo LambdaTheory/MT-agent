@@ -8,6 +8,7 @@ import type { AgentStepMetadataStore } from '../agentRuntime/stepResolution.js';
 import { rememberStepMetadata, resolvePlannerArguments } from '../agentRuntime/stepResolution.js';
 import { findAgentTool } from '../agentRuntime/toolRegistry.js';
 import { executeAgentToolRequest, type AgentToolExecutionOptions } from './agentToolExecutor.js';
+import { inferPriceMultiplierFromText } from './priceMultiplier.js';
 import type { BotResponse } from './types.js';
 
 interface ContinuePlannerStepsInput {
@@ -48,6 +49,21 @@ function shouldStopAfterConfirmedResponse(response: BotResponse): boolean {
   return response.metadata?.ok === false;
 }
 
+function completePricePreviewArguments(
+  toolName: string,
+  args: Record<string, unknown>,
+  contextText: string,
+): Record<string, unknown> {
+  if (toolName !== 'rental.pricePreview' || args.discount !== undefined || args.fields !== undefined) return args;
+  const inferred = inferPriceMultiplierFromText(contextText);
+  if (inferred === null) return args;
+  return {
+    ...args,
+    discount: inferred,
+    ...(args.scope === undefined && /(整体|所有|全部)/.test(contextText) ? { scope: 'all_price_fields' } : {}),
+  };
+}
+
 export async function continueAgentPlannerSteps(input: ContinuePlannerStepsInput): Promise<BotResponse | null> {
   for (const [localIndex, step] of input.steps.entries()) {
     const absoluteIndex = input.baseIndex + localIndex;
@@ -59,7 +75,12 @@ export async function continueAgentPlannerSteps(input: ContinuePlannerStepsInput
       input.textParts.push('已停止执行后续步骤，未触发任何未确认的写操作。');
       return { text: input.textParts.join('\n') };
     }
-    if (!validateAgentToolArguments(step.toolName, resolvedArguments.value)) {
+    const completedArguments = completePricePreviewArguments(
+      step.toolName,
+      resolvedArguments.value,
+      [input.goal, input.reason, step.reason].filter(Boolean).join('\n'),
+    );
+    if (!validateAgentToolArguments(step.toolName, completedArguments)) {
       input.textParts.push('');
       input.textParts.push(`步骤 ${absoluteIndex + 1}/${input.totalSteps} 参数校验失败：${step.toolName}`);
       input.textParts.push('已停止执行后续步骤，未触发任何未确认的写操作。');
@@ -71,10 +92,10 @@ export async function continueAgentPlannerSteps(input: ContinuePlannerStepsInput
 
     const request: AgentToolConfirmRequest = {
       toolName: step.toolName,
-      arguments: resolvedArguments.value,
+      arguments: completedArguments,
       reason: step.reason || input.reason,
     };
-    const policy = decideAgentPolicy({ tool, input: resolvedArguments.value, reason: request.reason });
+    const policy = decideAgentPolicy({ tool, input: completedArguments, reason: request.reason });
     const remainingSteps = input.steps.slice(localIndex + 1);
     if (policy?.decision === 'confirmation_required' || isPreConfirmationPlanningTool(step.toolName)) {
       request.continuation = buildContinuation(input, stepId, absoluteIndex, remainingSteps);

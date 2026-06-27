@@ -71,6 +71,7 @@ import {
   type RentalPriceSkillClient,
 } from './rentalPrice.js';
 import { findReadOnlyTool } from './readOnlyToolRegistry.js';
+import { inferPriceMultiplierFromText, readPriceMultiplierArgument } from './priceMultiplier.js';
 import { runPublicTrafficReportQuery, type PublicTrafficReportQueryArguments } from './reportQuery.js';
 import { findLatestReportContext, findReportContextByDate, formatConversionSummary, formatLatestSummary, formatProductRows, parseNumericProductIdList, queryProductRows } from './reportStore.js';
 
@@ -380,13 +381,6 @@ async function rentalPriceSnapshotResponse(
   return { text: formatRentalPriceSnapshot(query, resolution, reads) };
 }
 
-function readDiscountMultiplier(value: unknown): number | null {
-  const numeric = typeof value === 'number' ? value : typeof value === 'string' ? Number(value.trim()) : NaN;
-  if (!Number.isFinite(numeric) || numeric <= 0) return null;
-  if (numeric > 1 && numeric <= 10 && Number.isInteger(numeric)) return numeric / 10;
-  return numeric <= 1 ? numeric : null;
-}
-
 function readPriceChangeScope(value: unknown): 'rent_fields' | 'all_price_fields' {
   return value === 'all_price_fields' ? 'all_price_fields' : 'rent_fields';
 }
@@ -443,11 +437,12 @@ async function rentalPricePreviewResponse(
   if (!productIds) return { text: `改价预览参数无效：productIds 需要是 1 到 ${RENTAL_PRICE_PREVIEW_MAX_PRODUCTS} 个端内ID。`, metadata: { toolName: 'rental.pricePreview', ok: false } };
 
   const hasExplicitFields = isRecord(args.fields);
-  const discount = hasExplicitFields ? undefined : readDiscountMultiplier(args.discount);
+  const discount = hasExplicitFields ? undefined : (readPriceMultiplierArgument(args.discount) ?? inferPriceMultiplierFromText(reason));
   if (!hasExplicitFields && discount === null) {
     return { text: '改价预览参数无效：需要提供 fields，或提供 discount 折扣倍数，例如九折传 0.9。', metadata: { toolName: 'rental.pricePreview', ok: false, productIds } };
   }
-  const scope = hasExplicitFields ? undefined : readPriceChangeScope(args.scope);
+  const inferredScope = args.scope ?? (/(整体|所有|全部)/.test(reason) ? 'all_price_fields' : undefined);
+  const scope = hasExplicitFields ? undefined : readPriceChangeScope(inferredScope);
 
   const blocked: string[] = [];
   const readyItems: Array<{ productId: string; fields: Record<string, string>; audit?: RentalPriceAuditReference }> = [];
