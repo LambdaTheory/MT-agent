@@ -1133,6 +1133,19 @@ describe('handleBotIntent', () => {
     await expect(handleBotIntent({ type: 'unknown', text: '订单情况' }, outputDir)).resolves.toMatchObject({ text: expect.stringContaining('发货订单：12') });
   });
 
+  it('splits latest overview into exposure-page and order-analysis sources', async () => {
+    const outputDir = await writeContext();
+    const response = await handleBotIntent({ type: 'unknown', text: '今日概况' }, outputDir);
+
+    expect(response.text).toContain('公域日报 2026-06-11');
+    expect(response.text).toContain('公域曝光页：');
+    expect(response.text).toContain('曝光 1000，访问 50，金额 ¥88.00，转化率 5.00%');
+    expect(response.text).toContain('订单情况：');
+    expect(response.text).toContain('发货订单 12');
+    expect(response.text).toContain('数据源：曝光页已抓取；访问页已抓取；订单情况已抓取');
+    expect(response.text).not.toContain('发货 1');
+  });
+
   it('does not misroute new-link write intents to the read-only new product pool when LLM is unavailable', async () => {
     const outputDir = await writeContext();
 
