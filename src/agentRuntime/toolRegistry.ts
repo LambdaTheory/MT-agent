@@ -1,7 +1,7 @@
 import type { AgentToolDefinition } from './tool.js';
 
 const noArgumentsSchema = { type: 'object', additionalProperties: false };
-const reportDateSchema = { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' };
+const reportDateSchema = { type: 'string', pattern: '^(?:\\d{4}-\\d{2}-\\d{2}|\\d{2,4}[./-]\\d{1,2}[./-]\\d{1,2}|\\d{1,2}[./-]\\d{1,2}|\\d{1,2}月\\d{1,2}日)$' };
 const optionalReportDateArgumentsSchema = { type: 'object', properties: { date: reportDateSchema }, additionalProperties: false };
 const reportPeriodSchema = { type: 'string', enum: ['1d', '7d', '30d'] };
 const reportMetricSchema = {

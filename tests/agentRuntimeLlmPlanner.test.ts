@@ -50,6 +50,7 @@ describe('agent runtime LLM planner', () => {
     expect(system).toContain('orderDerivedMetric closeRateStatus');
     expect(system).toContain('target productDetail');
     expect(system).toContain('target comparison');
+    expect(system).toContain('Normalize short report dates such as 26.6.18');
     expect(system).toContain('use rental.priceSnapshot');
     expect(system).toContain('linkRegistry.resolveProducts');
     expect(system).toContain('rental.pricePreview');

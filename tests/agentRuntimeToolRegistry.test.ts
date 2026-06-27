@@ -172,17 +172,17 @@ describe('agent runtime tool registry', () => {
 
   it('allows read-only report tools to target an explicit report date', () => {
     expect(findAgentTool('publicTraffic.latestSummary')?.inputSchema).toMatchObject({
-      properties: { date: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' } },
+      properties: { date: { type: 'string', pattern: expect.any(String) } },
       additionalProperties: false,
     });
     expect(findAgentTool('publicTraffic.conversionSummary')?.inputSchema).toMatchObject({
-      properties: { date: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' } },
+      properties: { date: { type: 'string', pattern: expect.any(String) } },
       additionalProperties: false,
     });
     expect(findAgentTool('publicTraffic.reportQuery')?.inputSchema).toMatchObject({
       properties: {
         target: { enum: ['summary', 'comparison', 'products', 'productDetail', 'productAggregation', 'sourceCoverage', 'section', 'sectionCounts', 'orders', 'orderDerived', 'dataQuality', 'conclusions'] },
-        date: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
+        date: { type: 'string', pattern: expect.any(String) },
         period: { enum: ['1d', '7d', '30d'] },
         metrics: { type: 'array' },
         aggregation: { enum: ['count', 'sum', 'avg', 'min', 'max'] },
@@ -210,11 +210,11 @@ describe('agent runtime tool registry', () => {
       additionalProperties: false,
     });
     expect(findAgentTool('publicTraffic.resendLatestReport')?.inputSchema).toMatchObject({
-      properties: { sendTo: { type: 'string' }, date: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' } },
+      properties: { sendTo: { type: 'string' }, date: { type: 'string', pattern: expect.any(String) } },
       additionalProperties: false,
     });
     expect(findAgentTool('publicTraffic.pushLatestReportToGroup')?.inputSchema).toMatchObject({
-      properties: { date: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' } },
+      properties: { date: { type: 'string', pattern: expect.any(String) } },
       additionalProperties: false,
     });
   });

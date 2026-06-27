@@ -54,7 +54,7 @@ export function createAgentPlannerProvider(provider: LlmProvider): AgentPlannerP
               'Clarification options must be natural-language restatements that can be planned again, each with label, message, and optional description; provide 2 to 4 options.',
               'When learningHints are present and relevant, prefer the historically selected restatement, but still validate required arguments and never skip confirmation for write or high-risk actions.',
               'For write or high-risk tools, set requiresConfirmation to true. Do not claim execution has happened.',
-              `Current date in Asia/Shanghai is ${currentDate}; when the user asks for a report by date or a relative date such as today/yesterday, pass date as YYYY-MM-DD when the selected tool supports a date argument.`,
+              `Current date in Asia/Shanghai is ${currentDate}; when the user asks for a report by date or a relative date such as today/yesterday, pass date as YYYY-MM-DD when the selected tool supports a date argument. Normalize short report dates such as 26.6.18, 2026.6.18, 6.18, or 6月18日 to YYYY-MM-DD before planning when the year is clear or can be inferred from the current year.`,
             ].join(' '),
           },
           { role: 'user', content: JSON.stringify(plannerRequest) },

@@ -88,6 +88,25 @@ describe('agent runtime planner proposal validation', () => {
     });
 
     expect(validateAgentPlannerProposal(JSON.stringify({
+      goal: '查询短日期访问量',
+      selectedTool: 'publicTraffic.reportQuery',
+      arguments: {
+        target: 'summary',
+        date: '26.6.18',
+        metrics: ['publicVisits'],
+      },
+      confidence: 0.9,
+      reason: '用户用短日期询问指定日报访问量',
+    }))).toMatchObject({
+      ok: true,
+      proposal: {
+        selectedTool: 'publicTraffic.reportQuery',
+        arguments: { target: 'summary', date: '26.6.18', metrics: ['publicVisits'] },
+      },
+      policy: { decision: 'allow', toolName: 'publicTraffic.reportQuery', risk: 'read' },
+    });
+
+    expect(validateAgentPlannerProposal(JSON.stringify({
       goal: 'bad aggregation',
       selectedTool: 'publicTraffic.reportQuery',
       arguments: { target: 'productAggregation', aggregation: 'median' },

@@ -1130,11 +1130,48 @@ function readSendTo(value: unknown): FeishuSendTo | undefined {
   throw new Error('sendTo must be personal, group, or both');
 }
 
+function currentShanghaiYear(): number {
+  const year = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric' }).format(new Date());
+  return Number(year);
+}
+
+function padDatePart(value: number): string {
+  return String(value).padStart(2, '0');
+}
+
+function normalizeReportDate(value: string): string | null {
+  const trimmed = value.trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+
+  const monthDay = /^(\d{1,2})月(\d{1,2})日$/.exec(trimmed);
+  if (monthDay) {
+    const month = Number(monthDay[1]);
+    const day = Number(monthDay[2]);
+    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) return `${currentShanghaiYear()}-${padDatePart(month)}-${padDatePart(day)}`;
+    return null;
+  }
+
+  const parts = trimmed.split(/[./-]/).filter(Boolean);
+  if (parts.length !== 2 && parts.length !== 3) return null;
+  const numbers = parts.map((part) => Number(part));
+  if (numbers.some((item) => !Number.isInteger(item))) return null;
+
+  const [first, second, third] = numbers;
+  const year = parts.length === 3
+    ? first < 100 ? 2000 + first : first
+    : currentShanghaiYear();
+  const month = parts.length === 3 ? second : first;
+  const day = parts.length === 3 ? third : second;
+  if (!year || !month || !day || year < 2000 || year > 2099 || month < 1 || month > 12 || day < 1 || day > 31) return null;
+  return `${year}-${padDatePart(month)}-${padDatePart(day)}`;
+}
+
 function readOptionalDate(value: unknown): string | undefined {
   if (value === undefined) return undefined;
   const parsed = readString(value);
-  if (!parsed || !/^\d{4}-\d{2}-\d{2}$/.test(parsed)) throw new Error('date must be YYYY-MM-DD');
-  return parsed;
+  const normalized = parsed ? normalizeReportDate(parsed) : null;
+  if (!normalized) throw new Error('date must be YYYY-MM-DD or a supported short date like 26.6.18');
+  return normalized;
 }
 
 async function findReportContextForTool(outputDir: string, date?: string) {

@@ -132,6 +132,57 @@ describe('executeAgentToolRequest public traffic report', () => {
     expect(response.text).not.toContain('端内ID 101');
   });
 
+  it('normalizes short report dates before querying saved report contexts', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'mt-agent-report-query-short-date-'));
+    const runDir = join(dir, '2026-06-23');
+    await mkdir(runDir, { recursive: true });
+    const metric = {
+      exposure: 0,
+      publicVisits: 0,
+      dashboardVisits: 0,
+      createdOrders: 0,
+      signedOrders: 0,
+      reviewedOrders: 0,
+      shippedOrders: 0,
+      amount: 0,
+      exposureVisitRate: 0,
+      visitCreatedOrderRate: 0,
+      visitShipmentRate: 0,
+      hasExposureData: true,
+      hasDashboardData: true,
+    };
+    await writeFile(join(runDir, 'report-context.json'), JSON.stringify({
+      date: '2026-06-22',
+      summary: {
+        '1d': { exposure: 100, publicVisits: 18, dashboardVisits: 18, createdOrders: 1, shippedOrders: 0, amount: 8, exposureVisitRate: 0.18, visitCreatedOrderRate: 0.055, visitShipmentRate: 0 },
+        '7d': { exposure: 700, publicVisits: 70, dashboardVisits: 65, createdOrders: 7, shippedOrders: 2, amount: 88, exposureVisitRate: 0.1, visitCreatedOrderRate: 0.1, visitShipmentRate: 0.028 },
+        '30d': { exposure: 3000, publicVisits: 300, dashboardVisits: 280, createdOrders: 30, shippedOrders: 10, amount: 300, exposureVisitRate: 0.1, visitCreatedOrderRate: 0.1, visitShipmentRate: 0.033 },
+      },
+      conclusions: [],
+      rows: [{ productName: 'Pocket 3 A', platformProductId: 'p-101', displayProductId: '端内ID 101', custodyDays: 1, periods: { '1d': metric, '7d': metric, '30d': metric } }],
+      lowExposure: [],
+      weakClick: [],
+      weakConversion: [],
+      highPotential: [],
+      newProductObservation: [],
+      lifecycleGovernance: [],
+      recommendedActions: [],
+      emptySectionNotes: {},
+    }));
+
+    const response = await executeAgentToolRequest(
+      {
+        toolName: 'publicTraffic.reportQuery',
+        arguments: { target: 'summary', date: '26.6.22', metrics: ['publicVisits'] },
+        reason: '用户用短日期查询访问量',
+      },
+      dir,
+    );
+
+    expect(response.text).toContain('公域日报汇总 2026-06-22');
+    expect(response.text).toContain('访问 18');
+  });
+
   it('does not expose the old crawlSources boundary through Feishu tool execution', async () => {
     await expect(executeAgentToolRequest(
       { toolName: 'publicTraffic.crawlSources', arguments: { goodsExportPath: 'output/goods.xlsx' }, reason: '旧抓源工具不应由飞书执行' },
