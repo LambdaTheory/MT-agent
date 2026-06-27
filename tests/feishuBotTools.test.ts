@@ -882,6 +882,7 @@ describe('handleBotIntent', () => {
     expect(response.text).toContain('📋 查询与分析');
     expect(response.text).toContain('2026-06-22 访问最高的前20个商品');
     expect(response.text).toContain('Pocket 3 的7日访问总和是多少');
+    expect(response.text).toContain('访问页缺失哪些商品');
     expect(response.text).toContain('733 的所有日报数据');
     expect(response.text).toContain('各问题池分别多少条');
     expect(response.text).toContain('写操作会先弹确认卡');
@@ -1358,6 +1359,40 @@ describe('handleBotIntent', () => {
     expect(response.text).toContain('公域日报商品聚合统计 2026-06-11');
     expect(response.text).toContain('匹配 2 条商品');
     expect(response.text).toContain('访问总和 = 82');
+    expect(response.card).toBeUndefined();
+  });
+
+  it('lets the Agent planner answer report source coverage questions through publicTraffic.reportQuery', async () => {
+    const outputDir = await writeContext();
+    let plannerCalled = false;
+    const planner: AgentPlannerProvider = {
+      async proposePlan(request) {
+        plannerCalled = true;
+        expect(request.message).toBe('7日访问页覆盖情况怎么样');
+        expect(request.tools.map((tool) => tool.name)).toContain('publicTraffic.reportQuery');
+        return JSON.stringify({
+          goal: '查询7日访问页覆盖情况',
+          selectedTool: 'publicTraffic.reportQuery',
+          arguments: {
+            target: 'sourceCoverage',
+            date: '2026-06-11',
+            period: '7d',
+            source: 'dashboard',
+            coverageStatus: 'all',
+          },
+          confidence: 0.94,
+          reason: '用户要查看已保存日报商品行的访问页抓取覆盖情况',
+        });
+      },
+    };
+
+    const response = await handleBotIntent({ type: 'unknown', text: '7日访问页覆盖情况怎么样' }, outputDir, { agentPlannerProvider: planner });
+
+    expect(plannerCalled).toBe(true);
+    expect(response.text).toContain('日报数据源覆盖 2026-06-11');
+    expect(response.text).toContain('数据源：访问页，状态：全部');
+    expect(response.text).toContain('7d：商品 6 条');
+    expect(response.text).toContain('访问页已抓取 6 条/未更新 0 条');
     expect(response.card).toBeUndefined();
   });
 

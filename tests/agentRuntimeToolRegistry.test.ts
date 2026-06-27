@@ -181,11 +181,13 @@ describe('agent runtime tool registry', () => {
     });
     expect(findAgentTool('publicTraffic.reportQuery')?.inputSchema).toMatchObject({
       properties: {
-        target: { enum: ['summary', 'comparison', 'products', 'productDetail', 'productAggregation', 'section', 'sectionCounts', 'orders', 'dataQuality', 'conclusions'] },
+        target: { enum: ['summary', 'comparison', 'products', 'productDetail', 'productAggregation', 'sourceCoverage', 'section', 'sectionCounts', 'orders', 'dataQuality', 'conclusions'] },
         date: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
         period: { enum: ['1d', '7d', '30d'] },
         metrics: { type: 'array' },
         aggregation: { enum: ['count', 'sum', 'avg', 'min', 'max'] },
+        source: { enum: ['exposure', 'dashboard', 'all'] },
+        coverageStatus: { enum: ['available', 'missing', 'all'] },
         filters: { type: 'array' },
       },
       required: ['target'],

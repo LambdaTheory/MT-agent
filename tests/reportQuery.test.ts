@@ -62,8 +62,8 @@ const reportContext: PublicTrafficDataReportContext = {
   ],
   rows: [
     row('101', 'Pocket 3 标准版', { exposure: 2000, publicVisits: 500, amount: 1200, shippedOrders: 3 }),
-    row('102', 'Pocket 3 套装版', { exposure: 3000, publicVisits: 900, amount: 2200, shippedOrders: 5 }),
-    row('103', 'SX70 长焦相机', { exposure: 100, publicVisits: 20, amount: 80, shippedOrders: 0 }),
+    row('102', 'Pocket 3 套装版', { exposure: 3000, publicVisits: 900, amount: 2200, shippedOrders: 5, hasExposureData: false }),
+    row('103', 'SX70 长焦相机', { exposure: 100, publicVisits: 20, amount: 80, shippedOrders: 0, hasDashboardData: false }),
   ],
   lowExposure: [{ identifier: '端内ID 103', action: '观察', reason: '7日曝光低', priority: 'medium' }],
   weakClick: [],
@@ -194,6 +194,31 @@ describe('public traffic report freeform query', () => {
     expect(text).toContain('30d：曝光 30000');
     expect(text).toContain('签约订单 0');
     expect(text).toContain('访问到发货率');
+  });
+
+  it('reports product-level source coverage and missing rows', () => {
+    const dashboardMissing = runPublicTrafficReportQuery(reportContext, {
+      target: 'sourceCoverage',
+      period: '7d',
+      source: 'dashboard',
+      coverageStatus: 'missing',
+    });
+
+    expect(dashboardMissing).toContain('日报数据源覆盖 2026-06-22');
+    expect(dashboardMissing).toContain('数据源：访问页，状态：未更新/异常');
+    expect(dashboardMissing).toContain('7d：商品 3 条，曝光页已抓取 2 条/未更新 1 条，访问页已抓取 2 条/未更新 1 条，双源完整 1 条');
+    expect(dashboardMissing).toContain('端内ID 103');
+    expect(dashboardMissing).not.toContain('端内ID 102 Pocket 3 套装版');
+
+    const anyMissing = runPublicTrafficReportQuery(reportContext, {
+      target: 'sourceCoverage',
+      period: '7d',
+      source: 'all',
+      coverageStatus: 'missing',
+    });
+
+    expect(anyMissing).toContain('端内ID 102 Pocket 3 套装版：曝光页未更新/异常');
+    expect(anyMissing).toContain('端内ID 103 SX70 长焦相机：访问页未更新/异常');
   });
 
   it('counts all report sections for issue-pool questions', () => {

@@ -31,6 +31,14 @@ export const reportAggregationNames = ['count', 'sum', 'avg', 'min', 'max'] as c
 
 export type ReportAggregationName = typeof reportAggregationNames[number];
 
+export const reportSourceNames = ['exposure', 'dashboard', 'all'] as const;
+
+export type ReportSourceName = typeof reportSourceNames[number];
+
+export const reportCoverageStatusNames = ['available', 'missing', 'all'] as const;
+
+export type ReportCoverageStatusName = typeof reportCoverageStatusNames[number];
+
 export const reportSectionNames = [
   'lowExposure',
   'weakClick',
@@ -46,7 +54,7 @@ export const reportSectionNames = [
 
 export type ReportSectionName = typeof reportSectionNames[number];
 
-export type ReportQueryTarget = 'summary' | 'comparison' | 'products' | 'productDetail' | 'productAggregation' | 'section' | 'sectionCounts' | 'orders' | 'dataQuality' | 'conclusions';
+export type ReportQueryTarget = 'summary' | 'comparison' | 'products' | 'productDetail' | 'productAggregation' | 'sourceCoverage' | 'section' | 'sectionCounts' | 'orders' | 'dataQuality' | 'conclusions';
 
 export interface ReportQueryFilter {
   field: ReportMetricName | 'productName' | 'productId' | 'platformProductId' | 'action' | 'reason' | 'priority' | 'maintenanceStatus' | 'stock' | 'skuCount';
@@ -63,6 +71,8 @@ export interface PublicTrafficReportQueryArguments {
   productQuery?: string;
   section?: ReportSectionName;
   aggregation?: ReportAggregationName;
+  source?: ReportSourceName;
+  coverageStatus?: ReportCoverageStatusName;
   sortBy?: ReportMetricName | 'productName' | 'productId' | 'platformProductId' | 'action' | 'priority' | 'maintenanceStatus' | 'stock' | 'skuCount';
   sortDirection?: 'asc' | 'desc';
   limit?: number | string;
@@ -110,6 +120,18 @@ const aggregationLabels: Record<ReportAggregationName, string> = {
   avg: '平均值',
   min: '最小值',
   max: '最大值',
+};
+
+const sourceLabels: Record<ReportSourceName, string> = {
+  exposure: '曝光页',
+  dashboard: '访问页',
+  all: '曝光页/访问页',
+};
+
+const coverageStatusLabels: Record<ReportCoverageStatusName, string> = {
+  available: '已抓取',
+  missing: '未更新/异常',
+  all: '全部',
 };
 
 const sectionLabels: Record<ReportSectionName, string> = {
@@ -408,6 +430,66 @@ function formatProductAggregation(context: PublicTrafficDataReportContext, args:
   ].join('\n');
 }
 
+function periodMetrics(row: PublicTrafficProductDataRow, period: PeriodKey): PublicTrafficPeriodMetrics | undefined {
+  return row.periods[period];
+}
+
+function sourceAvailable(row: PublicTrafficProductDataRow, period: PeriodKey, source: ReportSourceName): boolean {
+  const metrics = periodMetrics(row, period);
+  if (!metrics) return false;
+  if (source === 'exposure') return metrics.hasExposureData === true;
+  if (source === 'dashboard') return metrics.hasDashboardData === true;
+  return metrics.hasExposureData === true && metrics.hasDashboardData === true;
+}
+
+function sourceMissingParts(row: PublicTrafficProductDataRow, period: PeriodKey): string[] {
+  const metrics = periodMetrics(row, period);
+  if (!metrics) return ['曝光页', '访问页'];
+  const parts: string[] = [];
+  if (!metrics.hasExposureData) parts.push('曝光页');
+  if (!metrics.hasDashboardData) parts.push('访问页');
+  return parts;
+}
+
+function sourceMatchesStatus(row: PublicTrafficProductDataRow, period: PeriodKey, source: ReportSourceName, status: ReportCoverageStatusName): boolean {
+  if (status === 'all') return true;
+  const available = sourceAvailable(row, period, source);
+  return status === 'available' ? available : !available;
+}
+
+function formatSourceCoverageLine(row: PublicTrafficProductDataRow, period: PeriodKey, index: number): string {
+  const missing = sourceMissingParts(row, period);
+  const status = missing.length ? `${missing.join('、')}未更新/异常` : '曝光页、访问页已抓取';
+  return `${index + 1}. 端内ID ${internalProductId(row)} ${row.productName}：${status}`;
+}
+
+function formatSourceCoverage(context: PublicTrafficDataReportContext, args: PublicTrafficReportQueryArguments): string {
+  const periods = args.period || args.periods?.length ? periodsFromArgs(args) : PERIODS;
+  const source = args.source && reportSourceNames.includes(args.source) ? args.source : 'all';
+  const status = args.coverageStatus && reportCoverageStatusNames.includes(args.coverageStatus) ? args.coverageStatus : 'all';
+  const limit = clampLimit(args.limit);
+  const lines = [
+    `日报数据源覆盖 ${context.date}`,
+    `数据源：${sourceLabels[source]}，状态：${coverageStatusLabels[status]}`,
+  ];
+
+  for (const period of periods) {
+    const rows = matchingProductRows(context, args, period);
+    const exposureOk = rows.filter((row) => sourceAvailable(row, period, 'exposure')).length;
+    const dashboardOk = rows.filter((row) => sourceAvailable(row, period, 'dashboard')).length;
+    const complete = rows.filter((row) => sourceAvailable(row, period, 'all')).length;
+    lines.push(`${period}：商品 ${rows.length} 条，曝光页已抓取 ${exposureOk} 条/未更新 ${rows.length - exposureOk} 条，访问页已抓取 ${dashboardOk} 条/未更新 ${rows.length - dashboardOk} 条，双源完整 ${complete} 条`);
+
+    if (status !== 'all') {
+      const matched = rows.filter((row) => sourceMatchesStatus(row, period, source, status)).slice(0, limit);
+      lines.push(`${period} ${sourceLabels[source]}${coverageStatusLabels[status]}明细：${matched.length ? '' : '暂无'}`);
+      lines.push(...matched.map((row, index) => formatSourceCoverageLine(row, period, index)));
+    }
+  }
+
+  return lines.join('\n');
+}
+
 function formatProductDetailPeriod(row: PublicTrafficProductDataRow, period: PeriodKey): string {
   const metricText = productDetailMetrics
     .map((metric) => `${metricDefinitions[metric].label} ${formatValue(productMetricValue(row, metric, period), metricDefinitions[metric])}`)
@@ -563,6 +645,8 @@ export function runPublicTrafficReportQuery(context: PublicTrafficDataReportCont
       return formatProductDetail(context, args);
     case 'productAggregation':
       return formatProductAggregation(context, args);
+    case 'sourceCoverage':
+      return formatSourceCoverage(context, args);
     case 'section':
       return formatSection(context, args);
     case 'sectionCounts':
