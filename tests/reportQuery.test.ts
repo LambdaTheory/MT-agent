@@ -42,8 +42,24 @@ const reportContext: PublicTrafficDataReportContext = {
     '7d': { exposure: 7000, publicVisits: 300, dashboardVisits: 280, createdOrders: 20, shippedOrders: 8, amount: 500, exposureVisitRate: 0.04, visitCreatedOrderRate: 0.07, visitShipmentRate: 0.026 },
     '30d': { exposure: 30000, publicVisits: 1000, dashboardVisits: 920, createdOrders: 60, shippedOrders: 20, amount: 2000, exposureVisitRate: 0.033, visitCreatedOrderRate: 0.06, visitShipmentRate: 0.02 },
   },
+  previousSummary: { exposure: 800, publicVisits: 40, dashboardVisits: 36, createdOrders: 2, shippedOrders: 1, amount: 44, exposureVisitRate: 0.04, visitCreatedOrderRate: 0.055, visitShipmentRate: 0.027 },
   conclusions: [{ label: '重点', text: '访问增长但发货偏低。' }],
   dataQualityNotes: ['访问页 30 日首版缺失。'],
+  newProductPoolItems: [
+    {
+      productId: '301',
+      productName: 'Pocket 3 新链',
+      shortTitle: 'Pocket3',
+      submittedAt: '2026-06-21 10:00:00',
+      merchant: '门店A',
+      alipaySyncStatus: '已同步',
+      alipayCode: 'ALP301',
+      stock: 5,
+      skuCount: 3,
+      maintenanceStatus: '待维护',
+      note: '',
+    },
+  ],
   rows: [
     row('101', 'Pocket 3 标准版', { exposure: 2000, publicVisits: 500, amount: 1200, shippedOrders: 3 }),
     row('102', 'Pocket 3 套装版', { exposure: 3000, publicVisits: 900, amount: 2200, shippedOrders: 5 }),
@@ -90,6 +106,17 @@ const reportContext: PublicTrafficDataReportContext = {
 };
 
 describe('public traffic report freeform query', () => {
+  it('summarizes previous-day comparison metrics', () => {
+    const text = runPublicTrafficReportQuery(reportContext, {
+      target: 'comparison',
+      metrics: ['exposure', 'publicVisits', 'amount', 'exposureVisitRate'],
+    });
+
+    expect(text).toContain('公域日报较前日变化 2026-06-22');
+    expect(text).toContain('曝光：当前 1000，前日 800，变化 +200（+25.00%）');
+    expect(text).toContain('曝光到访问率：当前 5.00%，前日 4.00%，变化 +1.00 个百分点（+25.00%）');
+  });
+
   it('sorts product rows by selected period metric', () => {
     const text = runPublicTrafficReportQuery(reportContext, {
       target: 'products',
@@ -103,6 +130,22 @@ describe('public traffic report freeform query', () => {
     expect(text.indexOf('端内ID 102')).toBeLessThan(text.indexOf('端内ID 101'));
     expect(text).toContain('访问 900');
     expect(text).not.toContain('端内ID 103');
+  });
+
+  it('returns full product details across all report periods', () => {
+    const text = runPublicTrafficReportQuery(reportContext, {
+      target: 'productDetail',
+      productQuery: '102',
+    });
+
+    expect(text).toContain('公域日报商品全量明细 2026-06-22');
+    expect(text).toContain('端内ID 102 Pocket 3 套装版');
+    expect(text).toContain('平台商品ID platform-102，托管天数 8');
+    expect(text).toContain('1d：曝光 204');
+    expect(text).toContain('7d：曝光 3000');
+    expect(text).toContain('30d：曝光 30000');
+    expect(text).toContain('签约订单 0');
+    expect(text).toContain('访问到发货率');
   });
 
   it('counts all report sections for issue-pool questions', () => {
@@ -124,6 +167,18 @@ describe('public traffic report freeform query', () => {
     expect(text).toContain('托管异常');
     expect(text).toContain('端内ID 201');
     expect(text).not.toContain('端内ID 202');
+  });
+
+  it('keeps extended new-product-pool fields in section details', () => {
+    const text = runPublicTrafficReportQuery(reportContext, {
+      target: 'section',
+      section: 'newProductPool',
+    });
+
+    expect(text).toContain('商品名称 Pocket 3 新链');
+    expect(text).toContain('最近提交时间 2026-06-21 10:00:00');
+    expect(text).toContain('库存 5');
+    expect(text).toContain('SKU数 3');
   });
 
   it('filters order analysis indicators by user wording', () => {

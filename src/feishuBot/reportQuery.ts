@@ -42,10 +42,10 @@ export const reportSectionNames = [
 
 export type ReportSectionName = typeof reportSectionNames[number];
 
-export type ReportQueryTarget = 'summary' | 'products' | 'section' | 'sectionCounts' | 'orders' | 'dataQuality' | 'conclusions';
+export type ReportQueryTarget = 'summary' | 'comparison' | 'products' | 'productDetail' | 'section' | 'sectionCounts' | 'orders' | 'dataQuality' | 'conclusions';
 
 export interface ReportQueryFilter {
-  field: ReportMetricName | 'productName' | 'productId' | 'platformProductId' | 'action' | 'reason' | 'priority';
+  field: ReportMetricName | 'productName' | 'productId' | 'platformProductId' | 'action' | 'reason' | 'priority' | 'maintenanceStatus' | 'stock' | 'skuCount';
   operator: 'eq' | 'neq' | 'gt' | 'gte' | 'lt' | 'lte' | 'contains';
   value: string | number | boolean;
 }
@@ -58,7 +58,7 @@ export interface PublicTrafficReportQueryArguments {
   metrics?: ReportMetricName[];
   productQuery?: string;
   section?: ReportSectionName;
-  sortBy?: ReportMetricName | 'productName' | 'productId' | 'platformProductId' | 'action' | 'priority';
+  sortBy?: ReportMetricName | 'productName' | 'productId' | 'platformProductId' | 'action' | 'priority' | 'maintenanceStatus' | 'stock' | 'skuCount';
   sortDirection?: 'asc' | 'desc';
   limit?: number | string;
   filters?: ReportQueryFilter[];
@@ -97,6 +97,8 @@ const defaultMetricsByTarget: Record<'summary' | 'products', ReportMetricName[]>
   products: ['exposure', 'publicVisits', 'createdOrders', 'shippedOrders', 'amount', 'exposureVisitRate'],
 };
 
+const productDetailMetrics: ReportMetricName[] = reportMetricNames.filter((metric) => metric !== 'custodyDays');
+
 const sectionLabels: Record<ReportSectionName, string> = {
   lowExposure: '曝光低',
   weakClick: '点击弱',
@@ -108,6 +110,23 @@ const sectionLabels: Record<ReportSectionName, string> = {
   recommendedActions: '建议操作',
   newProductPool: '新链接池',
   removedLinks: '下架链接',
+};
+
+const sectionFieldLabels: Record<string, string> = {
+  productId: '商品ID',
+  productName: '商品名称',
+  shortTitle: '短标题',
+  submittedAt: '最近提交时间',
+  merchant: '商家',
+  alipaySyncStatus: '同步状态',
+  alipayCode: '支付宝编码',
+  stock: '库存',
+  skuCount: 'SKU数',
+  maintenanceStatus: '维护状态',
+  note: '备注',
+  platformProductId: '平台商品ID',
+  removedDate: '下架日期',
+  source: '来源',
 };
 
 function clampLimit(value: unknown): number {
@@ -142,6 +161,33 @@ function formatValue(value: unknown, definition?: ReportMetricDefinition): strin
     return Number.isInteger(value) ? String(value) : value.toFixed(2);
   }
   return String(value);
+}
+
+function formatSignedNumber(value: number, definition?: ReportMetricDefinition): string {
+  const prefix = value > 0 ? '+' : '';
+  return `${prefix}${formatValue(value, definition)}`;
+}
+
+function formatRelativeChange(current: number, previous: number): string {
+  if (previous <= 0 || !Number.isFinite(current) || !Number.isFinite(previous)) return '无可比百分比';
+  const change = ((current - previous) / previous) * 100;
+  const prefix = change > 0 ? '+' : '';
+  return `${prefix}${change.toFixed(2)}%`;
+}
+
+function formatComparisonValue(metric: ReportMetricName, current: unknown, previous: unknown): string {
+  const definition = metricDefinitions[metric];
+  if (typeof current !== 'number' || typeof previous !== 'number') {
+    return `${definition.label}：当前 ${formatValue(current, definition)}，前日 ${formatValue(previous, definition)}`;
+  }
+
+  if (definition.format === 'percent') {
+    const pointDiff = (current - previous) * 100;
+    const pointPrefix = pointDiff > 0 ? '+' : '';
+    return `${definition.label}：当前 ${formatValue(current, definition)}，前日 ${formatValue(previous, definition)}，变化 ${pointPrefix}${pointDiff.toFixed(2)} 个百分点（${formatRelativeChange(current, previous)}）`;
+  }
+
+  return `${definition.label}：当前 ${formatValue(current, definition)}，前日 ${formatValue(previous, definition)}，变化 ${formatSignedNumber(current - previous, definition)}（${formatRelativeChange(current, previous)}）`;
 }
 
 function productMetricValue(row: PublicTrafficProductDataRow, metric: ReportMetricName, period: PeriodKey): unknown {
@@ -202,8 +248,8 @@ function sortableProductValue(row: PublicTrafficProductDataRow, sortBy: PublicTr
   if (sortBy === 'productName') return row.productName;
   if (sortBy === 'productId') return internalProductId(row);
   if (sortBy === 'platformProductId') return row.platformProductId;
-  if (sortBy === 'action' || sortBy === 'priority') return undefined;
-  return productMetricValue(row, sortBy, period);
+  if (reportMetricNames.includes(sortBy as ReportMetricName)) return productMetricValue(row, sortBy as ReportMetricName, period);
+  return undefined;
 }
 
 function formatProductLine(row: PublicTrafficProductDataRow, period: PeriodKey, metrics: ReportMetricName[], index: number): string {
@@ -224,6 +270,17 @@ function formatSummary(context: PublicTrafficDataReportContext, args: PublicTraf
     return `${period}：${metricText}`;
   });
   return [`公域日报汇总 ${context.date}`, ...lines].join('\n');
+}
+
+function formatComparison(context: PublicTrafficDataReportContext, args: PublicTrafficReportQueryArguments): string {
+  const previous = context.previousSummary;
+  if (!previous) return `公域日报较前日变化 ${context.date}\n暂无前日汇总数据，无法计算较前日变化。`;
+  const current = context.summary['1d'];
+  const metrics = metricList(args, 'summary').filter((metric) => metricDefinitions[metric].summary);
+  return [
+    `公域日报较前日变化 ${context.date}`,
+    ...metrics.map((metric) => formatComparisonValue(metric, metricDefinitions[metric].summary?.(current), metricDefinitions[metric].summary?.(previous))),
+  ].join('\n');
 }
 
 function formatProducts(context: PublicTrafficDataReportContext, args: PublicTrafficReportQueryArguments): string {
@@ -252,6 +309,44 @@ function formatProducts(context: PublicTrafficDataReportContext, args: PublicTra
   ].join('\n');
 }
 
+function formatProductDetailPeriod(row: PublicTrafficProductDataRow, period: PeriodKey): string {
+  const metricText = productDetailMetrics
+    .map((metric) => `${metricDefinitions[metric].label} ${formatValue(productMetricValue(row, metric, period), metricDefinitions[metric])}`)
+    .join('，');
+  return `${period}：${metricText}`;
+}
+
+function formatProductDetailLine(row: PublicTrafficProductDataRow, periods: PeriodKey[], index: number): string {
+  return [
+    `${index + 1}. 端内ID ${internalProductId(row)} ${row.productName}`,
+    `平台商品ID ${row.platformProductId}，托管天数 ${formatValue(row.custodyDays)}`,
+    ...periods.map((period) => formatProductDetailPeriod(row, period)),
+  ].join('\n');
+}
+
+function formatProductDetail(context: PublicTrafficDataReportContext, args: PublicTrafficReportQueryArguments): string {
+  const periods = args.period || args.periods?.length ? periodsFromArgs(args) : PERIODS;
+  const sortPeriod = periods[0] ?? '1d';
+  const sortDirection = args.sortDirection ?? 'desc';
+  const sortBy = args.sortBy && reportMetricNames.includes(args.sortBy as ReportMetricName) ? args.sortBy : args.sortBy ?? 'publicVisits';
+  const limit = args.limit === undefined ? 5 : clampLimit(args.limit);
+  const rows = context.rows
+    .filter((row) => productMatchesQuery(row, args.productQuery))
+    .filter((row) => productMatchesFilters(row, args.filters, sortPeriod))
+    .sort((left, right) => {
+      const compared = compareSortableValues(sortableProductValue(left, sortBy, sortPeriod), sortableProductValue(right, sortBy, sortPeriod));
+      return sortDirection === 'asc' ? compared : -compared;
+    })
+    .slice(0, limit);
+
+  if (rows.length === 0) return `公域日报商品全量明细 ${context.date}\n暂无匹配商品。`;
+  return [
+    `公域日报商品全量明细 ${context.date}`,
+    `展示 ${rows.length} 条，周期 ${periods.join('、')}`,
+    ...rows.map((row, index) => formatProductDetailLine(row, periods, index)),
+  ].join('\n\n');
+}
+
 function sectionItems(context: PublicTrafficDataReportContext, section: ReportSectionName): Array<Record<string, unknown>> {
   if (section === 'newProductPool') return context.newProductPoolItems ?? (context.newProductPoolIds ?? []).map((productId) => ({ productId }));
   if (section === 'removedLinks') return (context.agentData?.removedLinks ?? []).map((item) => ({ ...item }));
@@ -268,12 +363,22 @@ function itemMatchesSectionFilters(item: Record<string, unknown>, filters: Repor
   return filters.every((filter) => compareValues(sectionFieldValue(item, filter.field), filter.value, filter.operator));
 }
 
+function formatSectionExtraValue(value: unknown): string {
+  if (value === undefined || value === null || value === '') return '';
+  return String(value).replace(/\s+/g, ' ').trim();
+}
+
 function formatSectionItem(item: Record<string, unknown>, index: number): string {
   const id = item.identifier ?? item.productId ?? '-';
   const action = item.action ?? item.maintenanceStatus ?? item.reason ?? '-';
-  const reason = item.reason ?? item.productName ?? item.note ?? '';
+  const reason = item.reason ?? item.note ?? '';
   const priority = item.priority ? `，优先级 ${item.priority}` : '';
-  return `${index + 1}. ${id}：${action}${priority}${reason ? `。${reason}` : ''}`;
+  const hiddenFields = new Set(['identifier', 'productId', 'action', 'maintenanceStatus', 'reason', 'priority', 'note']);
+  const extra = Object.entries(item)
+    .filter(([key, value]) => !hiddenFields.has(key) && formatSectionExtraValue(value))
+    .slice(0, 8)
+    .map(([key, value]) => `${sectionFieldLabels[key] ?? key} ${formatSectionExtraValue(value)}`);
+  return `${index + 1}. ${id}：${action}${priority}${reason ? `。${reason}` : ''}${extra.length ? `；${extra.join('，')}` : ''}`;
 }
 
 function formatSection(context: PublicTrafficDataReportContext, args: PublicTrafficReportQueryArguments): string {
@@ -351,8 +456,12 @@ export function runPublicTrafficReportQuery(context: PublicTrafficDataReportCont
   switch (args.target) {
     case 'summary':
       return formatSummary(context, args);
+    case 'comparison':
+      return formatComparison(context, args);
     case 'products':
       return formatProducts(context, args);
+    case 'productDetail':
+      return formatProductDetail(context, args);
     case 'section':
       return formatSection(context, args);
     case 'sectionCounts':

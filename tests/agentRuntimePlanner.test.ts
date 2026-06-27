@@ -58,6 +58,14 @@ describe('agent runtime planner proposal validation', () => {
       confidence: 0.8,
       reason: 'invalid metric should be rejected',
     }))).toEqual({ ok: false, reason: 'invalid_arguments' });
+
+    expect(validateAgentPlannerProposal(JSON.stringify({
+      goal: '查询商品全量日报数据',
+      selectedTool: 'publicTraffic.reportQuery',
+      arguments: { target: 'productDetail', productQuery: '733' },
+      confidence: 0.9,
+      reason: '用户要指定商品的完整日报指标',
+    }))).toMatchObject({ ok: true, policy: { decision: 'allow', toolName: 'publicTraffic.reportQuery', risk: 'read' } });
   });
 
   it('rejects malformed JSON and unknown tools', () => {
