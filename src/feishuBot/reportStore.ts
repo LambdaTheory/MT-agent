@@ -9,6 +9,15 @@ function reportContextFileNames(date: string): string[] {
   return [`公域数据上下文_${date}.json`, 'report-context.json'];
 }
 
+async function datedOutputDirs(outputDir: string): Promise<string[]> {
+  const entries = await readdir(outputDir, { withFileTypes: true }).catch(() => []);
+  return entries
+    .filter((entry) => entry.isDirectory() && reportDatePattern.test(entry.name))
+    .map((entry) => entry.name)
+    .sort()
+    .reverse();
+}
+
 async function readReportContextFromDateDir(outputDir: string, date: string): Promise<{ path: string; context: PublicTrafficDataReportContext } | null> {
   for (const fileName of reportContextFileNames(date)) {
     const path = join(outputDir, date, fileName);
@@ -23,14 +32,7 @@ async function readReportContextFromDateDir(outputDir: string, date: string): Pr
 }
 
 export async function findLatestReportContext(outputDir = 'output'): Promise<{ path: string; context: PublicTrafficDataReportContext } | null> {
-  const entries = await readdir(outputDir, { withFileTypes: true }).catch(() => []);
-  const dates = entries
-    .filter((entry) => entry.isDirectory() && reportDatePattern.test(entry.name))
-    .map((entry) => entry.name)
-    .sort()
-    .reverse();
-
-  for (const date of dates) {
+  for (const date of await datedOutputDirs(outputDir)) {
     const found = await readReportContextFromDateDir(outputDir, date);
     if (found) return found;
   }
@@ -40,7 +42,15 @@ export async function findLatestReportContext(outputDir = 'output'): Promise<{ p
 
 export async function findReportContextByDate(outputDir: string, date: string): Promise<{ path: string; context: PublicTrafficDataReportContext } | null> {
   if (!reportDatePattern.test(date)) throw new Error('date must be YYYY-MM-DD');
-  return readReportContextFromDateDir(outputDir, date);
+  const directoryDates = await datedOutputDirs(outputDir);
+  const candidates = [date, ...directoryDates.filter((directoryDate) => directoryDate !== date)];
+
+  for (const directoryDate of candidates) {
+    const found = await readReportContextFromDateDir(outputDir, directoryDate);
+    if (found?.context.date === date) return found;
+  }
+
+  return null;
 }
 
 function percent(value: number): string {

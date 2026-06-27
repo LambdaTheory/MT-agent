@@ -66,6 +66,27 @@ describe('feishu bot report store', () => {
     expect(found?.context.date).toBe('2026-06-10');
   });
 
+  it('finds report context by its data date when the run directory is the next day', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'mt-agent-bot-'));
+    await mkdir(join(dir, '2026-06-26'), { recursive: true });
+    await mkdir(join(dir, '2026-06-27'), { recursive: true });
+    await writeFile(join(dir, '2026-06-26', '公域数据上下文_2026-06-26.json'), JSON.stringify({ ...context, date: '2026-06-25' }));
+    await writeFile(join(dir, '2026-06-27', '公域数据上下文_2026-06-27.json'), JSON.stringify({ ...context, date: '2026-06-26' }));
+
+    const found = await findReportContextByDate(dir, '2026-06-26');
+
+    expect(found?.context.date).toBe('2026-06-26');
+    expect(found?.path).toContain('2026-06-27');
+  });
+
+  it('does not return a direct date directory when the context data date is different', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'mt-agent-bot-'));
+    await mkdir(join(dir, '2026-06-26'), { recursive: true });
+    await writeFile(join(dir, '2026-06-26', '公域数据上下文_2026-06-26.json'), JSON.stringify({ ...context, date: '2026-06-25' }));
+
+    await expect(findReportContextByDate(dir, '2026-06-26')).resolves.toBeNull();
+  });
+
   it('returns null when an explicit report date has no context file', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'mt-agent-bot-'));
     await mkdir(join(dir, '2026-06-10'), { recursive: true });

@@ -72,8 +72,8 @@ async function writeContext(): Promise<string> {
     emptySectionNotes: {},
     }));
   };
-  await writeOne('2026-06-10', '2026-06-10', 321);
-  await writeOne('2026-06-11', '2026-06-11', 999);
+  await writeOne('2026-06-11', '2026-06-10', 321);
+  await writeOne('2026-06-12', '2026-06-11', 999);
   return dir;
 }
 

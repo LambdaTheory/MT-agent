@@ -170,11 +170,11 @@ describe('agent runtime tool registry', () => {
 
   it('allows read-only report tools to target an explicit report date', () => {
     expect(findAgentTool('publicTraffic.latestSummary')?.inputSchema).toMatchObject({
-      properties: { date: { type: 'string' } },
+      properties: { date: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' } },
       additionalProperties: false,
     });
     expect(findAgentTool('publicTraffic.conversionSummary')?.inputSchema).toMatchObject({
-      properties: { date: { type: 'string' } },
+      properties: { date: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' } },
       additionalProperties: false,
     });
     expect(findAgentTool('product.query')?.inputSchema).toMatchObject({
@@ -193,11 +193,11 @@ describe('agent runtime tool registry', () => {
       additionalProperties: false,
     });
     expect(findAgentTool('publicTraffic.resendLatestReport')?.inputSchema).toMatchObject({
-      properties: { sendTo: { type: 'string' }, date: { type: 'string' } },
+      properties: { sendTo: { type: 'string' }, date: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' } },
       additionalProperties: false,
     });
     expect(findAgentTool('publicTraffic.pushLatestReportToGroup')?.inputSchema).toMatchObject({
-      properties: { date: { type: 'string' } },
+      properties: { date: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' } },
       additionalProperties: false,
     });
   });

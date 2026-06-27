@@ -130,8 +130,8 @@ async function writeDatedContexts(): Promise<string> {
     }), 'utf8');
   };
 
-  await writeOne('2026-06-10', '2026-06-10', 321, '旧日期 Pocket3');
-  await writeOne('2026-06-11', '2026-06-11', 999, '最新日期 Pocket3');
+  await writeOne('2026-06-11', '2026-06-10', 321, '旧日期 Pocket3');
+  await writeOne('2026-06-12', '2026-06-11', 999, '最新日期 Pocket3');
   return dir;
 }
 

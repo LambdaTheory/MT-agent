@@ -1,8 +1,9 @@
 import type { AgentToolDefinition } from './tool.js';
 
 const noArgumentsSchema = { type: 'object', additionalProperties: false };
-const optionalReportDateArgumentsSchema = { type: 'object', properties: { date: { type: 'string' } }, additionalProperties: false };
-const keywordArgumentsSchema = { type: 'object', properties: { keyword: { type: 'string' }, date: { type: 'string' } }, required: ['keyword'], additionalProperties: false };
+const reportDateSchema = { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' };
+const optionalReportDateArgumentsSchema = { type: 'object', properties: { date: reportDateSchema }, additionalProperties: false };
+const keywordArgumentsSchema = { type: 'object', properties: { keyword: { type: 'string' }, date: reportDateSchema }, required: ['keyword'], additionalProperties: false };
 const productRankingArgumentsSchema = { type: 'object', properties: { query: { type: 'string' } }, required: ['query'], additionalProperties: false };
 const inventoryStatusQueryArgumentsSchema = { type: 'object', properties: { query: { type: 'string' } }, required: ['query'], additionalProperties: false };
 const positiveIntegerLikeSchema = { type: ['integer', 'string'], pattern: '^[1-9]\\d*$', minimum: 1 };
@@ -109,13 +110,13 @@ const problemProductsArgumentsSchema = {
 };
 const optionalSendToArgumentsSchema = {
   type: 'object',
-  properties: { sendTo: { type: 'string' }, date: { type: 'string' } },
+  properties: { sendTo: { type: 'string' }, date: reportDateSchema },
   additionalProperties: false,
 };
 const optionalDashboardRefreshArgumentsSchema = {
   type: 'object',
   properties: {
-    date: { type: 'string' },
+    date: reportDateSchema,
     sendTo: { type: 'string' },
   },
   additionalProperties: false,
