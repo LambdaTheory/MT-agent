@@ -107,3 +107,11 @@
 Dedicated high-risk cards now validate `confirmationKey` before parsing the callback payload. Covered card families: `rental_price_confirm`, `rental_operation_confirm`, `new_link_batch_confirm`, `new_link_batch_multi_confirm`, `activity_automation_confirm`, `activity_price_callback_*`, and `cancel_differential_pricing_*`. Tampered request payloads and unsigned legacy payloads are rejected before side effects.
 
 Current verification after this hardening pass: `tsc -p tsconfig.json --noEmit` passed, focused planner/tool/card tests passed with 4 files / 95 tests, and `vitest run --exclude "**/.worktrees/**"` passed with 142 files / 971 tests.
+
+## Result Metadata Review
+
+Planner-visible tools now expose `resultMetadataSchema` when their execution result is intended for later steps. This lets the LLM compose plans from tool outputs instead of guessing field names: `product.rankBestSameSku.bestProductId` can feed `rental.newLinkBatchPlan.sourceProductId`, `rental.copy.newProductId` can feed a follow-up query, and `rental.priceChange.taskId` / `rollbackFile` can feed rollback planning.
+
+The schema is copied defensively from the tool registry and hidden execution tools remain filtered from planner-visible metadata. Confirmed `rental.copy` execution now returns `newProductId` in response metadata, so a continuation can resolve `${copy.newProductId}` after the user approves the copy card.
+
+Current verification after this metadata pass: `tsc -p tsconfig.json --noEmit` passed, focused planner/tool tests passed with 4 files / 84 tests, and `vitest run --exclude "**/.worktrees/**"` passed with 142 files / 974 tests.

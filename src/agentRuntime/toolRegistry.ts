@@ -6,6 +6,78 @@ const keywordArgumentsSchema = { type: 'object', properties: { keyword: { type: 
 const productRankingArgumentsSchema = { type: 'object', properties: { query: { type: 'string' } }, required: ['query'], additionalProperties: false };
 const inventoryStatusQueryArgumentsSchema = { type: 'object', properties: { query: { type: 'string' } }, required: ['query'], additionalProperties: false };
 const positiveIntegerLikeSchema = { type: ['integer', 'string'], pattern: '^[1-9]\\d*$', minimum: 1 };
+const productRankingResultMetadataSchema = {
+  type: 'object',
+  description: 'Metadata available to later planner steps after product.rankBestSameSku.',
+  properties: {
+    status: { type: 'string' },
+    query: { type: 'string' },
+    bestProductId: { type: 'string', description: 'Best internal product id for follow-up actions such as rental.newLinkBatchPlan.sourceProductId.' },
+    sameSkuGroupId: { type: 'string' },
+    date: { type: 'string' },
+    best: { type: 'object' },
+    ranking: { type: 'array' },
+  },
+};
+const rentalCopyResultMetadataSchema = {
+  type: 'object',
+  description: 'Metadata available after a confirmed rental.copy step.',
+  properties: {
+    ok: { type: 'boolean' },
+    productId: { type: 'string' },
+    newProductId: { type: 'string', description: 'New internal product id returned by the copy operation when available.' },
+  },
+};
+const rentalPriceChangeResultMetadataSchema = {
+  type: 'object',
+  description: 'Metadata available after confirmed rental.priceChange execution.',
+  properties: {
+    ok: { type: 'boolean' },
+    productId: { type: 'string' },
+    taskId: { type: 'string', description: 'Audit task id that can be used by rental.priceRollback.' },
+    rollbackFile: { type: 'string', description: 'Rollback artifact path that can be used by rental.priceRollback.' },
+    resultFile: { type: 'string' },
+  },
+};
+const rentalNewLinkResultMetadataSchema = {
+  type: 'object',
+  description: 'Metadata available after confirmed rental.newLinkBatchPlan execution.',
+  properties: {
+    ok: { type: 'boolean' },
+    newProductIds: { type: 'array', items: { type: 'string' } },
+    completedCount: { type: 'integer' },
+  },
+};
+const refreshActivityPlanResultMetadataSchema = {
+  type: 'object',
+  description: 'Metadata available after operations.refreshActivityPlan planning.',
+  properties: {
+    date: { type: 'string' },
+    candidateCount: { type: 'integer' },
+    executeRequest: { type: 'object', description: 'Hidden execution request included only inside the generated confirmation card.' },
+    blockers: { type: 'array', items: { type: 'string' } },
+  },
+};
+const refreshActivityExecuteResultMetadataSchema = {
+  type: 'object',
+  description: 'Metadata available after confirmed operations.refreshActivityExecute execution.',
+  properties: {
+    ok: { type: 'boolean' },
+    auditPath: { type: 'string' },
+    delistedProductIds: { type: 'array', items: { type: 'string' } },
+    newProductIds: { type: 'array', items: { type: 'string' } },
+  },
+};
+const rentalPriceRollbackResultMetadataSchema = {
+  type: 'object',
+  description: 'Metadata available after confirmed rental.priceRollback execution.',
+  properties: {
+    ok: { type: 'boolean' },
+    productId: { type: 'string' },
+    taskId: { type: 'string' },
+    rollbackFile: { type: 'string' },
+  },
+};
 const problemProductsArgumentsSchema = {
   type: 'object',
   properties: {
@@ -182,6 +254,7 @@ const agentTools: AgentToolDefinition[] = [
     risk: 'read',
     requiresConfirmation: false,
     inputSchema: productRankingArgumentsSchema,
+    resultMetadataSchema: productRankingResultMetadataSchema,
   },
   {
     name: 'productId.lookup',
@@ -329,6 +402,7 @@ const agentTools: AgentToolDefinition[] = [
     risk: 'read',
     requiresConfirmation: false,
     inputSchema: refreshActivityPlanArgumentsSchema,
+    resultMetadataSchema: refreshActivityPlanResultMetadataSchema,
   },
   {
     name: 'operations.refreshActivityExecute',
@@ -337,6 +411,7 @@ const agentTools: AgentToolDefinition[] = [
     requiresConfirmation: true,
     plannerVisible: false,
     inputSchema: refreshActivityExecuteArgumentsSchema,
+    resultMetadataSchema: refreshActivityExecuteResultMetadataSchema,
   },
   {
     name: 'closedOrder.syncFeedback',
@@ -358,6 +433,7 @@ const agentTools: AgentToolDefinition[] = [
     risk: 'high',
     requiresConfirmation: true,
     inputSchema: productIdArgumentsSchema,
+    resultMetadataSchema: rentalCopyResultMetadataSchema,
   },
   {
     name: 'rental.delist',
@@ -400,6 +476,7 @@ const agentTools: AgentToolDefinition[] = [
     risk: 'high',
     requiresConfirmation: true,
     inputSchema: rentalPriceChangeArgumentsSchema,
+    resultMetadataSchema: rentalPriceChangeResultMetadataSchema,
   },
   {
     name: 'rental.priceSnapshot',
@@ -414,6 +491,7 @@ const agentTools: AgentToolDefinition[] = [
     risk: 'high',
     requiresConfirmation: true,
     inputSchema: newLinkBatchPlanArgumentsSchema,
+    resultMetadataSchema: rentalNewLinkResultMetadataSchema,
   },
   {
     name: 'rental.priceRollback',
@@ -421,6 +499,7 @@ const agentTools: AgentToolDefinition[] = [
     risk: 'high',
     requiresConfirmation: true,
     inputSchema: rentalPriceRollbackArgumentsSchema,
+    resultMetadataSchema: rentalPriceRollbackResultMetadataSchema,
   },
   {
     name: 'rental.operationConfirmRequest',
@@ -437,7 +516,11 @@ function cloneSchema(schema: unknown): unknown {
 }
 
 function cloneTool(tool: AgentToolDefinition): AgentToolDefinition {
-  return { ...tool, inputSchema: cloneSchema(tool.inputSchema) };
+  return {
+    ...tool,
+    inputSchema: cloneSchema(tool.inputSchema),
+    resultMetadataSchema: cloneSchema(tool.resultMetadataSchema),
+  };
 }
 
 export function listAgentTools(): AgentToolDefinition[] {

@@ -132,9 +132,15 @@ export interface RentalPriceSpecRemoveResult {
 
 interface RentalOperationConfirmMetadata {
   continuation?: AgentToolConfirmContinuation;
-  plannerToolName?: 'rental.specRemovePlan' | 'rental.operationConfirmRequest';
+  plannerToolName?: 'rental.copy' | 'rental.delist' | 'rental.tenancySet' | 'rental.specDiscover' | 'rental.specAddAndRefresh' | 'rental.specRemovePlan' | 'rental.operationConfirmRequest';
   plannerArguments?: Record<string, unknown>;
   plannerReason?: string;
+}
+
+export interface RentalOperationExecutionResult {
+  ok: boolean;
+  text: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface RentalPriceSkillClient {
@@ -1260,7 +1266,7 @@ export function parseRentalOperationConfirmRequest(value: unknown): RentalOperat
   return readRentalOperationConfirmRequestRecord(request);
 }
 
-export async function executeRentalOperationConfirmRequest(client: RentalPriceSkillClient, request: RentalOperationConfirmRequest): Promise<{ ok: boolean; text: string }> {
+export async function executeRentalOperationConfirmRequest(client: RentalPriceSkillClient, request: RentalOperationConfirmRequest): Promise<RentalOperationExecutionResult> {
   switch (request.action) {
     case 'copy': {
       const result = await client.copy(request.productId);
@@ -1268,9 +1274,22 @@ export async function executeRentalOperationConfirmRequest(client: RentalPriceSk
         return {
           ok: false,
           text: `复制状态未知：商品 ${result.productId}\n${result.lines.join('\n')}\n注意：本次复制可能已经提交但未拿到新商品ID；为避免重复复制，请先到后台核对，不要直接重试。`,
+          metadata: {
+            productId: result.productId,
+            newProductId: result.newProductId ?? undefined,
+            status: result.status,
+            sideEffectPossible: result.sideEffectPossible,
+          },
         };
       }
-      return { ok: result.ok, text: result.ok ? (result.newProductId ? `复制成功：商品 ${result.productId} → 新商品 ${result.newProductId}` : `复制成功：商品 ${result.productId} 已复制（新商品ID未能自动获取，请到后台确认）`) : `复制失败：商品 ${result.productId}\n${result.lines.join('\n')}` };
+      return {
+        ok: result.ok,
+        text: result.ok ? (result.newProductId ? `复制成功：商品 ${result.productId} → 新商品 ${result.newProductId}` : `复制成功：商品 ${result.productId} 已复制（新商品ID未能自动获取，请到后台确认）`) : `复制失败：商品 ${result.productId}\n${result.lines.join('\n')}`,
+        metadata: {
+          productId: result.productId,
+          newProductId: result.newProductId ?? undefined,
+        },
+      };
     }
     case 'delist': {
       const result = await client.delist(request.productId);

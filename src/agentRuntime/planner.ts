@@ -5,7 +5,7 @@ import type { AgentWorkflowDefinition } from './workflowRegistry.js';
 import type { AgentClarificationOption, AgentClarificationRequest } from './clarificationCard.js';
 import type { AgentLearningPlannerHint } from '../agentLearning/store.js';
 
-export type AgentPlannerToolMetadata = Pick<AgentToolDefinition, 'name' | 'description' | 'risk' | 'requiresConfirmation' | 'inputSchema'>;
+export type AgentPlannerToolMetadata = Pick<AgentToolDefinition, 'name' | 'description' | 'risk' | 'requiresConfirmation' | 'inputSchema' | 'resultMetadataSchema'>;
 
 export interface AgentPlannerRequest {
   message: string;
@@ -197,12 +197,13 @@ export function schemaAllowsArguments(schema: unknown, value: Record<string, unk
 export function listAgentPlannerTools(): AgentPlannerToolMetadata[] {
   return listAgentTools()
     .filter((tool) => tool.plannerVisible !== false)
-    .map(({ name, description, risk, requiresConfirmation, inputSchema }) => ({
+    .map(({ name, description, risk, requiresConfirmation, inputSchema, resultMetadataSchema }) => ({
       name,
       description,
       risk,
       requiresConfirmation,
       inputSchema,
+      ...(resultMetadataSchema !== undefined ? { resultMetadataSchema } : {}),
     }));
 }
 

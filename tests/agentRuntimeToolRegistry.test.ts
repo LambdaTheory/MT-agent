@@ -99,6 +99,28 @@ describe('agent runtime tool registry', () => {
     });
   });
 
+  it('returns defensive copies of result metadata schema', () => {
+    const tool = findAgentTool('rental.copy');
+    expect(tool).toBeDefined();
+    if (!tool) return;
+
+    const schema = tool.resultMetadataSchema;
+    expect(isRecord(schema)).toBe(true);
+    if (!isRecord(schema)) return;
+    const properties = schema.properties;
+    expect(isRecord(properties)).toBe(true);
+    if (!isRecord(properties)) return;
+    const newProductId = properties.newProductId;
+    expect(isRecord(newProductId)).toBe(true);
+    if (!isRecord(newProductId)) return;
+
+    newProductId.type = 'number';
+
+    expect(findAgentTool('rental.copy')?.resultMetadataSchema).toMatchObject({
+      properties: { newProductId: { type: 'string' } },
+    });
+  });
+
   it('makes risk and confirmation metadata explicit', () => {
     expect(findAgentTool('system.help')).toMatchObject({ risk: 'read', requiresConfirmation: false });
     expect(findAgentTool('publicTraffic.latestSummary')).toMatchObject({ risk: 'read', requiresConfirmation: false });
@@ -215,6 +237,35 @@ describe('agent runtime tool registry', () => {
     ]);
     expect(plannerToolNames).not.toContain('rental.operationConfirmRequest');
     expect(plannerToolNames).not.toContain('operations.refreshActivityExecute');
+  });
+
+  it('exposes result metadata schema to planner-visible tools only', () => {
+    const plannerTools = listAgentPlannerTools();
+    expect(plannerTools.find((tool) => tool.name === 'product.rankBestSameSku')?.resultMetadataSchema).toMatchObject({
+      properties: {
+        bestProductId: { type: 'string' },
+        ranking: { type: 'array' },
+      },
+    });
+    expect(plannerTools.find((tool) => tool.name === 'rental.copy')?.resultMetadataSchema).toMatchObject({
+      properties: {
+        productId: { type: 'string' },
+        newProductId: { type: 'string' },
+      },
+    });
+    expect(plannerTools.find((tool) => tool.name === 'rental.priceChange')?.resultMetadataSchema).toMatchObject({
+      properties: {
+        taskId: { type: 'string' },
+        rollbackFile: { type: 'string' },
+      },
+    });
+    expect(plannerTools.find((tool) => tool.name === 'rental.newLinkBatchPlan')?.resultMetadataSchema).toMatchObject({
+      properties: {
+        newProductIds: { type: 'array' },
+        completedCount: { type: 'integer' },
+      },
+    });
+    expect(plannerTools.find((tool) => tool.name === 'operations.refreshActivityExecute')).toBeUndefined();
   });
 
   it('describes rental operation metadata per executable action', () => {

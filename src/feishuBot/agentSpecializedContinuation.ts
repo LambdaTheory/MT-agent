@@ -1,7 +1,7 @@
 import type { AgentToolConfirmRequest } from '../agentRuntime/approvalCard.js';
 import type { NewLinkBatchConfirmRequest, NewLinkBatchExecutionResult, NewLinkBatchMultiConfirmRequest } from '../newLinkWorkflow/batch.js';
 import type { BotResponse } from './types.js';
-import type { RentalOperationConfirmRequest, RentalPriceChangeRequest, RentalPriceExecutionResult } from './rentalPrice.js';
+import type { RentalOperationConfirmRequest, RentalOperationExecutionResult, RentalPriceChangeRequest, RentalPriceExecutionResult } from './rentalPrice.js';
 
 function rentalOperationArguments(request: RentalOperationConfirmRequest): Record<string, unknown> {
   switch (request.action) {
@@ -107,10 +107,11 @@ export function agentRequestFromRentalOperationConfirm(request: RentalOperationC
   };
 }
 
-export function botResponseFromRentalOperationResult(request: RentalOperationConfirmRequest, result: { ok: boolean; text: string }): BotResponse {
+export function botResponseFromRentalOperationResult(request: RentalOperationConfirmRequest, result: RentalOperationExecutionResult): BotResponse {
   return {
     text: result.text,
     metadata: {
+      ...(result.metadata ?? {}),
       toolName: request.plannerToolName ?? 'rental.operationConfirmRequest',
       ok: result.ok,
       productId: request.productId,
