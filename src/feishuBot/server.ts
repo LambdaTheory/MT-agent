@@ -24,6 +24,7 @@ import {
   buildActivityPriceCallbackStatusCard,
   createActivityAutomationSkillClient,
   formatActivityAutomationExecutionResult,
+  hasValidActivityAutomationCardAction,
   parseActivityAutomationConfirmRequest,
   parseActivityPriceCallbackConfirmRequest,
   type ActivityAutomationSkillClient,
@@ -144,6 +145,8 @@ function expectedActionForButtonName(name: string | undefined): string | undefin
     rental_price_cancel_submit: 'rental_price_cancel',
     rental_operation_confirm_submit: 'rental_operation_confirm',
     rental_operation_cancel_submit: 'rental_operation_cancel',
+    activity_automation_confirm_submit: 'activity_automation_confirm',
+    activity_automation_cancel_submit: 'activity_automation_cancel',
     activity_price_callback_confirm_submit: 'activity_price_callback_confirm',
     activity_price_callback_cancel_submit: 'activity_price_callback_cancel',
     id_lookup_submit: 'id_lookup',
@@ -655,6 +658,10 @@ async function handleCardActionTrigger(
   }
 
   if (actionName === 'activity_automation_confirm') {
+    if (!hasValidActivityAutomationCardAction(value, 'activity_automation_confirm')) {
+      await replyText(replyConfig, '差异化定价确认参数无效，请重新发起。');
+      return;
+    }
     const actionForm = readActionForm(payload.event?.action);
     const request = parseActivityAutomationConfirmRequest(actionForm);
     if (!request) {
@@ -678,6 +685,10 @@ async function handleCardActionTrigger(
   }
 
   if (actionName === 'activity_automation_cancel') {
+    if (!hasValidActivityAutomationCardAction(value, 'activity_automation_cancel')) {
+      await replyText(replyConfig, '差异化定价取消参数无效，请重新发起。');
+      return;
+    }
     const claim = claimServerCardAction(messageId, 'activity_automation', actionName);
     if (!claim.claimed) {
       return claimStatusCard('差异化定价已处理', claim.claim);

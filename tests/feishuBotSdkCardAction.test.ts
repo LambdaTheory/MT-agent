@@ -4,7 +4,14 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { buildAgentToolConfirmCard, type AgentToolConfirmContinuation } from '../src/agentRuntime/approvalCard.js';
 import { createFeishuSdkBot } from '../src/feishuBot/sdkClient.js';
-import type { ActivityAutomationSkillClient } from '../src/feishuBot/activityAutomation.js';
+import {
+  buildActivityAutomationCard,
+  buildActivityCancelAssistanceCard,
+  buildActivityPriceCallbackConfirmCard,
+  buildCancelDifferentialPricingCard,
+  type ActivityAutomationSkillClient,
+  type ActivityPriceCallbackConfirmRequest,
+} from '../src/feishuBot/activityAutomation.js';
 import { buildRentalOperationConfirmCard, buildRentalPricePreviewCard, type RentalPriceSkillClient } from '../src/feishuBot/rentalPrice.js';
 import { buildNewLinkBatchConfirmCard, type NewLinkBatchPlan } from '../src/newLinkWorkflow/batch.js';
 import { openLinkRegistryGovernancePrompt } from '../src/linkRegistry/governanceSession.js';
@@ -87,6 +94,16 @@ function fakeActivityCancellationAssistant() {
   };
 }
 
+function activityCallbackRequest(submitSessionPath = 'output/latest/activity-automation/activity-submit-session.json'): ActivityPriceCallbackConfirmRequest {
+  return {
+    submitSessionPath,
+    productIds: ['886'],
+    mappedCount: 1,
+    startsAt: '2026-06-24',
+    endsAt: '2026-07-01',
+  };
+}
+
 function agentToolConfirmActionValue(card: unknown): Record<string, unknown> {
   const body = (card as { body?: { elements?: Array<{ elements?: Array<{ name?: string; behaviors?: Array<{ value?: unknown }> }> }> } }).body;
   const form = body?.elements?.find((element) => Array.isArray(element.elements));
@@ -97,9 +114,9 @@ function agentToolConfirmActionValue(card: unknown): Record<string, unknown> {
 }
 
 function readButtonValue(card: unknown, buttonName: string): Record<string, unknown> {
-  const body = (card as { body?: { elements?: Array<{ elements?: Array<{ name?: string; behaviors?: Array<{ value?: unknown }> }> }> } }).body;
+  const body = (card as { body?: { elements?: Array<{ elements?: Array<{ name?: string; behaviors?: Array<{ value?: unknown }> }>; actions?: Array<{ name?: string; behaviors?: Array<{ value?: unknown }> }> }> } }).body;
   for (const element of body?.elements ?? []) {
-    for (const item of element.elements ?? []) {
+    for (const item of [...(element.elements ?? []), ...(element.actions ?? [])]) {
       if (item.name === buttonName) {
         const value = item.behaviors?.[0]?.value;
         if (value && typeof value === 'object' && !Array.isArray(value)) return value as Record<string, unknown>;
@@ -725,12 +742,13 @@ describe('createFeishuSdkBot card.action.trigger', () => {
     });
 
     bot.start();
+    const confirmValue = readButtonValue(buildActivityAutomationCard(), 'activity_automation_confirm_submit');
     await registered['card.action.trigger']({
       event: {
         context: { open_message_id: 'om-activity-automation' },
         action: {
           tag: 'button',
-          value: { action: 'activity_automation_confirm' },
+          value: confirmValue,
           form_value: {
             starts_at: '2026-06-23',
             ends_at: '2026-06-30',
@@ -764,7 +782,7 @@ describe('createFeishuSdkBot card.action.trigger', () => {
     expect(JSON.stringify(sent[1])).toContain('770');
   });
 
-  it('accepts date picker objects and omitted default discounts for differential pricing automation', async () => {
+  it('rejects unsigned differential pricing automation callbacks', async () => {
     const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
     const sent: unknown[] = [];
     const activityAutomationClient = fakeActivityAutomationClient();
@@ -779,10 +797,76 @@ describe('createFeishuSdkBot card.action.trigger', () => {
     bot.start();
     await registered['card.action.trigger']({
       event: {
-        context: { open_message_id: 'om-activity-automation-defaults' },
+        context: { open_message_id: 'om-activity-automation-unsigned' },
         action: {
           tag: 'button',
           value: { action: 'activity_automation_confirm' },
+          form_value: {
+            starts_at: '2026-06-23',
+            ends_at: '2026-06-30',
+          },
+        },
+      },
+    });
+
+    expect(activityAutomationClient.executions).toEqual([]);
+    expect(sent).toHaveLength(1);
+    expect(JSON.stringify(sent[0])).toContain('参数无效');
+  });
+
+  it('rejects differential pricing callbacks when the card key belongs to another action', async () => {
+    const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
+    const sent: unknown[] = [];
+    const activityAutomationClient = fakeActivityAutomationClient();
+    const bot = createFeishuSdkBot({
+      appId: 'app',
+      appSecret: 'secret',
+      outputDir: 'output',
+      activityAutomationClient,
+      sdk: fakeSdk(sent, registered),
+    });
+
+    bot.start();
+    const cancelValue = readButtonValue(buildActivityAutomationCard(), 'activity_automation_cancel_submit');
+    await registered['card.action.trigger']({
+      event: {
+        context: { open_message_id: 'om-activity-automation-wrong-action-key' },
+        action: {
+          tag: 'button',
+          value: { ...cancelValue, action: 'activity_automation_confirm' },
+          form_value: {
+            starts_at: '2026-06-23',
+            ends_at: '2026-06-30',
+          },
+        },
+      },
+    });
+
+    expect(activityAutomationClient.executions).toEqual([]);
+    expect(sent).toHaveLength(1);
+    expect(JSON.stringify(sent[0])).toContain('参数无效');
+  });
+
+  it('accepts date picker objects and omitted default discounts for differential pricing automation', async () => {
+    const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
+    const sent: unknown[] = [];
+    const activityAutomationClient = fakeActivityAutomationClient();
+    const bot = createFeishuSdkBot({
+      appId: 'app',
+      appSecret: 'secret',
+      outputDir: 'output',
+      activityAutomationClient,
+      sdk: fakeSdk(sent, registered),
+    });
+
+    bot.start();
+    const confirmValue = readButtonValue(buildActivityAutomationCard(), 'activity_automation_confirm_submit');
+    await registered['card.action.trigger']({
+      event: {
+        context: { open_message_id: 'om-activity-automation-defaults' },
+        action: {
+          tag: 'button',
+          value: confirmValue,
           form_value: {
             starts_at: { date: '2026-06-24' },
             ends_at: { value: '2026-06-30' },
@@ -818,12 +902,13 @@ describe('createFeishuSdkBot card.action.trigger', () => {
     });
 
     bot.start();
+    const confirmValue = readButtonValue(buildActivityAutomationCard(), 'activity_automation_confirm_submit');
     await registered['card.action.trigger']({
       event: {
         context: { open_message_id: 'om-activity-automation-nested' },
         action: {
           tag: 'button',
-          value: { action: 'activity_automation_confirm' },
+          value: confirmValue,
           form_value: {
             differential_pricing_form: {
               starts_at: '2026-06-24',
@@ -861,12 +946,13 @@ describe('createFeishuSdkBot card.action.trigger', () => {
     });
 
     bot.start();
+    const cancelValue = readButtonValue(buildActivityAutomationCard(), 'activity_automation_cancel_submit');
     const result = await registered['card.action.trigger']({
       event: {
         context: { open_message_id: 'om-activity-automation-cancel' },
         action: {
           tag: 'button',
-          value: { action: 'activity_automation_cancel' },
+          value: cancelValue,
         },
       },
     });
@@ -884,21 +970,20 @@ describe('createFeishuSdkBot card.action.trigger', () => {
     const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', outputDir: 'output', sdk: fakeSdk(sent, registered) });
 
     bot.start();
+    const request: ActivityPriceCallbackConfirmRequest = {
+      submitSessionPath: 'output/latest/activity-automation/activity-submit-session.json',
+      productIds: ['770', '800'],
+      mappedCount: 2,
+      startsAt: '2026-06-24',
+      endsAt: '2026-06-30',
+    };
+    const cancelValue = readButtonValue(buildActivityPriceCallbackConfirmCard(request), 'activity_price_callback_cancel_submit');
     const event = {
       event: {
         context: { open_message_id: 'om-activity-price-callback-cancel' },
         action: {
           tag: 'button',
-          value: {
-            action: 'activity_price_callback_cancel',
-            request: {
-              submitSessionPath: 'output/latest/activity-automation/activity-submit-session.json',
-              productIds: ['770', '800'],
-              mappedCount: 2,
-              startsAt: '2026-06-24',
-              endsAt: '2026-06-30',
-            },
-          },
+          value: cancelValue,
         },
       },
     };
@@ -928,22 +1013,15 @@ describe('createFeishuSdkBot card.action.trigger', () => {
     } as any);
 
     bot.start();
+    const request = activityCallbackRequest(submitSessionPath);
+    const openValue = readButtonValue(buildCancelDifferentialPricingCard(request), 'cancel_differential_pricing_open_submit');
     await registered['card.action.trigger']({
       event: {
         context: { open_message_id: 'om-activity-cancel-open' },
         action: {
           tag: 'button',
           name: 'cancel_differential_pricing_open_submit',
-          value: {
-            action: 'cancel_differential_pricing_open',
-            request: {
-              submitSessionPath,
-              productIds: ['886'],
-              mappedCount: 1,
-              startsAt: '2026-06-24',
-              endsAt: '2026-07-01',
-            },
-          },
+          value: openValue,
         },
       },
     });
@@ -979,22 +1057,18 @@ describe('createFeishuSdkBot card.action.trigger', () => {
     });
 
     bot.start();
+    const request = activityCallbackRequest(submitSessionPath);
+    const doneValue = readButtonValue(
+      buildActivityCancelAssistanceCard(request, { openedUrl: 'https://example.test/activity', requiresManualLogin: false, lines: [] }),
+      'cancel_differential_pricing_done_submit',
+    );
     await registered['card.action.trigger']({
       event: {
         context: { open_message_id: 'om-activity-cancel-done' },
         action: {
           tag: 'button',
           name: 'cancel_differential_pricing_done_submit',
-          value: {
-            action: 'cancel_differential_pricing_done',
-            request: {
-              submitSessionPath,
-              productIds: ['886'],
-              mappedCount: 1,
-              startsAt: '2026-06-24',
-              endsAt: '2026-07-01',
-            },
-          },
+          value: doneValue,
         },
       },
     });
@@ -1016,22 +1090,18 @@ describe('createFeishuSdkBot card.action.trigger', () => {
     });
 
     bot.start();
+    const request = activityCallbackRequest(submitSessionPath);
+    const abortValue = readButtonValue(
+      buildActivityCancelAssistanceCard(request, { openedUrl: 'https://example.test/activity', requiresManualLogin: false, lines: [] }),
+      'cancel_differential_pricing_abort_submit',
+    );
     await registered['card.action.trigger']({
       event: {
         context: { open_message_id: 'om-activity-cancel-abort' },
         action: {
           tag: 'button',
           name: 'cancel_differential_pricing_abort_submit',
-          value: {
-            action: 'cancel_differential_pricing_abort',
-            request: {
-              submitSessionPath,
-              productIds: ['886'],
-              mappedCount: 1,
-              startsAt: '2026-06-24',
-              endsAt: '2026-07-01',
-            },
-          },
+          value: abortValue,
         },
       },
     });

@@ -103,4 +103,6 @@
 
 ## Additional Safety Review
 
-Dedicated high-risk cards now validate `confirmationKey` before parsing the callback payload. Covered card families: `rental_price_confirm`, `rental_operation_confirm`, `new_link_batch_confirm`, and `new_link_batch_multi_confirm`. Tampered request payloads and unsigned legacy payloads are rejected before side effects.
+Dedicated high-risk cards now validate `confirmationKey` before parsing the callback payload. Covered card families: `rental_price_confirm`, `rental_operation_confirm`, `new_link_batch_confirm`, `new_link_batch_multi_confirm`, `activity_automation_confirm`, `activity_price_callback_*`, and `cancel_differential_pricing_*`. Tampered request payloads and unsigned legacy payloads are rejected before side effects.
+
+Current verification after this hardening pass: `tsc -p tsconfig.json --noEmit` passed, and `vitest run --exclude "**/.worktrees/**"` passed with 142 files / 969 tests.

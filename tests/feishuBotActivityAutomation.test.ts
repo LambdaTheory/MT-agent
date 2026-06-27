@@ -35,6 +35,19 @@ function fakeClient(): ActivityAutomationSkillClient & { executions: unknown[] }
   };
 }
 
+function readButtonValue(card: unknown, buttonName: string): Record<string, unknown> {
+  const body = (card as { body?: { elements?: Array<{ elements?: Array<{ name?: string; behaviors?: Array<{ value?: unknown }> }>; actions?: Array<{ name?: string; behaviors?: Array<{ value?: unknown }> }> }> } }).body;
+  for (const element of body?.elements ?? []) {
+    for (const item of [...(element.elements ?? []), ...(element.actions ?? [])]) {
+      if (item.name === buttonName) {
+        const value = item.behaviors?.[0]?.value;
+        if (value && typeof value === 'object' && !Array.isArray(value)) return value as Record<string, unknown>;
+      }
+    }
+  }
+  throw new Error(`${buttonName} value not found`);
+}
+
 describe('differential pricing Feishu integration', () => {
   it('parses differential pricing card commands', () => {
     expect(parseBotIntent('差异化定价')).toEqual({ type: 'differential_pricing_card' });
@@ -89,6 +102,7 @@ describe('differential pricing Feishu integration', () => {
     expect(JSON.stringify(card)).toContain('activity-submit-session.json');
     expect(JSON.stringify(card)).toContain('activity_price_callback_cancel');
     expect(JSON.stringify(card)).toContain('activity_price_callback_cancel_submit');
+    expect(JSON.stringify(card)).toContain('confirmationKey');
     expect(JSON.stringify(card)).not.toContain('"tag":"action"');
   });
 
@@ -178,6 +192,23 @@ describe('differential pricing Feishu integration', () => {
   });
 
   it('parses the callback confirmation request from card action values', () => {
+    const card = buildActivityPriceCallbackConfirmCard({
+      submitSessionPath: 'output/latest/activity-automation/activity-submit-session.json',
+      productIds: ['770', '800'],
+      mappedCount: 2,
+      startsAt: '2026-06-24',
+      endsAt: '2026-06-30',
+    });
+    expect(parseActivityPriceCallbackConfirmRequest(readButtonValue(card, 'activity_price_callback_confirm_submit'))).toEqual({
+      submitSessionPath: 'output/latest/activity-automation/activity-submit-session.json',
+      productIds: ['770', '800'],
+      mappedCount: 2,
+      startsAt: '2026-06-24',
+      endsAt: '2026-06-30',
+    });
+  });
+
+  it('rejects unsigned callback confirmation request wrappers', () => {
     expect(parseActivityPriceCallbackConfirmRequest({
       request: {
         submitSessionPath: 'output/latest/activity-automation/activity-submit-session.json',
@@ -186,12 +217,6 @@ describe('differential pricing Feishu integration', () => {
         startsAt: '2026-06-24',
         endsAt: '2026-06-30',
       },
-    })).toEqual({
-      submitSessionPath: 'output/latest/activity-automation/activity-submit-session.json',
-      productIds: ['770', '800'],
-      mappedCount: 2,
-      startsAt: '2026-06-24',
-      endsAt: '2026-06-30',
-    });
+    })).toBeNull();
   });
 });

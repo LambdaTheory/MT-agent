@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import {
   activityAutomationOutputDir,
@@ -56,6 +57,36 @@ const DEFAULT_DISCOUNTS: DifferentialPricingDiscountValues = {
   A: '9.5',
   B: '9.8',
 };
+
+function confirmationKey(value: Record<string, unknown>): string {
+  return createHash('sha256').update(JSON.stringify(value)).digest('hex').slice(0, 24);
+}
+
+function readConfirmationKey(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return /^[a-f0-9]{24}$/i.test(trimmed) ? trimmed.toLowerCase() : null;
+}
+
+function hasValidConfirmationKey(value: Record<string, unknown>, request: Record<string, unknown>): boolean {
+  return readConfirmationKey(value.confirmationKey) === confirmationKey(request);
+}
+
+function activityAutomationCardRequest(action: 'activity_automation_confirm' | 'activity_automation_cancel'): Record<string, unknown> {
+  return { card: 'activity_automation', action };
+}
+
+function activityCardActionValue(action: 'activity_automation_confirm' | 'activity_automation_cancel'): Record<string, unknown> {
+  return { action, confirmationKey: confirmationKey(activityAutomationCardRequest(action)) };
+}
+
+function activityCallbackActionValue(action: string, request: ActivityPriceCallbackConfirmRequest): Record<string, unknown> {
+  return { action, request, confirmationKey: confirmationKey(request as unknown as Record<string, unknown>) };
+}
+
+export function hasValidActivityAutomationCardAction(value: unknown, action: 'activity_automation_confirm' | 'activity_automation_cancel'): boolean {
+  return isRecord(value) && hasValidConfirmationKey(value, activityAutomationCardRequest(action));
+}
 
 function textInput(name: string, label: string, options: { defaultValue?: string; placeholder: string }): Record<string, unknown> {
   const input: Record<string, unknown> = {
@@ -229,7 +260,7 @@ export function buildActivityAutomationCard(defaults: Partial<ActivityAutomation
               type: 'primary',
               form_action_type: 'submit',
               name: 'activity_automation_confirm_submit',
-              behaviors: [{ type: 'callback', value: { action: 'activity_automation_confirm' } }],
+              behaviors: [{ type: 'callback', value: activityCardActionValue('activity_automation_confirm') }],
             },
             {
               tag: 'button',
@@ -237,7 +268,7 @@ export function buildActivityAutomationCard(defaults: Partial<ActivityAutomation
               type: 'default',
               form_action_type: 'submit',
               name: 'activity_automation_cancel_submit',
-              behaviors: [{ type: 'callback', value: { action: 'activity_automation_cancel' } }],
+              behaviors: [{ type: 'callback', value: activityCardActionValue('activity_automation_cancel') }],
             },
           ],
         },
@@ -269,7 +300,7 @@ export function buildActivityPriceCallbackConfirmCard(request: ActivityPriceCall
               type: 'primary',
               form_action_type: 'submit',
               name: 'activity_price_callback_confirm_submit',
-              behaviors: [{ type: 'callback', value: { action: 'activity_price_callback_confirm', request } }],
+              behaviors: [{ type: 'callback', value: activityCallbackActionValue('activity_price_callback_confirm', request) }],
             },
             {
               tag: 'button',
@@ -277,7 +308,7 @@ export function buildActivityPriceCallbackConfirmCard(request: ActivityPriceCall
               type: 'default',
               form_action_type: 'submit',
               name: 'activity_price_callback_cancel_submit',
-              behaviors: [{ type: 'callback', value: { action: 'activity_price_callback_cancel', request } }],
+              behaviors: [{ type: 'callback', value: activityCallbackActionValue('activity_price_callback_cancel', request) }],
             },
           ],
         },
@@ -307,7 +338,7 @@ export function buildCancelDifferentialPricingCard(request: ActivityPriceCallbac
               text: { tag: 'plain_text', content: '打开取消辅助' },
               type: 'primary',
               name: 'cancel_differential_pricing_open_submit',
-              behaviors: [{ type: 'callback', value: { action: 'cancel_differential_pricing_open', request } }],
+              behaviors: [{ type: 'callback', value: activityCallbackActionValue('cancel_differential_pricing_open', request) }],
             },
           ],
         },
@@ -366,14 +397,14 @@ export function buildActivityCancelAssistanceCard(
               text: { tag: 'plain_text', content: '我已取消活动' },
               type: 'primary',
               name: 'cancel_differential_pricing_done_submit',
-              behaviors: [{ type: 'callback', value: { action: 'cancel_differential_pricing_done', request } }],
+              behaviors: [{ type: 'callback', value: activityCallbackActionValue('cancel_differential_pricing_done', request) }],
             },
             {
               tag: 'button',
               text: { tag: 'plain_text', content: '先保留活动' },
               type: 'default',
               name: 'cancel_differential_pricing_abort_submit',
-              behaviors: [{ type: 'callback', value: { action: 'cancel_differential_pricing_abort', request } }],
+              behaviors: [{ type: 'callback', value: activityCallbackActionValue('cancel_differential_pricing_abort', request) }],
             },
           ],
         },
@@ -469,6 +500,7 @@ export function parseActivityPriceCallbackConfirmRequest(value: unknown): Activi
   const source = typeof record.request === 'object' && record.request !== null && !Array.isArray(record.request)
     ? record.request as Record<string, unknown>
     : record;
+  if (source !== record && !hasValidConfirmationKey(record, source)) return null;
   const submitSessionPath = readString(source.submitSessionPath);
   const productIds = readStringArray(source.productIds);
   const mappedCountRaw = source.mappedCount;

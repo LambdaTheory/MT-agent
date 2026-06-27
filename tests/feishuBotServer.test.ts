@@ -5,7 +5,14 @@ import { describe, expect, it } from 'vitest';
 import { buildAgentToolConfirmCard } from '../src/agentRuntime/approvalCard.js';
 import type { AgentPlannerProvider } from '../src/agentRuntime/planner.js';
 import { extractTextMessage, startFeishuBotServer } from '../src/feishuBot/server.js';
-import type { ActivityAutomationSkillClient } from '../src/feishuBot/activityAutomation.js';
+import {
+  buildActivityAutomationCard,
+  buildActivityCancelAssistanceCard,
+  buildActivityPriceCallbackConfirmCard,
+  buildCancelDifferentialPricingCard,
+  type ActivityAutomationSkillClient,
+  type ActivityPriceCallbackConfirmRequest,
+} from '../src/feishuBot/activityAutomation.js';
 import { openLinkRegistryGovernancePrompt } from '../src/linkRegistry/governanceSession.js';
 import { openLinkRegistryMaintenancePrompt } from '../src/linkRegistry/maintenanceSession.js';
 import type { LinkRegistryOverrideRisk } from '../src/linkRegistry/overrides.js';
@@ -21,9 +28,9 @@ function readAgentToolConfirmValue(card: unknown): unknown {
 }
 
 function readButtonValue(card: unknown, buttonName: string): Record<string, unknown> {
-  const body = (card as { body?: { elements?: Array<{ elements?: Array<{ name?: string; behaviors?: Array<{ value?: unknown }> }> }> } }).body;
+  const body = (card as { body?: { elements?: Array<{ elements?: Array<{ name?: string; behaviors?: Array<{ value?: unknown }> }>; actions?: Array<{ name?: string; behaviors?: Array<{ value?: unknown }> }> }> } }).body;
   for (const element of body?.elements ?? []) {
-    for (const item of element.elements ?? []) {
+    for (const item of [...(element.elements ?? []), ...(element.actions ?? [])]) {
       if (item.name === buttonName) {
         const value = item.behaviors?.[0]?.value;
         if (value && typeof value === 'object' && !Array.isArray(value)) return value as Record<string, unknown>;
@@ -265,6 +272,16 @@ function fakeActivityCancellationAssistant() {
         ],
       };
     },
+  };
+}
+
+function activityCallbackRequest(submitSessionPath = 'output/latest/activity-automation/activity-submit-session.json'): ActivityPriceCallbackConfirmRequest {
+  return {
+    submitSessionPath,
+    productIds: ['886'],
+    mappedCount: 1,
+    startsAt: '2026-06-24',
+    endsAt: '2026-07-01',
   };
 }
 
@@ -741,6 +758,7 @@ describe('startFeishuBotServer', () => {
       await new Promise<void>((resolve) => server.once('listening', resolve));
       const address = server.address();
       if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+      const confirmValue = readButtonValue(buildActivityAutomationCard(), 'activity_automation_confirm_submit');
 
       const response = await fetch(`http://127.0.0.1:${address.port}`, {
         method: 'POST',
@@ -750,7 +768,7 @@ describe('startFeishuBotServer', () => {
           event: {
             context: { open_message_id: 'mid-http-activity-card' },
             action: {
-              value: { action: 'activity_automation_confirm' },
+              value: confirmValue,
               form_value: {
                 starts_at: '2026-06-23',
                 ends_at: '2026-06-30',
@@ -784,6 +802,51 @@ describe('startFeishuBotServer', () => {
     }
   });
 
+  it('rejects unsigned HTTP differential pricing automation callbacks', async () => {
+    const replies: Array<{ messageId: string; text: string }> = [];
+    const activityAutomationClient = fakeActivityAutomationClient();
+    const server = startFeishuBotServer({
+      port: 0,
+      appId: 'app',
+      appSecret: 'secret',
+      outputDir: 'output',
+      activityAutomationClient,
+      replyText: async ({ messageId }, text) => {
+        replies.push({ messageId, text });
+        return { sent: true, channel: 'app' };
+      },
+    });
+    try {
+      await new Promise<void>((resolve) => server.once('listening', resolve));
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+
+      const response = await fetch(`http://127.0.0.1:${address.port}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          header: { event_type: 'card.action.trigger' },
+          event: {
+            context: { open_message_id: 'mid-http-activity-card-unsigned' },
+            action: {
+              value: { action: 'activity_automation_confirm' },
+              form_value: {
+                starts_at: '2026-06-23',
+                ends_at: '2026-06-30',
+              },
+            },
+          },
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(activityAutomationClient.executions).toEqual([]);
+      expect(replies).toEqual([{ messageId: 'mid-http-activity-card-unsigned', text: '差异化定价确认参数无效，请重新发起。' }]);
+    } finally {
+      server.close();
+    }
+  });
+
   it('accepts nested differential_pricing_form values in HTTP differential pricing callbacks', async () => {
     const cards: Array<{ messageId: string; card: unknown }> = [];
     let resolveReplySent!: () => void;
@@ -810,6 +873,7 @@ describe('startFeishuBotServer', () => {
       await new Promise<void>((resolve) => server.once('listening', resolve));
       const address = server.address();
       if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+      const confirmValue = readButtonValue(buildActivityAutomationCard(), 'activity_automation_confirm_submit');
 
       const response = await fetch(`http://127.0.0.1:${address.port}`, {
         method: 'POST',
@@ -819,7 +883,7 @@ describe('startFeishuBotServer', () => {
           event: {
             context: { open_message_id: 'mid-http-activity-card-nested' },
             action: {
-              value: { action: 'activity_automation_confirm' },
+              value: confirmValue,
               form_value: {
                 differential_pricing_form: {
                   starts_at: '2026-06-24',
@@ -862,6 +926,7 @@ describe('startFeishuBotServer', () => {
       await new Promise<void>((resolve) => server.once('listening', resolve));
       const address = server.address();
       if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+      const openValue = readButtonValue(buildCancelDifferentialPricingCard(activityCallbackRequest(submitSessionPath)), 'cancel_differential_pricing_open_submit');
 
       const response = await fetch(`http://127.0.0.1:${address.port}`, {
         method: 'POST',
@@ -872,16 +937,7 @@ describe('startFeishuBotServer', () => {
             context: { open_message_id: 'mid-http-activity-cancel-open' },
             action: {
               name: 'cancel_differential_pricing_open_submit',
-              value: {
-                action: 'cancel_differential_pricing_open',
-                request: {
-                  submitSessionPath,
-                  productIds: ['886'],
-                  mappedCount: 1,
-                  startsAt: '2026-06-24',
-                  endsAt: '2026-07-01',
-                },
-              },
+              value: openValue,
             },
           },
         }),
@@ -918,6 +974,10 @@ describe('startFeishuBotServer', () => {
       await new Promise<void>((resolve) => server.once('listening', resolve));
       const address = server.address();
       if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+      const doneValue = readButtonValue(
+        buildActivityCancelAssistanceCard(activityCallbackRequest(submitSessionPath), { openedUrl: 'https://example.test/activity', requiresManualLogin: false, lines: [] }),
+        'cancel_differential_pricing_done_submit',
+      );
 
       const response = await fetch(`http://127.0.0.1:${address.port}`, {
         method: 'POST',
@@ -928,16 +988,7 @@ describe('startFeishuBotServer', () => {
             context: { open_message_id: 'mid-http-activity-cancel-done' },
             action: {
               name: 'cancel_differential_pricing_done_submit',
-              value: {
-                action: 'cancel_differential_pricing_done',
-                request: {
-                  submitSessionPath,
-                  productIds: ['886'],
-                  mappedCount: 1,
-                  startsAt: '2026-06-24',
-                  endsAt: '2026-07-01',
-                },
-              },
+              value: doneValue,
             },
           },
         }),
@@ -963,6 +1014,7 @@ describe('startFeishuBotServer', () => {
       await new Promise<void>((resolve) => server.once('listening', resolve));
       const address = server.address();
       if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+      const cancelValue = readButtonValue(buildActivityAutomationCard(), 'activity_automation_cancel_submit');
 
       const response = await fetch(`http://127.0.0.1:${address.port}`, {
         method: 'POST',
@@ -972,7 +1024,7 @@ describe('startFeishuBotServer', () => {
           event: {
             context: { open_message_id: 'mid-http-activity-card-cancel' },
             action: {
-              value: { action: 'activity_automation_cancel' },
+              value: cancelValue,
             },
           },
         }),
@@ -996,21 +1048,20 @@ describe('startFeishuBotServer', () => {
       await new Promise<void>((resolve) => server.once('listening', resolve));
       const address = server.address();
       if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+      const request: ActivityPriceCallbackConfirmRequest = {
+        submitSessionPath: 'output/latest/activity-automation/activity-submit-session.json',
+        productIds: ['770', '800'],
+        mappedCount: 2,
+        startsAt: '2026-06-24',
+        endsAt: '2026-06-30',
+      };
+      const cancelValue = readButtonValue(buildActivityPriceCallbackConfirmCard(request), 'activity_price_callback_cancel_submit');
       const body = {
         header: { event_type: 'card.action.trigger' },
         event: {
           context: { open_message_id: 'mid-http-activity-price-callback-cancel' },
           action: {
-            value: {
-              action: 'activity_price_callback_cancel',
-              request: {
-                submitSessionPath: 'output/latest/activity-automation/activity-submit-session.json',
-                productIds: ['770', '800'],
-                mappedCount: 2,
-                startsAt: '2026-06-24',
-                endsAt: '2026-06-30',
-              },
-            },
+            value: cancelValue,
           },
         },
       };
