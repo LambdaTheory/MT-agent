@@ -83,7 +83,6 @@ function canonicalizeIntent(intent: BotIntent): BotIntent {
     case 'help':
     case 'differential_pricing_card':
     case 'cancel_differential_pricing_card':
-    case 'latest_summary':
     case 'operations_learning_quiz':
     case 'operations_learning_summary':
     case 'operations_learning_history':
@@ -91,18 +90,23 @@ function canonicalizeIntent(intent: BotIntent): BotIntent {
     case 'lookup_product_id_card':
     case 'link_registry_overview':
     case 'inventory_status_overview':
-    case 'push_latest_report_to_group':
     case 'sync_closed_order_feedback':
     case 'run_closed_order_observation_report':
       return { type: intent.type };
+    case 'latest_summary':
+    case 'conversion_summary':
+      return { type: intent.type, ...(intent.date ? { date: intent.date } : {}) };
+    case 'push_latest_report_to_group':
+      return { type: intent.type, ...(intent.date ? { date: intent.date } : {}) };
     case 'run_public_traffic_report':
     case 'refresh_public_traffic_dashboard':
-    case 'resend_latest_report':
       return { type: intent.type, sendTo: intent.sendTo };
+    case 'resend_latest_report':
+      return { type: intent.type, sendTo: intent.sendTo, ...(intent.date ? { date: intent.date } : {}) };
     case 'query_product':
-      return { type: intent.type, keyword: intent.keyword };
+      return { type: intent.type, keyword: intent.keyword, ...(intent.date ? { date: intent.date } : {}) };
     case 'lookup_product_id':
-      return { type: intent.type, query: intent.query };
+      return { type: intent.type, query: intent.query, ...(intent.date ? { date: intent.date } : {}) };
     case 'inventory_status_query':
       return { type: intent.type, query: intent.query };
     case 'rental_price_change':

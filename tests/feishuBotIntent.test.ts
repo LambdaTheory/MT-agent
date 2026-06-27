@@ -24,10 +24,12 @@ describe('parseBotIntent', () => {
   it('parses resend report intent', () => {
     expect(parseBotIntent('重发日报')).toEqual({ type: 'resend_latest_report', sendTo: undefined });
     expect(parseBotIntent('重发公域日报 发全部')).toEqual({ type: 'resend_latest_report', sendTo: 'both' });
+    expect(parseBotIntent('重发 2026-06-22 日报 发全部')).toEqual({ type: 'resend_latest_report', sendTo: 'both', date: '2026-06-22' });
   });
 
   it('parses private push latest report to group intent', () => {
     expect(parseBotIntent('推送日报到群')).toEqual({ type: 'push_latest_report_to_group' });
+    expect(parseBotIntent('推送 2026-06-22 日报到群')).toEqual({ type: 'push_latest_report_to_group', date: '2026-06-22' });
   });
 
   it('parses operations learning quiz intent', () => {
@@ -63,10 +65,12 @@ describe('parseBotIntent', () => {
     expect(parseBotIntent('看 2026-06-22 的日报')).toEqual({ type: 'latest_summary', date: '2026-06-22' });
     expect(parseBotIntent('2026-06-22 查询 733')).toEqual({ type: 'query_product', keyword: '733', date: '2026-06-22' });
     expect(parseBotIntent('2026-06-22 查ID 565')).toEqual({ type: 'lookup_product_id', query: '565', date: '2026-06-22' });
+    expect(parseBotIntent('2026-06-22 的转化率多少')).toEqual({ type: 'conversion_summary', date: '2026-06-22' });
 
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 5, 26, 8));
     expect(parseBotIntent('查昨天日报')).toEqual({ type: 'latest_summary', date: '2026-06-25' });
+    expect(parseBotIntent('昨天转化数据')).toEqual({ type: 'conversion_summary', date: '2026-06-25' });
   });
 
   it('parses natural read-only summary questions without triggering actions', () => {

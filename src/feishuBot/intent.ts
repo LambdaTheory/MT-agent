@@ -76,6 +76,8 @@ function parseDatedReadIntent(text: string): BotIntent | null {
   if (!hint) return null;
 
   const rest = stripDateHint(text, hint);
+  if (/转化率|转化数据|转化/.test(rest)) return { type: 'conversion_summary', date: hint.date };
+
   const idLookup = /^(?:查\s*ID|ID\s*查询)\s*(\d+)$/i.exec(rest);
   if (idLookup?.[1]) return { type: 'lookup_product_id', query: idLookup[1], date: hint.date };
 
@@ -94,19 +96,34 @@ function parseDatedReadIntent(text: string): BotIntent | null {
   return null;
 }
 
+function pushLatestReportIntentWithDate(text: string): BotIntent {
+  const date = parseDateHint(text)?.date;
+  return date ? { type: 'push_latest_report_to_group', date } : { type: 'push_latest_report_to_group' };
+}
+
+function resendLatestReportIntentWithDate(text: string): BotIntent {
+  const date = parseDateHint(text)?.date;
+  return {
+    type: 'resend_latest_report',
+    sendTo: sendTo(text),
+    ...(date ? { date } : {}),
+  };
+}
+
 export function parseExactBotIntent(input: string): BotIntent {
   const text = normalize(input);
   if (!text) return { type: 'help' };
   if (/^(帮助|help|\/help)$/i.test(text)) return { type: 'help' };
   if (/^(跑|生成|执行).*(公域)?日报/.test(text)) return { type: 'run_public_traffic_report', sendTo: sendTo(text) };
   if (/^(抓取|补抓|刷新|更新).*(访问页|后链路|访问数据)/.test(text)) return { type: 'refresh_public_traffic_dashboard', sendTo: sendTo(text) };
-  if (/^(推送)?(公域)?日报到群$/.test(text)) return { type: 'push_latest_report_to_group' };
-  if (/^重发.*(公域)?日报/.test(text)) return { type: 'resend_latest_report', sendTo: sendTo(text) };
+  if (/^(推送)?(公域)?日报到群$/.test(text) || /^(推送|发送).*(公域)?日报.*(到群|群里)$/.test(text)) return pushLatestReportIntentWithDate(text);
+  if (/^重发.*(公域)?日报/.test(text)) return resendLatestReportIntentWithDate(text);
   if (/^(同步|拉取|更新).*(关单|关单反馈)/.test(text)) return { type: 'sync_closed_order_feedback' };
   if (/^(跑|生成|执行).*(关单观察|关单报告|关单反馈观察)/.test(text)) return { type: 'run_closed_order_observation_report' };
   const datedReadIntent = parseDatedReadIntent(text);
   if (datedReadIntent) return datedReadIntent;
   if (/(今日|今天|现在).*(咋样|怎么样|概况|数据|日报|看下|看看)/.test(text)) return { type: 'latest_summary' };
+  if (/转化率|转化数据/.test(text)) return { type: 'conversion_summary' };
   if (/^(?:Agent|agent|智能体语义|语义)(?:学习|迭代).*(?:汇总|总结|历史|统计)$|^(?:Agent|agent|智能体语义|语义)(?:学习|迭代)$/.test(text)) {
     return { type: 'agent_learning_summary' };
   }

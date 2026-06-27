@@ -109,7 +109,7 @@ const problemProductsArgumentsSchema = {
 };
 const optionalSendToArgumentsSchema = {
   type: 'object',
-  properties: { sendTo: { type: 'string' } },
+  properties: { sendTo: { type: 'string' }, date: { type: 'string' } },
   additionalProperties: false,
 };
 const optionalDashboardRefreshArgumentsSchema = {
@@ -305,6 +305,13 @@ const agentTools: AgentToolDefinition[] = [
     inputSchema: optionalReportDateArgumentsSchema,
   },
   {
+    name: 'publicTraffic.conversionSummary',
+    description: '查询最新或指定日期公域日报的转化率漏斗数据，包括曝光到访问率、访问到创建率、访问到发货率',
+    risk: 'read',
+    requiresConfirmation: false,
+    inputSchema: optionalReportDateArgumentsSchema,
+  },
+  {
     name: 'product.query',
     description: '按商品 ID、平台 ID 或商品名查询单个或多个商品表现。不要用于“同款组里哪条最好/最好的链接/最好的端内ID”这类排名问题。',
     risk: 'read',
@@ -448,17 +455,17 @@ const agentTools: AgentToolDefinition[] = [
   },
   {
     name: 'publicTraffic.resendLatestReport',
-    description: '重发最新公域流量日报卡片',
+    description: '重发最新或指定日期的公域流量日报卡片。指定日期时传 date=YYYY-MM-DD；不重新抓取或生成日报，只发送已有日报上下文。',
     risk: 'write',
     requiresConfirmation: true,
     inputSchema: optionalSendToArgumentsSchema,
   },
   {
     name: 'publicTraffic.pushLatestReportToGroup',
-    description: '把最新公域流量日报推送到群',
+    description: '把最新或指定日期的公域流量日报推送到群。指定日期时传 date=YYYY-MM-DD；不重新抓取或生成日报，只发送已有日报上下文。',
     risk: 'write',
     requiresConfirmation: true,
-    inputSchema: noArgumentsSchema,
+    inputSchema: optionalReportDateArgumentsSchema,
   },
   {
     name: 'publicTraffic.refreshDashboard',

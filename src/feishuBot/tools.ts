@@ -45,7 +45,7 @@ import {
 } from './rentalPrice.js';
 import { findReadOnlyTool } from './readOnlyToolRegistry.js';
 import type { ReadOnlyToolRunOptions } from './readOnlyToolRegistry.js';
-import { findLatestReportContext, findReportContextByDate, formatLatestSummary, formatProductRows, parseNumericProductIdList, queryProductRows } from './reportStore.js';
+import { findLatestReportContext, findReportContextByDate, formatConversionSummary, formatLatestSummary, formatProductRows, parseNumericProductIdList, queryProductRows } from './reportStore.js';
 import type { BotIntent, BotResponse } from './types.js';
 
 const UNKNOWN_GUIDANCE = '我现在可以查：今日概况、商品、新链接池、待处理任务、转化差、曝光低、高潜力、下架链接、订单情况。你可以问“新链接池怎么样”或“查一下721”。';
@@ -61,6 +61,7 @@ const PLANNER_FIRST_EXACT_INTENT_BLOCKED =
 const HELP_TEXT = `📋 查询与分析
   今日概况 — 查看最新公域日报概况
   看 2026-06-22 的日报 / 查昨天日报 — 查看指定日期公域日报
+  2026-06-22 的转化率多少 — 查看指定日期转化率漏斗
   查询 565 / 查 433,798 — 查询单个或多个端内ID表现
   2026-06-22 查询 733 — 查询指定日期的商品表现
   s23u最好的链接是哪条 — 按链接档案找同款组里数据最好的端内ID
@@ -73,6 +74,7 @@ const HELP_TEXT = `📋 查询与分析
   跑日报 — 生成公域流量日报
   抓取访问页数据 — 补抓访问页/后链路数据
   重发日报 — 重新发送最新日报
+  重发 2026-06-22 日报 / 推送 2026-06-22 日报到群 — 发送指定日期已有日报
   推送日报到群 — 推送日报到指定群
   同步关单 — 拉取最新关单并写入本地状态
   跑关单观察 — 生成关单观察摘要并回卡片
@@ -362,6 +364,11 @@ export async function handleBotIntent(intent: BotIntent, outputDir = 'output', o
     return { text: latest ? formatLatestSummary(latest.context) : missingReportContextText(intent.date) };
   }
 
+  if (intent.type === 'conversion_summary') {
+    const latest = await findReportContextForIntent(outputDir, intent.date);
+    return { text: latest ? formatConversionSummary(latest.context) : missingReportContextText(intent.date) };
+  }
+
   if (intent.type === 'inventory_status_overview' || intent.type === 'inventory_status_query') {
     return handleInventoryStatusIntent(intent, outputDir, options);
   }
@@ -463,13 +470,20 @@ export async function handleBotIntent(intent: BotIntent, outputDir = 'output', o
   }
 
   if (intent.type === 'push_latest_report_to_group') {
-    return agentToolConfirmResponse('publicTraffic.pushLatestReportToGroup', {}, '明确飞书命令需要二次确认后才能把日报推送到群。');
+    return agentToolConfirmResponse(
+      'publicTraffic.pushLatestReportToGroup',
+      intent.date ? { date: intent.date } : {},
+      '明确飞书命令需要二次确认后才能把日报推送到群。',
+    );
   }
 
   if (intent.type === 'resend_latest_report') {
     return agentToolConfirmResponse(
       'publicTraffic.resendLatestReport',
-      intent.sendTo ? { sendTo: intent.sendTo } : {},
+      {
+        ...(intent.sendTo ? { sendTo: intent.sendTo } : {}),
+        ...(intent.date ? { date: intent.date } : {}),
+      },
       '明确飞书命令需要二次确认后才能重发公域日报。',
     );
   }

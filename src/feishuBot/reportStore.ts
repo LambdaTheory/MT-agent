@@ -106,6 +106,30 @@ export function formatLatestSummary(context: PublicTrafficDataReportContext): st
   ].join('\n');
 }
 
+function formatPeriodConversion(label: string, metric: PublicTrafficDataReportContext['summary']['1d']): string {
+  return [
+    `${label}：曝光到访问率 ${percent(metric.exposureVisitRate)}`,
+    `访问到创建率 ${percent(metric.visitCreatedOrderRate)}`,
+    `访问到发货率 ${percent(metric.visitShipmentRate)}`,
+    `曝光 ${metric.exposure}`,
+    `访问 ${metric.publicVisits}`,
+    `创建订单 ${metric.createdOrders}`,
+    `发货 ${metric.shippedOrders}`,
+    `金额 ¥${metric.amount.toFixed(2)}`,
+  ].join('，');
+}
+
+export function formatConversionSummary(context: PublicTrafficDataReportContext): string {
+  return [
+    `公域转化率 ${context.date}`,
+    formatPeriodConversion('1日', context.summary['1d']),
+    formatPeriodConversion('7日', context.summary['7d']),
+    formatPeriodConversion('30日', context.summary['30d']),
+    '',
+    formatLatestSummarySourceStatus(context),
+  ].join('\n');
+}
+
 export function queryProductRows(context: PublicTrafficDataReportContext, keyword: string): PublicTrafficProductDataRow[] {
   const normalized = normalizeProductIdentifier(keyword);
   if (!normalized) return [];

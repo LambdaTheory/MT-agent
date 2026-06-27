@@ -11,6 +11,7 @@ describe('agent runtime tool registry', () => {
     expect(listAgentTools().map((tool) => tool.name)).toEqual([
       'system.help',
       'publicTraffic.latestSummary',
+      'publicTraffic.conversionSummary',
       'product.query',
       'product.rankBestSameSku',
       'productId.lookup',
@@ -63,7 +64,7 @@ describe('agent runtime tool registry', () => {
 
     const tools = listAgentTools();
     tools.pop();
-    expect(listAgentTools()).toHaveLength(42);
+    expect(listAgentTools()).toHaveLength(43);
   });
 
   it('returns defensive copies of tool metadata', () => {
@@ -127,6 +128,7 @@ describe('agent runtime tool registry', () => {
   it('makes risk and confirmation metadata explicit', () => {
     expect(findAgentTool('system.help')).toMatchObject({ risk: 'read', requiresConfirmation: false });
     expect(findAgentTool('publicTraffic.latestSummary')).toMatchObject({ risk: 'read', requiresConfirmation: false });
+    expect(findAgentTool('publicTraffic.conversionSummary')).toMatchObject({ risk: 'read', requiresConfirmation: false });
     expect(findAgentTool('product.rankBestSameSku')).toMatchObject({ risk: 'read', requiresConfirmation: false });
     expect(findAgentTool('productId.lookupCard')).toMatchObject({ risk: 'read', requiresConfirmation: false });
     expect(findAgentTool('inventory.statusOverview')).toMatchObject({ risk: 'read', requiresConfirmation: false });
@@ -171,6 +173,10 @@ describe('agent runtime tool registry', () => {
       properties: { date: { type: 'string' } },
       additionalProperties: false,
     });
+    expect(findAgentTool('publicTraffic.conversionSummary')?.inputSchema).toMatchObject({
+      properties: { date: { type: 'string' } },
+      additionalProperties: false,
+    });
     expect(findAgentTool('product.query')?.inputSchema).toMatchObject({
       properties: { keyword: { type: 'string' }, date: { type: 'string' } },
       required: ['keyword'],
@@ -184,6 +190,14 @@ describe('agent runtime tool registry', () => {
     expect(findAgentTool('inventory.statusQuery')?.inputSchema).toMatchObject({
       properties: { query: { type: 'string' } },
       required: ['query'],
+      additionalProperties: false,
+    });
+    expect(findAgentTool('publicTraffic.resendLatestReport')?.inputSchema).toMatchObject({
+      properties: { sendTo: { type: 'string' }, date: { type: 'string' } },
+      additionalProperties: false,
+    });
+    expect(findAgentTool('publicTraffic.pushLatestReportToGroup')?.inputSchema).toMatchObject({
+      properties: { date: { type: 'string' } },
       additionalProperties: false,
     });
   });
@@ -205,6 +219,7 @@ describe('agent runtime tool registry', () => {
     expect(plannerToolNames).toEqual([
       'system.help',
       'publicTraffic.latestSummary',
+      'publicTraffic.conversionSummary',
       'product.query',
       'product.rankBestSameSku',
       'productId.lookup',

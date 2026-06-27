@@ -9,11 +9,12 @@ export type BotIntent =
   | { type: 'cancel_differential_pricing_card' }
   | { type: 'run_public_traffic_report'; sendTo?: FeishuSendTo }
   | { type: 'refresh_public_traffic_dashboard'; sendTo?: FeishuSendTo }
-  | { type: 'resend_latest_report'; sendTo?: FeishuSendTo }
-  | { type: 'push_latest_report_to_group' }
+  | { type: 'resend_latest_report'; sendTo?: FeishuSendTo; date?: string }
+  | { type: 'push_latest_report_to_group'; date?: string }
   | { type: 'sync_closed_order_feedback' }
   | { type: 'run_closed_order_observation_report' }
   | { type: 'latest_summary'; date?: string }
+  | { type: 'conversion_summary'; date?: string }
   | { type: 'operations_learning_quiz' }
   | { type: 'operations_learning_summary' }
   | { type: 'operations_learning_history' }

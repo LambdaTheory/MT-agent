@@ -71,7 +71,7 @@ import {
   type RentalPriceSkillClient,
 } from './rentalPrice.js';
 import { findReadOnlyTool } from './readOnlyToolRegistry.js';
-import { findLatestReportContext, findReportContextByDate, formatLatestSummary, formatProductRows, parseNumericProductIdList, queryProductRows } from './reportStore.js';
+import { findLatestReportContext, findReportContextByDate, formatConversionSummary, formatLatestSummary, formatProductRows, parseNumericProductIdList, queryProductRows } from './reportStore.js';
 
 export interface AgentToolExecutionOptions {
   rentalPriceClient?: RentalPriceSkillClient;
@@ -1144,6 +1144,10 @@ function missingReportContextText(date?: string): string {
   return date ? `没有找到 ${date} 的公域日报上下文。` : '还没有找到公域日报上下文。';
 }
 
+function reportSendLabel(date?: string): string {
+  return date ? `${date} ` : '最新';
+}
+
 function today(): string {
   return new Date().toISOString().slice(0, 10);
 }
@@ -1160,6 +1164,11 @@ export async function executeAgentToolRequest(
       const date = readOptionalDate(request.arguments.date);
       const report = await findReportContextForTool(outputDir, date);
       return { text: report ? formatLatestSummary(report.context) : missingReportContextText(date) };
+    }
+    case 'publicTraffic.conversionSummary': {
+      const date = readOptionalDate(request.arguments.date);
+      const report = await findReportContextForTool(outputDir, date);
+      return { text: report ? formatConversionSummary(report.context) : missingReportContextText(date) };
     }
     case 'product.query': {
       const date = readOptionalDate(request.arguments.date);
@@ -1239,22 +1248,26 @@ export async function executeAgentToolRequest(
         publicTrafficReportRunning = false;
       }
     case 'publicTraffic.resendLatestReport': {
-      const latest = await findLatestReportContext(outputDir);
-      if (!latest) return { text: '还没有找到可重发的公域日报。' };
-      const card = buildPublicTrafficCard(latest.context, { markdownPath: '', workbookPath: '' });
-      const fallbackText = buildPublicTrafficFeishuText(latest.context, { markdownPath: '', workbookPath: '' });
+      const date = readOptionalDate(request.arguments.date);
+      const report = await findReportContextForTool(outputDir, date);
+      if (!report) return { text: date ? `没有找到 ${date} 的可重发公域日报。` : '还没有找到可重发的公域日报。' };
+      const card = buildPublicTrafficCard(report.context, { markdownPath: '', workbookPath: '' });
+      const fallbackText = buildPublicTrafficFeishuText(report.context, { markdownPath: '', workbookPath: '' });
       const sendTo = readSendTo(request.arguments.sendTo);
       const env = sendTo ? { ...process.env, FEISHU_SEND_TO: sendTo } : process.env;
       const result = await sendFeishuCard(env, card, fallbackText);
-      return { text: result.sent ? '最新公域日报已重发。' : `公域日报重发失败：${result.reason}` };
+      const label = reportSendLabel(date);
+      return { text: result.sent ? `${label}公域日报已重发。` : `${label}公域日报重发失败：${result.reason}` };
     }
     case 'publicTraffic.pushLatestReportToGroup': {
-      const latest = await findLatestReportContext(outputDir);
-      if (!latest) return { text: '还没有找到可推送的公域日报。' };
-      const card = buildPublicTrafficCard(latest.context, { markdownPath: '', workbookPath: '' });
-      const fallbackText = buildPublicTrafficFeishuText(latest.context, { markdownPath: '', workbookPath: '' });
+      const date = readOptionalDate(request.arguments.date);
+      const report = await findReportContextForTool(outputDir, date);
+      if (!report) return { text: date ? `没有找到 ${date} 的可推送公域日报。` : '还没有找到可推送的公域日报。' };
+      const card = buildPublicTrafficCard(report.context, { markdownPath: '', workbookPath: '' });
+      const fallbackText = buildPublicTrafficFeishuText(report.context, { markdownPath: '', workbookPath: '' });
       const result = await sendFeishuCard({ ...process.env, FEISHU_SEND_TO: 'group' }, card, fallbackText);
-      return { text: result.sent ? '最新公域日报已推送到群。' : `公域日报推送到群失败：${result.reason}` };
+      const label = reportSendLabel(date);
+      return { text: result.sent ? `${label}公域日报已推送到群。` : `${label}公域日报推送到群失败：${result.reason}` };
     }
     case 'publicTraffic.refreshDashboard': {
       await loadEnv();

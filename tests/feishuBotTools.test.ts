@@ -880,6 +880,7 @@ describe('handleBotIntent', () => {
     await expect(handleBotIntent({ type: 'help' })).resolves.toEqual({ text: `📋 查询与分析
   今日概况 — 查看最新公域日报概况
   看 2026-06-22 的日报 / 查昨天日报 — 查看指定日期公域日报
+  2026-06-22 的转化率多少 — 查看指定日期转化率漏斗
   查询 565 / 查 433,798 — 查询单个或多个端内ID表现
   2026-06-22 查询 733 — 查询指定日期的商品表现
   s23u最好的链接是哪条 — 按链接档案找同款组里数据最好的端内ID
@@ -892,6 +893,7 @@ describe('handleBotIntent', () => {
   跑日报 — 生成公域流量日报
   抓取访问页数据 — 补抓访问页/后链路数据
   重发日报 — 重新发送最新日报
+  重发 2026-06-22 日报 / 推送 2026-06-22 日报到群 — 发送指定日期已有日报
   推送日报到群 — 推送日报到指定群
   同步关单 — 拉取最新关单并写入本地状态
   跑关单观察 — 生成关单观察摘要并回卡片
@@ -1015,6 +1017,17 @@ describe('handleBotIntent', () => {
     expect(response.text).toContain('曝光 321');
     expect(response.text).not.toContain('2026-06-11');
     expect(response.text).not.toContain('曝光 999');
+  });
+
+  it('answers dated conversion summary as a focused read-only query', async () => {
+    const outputDir = await writeDatedContexts();
+    const response = await handleBotIntent({ type: 'conversion_summary', date: '2026-06-10' }, outputDir);
+    expect(response.text).toContain('公域转化率 2026-06-10');
+    expect(response.text).toContain('1日：曝光到访问率 5.00%');
+    expect(response.text).toContain('访问到创建率 7.50%');
+    expect(response.text).toContain('访问到发货率 2.50%');
+    expect(response.text).toContain('曝光 321');
+    expect(response.text).not.toContain('公域日报 2026-06-11');
   });
 
   it('answers product query from report context', async () => {
@@ -2168,6 +2181,14 @@ describe('handleBotIntent', () => {
     const resend = await handleBotIntent({ type: 'resend_latest_report', sendTo: 'both' }, 'output');
     expect(resend.text).toContain('请确认 Agent 操作：publicTraffic.resendLatestReport');
     expect(JSON.stringify(resend.card)).toContain('"sendTo":"both"');
+
+    const datedResend = await handleBotIntent({ type: 'resend_latest_report', sendTo: 'group', date: '2026-06-10' }, 'output');
+    expect(JSON.stringify(datedResend.card)).toContain('"sendTo":"group"');
+    expect(JSON.stringify(datedResend.card)).toContain('"date":"2026-06-10"');
+
+    const datedPush = await handleBotIntent({ type: 'push_latest_report_to_group', date: '2026-06-10' }, 'output');
+    expect(datedPush.text).toContain('请确认 Agent 操作：publicTraffic.pushLatestReportToGroup');
+    expect(JSON.stringify(datedPush.card)).toContain('"date":"2026-06-10"');
   });
 
   it('plans new-link batch tool calls through LLM without copying before confirmation', async () => {
