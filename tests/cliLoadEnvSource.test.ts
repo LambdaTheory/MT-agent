@@ -21,6 +21,13 @@ describe('CLI loadEnv wiring', () => {
     expect(text).not.toContain('llmToolSelector:');
   });
 
+  it('wires the Feishu HTTP bot through the planner-first runtime only', async () => {
+    const text = await source('../src/cli/feishuBot.ts');
+    expect(text).toContain('agentPlannerProvider: createAgentPlannerProvider(llmProvider)');
+    expect(text).not.toContain('createLlmToolSelector');
+    expect(text).not.toContain('llmToolSelector:');
+  });
+
   it('loads .env before Feishu test send', async () => {
     const text = await source('../src/cli/testFeishu.ts');
     expect(text).toContain("import { loadEnv } from '../config/loadEnv.js';");

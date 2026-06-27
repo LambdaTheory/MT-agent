@@ -55,6 +55,8 @@
   - 规格删除执行链路与审计文件。
 - `tests/agentDryRunCliSource.test.ts`
   - dry-run 默认 planner-first；`--legacy` 仅用于旧解析对照。
+- `tests/cliLoadEnvSource.test.ts`
+  - SDK 与 HTTP 两个生产 bot CLI 都只接入 `agentPlannerProvider`，不再接旧 read-only tool selector。
 - `tests/agentRuntimePlanner.test.ts`
   - 多步骤占位符引用必须指向前序步骤；未知、未来、自引用均拒绝。
   - 所有隐藏执行工具不能被原子计划或多步骤计划直接选择。
@@ -64,7 +66,8 @@
 - `tsc -p tsconfig.json --noEmit`：通过。
 - `vitest run tests/agentRuntimePlanner.test.ts tests/agentRuntimeToolRegistry.test.ts tests/agentRuntimeLlmPlanner.test.ts tests/feishuBotTools.test.ts`：4 个文件、88 个测试通过。
 - `vitest run tests/feishuBotServer.test.ts tests/feishuBotSdkCardAction.test.ts tests/feishuBotDispatcher.test.ts tests/feishuBotSdkClient.test.ts tests/agentRuntime.test.ts tests/feishuBotTools.test.ts`：6 个文件、146 个测试通过。
-- `vitest run --exclude "**/.worktrees/**"`：142 个文件、962 个测试通过。
+- `vitest run tests/cliLoadEnvSource.test.ts tests/agentRuntime.test.ts tests/feishuBotDispatcher.test.ts`：3 个文件、23 个测试通过。
+- `vitest run --exclude "**/.worktrees/**"`：142 个文件、963 个测试通过。
 - 全量测试中的 stderr 来自既有用例：坏同款组跳过库存快照、飞书卡片 patch 失败回退；均为测试故意覆盖的异常路径。
 
 ## Review 结论
