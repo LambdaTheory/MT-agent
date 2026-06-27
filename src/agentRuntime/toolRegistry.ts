@@ -658,7 +658,7 @@ const agentTools: AgentToolDefinition[] = [
   },
   {
     name: 'rental.specRemovePlan',
-    description: '按商品名/端内ID/同款组和规格关键词生成规格项删除预览；只匹配规格项，不删除规格维度；命中明确后展示专用确认卡再执行。',
+    description: '按商品名/端内ID/多个端内ID/同款组和规格关键词生成规格项删除预览；只匹配规格项，不删除规格维度；命中明确后展示专用确认卡再执行。',
     risk: 'high',
     requiresConfirmation: true,
     inputSchema: specRemovePlanArgumentsSchema,

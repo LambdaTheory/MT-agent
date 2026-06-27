@@ -372,9 +372,47 @@ async function writeX300SpecRemoveRegistryFixtures(rootDir: string): Promise<{
   await writeFile(join(configDir, 'link-registry-overrides.json'), JSON.stringify({
     version: 1,
     entries: [
-      { internalProductId: '501', productName: 'vivo X300 Ultra 手柄套装', shortName: 'vivo X300 Ultra', aliases: ['x300u', 'X300U'], sameSkuGroupId: 'vivo-x300-ultra', updatedAt: '2026-06-26' },
-      { internalProductId: '502', productName: 'vivo X300 Ultra 标准套装', shortName: 'vivo X300 Ultra', aliases: ['x300u', 'X300U'], sameSkuGroupId: 'vivo-x300-ultra', updatedAt: '2026-06-26' },
+      { internalProductId: '501', productName: 'vivo X300 Ultra 手柄套装', shortName: 'vivo X300 Ultra', aliases: ['x300u-spec-test', 'X300U-SPEC-TEST'], sameSkuGroupId: 'vivo-x300-ultra-spec-test', updatedAt: '2026-06-26' },
+      { internalProductId: '502', productName: 'vivo X300 Ultra 标准套装', shortName: 'vivo X300 Ultra', aliases: ['x300u-spec-test', 'X300U-SPEC-TEST'], sameSkuGroupId: 'vivo-x300-ultra-spec-test', updatedAt: '2026-06-26' },
     ],
+    sameSkuGroupAliasRules: [{ sameSkuGroupId: 'vivo-x300-ultra-spec-test', aliases: ['x300u-spec-test', 'X300U-SPEC-TEST'] }],
+  }), 'utf8');
+  return {
+    productIdMapPath: join(configDir, 'product-id-map.json'),
+    productNameMapPath: join(configDir, 'product-name-map.json'),
+    firstSeenPath: join(stateDir, 'goods-first-seen.json'),
+    lifecyclePath: join(stateDir, 'goods-link-lifecycle.json'),
+    overridesPath: join(configDir, 'link-registry-overrides.json'),
+    artifactsDir: outputDir,
+  };
+}
+
+async function writeBulkSpecRemoveRegistryFixtures(rootDir: string, ids: string[]): Promise<{
+  productIdMapPath: string;
+  productNameMapPath: string;
+  firstSeenPath: string;
+  lifecyclePath: string;
+  overridesPath: string;
+  artifactsDir: string;
+}> {
+  const configDir = join(rootDir, 'config');
+  const outputDir = join(rootDir, 'output');
+  const stateDir = join(outputDir, 'state');
+  await mkdir(configDir, { recursive: true });
+  await mkdir(stateDir, { recursive: true });
+  await writeFile(join(configDir, 'product-id-map.json'), JSON.stringify(Object.fromEntries(ids.map((id) => [`p${id}`, id]))), 'utf8');
+  await writeFile(join(configDir, 'product-name-map.json'), JSON.stringify(Object.fromEntries(ids.map((id) => [id, `vivo X300 Ultra ${id}`]))), 'utf8');
+  await writeFile(join(configDir, 'link-registry-overrides.json'), JSON.stringify({
+    version: 1,
+    entries: ids.map((id) => ({
+      internalProductId: id,
+      productName: `vivo X300 Ultra ${id}`,
+      shortName: 'vivo X300 Ultra',
+      aliases: ['x300u', 'X300U'],
+      sameSkuGroupId: 'vivo-x300-ultra',
+      status: 'active',
+      updatedAt: '2026-06-26',
+    })),
     sameSkuGroupAliasRules: [{ sameSkuGroupId: 'vivo-x300-ultra', aliases: ['x300u', 'X300U'] }],
   }), 'utf8');
   return {
@@ -1939,12 +1977,12 @@ describe('handleBotIntent', () => {
     const registryPaths = await writeX300SpecRemoveRegistryFixtures(registryRoot);
     const planner: AgentPlannerProvider = {
       async proposePlan(request) {
-        expect(request.message).toBe('x300u 含手柄的sku 都得下掉');
+        expect(request.message).toBe('x300u-spec-test 含手柄的sku 都得下掉');
         expect(request.tools.map((tool) => tool.name)).toContain('rental.specRemovePlan');
         return JSON.stringify({
-          goal: '删除 x300u 同款组里含手柄的规格项',
+          goal: '删除 x300u-spec-test 同款组里含手柄的规格项',
           selectedTool: 'rental.specRemovePlan',
-          arguments: { query: 'x300u', keyword: '手柄' },
+          arguments: { query: 'x300u-spec-test', keyword: '手柄' },
           confidence: 0.91,
           reason: '用户要求删除同款组内含手柄的 SKU，属于高风险规格项删除，必须先预览并确认',
         });
@@ -1973,7 +2011,7 @@ describe('handleBotIntent', () => {
       async specRemoveItem() { throw new Error('specRemoveItem should not run before confirmation'); },
     };
 
-    const response = await handleBotIntent({ type: 'unknown', text: 'x300u 含手柄的sku 都得下掉' }, outputDir, {
+    const response = await handleBotIntent({ type: 'unknown', text: 'x300u-spec-test 含手柄的sku 都得下掉' }, outputDir, {
       agentPlannerProvider: planner,
       rentalPriceClient,
       closedOrderRegistryPaths: registryPaths,
@@ -1981,7 +2019,7 @@ describe('handleBotIntent', () => {
 
     const cardText = JSON.stringify(response.card);
     expect(specDiscoverCalls.sort()).toEqual(['501', '502']);
-    expect(response.text).toContain('规格项删除计划：x300u / 关键词「手柄」');
+    expect(response.text).toContain('规格项删除计划：x300u-spec-test / 关键词「手柄」');
     expect(response.text).toContain('命中规格项：2 个');
     expect(response.text).toContain('商品 501：套装 / 含手柄');
     expect(response.text).toContain('只删除命中的规格项，不删除规格维度');
@@ -1992,12 +2030,92 @@ describe('handleBotIntent', () => {
     expect(cardText).not.toContain('agent_tool_confirm');
   });
 
+  it('keeps explicit internal id spec removal scoped to that product only', async () => {
+    const outputDir = await writeContext();
+    const registryRoot = await mkdtemp(join(tmpdir(), 'mt-agent-x300-spec-remove-explicit-id-'));
+    const registryPaths = await writeX300SpecRemoveRegistryFixtures(registryRoot);
+    const specDiscoverCalls: string[] = [];
+    const response = await executeAgentToolRequest(
+      { toolName: 'rental.specRemovePlan', arguments: { query: '501', keyword: '手柄' }, reason: '用户指定端内ID删除含手柄规格项' },
+      outputDir,
+      {
+        closedOrderRegistryPaths: registryPaths,
+        rentalPriceClient: {
+          async preview() { throw new Error('preview should not run'); },
+          async execute() { throw new Error('execute should not run'); },
+          async copy() { throw new Error('copy should not run'); },
+          async delist() { throw new Error('delist should not run'); },
+          async tenancySet() { throw new Error('tenancySet should not run'); },
+          async specDiscover(productId) {
+            specDiscoverCalls.push(productId);
+            return {
+              productId,
+              ok: true,
+              dimensions: [{ specId: 'kit', title: '套装', items: [{ id: 'standard', title: '标准' }, { id: 'handle', title: '含手柄' }] }],
+              lines: ['spec-discover: ok'],
+            };
+          },
+          async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+          async specRemoveItem() { throw new Error('specRemoveItem should not run before confirmation'); },
+        },
+      },
+    );
+
+    expect(specDiscoverCalls).toEqual(['501']);
+    expect(response.text).toContain('匹配依据：按端内ID 501 查询指定商品');
+    expect(response.text).toContain('涉及商品：1 个（501）');
+    expect(response.card).toBeDefined();
+  });
+
+  it('allows explicit multi-id spec removal to produce one bulk confirmation card', async () => {
+    const outputDir = await writeContext();
+    const ids = Array.from({ length: 13 }, (_, index) => String(601 + index));
+    const registryRoot = await mkdtemp(join(tmpdir(), 'mt-agent-x300-spec-remove-bulk-id-'));
+    const registryPaths = await writeBulkSpecRemoveRegistryFixtures(registryRoot, ids);
+    const specDiscoverCalls: string[] = [];
+    const response = await executeAgentToolRequest(
+      { toolName: 'rental.specRemovePlan', arguments: { query: ids.join(', '), keyword: '手柄' }, reason: '用户指定多个端内ID删除含手柄规格项' },
+      outputDir,
+      {
+        closedOrderRegistryPaths: registryPaths,
+        rentalPriceClient: {
+          async preview() { throw new Error('preview should not run'); },
+          async execute() { throw new Error('execute should not run'); },
+          async copy() { throw new Error('copy should not run'); },
+          async delist() { throw new Error('delist should not run'); },
+          async tenancySet() { throw new Error('tenancySet should not run'); },
+          async specDiscover(productId) {
+            specDiscoverCalls.push(productId);
+            return {
+              productId,
+              ok: true,
+              dimensions: [{ specId: 'kit', title: '套装', items: [{ id: 'standard', title: '标准' }, { id: 'handle', title: '含手柄' }] }],
+              lines: ['spec-discover: ok'],
+            };
+          },
+          async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+          async specRemoveItem() { throw new Error('specRemoveItem should not run before confirmation'); },
+        },
+      },
+    );
+
+    const cardText = JSON.stringify(response.card);
+    expect(specDiscoverCalls).toEqual(ids);
+    expect(response.text).toContain('涉及商品：13 个');
+    expect(response.text).toContain('命中规格项：13 个');
+    expect(response.text).toContain('大批量提示');
+    expect(response.card).toBeDefined();
+    expect(cardText).toContain('"template":"red"');
+    expect(cardText).toContain('确认删除 13 项');
+    expect(cardText).toContain('"itemTitle":"含手柄"');
+  });
+
   it('blocks spec removal when a keyword only matches the parent dimension', async () => {
     const outputDir = await writeContext();
     const registryRoot = await mkdtemp(join(tmpdir(), 'mt-agent-x300-spec-remove-block-'));
     const registryPaths = await writeX300SpecRemoveRegistryFixtures(registryRoot);
     const response = await executeAgentToolRequest(
-      { toolName: 'rental.specRemovePlan', arguments: { query: 'x300u', keyword: '套装' }, reason: '测试只命中父级维度时的阻断' },
+      { toolName: 'rental.specRemovePlan', arguments: { query: 'x300u-spec-test', keyword: '套装' }, reason: '测试只命中父级维度时的阻断' },
       outputDir,
       {
         closedOrderRegistryPaths: registryPaths,

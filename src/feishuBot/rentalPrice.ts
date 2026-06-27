@@ -183,6 +183,9 @@ interface RentalPriceSkillClientOptions {
 const RENT_FIELD_PATTERN = /(1|2|3|4|5|7|10|15|30|60|90|180)\s*天(?:租金)?\s*([0-9]+(?:\.[0-9]+)?)/g;
 const PRICE_FIELD_NAMES = new Set(['rent1day', 'rent2day', 'rent3day', 'rent4day', 'rent5day', 'rent7day', 'rent10day', 'rent15day', 'rent30day', 'rent60day', 'rent90day', 'rent180day', 'marketPrice', 'deposit', 'purchasePrice', 'costPrice', 'finalPayment']);
 const AUDIT_TASK_ID_PATTERN = /^task_\d+_[a-f0-9]+$/i;
+const SPEC_REMOVE_CONFIRM_DISPLAY_LIMIT = 30;
+const SPEC_REMOVE_CONFIRM_MAX_ITEMS = 50;
+const SPEC_REMOVE_BULK_WARNING_ITEMS = 12;
 
 function money(value: string | number): string {
   return Number(value).toFixed(2);
@@ -333,7 +336,8 @@ function rentalOperationTitle(request: RentalOperationConfirmRequest): string {
 
 function rentalOperationDetailMarkdown(request: RentalOperationConfirmRequest): string {
   if (request.action !== 'spec-remove-items') return '';
-  const lines = request.items.slice(0, 12).map((item, index) => {
+  const productIds = Array.from(new Set(request.items.map((item) => item.productId)));
+  const lines = request.items.slice(0, SPEC_REMOVE_CONFIRM_DISPLAY_LIMIT).map((item, index) => {
     const dimension = item.dimensionTitle ? `${item.dimensionTitle} / ` : '';
     const itemId = item.itemId ? `，itemId ${item.itemId}` : '';
     return `${index + 1}. 商品 ${item.productId}：${dimension}${item.itemTitle}（维度 ${item.specDimId}${itemId}）`;
@@ -342,6 +346,7 @@ function rentalOperationDetailMarkdown(request: RentalOperationConfirmRequest): 
   return [
     '',
     '**将删除以下规格项，不会删除整个规格维度：**',
+    request.items.length > SPEC_REMOVE_BULK_WARNING_ITEMS ? `**大批量提示：涉及 ${productIds.length} 个商品、${request.items.length} 个规格项。确认后会逐个商品执行删除。**` : undefined,
     ...lines,
     ...(omitted > 0 ? [`还有 ${omitted} 个规格项未在卡片中展示。`] : []),
     request.sameSkuGroupId ? `同款组：${request.sameSkuGroupId}` : undefined,
@@ -353,10 +358,12 @@ export function buildRentalOperationConfirmCard(request: RentalOperationConfirmR
   const title = rentalOperationTitle(request);
   const details = rentalOperationDetailMarkdown(request);
   const key = confirmationKey(request as unknown as Record<string, unknown>);
+  const isBulkSpecRemove = request.action === 'spec-remove-items' && request.items.length > SPEC_REMOVE_BULK_WARNING_ITEMS;
+  const confirmButtonText = request.action === 'spec-remove-items' ? `确认删除 ${request.items.length} 项` : '确认执行';
   return {
     schema: '2.0',
     config: { wide_screen_mode: true },
-    header: { title: { tag: 'plain_text', content: '租赁商品操作确认' }, template: 'orange' },
+    header: { title: { tag: 'plain_text', content: '租赁商品操作确认' }, template: isBulkSpecRemove ? 'red' : 'orange' },
     body: {
       elements: [
         { tag: 'markdown', content: `**是否要执行：${title}？**${details}\n\nLLM 理解原因：${reason}` },
@@ -366,7 +373,7 @@ export function buildRentalOperationConfirmCard(request: RentalOperationConfirmR
           elements: [
             {
               tag: 'button',
-              text: { tag: 'plain_text', content: '确认执行' },
+              text: { tag: 'plain_text', content: confirmButtonText },
               type: 'primary',
               form_action_type: 'submit',
               name: 'rental_operation_confirm_submit',
@@ -1102,7 +1109,7 @@ function readProductId(value: unknown): string | null {
 }
 
 function parseSpecRemoveItems(value: unknown): RentalSpecRemoveItemConfirmRequest[] | null {
-  if (!Array.isArray(value) || value.length < 1 || value.length > 20) return null;
+  if (!Array.isArray(value) || value.length < 1 || value.length > SPEC_REMOVE_CONFIRM_MAX_ITEMS) return null;
   const items: RentalSpecRemoveItemConfirmRequest[] = [];
   for (const item of value) {
     if (!isRecord(item)) return null;

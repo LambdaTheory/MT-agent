@@ -85,8 +85,9 @@ let publicTrafficReportRunning = false;
 
 const RENTAL_PRICE_SNAPSHOT_MAX_PRODUCTS = 20;
 const RENTAL_PRICE_PREVIEW_MAX_PRODUCTS = 12;
-const RENTAL_SPEC_REMOVE_PLAN_MAX_PRODUCTS = 12;
-const RENTAL_SPEC_REMOVE_PLAN_MAX_ITEMS = 20;
+const RENTAL_SPEC_REMOVE_PLAN_BULK_WARNING_PRODUCTS = 12;
+const RENTAL_SPEC_REMOVE_PLAN_MAX_PRODUCTS = 60;
+const RENTAL_SPEC_REMOVE_PLAN_MAX_ITEMS = 50;
 const REFRESH_ACTIVITY_DEFAULT_MAX_CANDIDATES = 20;
 const REFRESH_ACTIVITY_EXECUTION_MAX_PRODUCTS = 20;
 const RENT_FIELD_ORDER: Array<{ field: string; label: string }> = [
@@ -189,12 +190,46 @@ function queryableEntries(entries: LinkRegistryEntry[]): LinkRegistryEntry[] {
   return entries.filter((entry) => entry.status !== 'removed');
 }
 
+interface ResolveRentalEntriesOptions {
+  expandSingleInternalIdToSameSkuGroup?: boolean;
+  allowMultipleInternalIds?: boolean;
+}
+
+function parseInternalProductIdsQuery(query: string): string[] | null {
+  const normalized = query.trim();
+  if (!/^\d+(?:[\s,，、;；]+\d+)*$/.test(normalized)) return null;
+  const ids = normalized.split(/[\s,，、;；]+/).filter(Boolean);
+  return Array.from(new Set(ids));
+}
+
 function resolveRentalPriceSnapshotEntries(
   query: string,
   registry: ReturnType<typeof createLinkRegistry>,
+  options: ResolveRentalEntriesOptions = {},
 ): { ok: true; sameSkuGroupId: string | null; entries: LinkRegistryEntry[]; matchText: string } | { ok: false; text: string } {
   const normalized = query.trim();
   if (!normalized) return { ok: false, text: '请提供要定位的商品、端内ID或同款组。' };
+
+  const explicitIds = parseInternalProductIdsQuery(normalized);
+  const expandSingleInternalIdToSameSkuGroup = options.expandSingleInternalIdToSameSkuGroup !== false;
+  if (explicitIds && (options.allowMultipleInternalIds || explicitIds.length === 1) && (explicitIds.length > 1 || !expandSingleInternalIdToSameSkuGroup)) {
+    const missing: string[] = [];
+    const entries = explicitIds
+      .map((id) => {
+        const entry = registry.getByInternalId(id);
+        if (!entry) missing.push(id);
+        return entry;
+      })
+      .filter((entry): entry is LinkRegistryEntry => Boolean(entry));
+    if (missing.length) return { ok: false, text: `链接维护档案未找到端内ID ${missing.join('、')}，无法安全定位商品。` };
+    const activeEntries = queryableEntries(entries);
+    return {
+      ok: true,
+      sameSkuGroupId: null,
+      entries: activeEntries,
+      matchText: `按端内ID ${explicitIds.join('、')} 查询指定商品`,
+    };
+  }
 
   if (/^\d+$/.test(normalized)) {
     const entry = registry.getByInternalId(normalized);
@@ -584,7 +619,8 @@ function formatSpecRemovePlanLines(
   blocked: string[],
   failedReads: string[],
 ): string {
-  const shown = matches.slice(0, 12).map((item, index) => {
+  const productIds = Array.from(new Set(matches.map((item) => item.productId)));
+  const shown = matches.slice(0, 30).map((item, index) => {
     const dimension = item.dimensionTitle ? `${item.dimensionTitle} / ` : '';
     const itemId = item.itemId ? `，itemId ${item.itemId}` : '';
     return `${index + 1}. 商品 ${item.productId}：${dimension}${item.itemTitle}（维度 ${item.specDimId}${itemId}）`;
@@ -593,7 +629,11 @@ function formatSpecRemovePlanLines(
     `规格项删除计划：${query} / 关键词「${keyword}」`,
     resolution.sameSkuGroupId ? `同款组：${resolution.sameSkuGroupId}` : undefined,
     `匹配依据：${resolution.matchText}`,
+    `涉及商品：${productIds.length} 个（${productIds.join('、')}）`,
     `命中规格项：${matches.length} 个`,
+    resolution.entries.length > RENTAL_SPEC_REMOVE_PLAN_BULK_WARNING_PRODUCTS
+      ? `大批量提示：本次读取了 ${resolution.entries.length} 个商品；确认后会按下方清单逐个删除命中的规格项。`
+      : undefined,
     '',
     ...shown,
     matches.length > shown.length ? `还有 ${matches.length - shown.length} 个命中项未展示。` : undefined,
@@ -614,11 +654,11 @@ async function rentalSpecRemovePlanResponse(
 ): Promise<BotResponse> {
   const registryContext = await loadClosedOrderRegistryContext(options.closedOrderRegistryPaths);
   const registry = createLinkRegistry(registryContext.registry);
-  const resolution = resolveRentalPriceSnapshotEntries(query, registry);
+  const resolution = resolveRentalPriceSnapshotEntries(query, registry, { expandSingleInternalIdToSameSkuGroup: false, allowMultipleInternalIds: true });
   if (!resolution.ok) return { text: resolution.text };
   if (resolution.entries.length === 0) return { text: `链接维护档案已匹配到“${query}”，但没有可处理的未下架商品。` };
   if (resolution.entries.length > RENTAL_SPEC_REMOVE_PLAN_MAX_PRODUCTS) {
-    return { text: `“${query}”命中 ${resolution.entries.length} 个未下架商品，超过单次规格删除预览上限 ${RENTAL_SPEC_REMOVE_PLAN_MAX_PRODUCTS} 个。请补充更具体的端内ID或子分组。` };
+    return { text: `“${query}”命中 ${resolution.entries.length} 个未下架商品，超过单次规格删除硬上限 ${RENTAL_SPEC_REMOVE_PLAN_MAX_PRODUCTS} 个。请补充更具体的端内ID或子分组。` };
   }
 
   const reads = await Promise.all(resolution.entries.map(async (entry) => {
