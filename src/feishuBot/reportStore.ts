@@ -1,5 +1,6 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { findOrderAnalysisIndicator } from '../publicTraffic/orderAnalysis.js';
 import type { PublicTrafficDataReportContext, PublicTrafficProductDataRow } from '../publicTraffic/types.js';
 
 const reportDatePattern = /^\d{4}-\d{2}-\d{2}$/;
@@ -46,6 +47,17 @@ function percent(value: number): string {
   return `${(value * 100).toFixed(2)}%`;
 }
 
+function hasOneDaySourceData(context: PublicTrafficDataReportContext, source: 'hasExposureData' | 'hasDashboardData'): boolean {
+  return context.rows.some((row) => row.periods['1d']?.[source] === true);
+}
+
+function formatLatestSummarySourceStatus(context: PublicTrafficDataReportContext): string {
+  const exposureText = hasOneDaySourceData(context, 'hasExposureData') ? '曝光页已抓取' : '曝光页未更新/异常';
+  const dashboardText = hasOneDaySourceData(context, 'hasDashboardData') ? '访问页已抓取' : '访问页未更新/异常';
+  const orderText = context.orderAnalysis?.pages?.overview?.indicators?.length ? '订单情况已抓取' : '订单情况未更新/异常';
+  return `数据源：${exposureText}；${dashboardText}；${orderText}`;
+}
+
 function normalizeProductIdentifier(value: string): string {
   return value.trim().toLowerCase();
 }
@@ -74,12 +86,23 @@ export function parseNumericProductIdList(keyword: string): string[] {
 
 export function formatLatestSummary(context: PublicTrafficDataReportContext): string {
   const one = context.summary['1d'];
+  const orderOverview = context.orderAnalysis?.pages?.overview;
   return [
     `公域日报 ${context.date}`,
-    `曝光 ${one.exposure}，公域访问 ${one.publicVisits}，后链路访问 ${one.dashboardVisits}`,
-    `创建订单 ${one.createdOrders}，发货 ${one.shippedOrders}，金额 ¥${one.amount.toFixed(2)}`,
-    `曝光到访问率 ${percent(one.exposureVisitRate)}，访问到发货率 ${percent(one.visitShipmentRate)}`,
-    `建议操作 ${context.recommendedActions.length} 条`,
+    '',
+    '公域曝光页：',
+    `曝光 ${one.exposure}，访问 ${one.publicVisits}，金额 ¥${one.amount.toFixed(2)}，转化率 ${percent(one.exposureVisitRate)}`,
+    '',
+    '订单情况：',
+    [
+      `创建订单 ${findOrderAnalysisIndicator(orderOverview, ['创建订单数', '创建订单'])}`,
+      `签约订单 ${findOrderAnalysisIndicator(orderOverview, ['签约订单数', '签约订单'])}`,
+      `发货订单 ${findOrderAnalysisIndicator(orderOverview, ['发货订单数', '发货订单'])}`,
+      `签约发货率 ${findOrderAnalysisIndicator(orderOverview, ['签约发货率'])}`,
+    ].join('，'),
+    '',
+    formatLatestSummarySourceStatus(context),
+    `建议操作：${context.recommendedActions.length} 条`,
   ].join('\n');
 }
 

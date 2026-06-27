@@ -1,10 +1,11 @@
-import { getLatestOverview, getNewProductPool, getProblemProducts, getProductPerformance, getRemovedLinks } from '../agentData/publicTrafficQueries.js';
+import { getNewProductPool, getProblemProducts, getProductPerformance, getRemovedLinks } from '../agentData/publicTrafficQueries.js';
 import { rankBestProductByRegistryQuery, type ProductRankingResult } from '../agentData/productRanking.js';
 import { buildAgentTaskPool } from '../agentData/taskPool.js';
 import type { AgentIntent, AgentProblemType } from '../agentData/types.js';
 import type { LinkRegistryStore } from '../linkRegistry/store.js';
 import type { PublicTrafficDataReportContext } from '../publicTraffic/types.js';
 import type { LlmReadOnlyToolName } from './llmProvider.js';
+import { formatLatestSummary } from './reportStore.js';
 import type { BotResponse } from './types.js';
 
 type ReadOnlyAgentIntent = Exclude<AgentIntent, { type: 'unknown' }>;
@@ -64,12 +65,6 @@ function formatRemovedLinkLines(items: Array<{ productId: string; productName: s
 
 function formatNewProductPoolLines(items: Array<{ productId: string; productName: string; maintenanceStatus: string }>): string {
   return items.length > 0 ? items.map((item, index) => `${index + 1}. ${item.productId}：${item.productName || '未命名'}。状态：${item.maintenanceStatus}`).join('\n') : '暂无新链接池商品。';
-}
-
-function formatOverviewLines(contextDate: string, metrics: ReturnType<typeof getLatestOverview>['metrics']): string {
-  const one = metrics.find((metric) => metric.period === '1d');
-  if (!one) return `公域日报 ${contextDate}\n暂无 1 日概况。`;
-  return `公域日报 ${contextDate}\n曝光 ${one.exposure}，访问 ${one.publicVisits}，发货 ${one.shippedOrders}，金额 ¥${one.amount.toFixed(2)}`;
 }
 
 function formatProductAnswer(answer: ReturnType<typeof getProductPerformance>): string {
@@ -132,8 +127,7 @@ export const readOnlyTools: ReadOnlyTool[] = [
       toIntent: () => ({ type: 'overview' }),
     },
     async run(context) {
-      const overview = getLatestOverview(context);
-      return { text: formatOverviewLines(overview.date, overview.metrics) };
+      return { text: formatLatestSummary(context) };
     },
   },
   {
