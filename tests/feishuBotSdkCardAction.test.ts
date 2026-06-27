@@ -2,10 +2,11 @@ import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { buildAgentToolConfirmCard } from '../src/agentRuntime/approvalCard.js';
+import { buildAgentToolConfirmCard, type AgentToolConfirmContinuation } from '../src/agentRuntime/approvalCard.js';
 import { createFeishuSdkBot } from '../src/feishuBot/sdkClient.js';
 import type { ActivityAutomationSkillClient } from '../src/feishuBot/activityAutomation.js';
-import type { RentalPriceSkillClient } from '../src/feishuBot/rentalPrice.js';
+import { buildRentalOperationConfirmCard, buildRentalPricePreviewCard, type RentalPriceSkillClient } from '../src/feishuBot/rentalPrice.js';
+import { buildNewLinkBatchConfirmCard, type NewLinkBatchPlan } from '../src/newLinkWorkflow/batch.js';
 import { openLinkRegistryGovernancePrompt } from '../src/linkRegistry/governanceSession.js';
 import type { LinkRegistryEntry } from '../src/linkRegistry/types.js';
 import { openLinkRegistryMaintenancePrompt } from '../src/linkRegistry/maintenanceSession.js';
@@ -93,6 +94,50 @@ function agentToolConfirmActionValue(card: unknown): Record<string, unknown> {
   const value = button?.behaviors?.[0]?.value;
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('agent tool confirm value not found');
   return value as Record<string, unknown>;
+}
+
+function readButtonValue(card: unknown, buttonName: string): Record<string, unknown> {
+  const body = (card as { body?: { elements?: Array<{ elements?: Array<{ name?: string; behaviors?: Array<{ value?: unknown }> }> }> } }).body;
+  for (const element of body?.elements ?? []) {
+    for (const item of element.elements ?? []) {
+      if (item.name === buttonName) {
+        const value = item.behaviors?.[0]?.value;
+        if (value && typeof value === 'object' && !Array.isArray(value)) return value as Record<string, unknown>;
+      }
+    }
+  }
+  throw new Error(`${buttonName} value not found`);
+}
+
+function newLinkPlan(): NewLinkBatchPlan {
+  return {
+    status: 'ready',
+    request: { keyword: 'SQ1', count: 2, sourceProductId: '388' },
+    dataDate: '2026-06-11',
+    requestedSourceProductId: '388',
+    selectedSource: {
+      productId: '388',
+      platformProductId: 'platform-388',
+      productName: 'SQ1 source',
+      score: 100,
+      reasons: ['fixture'],
+    },
+    candidates: [],
+    warnings: [],
+  };
+}
+
+function query565Continuation(currentStepId: string, currentStepIndex: number): AgentToolConfirmContinuation {
+  return {
+    goal: 'continue after confirmed write',
+    reason: 'continue with product query after confirmation',
+    steps: [{ toolName: 'product.query', arguments: { keyword: '565' }, reason: 'query product 565' }],
+    nextIndex: 1,
+    totalSteps: 2,
+    currentStepId,
+    currentStepIndex,
+    metadataStore: {},
+  };
 }
 
 function patchedCard(sentItem: unknown): unknown {
@@ -543,6 +588,10 @@ describe('createFeishuSdkBot card.action.trigger', () => {
       rentalPriceClient,
       sdk: fakeSdk(sent, registered),
     });
+    const confirmValue = readButtonValue(
+      buildNewLinkBatchConfirmCard(newLinkPlan(), 'test reason', query565Continuation('newLinks', 0)),
+      'new_link_batch_confirm_submit',
+    );
 
     bot.start();
     await registered['card.action.trigger']({
@@ -552,32 +601,7 @@ describe('createFeishuSdkBot card.action.trigger', () => {
         action: {
           tag: 'button',
           name: 'new_link_batch_confirm_submit',
-          value: {
-            action: 'new_link_batch_confirm',
-            confirmationKey: 'new-link-step-1',
-            request: {
-              safetyVersion: 2,
-              workflowName: 'rental.newLinkBatch',
-              keyword: 'SQ1',
-              count: 2,
-              sourceProductId: '388',
-              sourceProductName: 'SQ1 最佳源',
-              dataDate: '2026-06-11',
-              reason: '先铺 SQ1 新链，再查询商品表现',
-              continuation: {
-                goal: '先铺新链再查商品',
-                reason: '用户要求确认复制后继续查询',
-                steps: [
-                  { toolName: 'product.query', arguments: { keyword: '565' }, reason: '复制后查询 565' },
-                ],
-                nextIndex: 1,
-                totalSteps: 2,
-                currentStepId: 'newLinks',
-                currentStepIndex: 0,
-                metadataStore: {},
-              },
-            },
-          },
+          value: confirmValue,
         },
       },
     });
@@ -610,6 +634,12 @@ describe('createFeishuSdkBot card.action.trigger', () => {
       async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
     };
     const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'x', outputDir, rentalPriceClient, sdk: fakeSdk(sent, registered) });
+    const confirmValue = readButtonValue(buildRentalPricePreviewCard({
+      productId: '761',
+      fields: { rent1day: '22.00' },
+      lines: ['rent1day -> 22.00'],
+      warnings: [],
+    }, { reason: 'test reason', continuation: query565Continuation('price', 0) }), 'rental_price_confirm_submit');
 
     bot.start();
     await registered['card.action.trigger']({
@@ -618,26 +648,7 @@ describe('createFeishuSdkBot card.action.trigger', () => {
         action: {
           tag: 'button',
           name: 'rental_price_confirm_submit',
-          value: {
-            action: 'rental_price_confirm',
-            confirmationKey: 'price-step-1',
-            request: {
-              mode: 'explicit_fields',
-              productId: '761',
-              fields: { rent1day: '22.00' },
-              reason: '先改价再查询',
-              continuation: {
-                goal: '先改价再查商品',
-                reason: '用户要求确认改价后继续查询',
-                steps: [{ toolName: 'product.query', arguments: { keyword: '565' }, reason: '改价后查询 565' }],
-                nextIndex: 1,
-                totalSteps: 2,
-                currentStepId: 'price',
-                currentStepIndex: 0,
-                metadataStore: {},
-              },
-            },
-          },
+          value: confirmValue,
         },
       },
     });
@@ -670,6 +681,14 @@ describe('createFeishuSdkBot card.action.trigger', () => {
       async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
     };
     const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'x', outputDir, rentalPriceClient, sdk: fakeSdk(sent, registered) });
+    const confirmValue = readButtonValue(buildRentalOperationConfirmCard({
+      action: 'delist',
+      productId: '761',
+      plannerToolName: 'rental.operationConfirmRequest',
+      plannerArguments: { action: 'delist', productId: '761' },
+      plannerReason: 'test reason',
+      continuation: query565Continuation('delist', 0),
+    }, 'test reason'), 'rental_operation_confirm_submit');
 
     bot.start();
     await registered['card.action.trigger']({
@@ -678,27 +697,7 @@ describe('createFeishuSdkBot card.action.trigger', () => {
         action: {
           tag: 'button',
           name: 'rental_operation_confirm_submit',
-          value: {
-            action: 'rental_operation_confirm',
-            confirmationKey: 'operation-step-1',
-            request: {
-              action: 'delist',
-              productId: '761',
-              plannerToolName: 'rental.operationConfirmRequest',
-              plannerArguments: { action: 'delist', productId: '761' },
-              plannerReason: '先下架再查询',
-              continuation: {
-                goal: '先下架再查商品',
-                reason: '用户要求确认下架后继续查询',
-                steps: [{ toolName: 'product.query', arguments: { keyword: '565' }, reason: '下架后查询 565' }],
-                nextIndex: 1,
-                totalSteps: 2,
-                currentStepId: 'delist',
-                currentStepIndex: 0,
-                metadataStore: {},
-              },
-            },
-          },
+          value: confirmValue,
         },
       },
     });

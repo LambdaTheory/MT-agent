@@ -3,7 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createFeishuSdkBot } from '../src/feishuBot/sdkClient.js';
-import { createRentalPriceSkillClient, parseRentalOperationConfirmRequest, parseRentalPriceConfirmRequest, type RentalPriceSkillClient } from '../src/feishuBot/rentalPrice.js';
+import { buildRentalOperationConfirmCard, buildRentalPricePreviewCard, createRentalPriceSkillClient, parseRentalOperationConfirmRequest, parseRentalPriceConfirmRequest, type RentalPriceSkillClient } from '../src/feishuBot/rentalPrice.js';
+import { buildNewLinkBatchConfirmCard, type NewLinkBatchPlan } from '../src/newLinkWorkflow/batch.js';
 
 function fakeSdk(sent: unknown[], registered: Record<string, (data: unknown) => Promise<unknown>>, options: { failPatch?: boolean } = {}) {
   class FakeClient {
@@ -38,6 +39,37 @@ async function waitFor(predicate: () => boolean | Promise<boolean>, timeoutMs = 
   throw new Error('Timed out waiting for condition');
 }
 
+function readButtonValue(card: unknown, buttonName: string): Record<string, unknown> {
+  const body = (card as { body?: { elements?: Array<{ elements?: Array<{ name?: string; behaviors?: Array<{ value?: unknown }> }> }> } }).body;
+  for (const element of body?.elements ?? []) {
+    for (const item of element.elements ?? []) {
+      if (item.name === buttonName) {
+        const value = item.behaviors?.[0]?.value;
+        if (value && typeof value === 'object' && !Array.isArray(value)) return value as Record<string, unknown>;
+      }
+    }
+  }
+  throw new Error(`${buttonName} value not found`);
+}
+
+function newLinkPlan(): NewLinkBatchPlan {
+  return {
+    status: 'ready',
+    request: { keyword: 'pocket3', count: 3, sourceProductId: '733' },
+    dataDate: '2026-06-22',
+    requestedSourceProductId: '733',
+    selectedSource: {
+      productId: '733',
+      platformProductId: 'platform-733',
+      productName: 'Pocket3 source',
+      score: 100,
+      reasons: ['fixture'],
+    },
+    candidates: [],
+    warnings: [],
+  };
+}
+
 describe('rental price card action', () => {
   it('executes the rental price skill only after confirmation', async () => {
     const executions: unknown[] = [];
@@ -68,12 +100,17 @@ describe('rental price card action', () => {
     const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
     const sent: unknown[] = [];
     const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', outputDir: await mkdtemp(join(tmpdir(), 'mt-agent-sdk-action-')), sdk: fakeSdk(sent, registered), rentalPriceClient });
-
+    const confirmValue = readButtonValue(buildRentalPricePreviewCard({
+      productId: '761',
+      fields: { rent1day: '22.00' },
+      lines: ['rent1day -> 22.00'],
+      warnings: [],
+    }), 'rental_price_confirm_submit');
     bot.start();
     await registered['card.action.trigger']({
       event: {
         context: { open_message_id: 'om-rental-confirm' },
-        action: { value: { action: 'rental_price_confirm', request: { mode: 'explicit_fields', productId: '761', fields: { rent1day: '22.00' } } } },
+        action: { value: confirmValue },
       },
     });
 
@@ -85,34 +122,41 @@ describe('rental price card action', () => {
   });
 
   it('rejects forged confirmation fields before execution', () => {
-    expect(parseRentalPriceConfirmRequest({ request: { mode: 'explicit_fields', productId: '761', fields: { rent1day: '22', script: 'evil' } } })).toEqual({ mode: 'explicit_fields', productId: '761', fields: { rent1day: '22.00' } });
+    const value = readButtonValue(buildRentalPricePreviewCard({
+      productId: '761',
+      fields: { rent1day: '22', script: 'evil' },
+      lines: ['rent1day -> 22'],
+      warnings: [],
+    }), 'rental_price_confirm_submit');
+
+    expect(parseRentalPriceConfirmRequest(value)).toEqual({ mode: 'explicit_fields', productId: '761', fields: { rent1day: '22.00' } });
+    expect(parseRentalPriceConfirmRequest({ ...value, request: { ...(value.request as Record<string, unknown>), productId: '762' } })).toBeNull();
+    expect(parseRentalPriceConfirmRequest({ request: { mode: 'explicit_fields', productId: '761', fields: { rent1day: '22', script: 'evil' } } })).toBeNull();
     expect(parseRentalPriceConfirmRequest({ request: { mode: 'explicit_fields', productId: '761', fields: { rent1day: 'abc', script: 'evil' } } })).toBeNull();
   });
 
   it('preserves safe audit references and rejects blocked audit confirmations', () => {
-    expect(parseRentalPriceConfirmRequest({
-      request: {
-        mode: 'explicit_fields',
-        productId: '761',
-        fields: { rent1day: '22' },
-        audit: {
-          taskId: 'task_123_abcd1234',
-          changesFile: 'C:/works/MT-agent/vendor/rental-price-agent/tasks/changes.json',
-          rollbackFile: 'C:/works/MT-agent/vendor/rental-price-agent/tasks/rollback.json',
-          hasWarnings: true,
-        },
-      },
-    })).toEqual({
+    const audit = {
+      taskId: 'task_123_abcd1234',
+      changesFile: 'C:/works/MT-agent/vendor/rental-price-agent/tasks/changes.json',
+      rollbackFile: 'C:/works/MT-agent/vendor/rental-price-agent/tasks/rollback.json',
+      hasWarnings: true,
+    };
+    const value = readButtonValue(buildRentalPricePreviewCard({
+      productId: '761',
+      fields: { rent1day: '22' },
+      lines: ['rent1day -> 22'],
+      warnings: [],
+      audit,
+    }), 'rental_price_confirm_submit');
+
+    expect(parseRentalPriceConfirmRequest(value)).toEqual({
       mode: 'explicit_fields',
       productId: '761',
       fields: { rent1day: '22.00' },
-      audit: {
-        taskId: 'task_123_abcd1234',
-        changesFile: 'C:/works/MT-agent/vendor/rental-price-agent/tasks/changes.json',
-        rollbackFile: 'C:/works/MT-agent/vendor/rental-price-agent/tasks/rollback.json',
-        hasWarnings: true,
-      },
+      audit,
     });
+    expect(parseRentalPriceConfirmRequest({ request: (value.request as Record<string, unknown>) })).toBeNull();
     expect(parseRentalPriceConfirmRequest({ request: { mode: 'explicit_fields', productId: '761', fields: { rent1day: '22' }, audit: { hasErrors: true } } })).toBeNull();
   });
 
@@ -133,12 +177,13 @@ describe('rental price card action', () => {
     const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
     const sent: unknown[] = [];
     const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', outputDir: await mkdtemp(join(tmpdir(), 'mt-agent-sdk-action-')), sdk: fakeSdk(sent, registered), rentalPriceClient });
+    const confirmValue = readButtonValue(buildRentalOperationConfirmCard({ action: 'delist', productId: '761' }, 'test reason'), 'rental_operation_confirm_submit');
 
     bot.start();
     await registered['card.action.trigger']({
       event: {
         context: { open_message_id: 'om-rental-operation-confirm' },
-        action: { value: { action: 'rental_operation_confirm', request: { action: 'delist', productId: '761' } } },
+        action: { value: confirmValue },
       },
     });
 
@@ -170,10 +215,11 @@ describe('rental price card action', () => {
     const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
     const sent: unknown[] = [];
     const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', outputDir: await mkdtemp(join(tmpdir(), 'mt-agent-sdk-action-')), sdk: fakeSdk(sent, registered), rentalPriceClient });
+    const confirmValue = readButtonValue(buildRentalOperationConfirmCard({ action: 'copy', productId: '875' }, 'test reason'), 'rental_operation_confirm_submit');
     const callback = {
       event: {
         context: { open_message_id: 'om-rental-copy-confirm' },
-        action: { value: { action: 'rental_operation_confirm', request: { action: 'copy', productId: '875' } } },
+        action: { value: confirmValue },
       },
     };
 
@@ -410,25 +456,14 @@ describe('rental price card action', () => {
     const registered: Record<string, (data: unknown) => Promise<void>> = {};
     const sent: unknown[] = [];
     const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', outputDir: await mkdtemp(join(tmpdir(), 'mt-agent-sdk-action-')), sdk: fakeSdk(sent, registered), rentalPriceClient });
+    const confirmValue = readButtonValue(buildNewLinkBatchConfirmCard(newLinkPlan(), 'test reason'), 'new_link_batch_confirm_submit');
 
     bot.start();
     await registered['card.action.trigger']({
       event: {
         context: { open_message_id: 'om-new-link-batch-confirm' },
         action: {
-          value: {
-            action: 'new_link_batch_confirm',
-            request: {
-              safetyVersion: 2,
-              workflowName: 'rental.newLinkBatch',
-              keyword: 'pocket3',
-              count: 3,
-              sourceProductId: '733',
-              sourceProductName: '大疆 Pocket3',
-              dataDate: '2026-06-22',
-              reason: '用户确认铺新链',
-            },
-          },
+          value: confirmValue,
         },
       },
     });
@@ -457,28 +492,14 @@ describe('rental price card action', () => {
     const registered: Record<string, (data: unknown) => Promise<void>> = {};
     const sent: unknown[] = [];
     const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', outputDir: await mkdtemp(join(tmpdir(), 'mt-agent-sdk-action-')), sdk: fakeSdk(sent, registered), rentalPriceClient });
-    const staleConfirmValue = {
-      action: 'new_link_batch_confirm',
-      request: {
-        safetyVersion: 2,
-        workflowName: 'rental.newLinkBatch',
-        keyword: '848',
-        count: 3,
-        sourceProductId: '848',
-        requestedSourceProductId: '848',
-        sourceProductName: '佳能 G12',
-        dataDate: '2026-06-22',
-        reason: '用户取消前的旧确认值',
-      },
-    };
-
     bot.start();
+    const signedStaleConfirmValue = readButtonValue(buildNewLinkBatchConfirmCard(newLinkPlan(), 'test reason'), 'new_link_batch_confirm_submit');
     const cancelResult = await registered['card.action.trigger']({
       event: {
         context: { open_message_id: 'om-new-link-batch-cancel' },
         action: {
           name: 'new_link_batch_cancel_submit',
-          value: staleConfirmValue,
+          value: signedStaleConfirmValue,
         },
       },
     });
@@ -487,7 +508,7 @@ describe('rental price card action', () => {
         context: { open_message_id: 'om-new-link-batch-cancel' },
         action: {
           name: 'new_link_batch_confirm_submit',
-          value: staleConfirmValue,
+          value: signedStaleConfirmValue,
         },
       },
     });
@@ -503,23 +524,25 @@ describe('rental price card action', () => {
   });
 
   it('rejects forged rental operation confirmations', () => {
-    expect(parseRentalOperationConfirmRequest({ request: { action: 'delist', productId: '761' } })).toEqual({ action: 'delist', productId: '761' });
-    expect(parseRentalOperationConfirmRequest({
-      request: {
-        action: 'spec-remove-items',
-        productId: '761',
-        keyword: '手柄',
-        items: [{ productId: '761', specDimId: 'kit', dimensionTitle: '套装', itemId: 'handle', itemTitle: '含手柄' }],
-      },
-    })).toEqual({
-      action: 'spec-remove-items',
+    const delistValue = readButtonValue(buildRentalOperationConfirmCard({ action: 'delist', productId: '761' }, 'test reason'), 'rental_operation_confirm_submit');
+
+    expect(parseRentalOperationConfirmRequest(delistValue)).toEqual({ action: 'delist', productId: '761' });
+    expect(parseRentalOperationConfirmRequest({ ...delistValue, request: { ...(delistValue.request as Record<string, unknown>), productId: '762' } })).toBeNull();
+    expect(parseRentalOperationConfirmRequest({ request: { action: 'delist', productId: '761' } })).toBeNull();
+
+    const specRemoveRequest = {
+      action: 'spec-remove-items' as const,
       productId: '761',
-      keyword: '手柄',
-      items: [{ productId: '761', specDimId: 'kit', dimensionTitle: '套装', itemId: 'handle', itemTitle: '含手柄' }],
-    });
+      keyword: 'handle',
+      items: [{ productId: '761', specDimId: 'kit', dimensionTitle: 'kit', itemId: 'handle', itemTitle: 'handle' }],
+    };
+    const specRemoveValue = readButtonValue(buildRentalOperationConfirmCard(specRemoveRequest, 'test reason'), 'rental_operation_confirm_submit');
+
+    expect(parseRentalOperationConfirmRequest(specRemoveValue)).toEqual(specRemoveRequest);
+    expect(parseRentalOperationConfirmRequest({ request: specRemoveRequest })).toBeNull();
     expect(parseRentalOperationConfirmRequest({ request: { action: 'delete-everything', productId: '761' } })).toBeNull();
     expect(parseRentalOperationConfirmRequest({ request: { action: 'tenancy-set', productId: '761', days: '1,abc' } })).toBeNull();
-    expect(parseRentalOperationConfirmRequest({ request: { action: 'spec-remove-items', productId: '761', keyword: '手柄', items: [{ productId: 'abc', specDimId: 'kit', itemTitle: '含手柄' }] } })).toBeNull();
+    expect(parseRentalOperationConfirmRequest({ request: { action: 'spec-remove-items', productId: '761', keyword: 'handle', items: [{ productId: 'abc', specDimId: 'kit', itemTitle: 'handle' }] } })).toBeNull();
   });
 
   it('does not submit when the external apply step is partial', async () => {

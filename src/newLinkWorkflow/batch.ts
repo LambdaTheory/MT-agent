@@ -88,6 +88,16 @@ function confirmationKey(value: Record<string, unknown>): string {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex').slice(0, 24);
 }
 
+function readConfirmationKey(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return /^[a-f0-9]{24}$/i.test(trimmed) ? trimmed.toLowerCase() : null;
+}
+
+function hasValidConfirmationKey(value: Record<string, unknown>, request: Record<string, unknown>): boolean {
+  return readConfirmationKey(value.confirmationKey) === confirmationKey(request);
+}
+
 export function readNewLinkBatchWorkflowRequest(value: Record<string, unknown>): NewLinkBatchWorkflowRequest | null {
   const keyword = readString(value.keyword);
   const count = readPositiveInteger(value.count);
@@ -499,12 +509,14 @@ function readNewLinkBatchConfirmRequestRecord(request: Record<string, unknown>):
 
 export function parseNewLinkBatchConfirmRequest(value: unknown): NewLinkBatchConfirmRequest | null {
   if (!isRecord(value) || !isRecord(value.request)) return null;
+  if (!hasValidConfirmationKey(value, value.request)) return null;
   return readNewLinkBatchConfirmRequestRecord(value.request);
 }
 
 export function parseNewLinkBatchMultiConfirmRequest(value: unknown): NewLinkBatchMultiConfirmRequest | null {
   if (!isRecord(value) || !isRecord(value.request)) return null;
   const request = value.request;
+  if (!hasValidConfirmationKey(value, request)) return null;
   const safetyVersion = readPositiveInteger(request.safetyVersion);
   const workflowName = readString(request.workflowName);
   const mode = readString(request.mode);

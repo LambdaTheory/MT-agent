@@ -58,7 +58,7 @@ import {
   buildRentalPricePreviewCard,
   createRentalPriceSkillClient,
   executeRentalOperationConfirmRequest,
-  parseRentalOperationConfirmRequest,
+  rentalOperationConfirmRequestFromToolArguments,
   rentalPriceChangeRequestFromToolArguments,
   rentalPriceRollbackRequestFromToolArguments,
   type RentalOperationConfirmRequest,
@@ -1055,7 +1055,7 @@ export async function executeAgentToolRequest(
       return rentalSpecRemovePlanResponse(query, keyword, request.reason, options.rentalPriceClient ?? createRentalPriceSkillClient(), options, request.continuation);
     }
     case 'rental.operationConfirmRequest': {
-      const rentalRequest = parseRentalOperationConfirmRequest({ request: request.arguments });
+      const rentalRequest = rentalOperationConfirmRequestFromToolArguments(request.arguments);
       if (!rentalRequest) throw new Error('租赁商品操作参数无效，请重新发起。');
       const result = await executeRentalOperationConfirmRequest(options.rentalPriceClient ?? createRentalPriceSkillClient(), rentalRequest);
       return { text: result.text };

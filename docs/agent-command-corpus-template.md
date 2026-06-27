@@ -164,3 +164,7 @@
 | G-004 |  |  |  |  | 待分析 |
 | G-005 |  |  |  |  | 待分析 |
 | G-006 |  |  |  |  | 待分析 |
+
+## Safety Note
+
+Dedicated high-risk cards (`rental.priceChange`, `rental.operationConfirmRequest`, `rental.newLinkBatchPlan`) reject callbacks unless the generated `confirmationKey` matches the exact request payload. This applies to SDK and HTTP entrypoints, and to multi-step continuation cards.

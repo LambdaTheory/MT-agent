@@ -10,7 +10,7 @@ import { openLinkRegistryGovernancePrompt } from '../src/linkRegistry/governance
 import { openLinkRegistryMaintenancePrompt } from '../src/linkRegistry/maintenanceSession.js';
 import type { LinkRegistryOverrideRisk } from '../src/linkRegistry/overrides.js';
 import type { LinkRegistryEntry } from '../src/linkRegistry/types.js';
-import type { RentalPriceSkillClient } from '../src/feishuBot/rentalPrice.js';
+import { buildRentalOperationConfirmCard, type RentalPriceSkillClient } from '../src/feishuBot/rentalPrice.js';
 import type { FeishuBotIncomingTextMessage } from '../src/feishuBot/types.js';
 
 function readAgentToolConfirmValue(card: unknown): unknown {
@@ -18,6 +18,19 @@ function readAgentToolConfirmValue(card: unknown): unknown {
   const form = body?.elements?.find((element) => Array.isArray(element.elements));
   const button = form?.elements?.find((element) => element.name === 'agent_tool_confirm_submit');
   return button?.behaviors?.[0]?.value;
+}
+
+function readButtonValue(card: unknown, buttonName: string): Record<string, unknown> {
+  const body = (card as { body?: { elements?: Array<{ elements?: Array<{ name?: string; behaviors?: Array<{ value?: unknown }> }> }> } }).body;
+  for (const element of body?.elements ?? []) {
+    for (const item of element.elements ?? []) {
+      if (item.name === buttonName) {
+        const value = item.behaviors?.[0]?.value;
+        if (value && typeof value === 'object' && !Array.isArray(value)) return value as Record<string, unknown>;
+      }
+    }
+  }
+  throw new Error(`${buttonName} value not found`);
 }
 
 const metric = {
@@ -1040,12 +1053,13 @@ describe('startFeishuBotServer', () => {
       await new Promise<void>((resolve) => server.once('listening', resolve));
       const address = server.address();
       if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+      const confirmValue = readButtonValue(buildRentalOperationConfirmCard({ action: 'copy', productId: '875' }, 'test reason'), 'rental_operation_confirm_submit');
       const body = {
         header: { event_type: 'card.action.trigger' },
         event: {
           context: { open_message_id: 'mid-http-rental-operation-confirm' },
           action: {
-            value: { action: 'rental_operation_confirm', request: { action: 'copy', productId: '875' } },
+            value: confirmValue,
           },
         },
       };

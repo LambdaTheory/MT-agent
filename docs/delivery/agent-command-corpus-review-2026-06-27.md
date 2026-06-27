@@ -100,3 +100,7 @@
 剩余依赖主要是链接档案质量：别名、同款组、品类和状态越完整，LLM 选择工具后本地解析越稳定。
 
 本轮自审结论：已填写的语料功能均有注册工具、确认边界、关键回归测试和交付说明；空白占位行仍等待业务语料，不计入本轮完成范围。
+
+## Additional Safety Review
+
+Dedicated high-risk cards now validate `confirmationKey` before parsing the callback payload. Covered card families: `rental_price_confirm`, `rental_operation_confirm`, `new_link_batch_confirm`, and `new_link_batch_multi_confirm`. Tampered request payloads and unsigned legacy payloads are rejected before side effects.

@@ -16,7 +16,7 @@ Read tools that return an interactive card, such as the product ID lookup card, 
 
 For example, `operations.refreshActivityPlan` first builds the zero-order-link delist and replenishment plan. Only when the candidates, same-SKU groups, safe copy sources, and count limits all pass does it generate a hidden `operations.refreshActivityExecute` confirmation card. That execute tool is not exposed for direct planner selection; confirmation is required, and execution writes an audit file.
 
-Generic Agent confirmation cards carry a `confirmationKey` derived from the exact request payload. The parser recomputes that key when present and rejects tampered card values. Any card carrying a continuation must have a valid generated key. Hidden runtime tools additionally require a valid generated key, and continuation steps reject hidden tools entirely; hidden tools can only be the current confirmed action produced by an internal planning tool. Step ids reserve `last` and `steps` for runtime references.
+Generic Agent confirmation cards carry a `confirmationKey` derived from the exact request payload. The parser recomputes that key when present and rejects tampered card values. Dedicated high-risk cards, including rental price changes, rental operation confirmations, and new-link batch confirmations, also require the generated `confirmationKey` before parsing. Any card carrying a continuation must have a valid generated key. Hidden runtime tools additionally require a valid generated key, and continuation steps reject hidden tools entirely; hidden tools can only be the current confirmed action produced by an internal planning tool. Step ids reserve `last` and `steps` for runtime references.
 
 ## Required Env
 

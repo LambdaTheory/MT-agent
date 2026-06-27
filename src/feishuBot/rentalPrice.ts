@@ -186,6 +186,16 @@ function confirmationKey(value: Record<string, unknown>): string {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex').slice(0, 24);
 }
 
+function readConfirmationKey(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return /^[a-f0-9]{24}$/i.test(trimmed) ? trimmed.toLowerCase() : null;
+}
+
+function hasValidConfirmationKey(value: Record<string, unknown>, request: Record<string, unknown>): boolean {
+  return readConfirmationKey(value.confirmationKey) === confirmationKey(request);
+}
+
 export function parseRentalPriceChange(text: string): RentalPriceChangeRequest | null {
   const normalized = text.replace(/\s+/g, ' ').trim();
   const command = /^改价\s+(?:商品)?(\d+)\s+(.+)$/.exec(normalized);
@@ -1055,6 +1065,7 @@ export function parseRentalPriceConfirmRequest(value: unknown): Extract<RentalPr
   if (!isRecord(value)) return null;
   const request = value.request;
   if (!isRecord(request) || request.mode !== 'explicit_fields' || typeof request.productId !== 'string' || !isRecord(request.fields)) return null;
+  if (!hasValidConfirmationKey(value, request)) return null;
   if (isRecord(request.audit) && request.audit.hasErrors === true) return null;
   const continuation = parseAgentToolConfirmContinuation(request.continuation);
   if (request.continuation !== undefined && !continuation) return null;
@@ -1201,9 +1212,7 @@ export function rentalPriceRollbackRequestFromToolArguments(args: Record<string,
   };
 }
 
-export function parseRentalOperationConfirmRequest(value: unknown): RentalOperationConfirmRequest | null {
-  if (!isRecord(value) || !isRecord(value.request)) return null;
-  const request = value.request;
+function readRentalOperationConfirmRequestRecord(request: Record<string, unknown>): RentalOperationConfirmRequest | null {
   const action = readString(request.action);
   const productId = readProductId(request.productId);
   if (!action || !productId) return null;
@@ -1238,6 +1247,17 @@ export function parseRentalOperationConfirmRequest(value: unknown): RentalOperat
     };
   }
   return null;
+}
+
+export function rentalOperationConfirmRequestFromToolArguments(args: Record<string, unknown>): RentalOperationConfirmRequest | null {
+  return readRentalOperationConfirmRequestRecord(args);
+}
+
+export function parseRentalOperationConfirmRequest(value: unknown): RentalOperationConfirmRequest | null {
+  if (!isRecord(value) || !isRecord(value.request)) return null;
+  const request = value.request;
+  if (!hasValidConfirmationKey(value, request)) return null;
+  return readRentalOperationConfirmRequestRecord(request);
 }
 
 export async function executeRentalOperationConfirmRequest(client: RentalPriceSkillClient, request: RentalOperationConfirmRequest): Promise<{ ok: boolean; text: string }> {
