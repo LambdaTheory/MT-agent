@@ -881,6 +881,7 @@ describe('handleBotIntent', () => {
 
     expect(response.text).toContain('📋 查询与分析');
     expect(response.text).toContain('2026-06-22 访问最高的前20个商品');
+    expect(response.text).toContain('Pocket 3 的7日访问总和是多少');
     expect(response.text).toContain('733 的所有日报数据');
     expect(response.text).toContain('各问题池分别多少条');
     expect(response.text).toContain('写操作会先弹确认卡');
@@ -1323,6 +1324,40 @@ describe('handleBotIntent', () => {
     expect(response.text).toContain('公域日报商品查询 2026-06-11');
     expect(response.text).toContain('端内ID 702');
     expect(response.text).toContain('7d 公域访问 80');
+    expect(response.card).toBeUndefined();
+  });
+
+  it('lets the Agent planner answer aggregate report row questions through publicTraffic.reportQuery', async () => {
+    const outputDir = await writeContext();
+    let plannerCalled = false;
+    const planner: AgentPlannerProvider = {
+      async proposePlan(request) {
+        plannerCalled = true;
+        expect(request.message).toBe('Pocket 3 的7日访问总和是多少');
+        expect(request.tools.map((tool) => tool.name)).toContain('publicTraffic.reportQuery');
+        return JSON.stringify({
+          goal: '统计Pocket 3商品7日访问总和',
+          selectedTool: 'publicTraffic.reportQuery',
+          arguments: {
+            target: 'productAggregation',
+            date: '2026-06-11',
+            productQuery: 'Pocket 3',
+            period: '7d',
+            metrics: ['publicVisits'],
+            aggregation: 'sum',
+          },
+          confidence: 0.94,
+          reason: '用户要对已保存日报商品行做聚合统计',
+        });
+      },
+    };
+
+    const response = await handleBotIntent({ type: 'unknown', text: 'Pocket 3 的7日访问总和是多少' }, outputDir, { agentPlannerProvider: planner });
+
+    expect(plannerCalled).toBe(true);
+    expect(response.text).toContain('公域日报商品聚合统计 2026-06-11');
+    expect(response.text).toContain('匹配 2 条商品');
+    expect(response.text).toContain('访问总和 = 82');
     expect(response.card).toBeUndefined();
   });
 

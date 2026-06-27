@@ -132,6 +132,54 @@ describe('public traffic report freeform query', () => {
     expect(text).not.toContain('端内ID 103');
   });
 
+  it('aggregates product rows by count, sum, average, min, and max', () => {
+    const count = runPublicTrafficReportQuery(reportContext, {
+      target: 'productAggregation',
+      productQuery: 'Pocket 3',
+      aggregation: 'count',
+    });
+    expect(count).toContain('匹配 2 条商品');
+    expect(count).toContain('商品数量 = 2');
+
+    const sum = runPublicTrafficReportQuery(reportContext, {
+      target: 'productAggregation',
+      productQuery: 'Pocket 3',
+      period: '7d',
+      metrics: ['publicVisits'],
+      aggregation: 'sum',
+    });
+    expect(sum).toContain('访问总和 = 1400');
+
+    const avg = runPublicTrafficReportQuery(reportContext, {
+      target: 'productAggregation',
+      productQuery: 'Pocket 3',
+      period: '7d',
+      metrics: ['publicVisits'],
+      aggregation: 'avg',
+    });
+    expect(avg).toContain('访问平均值 = 700');
+    expect(avg).toContain('参与计算：2 条');
+
+    const max = runPublicTrafficReportQuery(reportContext, {
+      target: 'productAggregation',
+      productQuery: 'Pocket 3',
+      period: '7d',
+      metrics: ['amount'],
+      aggregation: 'max',
+    });
+    expect(max).toContain('金额最大值 = ¥2200.00');
+    expect(max).toContain('端内ID 102');
+
+    const min = runPublicTrafficReportQuery(reportContext, {
+      target: 'productAggregation',
+      period: '7d',
+      metrics: ['publicVisits'],
+      aggregation: 'min',
+    });
+    expect(min).toContain('访问最小值 = 20');
+    expect(min).toContain('端内ID 103');
+  });
+
   it('returns full product details across all report periods', () => {
     const text = runPublicTrafficReportQuery(reportContext, {
       target: 'productDetail',

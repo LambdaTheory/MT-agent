@@ -42,6 +42,8 @@ describe('agent runtime LLM planner', () => {
     expect(system).toContain('resultMetadataSchema');
     expect(system).toContain('publicTraffic.reportQuery');
     expect(system).toContain('arbitrary read-only questions about saved public traffic report data');
+    expect(system).toContain('target productAggregation');
+    expect(system).toContain('aggregation count/sum/avg/min/max');
     expect(system).toContain('target productDetail');
     expect(system).toContain('target comparison');
     expect(system).toContain('use rental.priceSnapshot');

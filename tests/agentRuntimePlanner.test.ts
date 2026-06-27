@@ -66,6 +66,34 @@ describe('agent runtime planner proposal validation', () => {
       confidence: 0.9,
       reason: '用户要指定商品的完整日报指标',
     }))).toMatchObject({ ok: true, policy: { decision: 'allow', toolName: 'publicTraffic.reportQuery', risk: 'read' } });
+
+    expect(validateAgentPlannerProposal(JSON.stringify({
+      goal: '统计7日访问总和',
+      selectedTool: 'publicTraffic.reportQuery',
+      arguments: {
+        target: 'productAggregation',
+        period: '7d',
+        metrics: ['publicVisits'],
+        aggregation: 'sum',
+      },
+      confidence: 0.9,
+      reason: '用户要对日报商品明细做聚合统计',
+    }))).toMatchObject({
+      ok: true,
+      proposal: {
+        selectedTool: 'publicTraffic.reportQuery',
+        arguments: { target: 'productAggregation', period: '7d', aggregation: 'sum' },
+      },
+      policy: { decision: 'allow', toolName: 'publicTraffic.reportQuery', risk: 'read' },
+    });
+
+    expect(validateAgentPlannerProposal(JSON.stringify({
+      goal: 'bad aggregation',
+      selectedTool: 'publicTraffic.reportQuery',
+      arguments: { target: 'productAggregation', aggregation: 'median' },
+      confidence: 0.8,
+      reason: 'invalid aggregation should be rejected',
+    }))).toEqual({ ok: false, reason: 'invalid_arguments' });
   });
 
   it('rejects malformed JSON and unknown tools', () => {

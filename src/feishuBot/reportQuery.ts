@@ -27,6 +27,10 @@ export const reportMetricNames = [
 
 export type ReportMetricName = typeof reportMetricNames[number];
 
+export const reportAggregationNames = ['count', 'sum', 'avg', 'min', 'max'] as const;
+
+export type ReportAggregationName = typeof reportAggregationNames[number];
+
 export const reportSectionNames = [
   'lowExposure',
   'weakClick',
@@ -42,7 +46,7 @@ export const reportSectionNames = [
 
 export type ReportSectionName = typeof reportSectionNames[number];
 
-export type ReportQueryTarget = 'summary' | 'comparison' | 'products' | 'productDetail' | 'section' | 'sectionCounts' | 'orders' | 'dataQuality' | 'conclusions';
+export type ReportQueryTarget = 'summary' | 'comparison' | 'products' | 'productDetail' | 'productAggregation' | 'section' | 'sectionCounts' | 'orders' | 'dataQuality' | 'conclusions';
 
 export interface ReportQueryFilter {
   field: ReportMetricName | 'productName' | 'productId' | 'platformProductId' | 'action' | 'reason' | 'priority' | 'maintenanceStatus' | 'stock' | 'skuCount';
@@ -58,6 +62,7 @@ export interface PublicTrafficReportQueryArguments {
   metrics?: ReportMetricName[];
   productQuery?: string;
   section?: ReportSectionName;
+  aggregation?: ReportAggregationName;
   sortBy?: ReportMetricName | 'productName' | 'productId' | 'platformProductId' | 'action' | 'priority' | 'maintenanceStatus' | 'stock' | 'skuCount';
   sortDirection?: 'asc' | 'desc';
   limit?: number | string;
@@ -98,6 +103,14 @@ const defaultMetricsByTarget: Record<'summary' | 'products', ReportMetricName[]>
 };
 
 const productDetailMetrics: ReportMetricName[] = reportMetricNames.filter((metric) => metric !== 'custodyDays');
+
+const aggregationLabels: Record<ReportAggregationName, string> = {
+  count: '数量',
+  sum: '总和',
+  avg: '平均值',
+  min: '最小值',
+  max: '最大值',
+};
 
 const sectionLabels: Record<ReportSectionName, string> = {
   lowExposure: '曝光低',
@@ -236,6 +249,12 @@ function productMatchesQuery(row: PublicTrafficProductDataRow, query: string | u
     normalizeText(row.platformProductId).includes(normalized);
 }
 
+function matchingProductRows(context: PublicTrafficDataReportContext, args: PublicTrafficReportQueryArguments, period: PeriodKey): PublicTrafficProductDataRow[] {
+  return context.rows
+    .filter((row) => productMatchesQuery(row, args.productQuery))
+    .filter((row) => productMatchesFilters(row, args.filters, period));
+}
+
 function compareSortableValues(left: unknown, right: unknown): number {
   const leftNumber = typeof left === 'number' ? left : Number(left);
   const rightNumber = typeof right === 'number' ? right : Number(right);
@@ -306,6 +325,86 @@ function formatProducts(context: PublicTrafficDataReportContext, args: PublicTra
     `公域日报商品查询 ${context.date}`,
     `${period}，按 ${metricDefinitions[sortBy as ReportMetricName]?.label ?? sortBy} ${sortDirection === 'asc' ? '升序' : '降序'}，前 ${rows.length} 条`,
     ...rows.map((row, index) => formatProductLine(row, period, metrics, index)),
+  ].join('\n');
+}
+
+function numericProductMetricValue(row: PublicTrafficProductDataRow, metric: ReportMetricName, period: PeriodKey): number | undefined {
+  const value = productMetricValue(row, metric, period);
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function formatProductAggregation(context: PublicTrafficDataReportContext, args: PublicTrafficReportQueryArguments): string {
+  const period = periodsFromArgs(args)[0] ?? '1d';
+  const aggregation = args.aggregation && reportAggregationNames.includes(args.aggregation) ? args.aggregation : 'count';
+  const rows = matchingProductRows(context, args, period);
+  const header = [
+    `公域日报商品聚合统计 ${context.date}`,
+    `范围：${period}，匹配 ${rows.length} 条商品`,
+  ];
+
+  if (aggregation === 'count') {
+    return [
+      ...header,
+      `统计：商品${aggregationLabels.count} = ${rows.length}`,
+    ].join('\n');
+  }
+
+  const metric = args.metrics?.find((item): item is ReportMetricName => reportMetricNames.includes(item));
+  if (!metric) {
+    return [
+      ...header,
+      '缺少统计指标。请说明要统计曝光、访问、发货、金额或转化率等指标。',
+    ].join('\n');
+  }
+
+  const definition = metricDefinitions[metric];
+  const values = rows
+    .map((row) => ({ row, value: numericProductMetricValue(row, metric, period) }))
+    .filter((item): item is { row: PublicTrafficProductDataRow; value: number } => item.value !== undefined);
+
+  if (values.length === 0) {
+    return [
+      ...header,
+      `统计：${period} ${definition.label} 没有可计算数值。`,
+    ].join('\n');
+  }
+
+  if (aggregation === 'sum') {
+    const total = values.reduce((sum, item) => sum + item.value, 0);
+    return [
+      ...header,
+      `统计：${period} ${definition.label}${aggregationLabels.sum} = ${formatValue(total, definition)}`,
+    ].join('\n');
+  }
+
+  if (aggregation === 'avg') {
+    const total = values.reduce((sum, item) => sum + item.value, 0);
+    return [
+      ...header,
+      `统计：${period} ${definition.label}${aggregationLabels.avg} = ${formatValue(total / values.length, definition)}`,
+      `参与计算：${values.length} 条`,
+    ].join('\n');
+  }
+
+  const first = values[0];
+  if (!first) {
+    return [
+      ...header,
+      `统计：${period} ${definition.label} 没有可计算数值。`,
+    ].join('\n');
+  }
+
+  const selected = values.reduce((best, item) => {
+    if (aggregation === 'min') return item.value < best.value ? item : best;
+    return item.value > best.value ? item : best;
+  }, first);
+
+  return [
+    ...header,
+    `统计：${period} ${definition.label}${aggregationLabels[aggregation]} = ${formatValue(selected.value, definition)}`,
+    `对应商品：端内ID ${internalProductId(selected.row)} ${selected.row.productName}`,
   ].join('\n');
 }
 
@@ -462,6 +561,8 @@ export function runPublicTrafficReportQuery(context: PublicTrafficDataReportCont
       return formatProducts(context, args);
     case 'productDetail':
       return formatProductDetail(context, args);
+    case 'productAggregation':
+      return formatProductAggregation(context, args);
     case 'section':
       return formatSection(context, args);
     case 'sectionCounts':

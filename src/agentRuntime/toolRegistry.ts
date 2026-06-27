@@ -25,6 +25,7 @@ const reportMetricSchema = {
     'custodyDays',
   ],
 };
+const reportAggregationSchema = { type: 'string', enum: ['count', 'sum', 'avg', 'min', 'max'] };
 const reportSectionSchema = {
   type: 'string',
   enum: [
@@ -72,13 +73,14 @@ const reportQuerySortFieldSchema = {
 const publicTrafficReportQueryArgumentsSchema = {
   type: 'object',
   properties: {
-    target: { type: 'string', enum: ['summary', 'comparison', 'products', 'productDetail', 'section', 'sectionCounts', 'orders', 'dataQuality', 'conclusions'] },
+    target: { type: 'string', enum: ['summary', 'comparison', 'products', 'productDetail', 'productAggregation', 'section', 'sectionCounts', 'orders', 'dataQuality', 'conclusions'] },
     date: reportDateSchema,
     period: reportPeriodSchema,
     periods: { type: 'array', minItems: 1, maxItems: 3, items: reportPeriodSchema },
     metrics: { type: 'array', minItems: 1, maxItems: 16, items: reportMetricSchema },
     productQuery: { type: 'string' },
     section: reportSectionSchema,
+    aggregation: reportAggregationSchema,
     sortBy: reportQuerySortFieldSchema,
     sortDirection: { type: 'string', enum: ['asc', 'desc'] },
     limit: { type: ['integer', 'string'], pattern: '^[1-9]\\d*$', minimum: 1 },
