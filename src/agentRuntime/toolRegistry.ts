@@ -5,6 +5,7 @@ const optionalReportDateArgumentsSchema = { type: 'object', properties: { date: 
 const keywordArgumentsSchema = { type: 'object', properties: { keyword: { type: 'string' }, date: { type: 'string' } }, required: ['keyword'], additionalProperties: false };
 const productRankingArgumentsSchema = { type: 'object', properties: { query: { type: 'string' } }, required: ['query'], additionalProperties: false };
 const inventoryStatusQueryArgumentsSchema = { type: 'object', properties: { query: { type: 'string' } }, required: ['query'], additionalProperties: false };
+const positiveIntegerLikeSchema = { type: ['integer', 'string'], pattern: '^[1-9]\\d*$', minimum: 1 };
 const problemProductsArgumentsSchema = {
   type: 'object',
   properties: {
@@ -71,8 +72,23 @@ const refreshActivityExecuteArgumentsSchema = {
   type: 'object',
   properties: {
     date: { type: 'string' },
-    delistProductIds: { type: 'array' },
-    newLinkItems: { type: 'array' },
+    delistProductIds: { type: 'array', minItems: 1, items: { type: 'string' } },
+    newLinkItems: {
+      type: 'array',
+      minItems: 1,
+      items: {
+        type: 'object',
+        properties: {
+          keyword: { type: 'string' },
+          count: { type: 'integer', minimum: 1 },
+          sourceProductId: { type: 'string' },
+          sourceProductName: { type: 'string' },
+          sameSkuGroupId: { type: 'string' },
+        },
+        required: ['keyword', 'count', 'sourceProductId', 'sourceProductName'],
+        additionalProperties: false,
+      },
+    },
   },
   required: ['date', 'delistProductIds', 'newLinkItems'],
   additionalProperties: false,
@@ -102,9 +118,22 @@ const newLinkBatchPlanArgumentsSchema = {
   type: 'object',
   properties: {
     keyword: { type: 'string' },
-    count: {},
+    count: positiveIntegerLikeSchema,
     sourceProductId: { type: 'string' },
-    items: { type: 'array' },
+    items: {
+      type: 'array',
+      minItems: 1,
+      items: {
+        type: 'object',
+        properties: {
+          keyword: { type: 'string' },
+          count: positiveIntegerLikeSchema,
+          sourceProductId: { type: 'string' },
+        },
+        required: ['keyword', 'count'],
+        additionalProperties: false,
+      },
+    },
   },
   minProperties: 1,
   additionalProperties: false,

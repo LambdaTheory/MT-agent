@@ -59,6 +59,8 @@ The shared `handleBotIntent()` entry also rejects pre-parsed exact intents when 
 
 `npm run agent:dry-run -- "..."` also defaults to planner-first resolution. It includes a `legacyIntent` field only as a comparison aid; use `--legacy` when intentionally inspecting the old deterministic parser.
 
+Planner validation checks the registered tool schemas recursively, including structured array items and quantity fields for multi-product new-link plans and hidden refresh-activity execution payloads. Malformed LLM output such as `items: ["wide 300"]`, `count: ["5"]`, or fractional hidden execution counts is rejected before any confirmation card or side effect path is reached.
+
 Write or high-risk selections from these old command phrases still stop at confirmation cards. The regression tests cover SDK and HTTP text events for those examples.
 
 ## Smoke Test

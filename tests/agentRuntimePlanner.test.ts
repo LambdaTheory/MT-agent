@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { validateAgentMultiStepPlannerProposal, validateAgentPlannerClarificationProposal, validateAgentPlannerProposal } from '../src/agentRuntime/planner.js';
+import { validateAgentMultiStepPlannerProposal, validateAgentPlannerClarificationProposal, validateAgentPlannerProposal, validateAgentToolArguments } from '../src/agentRuntime/planner.js';
 import { listAgentTools } from '../src/agentRuntime/toolRegistry.js';
 
 describe('agent runtime planner proposal validation', () => {
@@ -61,6 +61,83 @@ describe('agent runtime planner proposal validation', () => {
   it('rejects arguments that do not satisfy tool metadata schema', () => {
     expect(validateAgentPlannerProposal('{"goal":"查询商品表现","selectedTool":"product.query","arguments":{},"confidence":0.88,"reason":"缺少 keyword"}')).toEqual({ ok: false, reason: 'invalid_arguments' });
     expect(validateAgentPlannerProposal('{"goal":"查询商品表现","selectedTool":"product.query","arguments":{"keyword":"565","extra":true},"confidence":0.88,"reason":"多余字段"}')).toEqual({ ok: false, reason: 'invalid_arguments' });
+  });
+
+  it('recursively validates planner array item schemas for multi-product tools', () => {
+    expect(validateAgentPlannerProposal(JSON.stringify({
+      goal: 'multi source new links',
+      selectedTool: 'rental.newLinkBatchPlan',
+      arguments: {
+        items: [
+          { keyword: 'wide 300', count: 5, sourceProductId: '900' },
+          { keyword: 'wide 400', count: '5', sourceProductId: '901' },
+        ],
+      },
+      confidence: 0.9,
+      reason: 'valid structured items',
+    }))).toMatchObject({ ok: true });
+
+    expect(validateAgentPlannerProposal(JSON.stringify({
+      goal: 'bad item array',
+      selectedTool: 'rental.newLinkBatchPlan',
+      arguments: { items: ['wide 300'] },
+      confidence: 0.9,
+      reason: 'array item is not an object',
+    }))).toEqual({ ok: false, reason: 'invalid_arguments' });
+
+    expect(validateAgentPlannerProposal(JSON.stringify({
+      goal: 'bad item shape',
+      selectedTool: 'rental.newLinkBatchPlan',
+      arguments: { items: [{ count: 5, sourceProductId: '900' }] },
+      confidence: 0.9,
+      reason: 'missing keyword',
+    }))).toEqual({ ok: false, reason: 'invalid_arguments' });
+
+    expect(validateAgentPlannerProposal(JSON.stringify({
+      goal: 'bad top-level count shape',
+      selectedTool: 'rental.newLinkBatchPlan',
+      arguments: { keyword: 'wide 300', count: ['5'] },
+      confidence: 0.9,
+      reason: 'count must be a positive integer or numeric string',
+    }))).toEqual({ ok: false, reason: 'invalid_arguments' });
+
+    expect(validateAgentPlannerProposal(JSON.stringify({
+      goal: 'bad item count shape',
+      selectedTool: 'rental.newLinkBatchPlan',
+      arguments: { items: [{ keyword: 'wide 300', count: 0, sourceProductId: '900' }] },
+      confidence: 0.9,
+      reason: 'count must be positive',
+    }))).toEqual({ ok: false, reason: 'invalid_arguments' });
+  });
+
+  it('recursively validates hidden execution tool arguments before confirmation execution', () => {
+    expect(validateAgentToolArguments('operations.refreshActivityExecute', {
+      date: '2026-06-27',
+      delistProductIds: ['433'],
+      newLinkItems: [
+        { keyword: 'wide 300', count: 1, sourceProductId: '900', sourceProductName: 'Wide 300' },
+      ],
+    })).toBe(true);
+
+    expect(validateAgentToolArguments('operations.refreshActivityExecute', {
+      date: '2026-06-27',
+      delistProductIds: ['433'],
+      newLinkItems: [{ keyword: 'wide 300', count: 1, sourceProductId: '900' }],
+    })).toBe(false);
+
+    expect(validateAgentToolArguments('operations.refreshActivityExecute', {
+      date: '2026-06-27',
+      delistProductIds: ['433'],
+      newLinkItems: ['bad'],
+    })).toBe(false);
+
+    expect(validateAgentToolArguments('operations.refreshActivityExecute', {
+      date: '2026-06-27',
+      delistProductIds: ['433'],
+      newLinkItems: [
+        { keyword: 'wide 300', count: 1.5, sourceProductId: '900', sourceProductName: 'Wide 300' },
+      ],
+    })).toBe(false);
   });
 
   it('gates dashboard refresh write proposals behind confirmation and does not execute tools', () => {

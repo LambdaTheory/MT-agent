@@ -44,6 +44,7 @@
 - `rental.priceChange`、`rental.specRemovePlan`、`rental.newLinkBatchPlan`、`operations.refreshActivityPlan` 属于预览/计划型工具，只会生成专用确认卡，不会在专用确认前改价、删规格、复制新链或执行活跃度刷新。
 - 专用确认卡也会携带剩余步骤：确认成功后继续跑后续步骤；确认失败或取消后停止，不会继续执行。
 - Agent 通用确认卡会校验 `confirmationKey` 与请求内容是否匹配，卡片 payload 被篡改会拒绝执行；带续跑步骤的确认卡必须有合法 key；隐藏执行工具不能出现在续跑步骤里，只能作为系统生成确认卡的当前动作触发。
+- Agent planner 会递归校验工具参数，尤其是多商品 `items` 和数量 `count` 这类结构化字段；畸形数组、缺字段、小数数量不会进入确认卡或副作用路径。
 - 下方空白行只是留给后续新增语料，不代表已确认但未实现的需求。
 
 | 编号 | 你会怎么说 | 希望拿到的回复/效果 | 备注 | Codex 分析 | 推进状态 |

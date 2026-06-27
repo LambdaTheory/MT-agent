@@ -31,6 +31,7 @@
 - 共享 `handleBotIntent()` 在配置 `agentPlannerProvider` 时会拒绝旧 exact intent 直通，避免测试、适配器或后续入口绕开 planner-first 边界。
 - `agent:dry-run` 默认也走 planner-first 解析；旧 deterministic 结果只作为 `legacyIntent` 对照，或通过 `--legacy` 显式查看。
 - 多步骤计划的 `${...}` 占位符只允许引用已经出现过的 step id；未知、未来或自引用会在 planner 校验阶段被拒绝。
+- planner schema validator 会递归校验结构化数组项和关键数量字段；多商品新链计划里的 `items` 必须是对象数组，`count` 只能是正整数或数字字符串，隐藏执行 payload 里的数量必须是真正正整数。
 - 所有 `plannerVisible:false` 的内部执行工具即使存在于 runtime registry，也会被 planner validator 当作未知工具拒绝，只能由确认卡内部续跑触发；当前覆盖 `operations.refreshActivityExecute` 和 `rental.operationConfirmRequest`。
 - HTTP 和 SDK 两条卡片确认通道都会把租赁客户端、关单 fetch 注入和链接档案路径继续传给剩余步骤，确认后续跑不会丢失执行上下文。
 - Agent 通用确认卡现在会校验 `confirmationKey` 与请求内容是否一致；卡片 value 被改过、或隐藏工具缺少合法 key，都会拒绝执行。
@@ -82,7 +83,7 @@
 
 ## Review 结论
 
-- 本轮新增边界很窄，只改 planner validator、planner 测试和交付审计文档。
+- 本轮新增边界很窄，只改 planner validator、工具 schema、planner 测试和交付审计文档。
 - planner 可见工具列表已经过滤隐藏工具；validator 现在也会二次拒绝隐藏工具，避免恶意或错误 LLM 输出绕过列表直接点名内部执行工具。
 - 写类工具仍由本地 policy 与专用确认卡兜底；语料表里的 M-002、M-003 不会因为 LLM 置信度高而直接产生副作用。
 - 已填写语料的实现路径都落在注册工具上，没有再依赖旧 workflow 直通。
@@ -105,4 +106,4 @@
 
 Dedicated high-risk cards now validate `confirmationKey` before parsing the callback payload. Covered card families: `rental_price_confirm`, `rental_operation_confirm`, `new_link_batch_confirm`, `new_link_batch_multi_confirm`, `activity_automation_confirm`, `activity_price_callback_*`, and `cancel_differential_pricing_*`. Tampered request payloads and unsigned legacy payloads are rejected before side effects.
 
-Current verification after this hardening pass: `tsc -p tsconfig.json --noEmit` passed, and `vitest run --exclude "**/.worktrees/**"` passed with 142 files / 969 tests.
+Current verification after this hardening pass: `tsc -p tsconfig.json --noEmit` passed, focused planner/tool/card tests passed with 4 files / 95 tests, and `vitest run --exclude "**/.worktrees/**"` passed with 142 files / 971 tests.
