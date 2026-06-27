@@ -1,5 +1,5 @@
 import type { PeriodKey } from '../domain/types.js';
-import { ORDER_ANALYSIS_PAGE_LABELS, type OrderAnalysisPageKey } from '../publicTraffic/orderAnalysis.js';
+import { derivedOrderBusinessMetrics, fulfillmentRateLines, ORDER_ANALYSIS_PAGE_LABELS, type OrderAnalysisPageKey } from '../publicTraffic/orderAnalysis.js';
 import type { PublicTrafficDataReportContext, PublicTrafficPeriodMetrics, PublicTrafficProductDataRow, PublicTrafficReportSectionItem } from '../publicTraffic/types.js';
 
 const PERIODS: PeriodKey[] = ['1d', '7d', '30d'];
@@ -39,6 +39,10 @@ export const reportCoverageStatusNames = ['available', 'missing', 'all'] as cons
 
 export type ReportCoverageStatusName = typeof reportCoverageStatusNames[number];
 
+export const reportOrderDerivedMetricNames = ['shipmentRate', 'closeRate', 'closeRateStatus', 'averageOrderValue', 'fulfillmentRates', 'all'] as const;
+
+export type ReportOrderDerivedMetricName = typeof reportOrderDerivedMetricNames[number];
+
 export const reportSectionNames = [
   'lowExposure',
   'weakClick',
@@ -54,7 +58,7 @@ export const reportSectionNames = [
 
 export type ReportSectionName = typeof reportSectionNames[number];
 
-export type ReportQueryTarget = 'summary' | 'comparison' | 'products' | 'productDetail' | 'productAggregation' | 'sourceCoverage' | 'section' | 'sectionCounts' | 'orders' | 'dataQuality' | 'conclusions';
+export type ReportQueryTarget = 'summary' | 'comparison' | 'products' | 'productDetail' | 'productAggregation' | 'sourceCoverage' | 'section' | 'sectionCounts' | 'orders' | 'orderDerived' | 'dataQuality' | 'conclusions';
 
 export interface ReportQueryFilter {
   field: ReportMetricName | 'productName' | 'productId' | 'platformProductId' | 'action' | 'reason' | 'priority' | 'maintenanceStatus' | 'stock' | 'skuCount';
@@ -79,6 +83,7 @@ export interface PublicTrafficReportQueryArguments {
   filters?: ReportQueryFilter[];
   orderPage?: OrderAnalysisPageKey | 'all';
   orderIndicator?: string;
+  orderDerivedMetric?: ReportOrderDerivedMetricName;
 }
 
 interface ReportMetricDefinition {
@@ -132,6 +137,15 @@ const coverageStatusLabels: Record<ReportCoverageStatusName, string> = {
   available: '已抓取',
   missing: '未更新/异常',
   all: '全部',
+};
+
+const orderDerivedMetricLabels: Record<ReportOrderDerivedMetricName, string> = {
+  shipmentRate: '发货率',
+  closeRate: '关单率',
+  closeRateStatus: '关单率状态',
+  averageOrderValue: '客单价',
+  fulfillmentRates: '履约链路',
+  all: '全部经营指标',
 };
 
 const sectionLabels: Record<ReportSectionName, string> = {
@@ -606,6 +620,32 @@ function formatOrders(context: PublicTrafficDataReportContext, args: PublicTraff
   return lines.join('\n');
 }
 
+function formatOrderDerived(context: PublicTrafficDataReportContext, args: PublicTrafficReportQueryArguments): string {
+  const pages = context.orderAnalysis?.pages;
+  if (!pages) return `订单经营指标 ${context.date}\n暂无订单分析数据。`;
+  const overview = pages.overview;
+  const customs = pages.customs;
+  const metric = args.orderDerivedMetric && reportOrderDerivedMetricNames.includes(args.orderDerivedMetric) ? args.orderDerivedMetric : 'all';
+  const business = derivedOrderBusinessMetrics(overview, customs);
+  const items: Array<{ key: ReportOrderDerivedMetricName; label: string; value: string; note?: string }> = [
+    { key: 'shipmentRate', label: orderDerivedMetricLabels.shipmentRate, value: business.shipmentRate, note: '发货订单数 / 创建订单数' },
+    { key: 'closeRate', label: orderDerivedMetricLabels.closeRate, value: business.closeRate, note: business.closeRateStatus === '-' ? '目标<=35%' : `目标<=35%，${business.closeRateStatus}` },
+    { key: 'closeRateStatus', label: orderDerivedMetricLabels.closeRateStatus, value: business.closeRateStatus, note: '目标<=35%' },
+    { key: 'averageOrderValue', label: orderDerivedMetricLabels.averageOrderValue, value: business.averageOrderValue, note: '签约完成金额 / 签约订单数' },
+  ];
+  const lines = [
+    `订单经营指标 ${context.date}`,
+    `订单页日期：经营 ${overview?.dataDate ?? '未知'}，关单 ${customs?.dataDate ?? '未知'}`,
+  ];
+  const selected = metric === 'all' ? items.filter((item) => item.key !== 'closeRateStatus') : items.filter((item) => item.key === metric);
+  lines.push(...selected.map((item) => `${item.label}：${item.value}${item.note ? `（${item.note}）` : ''}`));
+  if (metric === 'all' || metric === 'fulfillmentRates') {
+    const fulfillment = fulfillmentRateLines(overview)[0] ?? '暂无履约链路数据';
+    lines.push(`${orderDerivedMetricLabels.fulfillmentRates}：${fulfillment}`);
+  }
+  return lines.join('\n');
+}
+
 function formatDataQuality(context: PublicTrafficDataReportContext): string {
   const oneDayHasExposure = context.rows.some((row) => row.periods['1d']?.hasExposureData);
   const oneDayHasDashboard = context.rows.some((row) => row.periods['1d']?.hasDashboardData);
@@ -653,6 +693,8 @@ export function runPublicTrafficReportQuery(context: PublicTrafficDataReportCont
       return formatSectionCounts(context);
     case 'orders':
       return formatOrders(context, args);
+    case 'orderDerived':
+      return formatOrderDerived(context, args);
     case 'dataQuality':
       return formatDataQuality(context);
     case 'conclusions':

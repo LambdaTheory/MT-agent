@@ -122,6 +122,32 @@ describe('agent runtime planner proposal validation', () => {
       confidence: 0.8,
       reason: 'invalid source should be rejected',
     }))).toEqual({ ok: false, reason: 'invalid_arguments' });
+
+    expect(validateAgentPlannerProposal(JSON.stringify({
+      goal: '查询关单率是否达标',
+      selectedTool: 'publicTraffic.reportQuery',
+      arguments: {
+        target: 'orderDerived',
+        orderDerivedMetric: 'closeRateStatus',
+      },
+      confidence: 0.9,
+      reason: '用户要查看订单分析衍生经营指标',
+    }))).toMatchObject({
+      ok: true,
+      proposal: {
+        selectedTool: 'publicTraffic.reportQuery',
+        arguments: { target: 'orderDerived', orderDerivedMetric: 'closeRateStatus' },
+      },
+      policy: { decision: 'allow', toolName: 'publicTraffic.reportQuery', risk: 'read' },
+    });
+
+    expect(validateAgentPlannerProposal(JSON.stringify({
+      goal: 'bad derived metric',
+      selectedTool: 'publicTraffic.reportQuery',
+      arguments: { target: 'orderDerived', orderDerivedMetric: 'gmv' },
+      confidence: 0.8,
+      reason: 'invalid derived metric should be rejected',
+    }))).toEqual({ ok: false, reason: 'invalid_arguments' });
   });
 
   it('rejects malformed JSON and unknown tools', () => {

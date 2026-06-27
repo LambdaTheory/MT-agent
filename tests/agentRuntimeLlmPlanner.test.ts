@@ -46,6 +46,8 @@ describe('agent runtime LLM planner', () => {
     expect(system).toContain('aggregation count/sum/avg/min/max');
     expect(system).toContain('target sourceCoverage');
     expect(system).toContain('coverageStatus missing');
+    expect(system).toContain('target orderDerived');
+    expect(system).toContain('orderDerivedMetric closeRateStatus');
     expect(system).toContain('target productDetail');
     expect(system).toContain('target comparison');
     expect(system).toContain('use rental.priceSnapshot');

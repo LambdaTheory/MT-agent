@@ -87,7 +87,28 @@ async function writeContext(): Promise<string> {
     ],
     newProductPoolIds: ['701'],
     newProductPoolItems: [{ productId: '701', productName: '大疆 Pocket 3', shortTitle: '', submittedAt: '2026-06-11 09:00:00', merchant: '', alipaySyncStatus: '已同步', alipayCode: '', stock: 0, skuCount: 0, maintenanceStatus: '待维护', note: '' }],
-    orderAnalysis: { runDate: '2026-06-11', pages: { overview: { label: '订单概览', dataDate: '2026-06-10', indicators: [{ label: '发货订单', value: '12' }] } } },
+    orderAnalysis: {
+      runDate: '2026-06-11',
+      capturedAt: '2026-06-11T01:00:00.000Z',
+      pages: {
+        overview: {
+          key: 'overview',
+          label: '订单概览',
+          dataDate: '2026-06-10',
+          indicators: [
+            { label: '创建订单数', value: '20', delta: '' },
+            { label: '签约订单数', value: '10', delta: '' },
+            { label: '审出订单数', value: '8', delta: '' },
+            { label: '发货订单数', value: '12', delta: '' },
+            { label: '发货订单', value: '12', delta: '' },
+            { label: '签约完成金额（元）', value: '500', delta: '' },
+          ],
+        },
+        delivery: { key: 'delivery', label: '发货分析', dataDate: '2026-06-10', indicators: [] },
+        return: { key: 'return', label: '归还分析', dataDate: '2026-06-10', indicators: [] },
+        customs: { key: 'customs', label: '关单分析', dataDate: '2026-06-10', indicators: [{ label: '关单数', value: '5', delta: '' }] },
+      },
+    },
     agentData: { removedLinks: [{ productId: '701', platformProductId: 'p701', productName: '已下架链接', removedDate: '2026-06-12', reason: '商品总表缺失', source: 'goods_snapshot_diff' }] },
     emptySectionNotes: {},
   }));
@@ -885,6 +906,7 @@ describe('handleBotIntent', () => {
     expect(response.text).toContain('访问页缺失哪些商品');
     expect(response.text).toContain('733 的所有日报数据');
     expect(response.text).toContain('各问题池分别多少条');
+    expect(response.text).toContain('关单率 / 客单价');
     expect(response.text).toContain('写操作会先弹确认卡');
   });
 
@@ -1393,6 +1415,37 @@ describe('handleBotIntent', () => {
     expect(response.text).toContain('数据源：访问页，状态：全部');
     expect(response.text).toContain('7d：商品 6 条');
     expect(response.text).toContain('访问页已抓取 6 条/未更新 0 条');
+    expect(response.card).toBeUndefined();
+  });
+
+  it('lets the Agent planner answer derived order metric questions through publicTraffic.reportQuery', async () => {
+    const outputDir = await writeContext();
+    let plannerCalled = false;
+    const planner: AgentPlannerProvider = {
+      async proposePlan(request) {
+        plannerCalled = true;
+        expect(request.message).toBe('关单率是否达标');
+        expect(request.tools.map((tool) => tool.name)).toContain('publicTraffic.reportQuery');
+        return JSON.stringify({
+          goal: '查询关单率是否达标',
+          selectedTool: 'publicTraffic.reportQuery',
+          arguments: {
+            target: 'orderDerived',
+            date: '2026-06-11',
+            orderDerivedMetric: 'closeRateStatus',
+          },
+          confidence: 0.94,
+          reason: '用户要查看订单分析衍生经营指标',
+        });
+      },
+    };
+
+    const response = await handleBotIntent({ type: 'unknown', text: '关单率是否达标' }, outputDir, { agentPlannerProvider: planner });
+
+    expect(plannerCalled).toBe(true);
+    expect(response.text).toContain('订单经营指标 2026-06-11');
+    expect(response.text).toContain('关单率状态：达标（目标<=35%）');
+    expect(response.text).not.toContain('客单价');
     expect(response.card).toBeUndefined();
   });
 

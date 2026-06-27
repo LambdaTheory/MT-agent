@@ -95,12 +95,16 @@ const reportContext: PublicTrafficDataReportContext = {
         dataDate: '2026-06-22',
         indicators: [
           { label: '创建订单数', value: '12', delta: '+2' },
+          { label: '签约订单数', value: '6', delta: '+1' },
+          { label: '审出订单数', value: '4', delta: '+1' },
+          { label: '发货订单数', value: '3', delta: '+1' },
+          { label: '签约完成金额（元）', value: '240', delta: '+40' },
           { label: '签约发货率', value: '66.67%', delta: '+1.00%' },
         ],
       },
       delivery: { key: 'delivery', label: '发货分析', dataDate: '2026-06-22', indicators: [] },
       return: { key: 'return', label: '归还分析', dataDate: '2026-06-22', indicators: [] },
-      customs: { key: 'customs', label: '关单分析', dataDate: '2026-06-22', indicators: [] },
+      customs: { key: 'customs', label: '关单分析', dataDate: '2026-06-22', indicators: [{ label: '关单数', value: '5', delta: '+1' }] },
     },
   },
 };
@@ -264,6 +268,27 @@ describe('public traffic report freeform query', () => {
     expect(text).toContain('订单分析 2026-06-22');
     expect(text).toContain('签约发货率：66.67%');
     expect(text).not.toContain('创建订单数');
+  });
+
+  it('answers derived order business metric questions', () => {
+    const all = runPublicTrafficReportQuery(reportContext, {
+      target: 'orderDerived',
+    });
+
+    expect(all).toContain('订单经营指标 2026-06-22');
+    expect(all).toContain('订单页日期：经营 2026-06-22，关单 2026-06-22');
+    expect(all).toContain('发货率：25.00%');
+    expect(all).toContain('关单率：41.67%（目标<=35%，风险）');
+    expect(all).toContain('客单价：¥40.00');
+    expect(all).toContain('履约链路：签约/创建 50.00%｜审出/签约 66.67%｜发货/审出 75.00%');
+
+    const closeStatus = runPublicTrafficReportQuery(reportContext, {
+      target: 'orderDerived',
+      orderDerivedMetric: 'closeRateStatus',
+    });
+
+    expect(closeStatus).toContain('关单率状态：风险（目标<=35%）');
+    expect(closeStatus).not.toContain('客单价');
   });
 
   it('reports source data quality and conclusions', () => {

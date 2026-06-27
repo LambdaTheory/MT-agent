@@ -28,6 +28,7 @@ const reportMetricSchema = {
 const reportAggregationSchema = { type: 'string', enum: ['count', 'sum', 'avg', 'min', 'max'] };
 const reportSourceSchema = { type: 'string', enum: ['exposure', 'dashboard', 'all'] };
 const reportCoverageStatusSchema = { type: 'string', enum: ['available', 'missing', 'all'] };
+const reportOrderDerivedMetricSchema = { type: 'string', enum: ['shipmentRate', 'closeRate', 'closeRateStatus', 'averageOrderValue', 'fulfillmentRates', 'all'] };
 const reportSectionSchema = {
   type: 'string',
   enum: [
@@ -75,7 +76,7 @@ const reportQuerySortFieldSchema = {
 const publicTrafficReportQueryArgumentsSchema = {
   type: 'object',
   properties: {
-    target: { type: 'string', enum: ['summary', 'comparison', 'products', 'productDetail', 'productAggregation', 'sourceCoverage', 'section', 'sectionCounts', 'orders', 'dataQuality', 'conclusions'] },
+    target: { type: 'string', enum: ['summary', 'comparison', 'products', 'productDetail', 'productAggregation', 'sourceCoverage', 'section', 'sectionCounts', 'orders', 'orderDerived', 'dataQuality', 'conclusions'] },
     date: reportDateSchema,
     period: reportPeriodSchema,
     periods: { type: 'array', minItems: 1, maxItems: 3, items: reportPeriodSchema },
@@ -104,6 +105,7 @@ const publicTrafficReportQueryArgumentsSchema = {
     },
     orderPage: { type: 'string', enum: ['overview', 'delivery', 'return', 'customs', 'all'] },
     orderIndicator: { type: 'string' },
+    orderDerivedMetric: reportOrderDerivedMetricSchema,
   },
   required: ['target'],
   additionalProperties: false,
