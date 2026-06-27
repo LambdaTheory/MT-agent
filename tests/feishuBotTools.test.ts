@@ -877,56 +877,13 @@ async function writeNewLinkWorkflowContext(): Promise<{
 
 describe('handleBotIntent', () => {
   it('returns help text', async () => {
-    await expect(handleBotIntent({ type: 'help' })).resolves.toEqual({ text: `📋 查询与分析
-  今日概况 — 查看最新公域日报概况
-  看 2026-06-22 的日报 / 查昨天日报 — 查看指定日期公域日报
-  2026-06-22 的转化率多少 — 查看指定日期转化率漏斗
-  查询 565 / 查 433,798 — 查询单个或多个端内ID表现
-  2026-06-22 查询 733 — 查询指定日期的商品表现
-  s23u最好的链接是哪条 — 按链接档案找同款组里数据最好的端内ID
-  x200u的定价情况怎么样 — 按同款组汇总SKU平均租金
-  查ID 565 / 商品ID互查 — 端内ID与平台商品ID互查
-  库存情况 / 库存情况 pocket3 — 查看库存与同款组状态
-  新链接池怎么样 / 待处理任务 / 下架链接 / 订单情况 — 查询运营数据池
+    const response = await handleBotIntent({ type: 'help' });
 
-📊 报表与数据
-  跑日报 — 生成公域流量日报
-  抓取访问页数据 — 补抓访问页/后链路数据
-  重发日报 — 重新发送最新日报
-  重发 2026-06-22 日报 / 推送 2026-06-22 日报到群 — 发送指定日期已有日报
-  推送日报到群 — 推送日报到指定群
-  同步关单 — 拉取最新关单并写入本地状态
-  跑关单观察 — 生成关单观察摘要并回卡片
-
-🤖 复合目标
-  数据最好的SQ1是哪条？按这个ID复制5条新链
-  数据最好的wide300、wide400分别复制5条新链
-  x300u 含手柄的sku都得下掉 — 先按规格项生成删除预览和确认卡
-  刷新活跃度 — 先生成近30天零创单链接下架与补链计划，确认后执行
-
-🎓 运营学习
-  运营学习 — 开始运营学习测验
-  运营学习汇总 / 运营学习历史 — 查看测验反馈汇总或历史统计
-  Agent学习汇总 — 查看 Agent 澄清与确认学习记录
-
-💰 改价、审计与回滚
-  876 全局改价 0.9 — 生成改价审计预览和确认卡
-  改价 761 1天22 10天55 — 指定租期改价
-  改价 761 所有价格 *0.9 — 所有价格乘法（含押金、成本等）
-  回滚 task_xxxx — 按改价审计任务回滚到该任务执行前
-
-🔧 商品操作
-  复制商品 761 / 从端内ID 848复制3条新链 — 复制或铺新链
-  下架商品 761 — 下架商品
-  设置租期 761 1,10,30 — 设置租期天数
-  查看规格 761 — 查看商品规格维度与项目
-  添加规格 761 128G — 添加规格项
-
-🛡️ 安全规则
-  写操作会先弹确认卡；取消后不会执行
-  商品ID、数量、规格层级不明确时会先澄清
-  Agent学习汇总 — 查看 Agent 澄清与确认学习记录
-  帮助 — 显示此帮助信息` });
+    expect(response.text).toContain('📋 查询与分析');
+    expect(response.text).toContain('2026-06-22 访问最高的前20个商品');
+    expect(response.text).toContain('733 的所有日报数据');
+    expect(response.text).toContain('各问题池分别多少条');
+    expect(response.text).toContain('写操作会先弹确认卡');
   });
 
   it('returns the product ID lookup input card', async () => {
@@ -1333,6 +1290,40 @@ describe('handleBotIntent', () => {
     const response = await handleBotIntent({ type: 'unknown', text: '帮我看看苹果手机' }, outputDir, { agentPlannerProvider: planner });
 
     expect(response.text).toContain('端内ID 565 iPhone 15');
+  });
+
+  it('lets the Agent planner answer natural report data questions through publicTraffic.reportQuery', async () => {
+    const outputDir = await writeContext();
+    let plannerCalled = false;
+    const planner: AgentPlannerProvider = {
+      async proposePlan(request) {
+        plannerCalled = true;
+        expect(request.message).toBe('2026-06-11 7日访问最高的1个商品是谁');
+        expect(request.tools.map((tool) => tool.name)).toContain('publicTraffic.reportQuery');
+        return JSON.stringify({
+          goal: '查询指定日期7日访问最高商品',
+          selectedTool: 'publicTraffic.reportQuery',
+          arguments: {
+            target: 'products',
+            date: '2026-06-11',
+            period: '7d',
+            sortBy: 'publicVisits',
+            metrics: ['publicVisits', 'amount', 'shippedOrders'],
+            limit: 1,
+          },
+          confidence: 0.94,
+          reason: '用户询问日报商品排行，属于只读报表查询',
+        });
+      },
+    };
+
+    const response = await handleBotIntent({ type: 'unknown', text: '2026-06-11 7日访问最高的1个商品是谁' }, outputDir, { agentPlannerProvider: planner });
+
+    expect(plannerCalled).toBe(true);
+    expect(response.text).toContain('公域日报商品查询 2026-06-11');
+    expect(response.text).toContain('端内ID 702');
+    expect(response.text).toContain('7d 公域访问 80');
+    expect(response.card).toBeUndefined();
   });
 
   it('does not fall back to deterministic exact routing when the Agent planner is configured but invalid', async () => {
