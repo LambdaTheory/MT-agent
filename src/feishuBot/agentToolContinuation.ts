@@ -94,6 +94,11 @@ export async function continueAgentPlannerSteps(input: ContinuePlannerStepsInput
     input.textParts.push(`步骤 ${absoluteIndex + 1}/${input.totalSteps}：${step.toolName}`);
     input.textParts.push(response.text);
     rememberStepMetadata(input.metadataStore, stepId, response);
+    if (shouldStopAfterConfirmedResponse(response)) {
+      input.textParts.push('');
+      input.textParts.push('当前步骤执行未成功，已停止后续步骤。');
+      return { text: input.textParts.join('\n'), ...(response.card ? { card: response.card } : {}) };
+    }
     if (response.card) {
       if (remainingSteps.length > 0) {
         input.textParts.push('');

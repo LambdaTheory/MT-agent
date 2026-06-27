@@ -56,13 +56,17 @@ import { buildLinkRegistryOverviewCard, formatLinkRegistryOverviewText } from '.
 import {
   buildRentalOperationConfirmCard,
   buildRentalPricePreviewCard,
+  compactAuditReference,
   createRentalPriceSkillClient,
   executeRentalOperationConfirmRequest,
   rentalOperationConfirmRequestFromToolArguments,
   rentalPriceChangeRequestFromToolArguments,
   rentalPriceRollbackRequestFromToolArguments,
+  type RentalPriceAuditReference,
   type RentalOperationConfirmRequest,
   type RentalSpecRemoveItemConfirmRequest,
+  type RentalPriceChangeRequest,
+  type RentalPriceExecutionResult,
   type RentalPriceReadResult,
   type RentalPriceSkillClient,
 } from './rentalPrice.js';
@@ -78,6 +82,7 @@ export interface AgentToolExecutionOptions {
 let publicTrafficReportRunning = false;
 
 const RENTAL_PRICE_SNAPSHOT_MAX_PRODUCTS = 20;
+const RENTAL_PRICE_PREVIEW_MAX_PRODUCTS = 12;
 const RENTAL_SPEC_REMOVE_PLAN_MAX_PRODUCTS = 12;
 const RENTAL_SPEC_REMOVE_PLAN_MAX_ITEMS = 20;
 const REFRESH_ACTIVITY_DEFAULT_MAX_CANDIDATES = 20;
@@ -108,6 +113,10 @@ function formatPublicTrafficReportRunSuccess(result: Awaited<ReturnType<typeof r
 
 function readString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function requireString(value: unknown, fieldName: string): string {
@@ -211,6 +220,46 @@ function resolveRentalPriceSnapshotEntries(
   const sameSkuGroupId = alias.sameSkuGroupId?.trim() ?? null;
   const entries = sameSkuGroupId ? queryableEntries(registry.listBySameSkuGroup(sameSkuGroupId, { includeUnknown: true })) : queryableEntries(alias.entries);
   return { ok: true, sameSkuGroupId, entries, matchText: alias.reason };
+}
+
+async function linkRegistryResolveProductsResponse(
+  args: Record<string, unknown>,
+  options: AgentToolExecutionOptions,
+): Promise<BotResponse> {
+  const query = requireString(args.query, 'query');
+  const includeUnknown = args.includeUnknown !== false;
+  const registryContext = await loadClosedOrderRegistryContext(options.closedOrderRegistryPaths);
+  const registry = createLinkRegistry(registryContext.registry);
+  const resolution = resolveRentalPriceSnapshotEntries(query, registry);
+  if (!resolution.ok) return { text: resolution.text, metadata: { toolName: 'linkRegistry.resolveProducts', status: 'not_found', query, productIds: [], count: 0 } };
+
+  const entries = includeUnknown ? resolution.entries : resolution.entries.filter((entry) => entry.status === 'active');
+  const productIds = entries.map((entry) => entry.internalProductId);
+  const shown = entries.slice(0, 20).map((entry, index) => {
+    const status = formatLinkRegistryStatus(entry.status);
+    return `${index + 1}. 端内ID ${entry.internalProductId} ${compactName(entry)}（${status}）`;
+  });
+  const hiddenCount = entries.length - shown.length;
+  return {
+    text: [
+      `商品集合解析：${query}`,
+      resolution.sameSkuGroupId ? `同款组：${resolution.sameSkuGroupId}` : undefined,
+      `匹配依据：${resolution.matchText}`,
+      `可用端内ID：${productIds.join('、') || '无'}`,
+      '',
+      ...shown,
+      hiddenCount > 0 ? `还有 ${hiddenCount} 个未展示。` : undefined,
+    ].filter((line): line is string => Boolean(line)).join('\n'),
+    metadata: {
+      toolName: 'linkRegistry.resolveProducts',
+      status: productIds.length ? 'ok' : 'empty',
+      query,
+      sameSkuGroupId: resolution.sameSkuGroupId,
+      productIds,
+      count: productIds.length,
+      matchText: resolution.matchText,
+    },
+  };
 }
 
 function parsePrice(value: string | undefined): number | null {
@@ -328,6 +377,193 @@ async function rentalPriceSnapshotResponse(
   }));
 
   return { text: formatRentalPriceSnapshot(query, resolution, reads) };
+}
+
+function readDiscountMultiplier(value: unknown): number | null {
+  const numeric = typeof value === 'number' ? value : typeof value === 'string' ? Number(value.trim()) : NaN;
+  if (!Number.isFinite(numeric) || numeric <= 0) return null;
+  if (numeric > 1 && numeric <= 10 && Number.isInteger(numeric)) return numeric / 10;
+  return numeric <= 1 ? numeric : null;
+}
+
+function readPriceChangeScope(value: unknown): 'rent_fields' | 'all_price_fields' {
+  return value === 'all_price_fields' ? 'all_price_fields' : 'rent_fields';
+}
+
+function formatDiscountText(discount: number): string {
+  return Number.isInteger(discount * 100) ? `${discount * 100}%` : `${(discount * 100).toFixed(2)}%`;
+}
+
+function compactPreviewLine(productId: string, fields: Record<string, string>): string {
+  const fieldCount = Object.keys(fields).length;
+  const samples = Object.entries(fields)
+    .slice(0, 4)
+    .map(([field, value]) => `${field}=${value}`)
+    .join('，');
+  return `商品 ${productId}：${fieldCount} 个价格字段${samples ? `（${samples}${fieldCount > 4 ? '...' : ''}）` : ''}`;
+}
+
+function formatPricePreviewText(input: {
+  productIds: string[];
+  discount?: number;
+  scope?: 'rent_fields' | 'all_price_fields';
+  readyItems: Array<{ productId: string; fields: Record<string, string>; audit?: RentalPriceAuditReference }>;
+  blocked: string[];
+}): string {
+  const readyLines = input.readyItems.slice(0, 12).map((item, index) => `${index + 1}. ${compactPreviewLine(item.productId, item.fields)}${item.audit?.taskId ? `；审计 ${item.audit.taskId}` : ''}`);
+  return [
+    `改价预览：${input.productIds.length} 个端内ID`,
+    input.discount !== undefined ? `折扣：${formatDiscountText(input.discount)}` : undefined,
+    input.scope ? `范围：${input.scope === 'all_price_fields' ? '所有价格字段' : '租金字段'}` : undefined,
+    `端内ID：${input.productIds.join('、')}`,
+    '',
+    ...readyLines,
+    input.readyItems.length > readyLines.length ? `还有 ${input.readyItems.length - readyLines.length} 个商品未展示。` : undefined,
+    '',
+    '安全边界：确认前不会改价；确认后按上面每个商品的审计预览逐个执行，并保留各自回滚文件。',
+    ...(input.blocked.length ? ['', '已阻断，未生成执行确认卡：', ...input.blocked.slice(0, 12)] : []),
+  ].filter((line): line is string => Boolean(line)).join('\n');
+}
+
+function readProductIdArray(value: unknown, maxItems: number): string[] | null {
+  if (!Array.isArray(value) || value.length === 0 || value.length > maxItems) return null;
+  const ids = value.map((item) => typeof item === 'string' ? item.trim() : '').filter(Boolean);
+  if (ids.length !== value.length || ids.some((id) => !/^\d+$/.test(id))) return null;
+  return [...new Set(ids)];
+}
+
+async function rentalPricePreviewResponse(
+  args: Record<string, unknown>,
+  reason: string,
+  client: RentalPriceSkillClient,
+  continuation?: AgentToolConfirmRequest['continuation'],
+): Promise<BotResponse> {
+  const productIds = readProductIdArray(args.productIds, RENTAL_PRICE_PREVIEW_MAX_PRODUCTS);
+  if (!productIds) return { text: `改价预览参数无效：productIds 需要是 1 到 ${RENTAL_PRICE_PREVIEW_MAX_PRODUCTS} 个端内ID。`, metadata: { toolName: 'rental.pricePreview', ok: false } };
+
+  const hasExplicitFields = isRecord(args.fields);
+  const discount = hasExplicitFields ? undefined : readDiscountMultiplier(args.discount);
+  if (!hasExplicitFields && discount === null) {
+    return { text: '改价预览参数无效：需要提供 fields，或提供 discount 折扣倍数，例如九折传 0.9。', metadata: { toolName: 'rental.pricePreview', ok: false, productIds } };
+  }
+  const scope = hasExplicitFields ? undefined : readPriceChangeScope(args.scope);
+
+  const blocked: string[] = [];
+  const readyItems: Array<{ productId: string; fields: Record<string, string>; audit?: RentalPriceAuditReference }> = [];
+  for (const productId of productIds) {
+    const requestArgs: Record<string, unknown> = hasExplicitFields
+      ? { productId, fields: args.fields }
+      : { productId, discount, scope };
+    const rentalRequest = rentalPriceChangeRequestFromToolArguments(requestArgs);
+    if (!rentalRequest) {
+      blocked.push(`商品 ${productId}：改价参数无效`);
+      continue;
+    }
+    try {
+      const preview = await client.preview(rentalRequest);
+      const audit = compactAuditReference(preview.audit);
+      if (audit?.hasErrors) {
+        blocked.push(`商品 ${productId}：审计错误，已阻断`);
+        continue;
+      }
+      if (Object.keys(preview.fields).length === 0) {
+        blocked.push(`商品 ${productId}：没有可改价格字段`);
+        continue;
+      }
+      readyItems.push({
+        productId,
+        fields: preview.fields,
+        ...(audit ? { audit } : {}),
+      });
+    } catch (error) {
+      blocked.push(`商品 ${productId}：预览失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  const text = formatPricePreviewText({ productIds, ...(discount !== undefined && discount !== null ? { discount } : {}), ...(scope ? { scope } : {}), readyItems, blocked });
+  if (blocked.length > 0 || readyItems.length !== productIds.length) {
+    return {
+      text,
+      metadata: { toolName: 'rental.pricePreview', ok: false, productIds, previewCount: readyItems.length },
+    };
+  }
+
+  return {
+    text,
+    card: buildAgentToolConfirmCard({
+      toolName: 'rental.priceApply',
+      arguments: { items: readyItems },
+      reason,
+      ...(continuation ? { continuation } : {}),
+    }),
+    metadata: {
+      toolName: 'rental.pricePreview',
+      ok: true,
+      productIds,
+      previewCount: readyItems.length,
+    },
+  };
+}
+
+function readPriceApplyItems(value: unknown): Array<{ productId: string; fields: Record<string, string>; audit?: RentalPriceAuditReference }> | null {
+  if (!Array.isArray(value) || value.length === 0 || value.length > RENTAL_PRICE_PREVIEW_MAX_PRODUCTS) return null;
+  const items: Array<{ productId: string; fields: Record<string, string>; audit?: RentalPriceAuditReference }> = [];
+  for (const item of value) {
+    if (!isRecord(item)) return null;
+    const productId = readString(item.productId);
+    if (!productId) return null;
+    const request = rentalPriceChangeRequestFromToolArguments({ productId, fields: item.fields });
+    if (!request || request.mode !== 'explicit_fields') return null;
+    items.push({
+      productId,
+      fields: request.fields,
+      ...(isRecord(item.audit) ? { audit: item.audit as RentalPriceAuditReference } : {}),
+    });
+  }
+  return items;
+}
+
+async function rentalPriceApplyResponse(
+  args: Record<string, unknown>,
+  client: RentalPriceSkillClient,
+): Promise<BotResponse> {
+  const items = readPriceApplyItems(args.items);
+  if (!items) throw new Error('改价执行参数无效，请重新发起预览。');
+  const results: RentalPriceExecutionResult[] = [];
+  for (const item of items) {
+    const request: Extract<RentalPriceChangeRequest, { mode: 'explicit_fields' }> = {
+      mode: 'explicit_fields',
+      productId: item.productId,
+      fields: item.fields,
+      ...(item.audit ? { audit: item.audit } : {}),
+    };
+    try {
+      results.push(await client.execute(request));
+    } catch (error) {
+      results.push({ productId: item.productId, ok: false, lines: [error instanceof Error ? error.message : String(error)] });
+    }
+  }
+
+  const success = results.filter((item) => item.ok);
+  const lines = results.flatMap((item, index) => [
+    `${index + 1}. 商品 ${item.productId}：${item.ok ? '成功' : '失败'}`,
+    ...item.lines.slice(0, 8).map((line) => `   ${line}`),
+  ]);
+  return {
+    text: [
+      `改价执行完成：成功 ${success.length}/${results.length}`,
+      '',
+      ...lines,
+    ].join('\n'),
+    metadata: {
+      toolName: 'rental.priceApply',
+      ok: success.length === results.length,
+      productIds: results.map((item) => item.productId),
+      successProductIds: success.map((item) => item.productId),
+      taskIds: results.map((item) => item.audit?.taskId).filter((value): value is string => Boolean(value)),
+      rollbackFiles: results.map((item) => item.audit?.rollbackFile).filter((value): value is string => Boolean(value)),
+    },
+  };
 }
 
 function normalizeMatchText(value: string): string {
@@ -962,6 +1198,8 @@ export async function executeAgentToolRequest(
       const audit = createLinkRegistry(registryContext.registry, registryContext.overrideRisks).audit();
       return { text: formatLinkRegistryOverviewText(audit), card: buildLinkRegistryOverviewCard(audit) };
     }
+    case 'linkRegistry.resolveProducts':
+      return linkRegistryResolveProductsResponse(request.arguments, options);
     case 'operationsLearning.startQuiz': {
       const latest = await findLatestReportContext(outputDir);
       return latest ? startOperationsLearningSession(outputDir, latest.context) : { text: '还没有找到公域日报上下文。' };
@@ -1075,6 +1313,10 @@ export async function executeAgentToolRequest(
       const preview = await client.preview(rentalRequest);
       return { text: `请确认商品 ${rentalRequest.productId} 改价`, card: buildRentalPricePreviewCard(preview, { reason: request.reason, continuation: request.continuation }) };
     }
+    case 'rental.pricePreview':
+      return rentalPricePreviewResponse(request.arguments, request.reason, options.rentalPriceClient ?? createRentalPriceSkillClient(), request.continuation);
+    case 'rental.priceApply':
+      return rentalPriceApplyResponse(request.arguments, options.rentalPriceClient ?? createRentalPriceSkillClient());
     case 'rental.priceSnapshot': {
       const query = requireString(request.arguments.query, 'query');
       return rentalPriceSnapshotResponse(query, options.rentalPriceClient ?? createRentalPriceSkillClient(), options);

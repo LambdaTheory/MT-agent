@@ -1,6 +1,7 @@
 import { basename, dirname } from 'node:path';
 import { buildAgentToolConfirmCard } from '../agentRuntime/approvalCard.js';
 import { buildAgentClarificationCard } from '../agentRuntime/clarificationCard.js';
+import { isPreConfirmationPlanningTool } from '../agentRuntime/planningTools.js';
 import { listAgentPlannerTools, validateAgentMultiStepPlannerProposal, validateAgentPlannerClarificationProposal, validateAgentPlannerProposal, type AgentPlannerProvider } from '../agentRuntime/planner.js';
 import { buildAgentLearningPlannerHints, summarizeAgentLearning } from '../agentLearning/store.js';
 import { parseAgentDataIntent } from '../agentData/intent.js';
@@ -308,7 +309,7 @@ async function agentPlannerResponse(
     const preview = await rentalPriceClient.preview(rentalRequest);
     return { text: `请确认商品 ${rentalRequest.productId} 改价`, card: buildRentalPricePreviewCard(preview, { reason: parsed.proposal.reason }) };
   }
-  if (parsed.proposal.selectedTool === 'rental.specRemovePlan' || parsed.proposal.selectedTool === 'rental.newLinkBatchPlan') {
+  if (isPreConfirmationPlanningTool(parsed.proposal.selectedTool)) {
     return executeAgentToolRequest(request, outputDir, {
       rentalPriceClient: options.rentalPriceClient,
       closedOrderFetchImpl: options.closedOrderFetchImpl,

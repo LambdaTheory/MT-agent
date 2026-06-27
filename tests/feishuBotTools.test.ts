@@ -297,6 +297,42 @@ async function writeX200PriceSnapshotRegistryFixtures(rootDir: string): Promise<
   };
 }
 
+async function writeAceProPriceRegistryFixtures(rootDir: string): Promise<{
+  productIdMapPath: string;
+  productNameMapPath: string;
+  firstSeenPath: string;
+  lifecyclePath: string;
+  overridesPath: string;
+  artifactsDir: string;
+}> {
+  const configDir = join(rootDir, 'config');
+  const outputDir = join(rootDir, 'output');
+  const stateDir = join(outputDir, 'state');
+  await mkdir(configDir, { recursive: true });
+  await mkdir(stateDir, { recursive: true });
+  await writeFile(join(configDir, 'product-id-map.json'), JSON.stringify({ p841: '841', p842: '842' }), 'utf8');
+  await writeFile(join(configDir, 'product-name-map.json'), JSON.stringify({
+    '841': '影石 Insta360 Ace Pro 2 标准套装',
+    '842': '影石 Insta360 Ace Pro 2 续航套装',
+  }), 'utf8');
+  await writeFile(join(configDir, 'link-registry-overrides.json'), JSON.stringify({
+    version: 1,
+    entries: [
+      { internalProductId: '841', productName: '影石 Insta360 Ace Pro 2 标准套装', shortName: 'Ace Pro 2', aliases: ['acepro2', 'Ace Pro 2'], sameSkuGroupId: 'insta360-ace-pro-2', status: 'active', updatedAt: '2026-06-27' },
+      { internalProductId: '842', productName: '影石 Insta360 Ace Pro 2 续航套装', shortName: 'Ace Pro 2', aliases: ['acepro2', 'Ace Pro 2'], sameSkuGroupId: 'insta360-ace-pro-2', status: 'active', updatedAt: '2026-06-27' },
+    ],
+    sameSkuGroupAliasRules: [{ sameSkuGroupId: 'insta360-ace-pro-2', aliases: ['acepro2', 'Ace Pro 2'] }],
+  }), 'utf8');
+  return {
+    productIdMapPath: join(configDir, 'product-id-map.json'),
+    productNameMapPath: join(configDir, 'product-name-map.json'),
+    firstSeenPath: join(stateDir, 'goods-first-seen.json'),
+    lifecyclePath: join(stateDir, 'goods-link-lifecycle.json'),
+    overridesPath: join(configDir, 'link-registry-overrides.json'),
+    artifactsDir: outputDir,
+  };
+}
+
 async function writeX300SpecRemoveRegistryFixtures(rootDir: string): Promise<{
   productIdMapPath: string;
   productNameMapPath: string;
@@ -2400,6 +2436,116 @@ describe('handleBotIntent', () => {
     expect(JSON.stringify(response.card)).toContain('rental_price_confirm');
     expect(JSON.stringify(response.card)).toContain('用户要求把 761 的 1 天租金改成 22');
     expect(JSON.stringify(response.card)).not.toContain('agent_tool_confirm');
+  });
+
+  it('lets the Agent compose product resolution and atomic price preview before group discount execution', async () => {
+    const outputDir = await writeContext();
+    const registryRoot = await mkdtemp(join(tmpdir(), 'mt-agent-ace-price-registry-'));
+    const registryPaths = await writeAceProPriceRegistryFixtures(registryRoot);
+    const planner: AgentPlannerProvider = {
+      async proposePlan(request) {
+        expect(request.tools.map((tool) => tool.name)).toContain('linkRegistry.resolveProducts');
+        expect(request.tools.map((tool) => tool.name)).toContain('rental.pricePreview');
+        expect(request.tools.map((tool) => tool.name)).not.toContain('rental.priceApply');
+        return JSON.stringify({
+          goal: '所有 Ace Pro 2 商品整体价格打九折',
+          steps: [
+            { id: 'resolve', toolName: 'linkRegistry.resolveProducts', arguments: { query: 'acepro2' }, reason: '先解析商品名对应的端内ID集合' },
+            { toolName: 'rental.pricePreview', arguments: { productIds: '${resolve.productIds}', discount: 0.9, scope: 'all_price_fields' }, reason: '对解析出的商品逐个生成改价审计预览' },
+          ],
+          confidence: 0.94,
+          reason: '用户要求对一个商品组整体打九折，需要先解析集合再预览改价',
+        });
+      },
+    };
+    const previewCalls: unknown[] = [];
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview(request) {
+        previewCalls.push(request);
+        if (request.mode !== 'global_discount') throw new Error('expected global discount preview');
+        return {
+          productId: request.productId,
+          fields: { rent1day: request.productId === '841' ? '90.00' : '81.00', marketPrice: '900.00' },
+          lines: ['preview: ok'],
+          warnings: [],
+          audit: { taskId: `task_${request.productId}_preview`, rollbackFile: `rollback-${request.productId}.json`, hasErrors: false },
+        };
+      },
+      async execute() { throw new Error('execute should not run before confirmation'); },
+      async copy() { throw new Error('copy should not run'); },
+      async delist() { throw new Error('delist should not run'); },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+
+    const response = await handleBotIntent({ type: 'unknown', text: '所有acepro2,整体价格打九折' }, outputDir, {
+      agentPlannerProvider: planner,
+      rentalPriceClient,
+      closedOrderRegistryPaths: registryPaths,
+    });
+
+    expect(previewCalls).toEqual([
+      { mode: 'global_discount', productId: '841', discount: 0.9, scope: 'all_price_fields' },
+      { mode: 'global_discount', productId: '842', discount: 0.9, scope: 'all_price_fields' },
+    ]);
+    expect(response.text).toContain('步骤 1/2：linkRegistry.resolveProducts');
+    expect(response.text).toContain('步骤 2/2：rental.pricePreview');
+    expect(response.text).toContain('端内ID：841、842');
+    expect(JSON.stringify(response.card)).toContain('agent_tool_confirm');
+    expect(JSON.stringify(response.card)).toContain('rental.priceApply');
+    const confirmRequest = readAgentToolConfirmRequestFromCard(response.card);
+    expect(confirmRequest.toolName).toBe('rental.priceApply');
+    expect((confirmRequest.arguments.items as Array<{ productId: string }>).map((item) => item.productId)).toEqual(['841', '842']);
+  });
+
+  it('executes atomic rental.priceApply after confirmation and returns audit references', async () => {
+    const calls: unknown[] = [];
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run after confirmation'); },
+      async execute(request) {
+        calls.push(request);
+        return {
+          productId: request.productId,
+          ok: true,
+          lines: ['apply: ok', 'submit: ok', 'verify: ok'],
+          audit: { taskId: `task_${request.productId}_done`, status: 'completed', rollbackFile: `rollback-${request.productId}.json` },
+        };
+      },
+      async copy() { throw new Error('copy should not run'); },
+      async delist() { throw new Error('delist should not run'); },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+
+    const response = await executeAgentToolRequest(
+      {
+        toolName: 'rental.priceApply',
+        arguments: {
+          items: [
+            { productId: '841', fields: { rent1day: '90.00' }, audit: { taskId: 'task_841_preview', rollbackFile: 'rollback-841.json' } },
+            { productId: '842', fields: { rent1day: '81.00' }, audit: { taskId: 'task_842_preview', rollbackFile: 'rollback-842.json' } },
+          ],
+        },
+        reason: '用户确认对 Ace Pro 2 商品组整体打九折',
+      },
+      'output',
+      { rentalPriceClient },
+    );
+
+    expect(calls).toEqual([
+      { mode: 'explicit_fields', productId: '841', fields: { rent1day: '90.00' }, audit: { taskId: 'task_841_preview', rollbackFile: 'rollback-841.json' } },
+      { mode: 'explicit_fields', productId: '842', fields: { rent1day: '81.00' }, audit: { taskId: 'task_842_preview', rollbackFile: 'rollback-842.json' } },
+    ]);
+    expect(response.text).toContain('改价执行完成：成功 2/2');
+    expect(response.metadata).toMatchObject({
+      toolName: 'rental.priceApply',
+      ok: true,
+      productIds: ['841', '842'],
+      taskIds: ['task_841_done', 'task_842_done'],
+      rollbackFiles: ['rollback-841.json', 'rollback-842.json'],
+    });
   });
 
   it('returns a rollback confirmation card when a message contains rollback and an audit task id', async () => {

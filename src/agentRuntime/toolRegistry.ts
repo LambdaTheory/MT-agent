@@ -6,6 +6,27 @@ const keywordArgumentsSchema = { type: 'object', properties: { keyword: { type: 
 const productRankingArgumentsSchema = { type: 'object', properties: { query: { type: 'string' } }, required: ['query'], additionalProperties: false };
 const inventoryStatusQueryArgumentsSchema = { type: 'object', properties: { query: { type: 'string' } }, required: ['query'], additionalProperties: false };
 const positiveIntegerLikeSchema = { type: ['integer', 'string'], pattern: '^[1-9]\\d*$', minimum: 1 };
+const linkRegistryResolveProductsArgumentsSchema = {
+  type: 'object',
+  properties: {
+    query: { type: 'string' },
+    includeUnknown: { type: 'boolean' },
+  },
+  required: ['query'],
+  additionalProperties: false,
+};
+const linkRegistryResolveProductsResultMetadataSchema = {
+  type: 'object',
+  description: 'Metadata available after resolving a product name, alias, internal id, or same-SKU group.',
+  properties: {
+    status: { type: 'string' },
+    query: { type: 'string' },
+    sameSkuGroupId: { type: 'string' },
+    productIds: { type: 'array', items: { type: 'string' }, description: 'Internal product ids resolved for follow-up tools such as rental.pricePreview.productIds.' },
+    count: { type: 'integer' },
+    matchText: { type: 'string' },
+  },
+};
 const productRankingResultMetadataSchema = {
   type: 'object',
   description: 'Metadata available to later planner steps after product.rankBestSameSku.',
@@ -176,6 +197,48 @@ const rentalPriceChangeArgumentsSchema = {
   required: ['productId'],
   additionalProperties: false,
 };
+const rentalPricePreviewArgumentsSchema = {
+  type: 'object',
+  properties: {
+    productIds: { type: 'array', minItems: 1, maxItems: 12, items: { type: 'string' } },
+    fields: { type: 'object' },
+    discount: { type: ['number', 'string'] },
+    scope: { type: 'string', enum: ['rent_fields', 'all_price_fields'] },
+  },
+  required: ['productIds'],
+  additionalProperties: false,
+};
+const rentalPricePreviewResultMetadataSchema = {
+  type: 'object',
+  description: 'Metadata available after price preview generation.',
+  properties: {
+    ok: { type: 'boolean' },
+    productIds: { type: 'array', items: { type: 'string' } },
+    previewCount: { type: 'integer' },
+  },
+};
+const rentalPriceApplyArgumentsSchema = {
+  type: 'object',
+  properties: {
+    items: {
+      type: 'array',
+      minItems: 1,
+      maxItems: 12,
+      items: {
+        type: 'object',
+        properties: {
+          productId: { type: 'string' },
+          fields: { type: 'object' },
+          audit: { type: 'object' },
+        },
+        required: ['productId', 'fields'],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ['items'],
+  additionalProperties: false,
+};
 const rentalPriceRollbackArgumentsSchema = {
   type: 'object',
   properties: {
@@ -290,6 +353,14 @@ const agentTools: AgentToolDefinition[] = [
     risk: 'read',
     requiresConfirmation: false,
     inputSchema: noArgumentsSchema,
+  },
+  {
+    name: 'linkRegistry.resolveProducts',
+    description: '按商品名、别名、端内ID或同款组解析链接档案，返回可供后续工具使用的端内ID列表；只做解析，不执行运营动作',
+    risk: 'read',
+    requiresConfirmation: false,
+    inputSchema: linkRegistryResolveProductsArgumentsSchema,
+    resultMetadataSchema: linkRegistryResolveProductsResultMetadataSchema,
   },
   {
     name: 'operationsLearning.startQuiz',
@@ -479,6 +550,14 @@ const agentTools: AgentToolDefinition[] = [
     resultMetadataSchema: rentalPriceChangeResultMetadataSchema,
   },
   {
+    name: 'rental.pricePreview',
+    description: '按明确端内ID列表生成租赁商品改价审计预览和确认卡；不负责解析商品名或同款组，确认前不会改价',
+    risk: 'high',
+    requiresConfirmation: true,
+    inputSchema: rentalPricePreviewArgumentsSchema,
+    resultMetadataSchema: rentalPricePreviewResultMetadataSchema,
+  },
+  {
     name: 'rental.priceSnapshot',
     description: '按端内ID、商品别名或同款组读取租赁后台当前规格价格，并按 SKU 聚合平均租金。适用于“x200u 的定价情况怎么样”。这是只读查询，不用于改价。',
     risk: 'read',
@@ -500,6 +579,14 @@ const agentTools: AgentToolDefinition[] = [
     requiresConfirmation: true,
     inputSchema: rentalPriceRollbackArgumentsSchema,
     resultMetadataSchema: rentalPriceRollbackResultMetadataSchema,
+  },
+  {
+    name: 'rental.priceApply',
+    description: '执行已经预览并确认的租赁商品改价请求',
+    risk: 'high',
+    requiresConfirmation: true,
+    plannerVisible: false,
+    inputSchema: rentalPriceApplyArgumentsSchema,
   },
   {
     name: 'rental.operationConfirmRequest',

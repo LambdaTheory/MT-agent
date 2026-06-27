@@ -41,12 +41,19 @@ describe('agent runtime LLM planner', () => {
     expect(system).toContain('Do not return selectedWorkflow');
     expect(system).toContain('resultMetadataSchema');
     expect(system).toContain('use rental.priceSnapshot');
+    expect(system).toContain('linkRegistry.resolveProducts');
+    expect(system).toContain('rental.pricePreview');
     expect(system).toContain('use rental.specRemovePlan');
     expect(system).toContain('should normally be the final step');
     expect(system).not.toContain('For composite flows, return selectedWorkflow');
     expect(user.tools.map((tool) => tool.name)).toContain('rental.newLinkBatchPlan');
+    expect(user.tools.map((tool) => tool.name)).toContain('linkRegistry.resolveProducts');
+    expect(user.tools.map((tool) => tool.name)).toContain('rental.pricePreview');
     expect(user.tools.find((tool) => tool.name === 'product.rankBestSameSku')?.resultMetadataSchema).toMatchObject({
       properties: { bestProductId: { type: 'string' } },
+    });
+    expect(user.tools.find((tool) => tool.name === 'linkRegistry.resolveProducts')?.resultMetadataSchema).toMatchObject({
+      properties: { productIds: { type: 'array' } },
     });
     expect(user.tools.find((tool) => tool.name === 'rental.copy')?.resultMetadataSchema).toMatchObject({
       properties: { newProductId: { type: 'string' } },

@@ -223,7 +223,7 @@ export function parseRentalPriceChange(text: string): RentalPriceChangeRequest |
   return Object.keys(fields).length ? { mode: 'explicit_fields', productId, fields } : null;
 }
 
-function compactAuditReference(audit: RentalPriceAuditReference | undefined): RentalPriceAuditReference | undefined {
+export function compactAuditReference(audit: RentalPriceAuditReference | undefined): RentalPriceAuditReference | undefined {
   if (!audit) return undefined;
   return {
     ...(audit.taskId ? { taskId: audit.taskId } : {}),

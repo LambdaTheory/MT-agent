@@ -18,6 +18,7 @@ describe('agent runtime tool registry', () => {
       'inventory.statusOverview',
       'inventory.statusQuery',
       'linkRegistry.overview',
+      'linkRegistry.resolveProducts',
       'operationsLearning.startQuiz',
       'operationsLearning.summary',
       'operationsLearning.history',
@@ -44,13 +45,15 @@ describe('agent runtime tool registry', () => {
       'rental.specAddAndRefresh',
       'rental.specRemovePlan',
       'rental.priceChange',
+      'rental.pricePreview',
       'rental.priceSnapshot',
       'rental.newLinkBatchPlan',
       'rental.priceRollback',
+      'rental.priceApply',
       'rental.operationConfirmRequest',
     ]);
     expect(listAgentTools().map((tool) => tool.name)).toContain('rental.newLinkBatchPlan');
-    expect(listAgentTools().map((tool) => tool.name)).not.toContain('rental.pricePreview');
+    expect(listAgentTools().map((tool) => tool.name)).toContain('rental.pricePreview');
     expect(listAgentTools().map((tool) => tool.name)).not.toContain('publicTraffic.crawlSources');
   });
 
@@ -60,7 +63,7 @@ describe('agent runtime tool registry', () => {
 
     const tools = listAgentTools();
     tools.pop();
-    expect(listAgentTools()).toHaveLength(39);
+    expect(listAgentTools()).toHaveLength(42);
   });
 
   it('returns defensive copies of tool metadata', () => {
@@ -129,6 +132,7 @@ describe('agent runtime tool registry', () => {
     expect(findAgentTool('inventory.statusOverview')).toMatchObject({ risk: 'read', requiresConfirmation: false });
     expect(findAgentTool('inventory.statusQuery')).toMatchObject({ risk: 'read', requiresConfirmation: false });
     expect(findAgentTool('linkRegistry.overview')).toMatchObject({ risk: 'read', requiresConfirmation: false });
+    expect(findAgentTool('linkRegistry.resolveProducts')).toMatchObject({ risk: 'read', requiresConfirmation: false });
     expect(findAgentTool('operationsLearning.summary')).toMatchObject({ risk: 'read', requiresConfirmation: false });
     expect(findAgentTool('operationsLearning.history')).toMatchObject({ risk: 'read', requiresConfirmation: false });
     expect(findAgentTool('agentLearning.summary')).toMatchObject({ risk: 'read', requiresConfirmation: false });
@@ -154,9 +158,11 @@ describe('agent runtime tool registry', () => {
     expect(findAgentTool('rental.specAddAndRefresh')).toMatchObject({ risk: 'high', requiresConfirmation: true });
     expect(findAgentTool('rental.specRemovePlan')).toMatchObject({ risk: 'high', requiresConfirmation: true });
     expect(findAgentTool('rental.priceChange')).toMatchObject({ risk: 'high', requiresConfirmation: true });
+    expect(findAgentTool('rental.pricePreview')).toMatchObject({ risk: 'high', requiresConfirmation: true });
     expect(findAgentTool('rental.priceSnapshot')).toMatchObject({ risk: 'read', requiresConfirmation: false });
     expect(findAgentTool('rental.newLinkBatchPlan')).toMatchObject({ risk: 'high', requiresConfirmation: true });
     expect(findAgentTool('rental.priceRollback')).toMatchObject({ risk: 'high', requiresConfirmation: true });
+    expect(findAgentTool('rental.priceApply')).toMatchObject({ risk: 'high', requiresConfirmation: true, plannerVisible: false });
     expect(findAgentTool('rental.operationConfirmRequest')).toMatchObject({ risk: 'high', requiresConfirmation: true });
   });
 
@@ -206,6 +212,7 @@ describe('agent runtime tool registry', () => {
       'inventory.statusOverview',
       'inventory.statusQuery',
       'linkRegistry.overview',
+      'linkRegistry.resolveProducts',
       'operationsLearning.startQuiz',
       'operationsLearning.summary',
       'operationsLearning.history',
@@ -231,11 +238,13 @@ describe('agent runtime tool registry', () => {
       'rental.specAddAndRefresh',
       'rental.specRemovePlan',
       'rental.priceChange',
+      'rental.pricePreview',
       'rental.priceSnapshot',
       'rental.newLinkBatchPlan',
       'rental.priceRollback',
     ]);
     expect(plannerToolNames).not.toContain('rental.operationConfirmRequest');
+    expect(plannerToolNames).not.toContain('rental.priceApply');
     expect(plannerToolNames).not.toContain('operations.refreshActivityExecute');
   });
 
@@ -245,6 +254,12 @@ describe('agent runtime tool registry', () => {
       properties: {
         bestProductId: { type: 'string' },
         ranking: { type: 'array' },
+      },
+    });
+    expect(plannerTools.find((tool) => tool.name === 'linkRegistry.resolveProducts')?.resultMetadataSchema).toMatchObject({
+      properties: {
+        productIds: { type: 'array' },
+        count: { type: 'integer' },
       },
     });
     expect(plannerTools.find((tool) => tool.name === 'rental.copy')?.resultMetadataSchema).toMatchObject({
@@ -257,6 +272,12 @@ describe('agent runtime tool registry', () => {
       properties: {
         taskId: { type: 'string' },
         rollbackFile: { type: 'string' },
+      },
+    });
+    expect(plannerTools.find((tool) => tool.name === 'rental.pricePreview')?.resultMetadataSchema).toMatchObject({
+      properties: {
+        productIds: { type: 'array' },
+        previewCount: { type: 'integer' },
       },
     });
     expect(plannerTools.find((tool) => tool.name === 'rental.newLinkBatchPlan')?.resultMetadataSchema).toMatchObject({
@@ -307,6 +328,14 @@ describe('agent runtime tool registry', () => {
       },
       additionalProperties: false,
     });
+    expect(findAgentTool('linkRegistry.resolveProducts')?.inputSchema).toMatchObject({
+      properties: {
+        query: { type: 'string' },
+        includeUnknown: { type: 'boolean' },
+      },
+      required: ['query'],
+      additionalProperties: false,
+    });
     expect(findAgentTool('operations.refreshActivityExecute')?.inputSchema).toMatchObject({
       properties: {
         date: { type: 'string' },
@@ -324,6 +353,15 @@ describe('agent runtime tool registry', () => {
         scope: { type: 'string' },
       },
       required: ['productId'],
+      additionalProperties: false,
+    });
+    expect(findAgentTool('rental.pricePreview')?.inputSchema).toMatchObject({
+      properties: {
+        productIds: { type: 'array' },
+        discount: { type: ['number', 'string'] },
+        scope: { type: 'string' },
+      },
+      required: ['productIds'],
       additionalProperties: false,
     });
     expect(findAgentTool('rental.priceSnapshot')?.inputSchema).toMatchObject({
