@@ -1,0 +1,145 @@
+import { describe, expect, it } from 'vitest';
+import { runPublicTrafficReportQuery } from '../src/feishuBot/reportQuery.js';
+import type { PublicTrafficDataReportContext, PublicTrafficPeriodMetrics, PublicTrafficProductDataRow } from '../src/publicTraffic/types.js';
+
+function period(overrides: Partial<PublicTrafficPeriodMetrics> = {}): PublicTrafficPeriodMetrics {
+  return {
+    exposure: 0,
+    publicVisits: 0,
+    dashboardVisits: 0,
+    createdOrders: 0,
+    signedOrders: 0,
+    reviewedOrders: 0,
+    shippedOrders: 0,
+    amount: 0,
+    exposureVisitRate: 0,
+    visitCreatedOrderRate: 0,
+    visitShipmentRate: 0,
+    hasExposureData: true,
+    hasDashboardData: true,
+    ...overrides,
+  };
+}
+
+function row(id: string, productName: string, sevenDay: Partial<PublicTrafficPeriodMetrics>): PublicTrafficProductDataRow {
+  return {
+    productName,
+    platformProductId: `platform-${id}`,
+    displayProductId: `端内ID ${id}`,
+    custodyDays: 8,
+    periods: {
+      '1d': period({ publicVisits: Number(id), exposure: Number(id) * 2 }),
+      '7d': period(sevenDay),
+      '30d': period({ publicVisits: 3000, exposure: 30000 }),
+    },
+  };
+}
+
+const reportContext: PublicTrafficDataReportContext = {
+  date: '2026-06-22',
+  summary: {
+    '1d': { exposure: 1000, publicVisits: 50, dashboardVisits: 45, createdOrders: 3, shippedOrders: 1, amount: 88, exposureVisitRate: 0.05, visitCreatedOrderRate: 0.06, visitShipmentRate: 0.02 },
+    '7d': { exposure: 7000, publicVisits: 300, dashboardVisits: 280, createdOrders: 20, shippedOrders: 8, amount: 500, exposureVisitRate: 0.04, visitCreatedOrderRate: 0.07, visitShipmentRate: 0.026 },
+    '30d': { exposure: 30000, publicVisits: 1000, dashboardVisits: 920, createdOrders: 60, shippedOrders: 20, amount: 2000, exposureVisitRate: 0.033, visitCreatedOrderRate: 0.06, visitShipmentRate: 0.02 },
+  },
+  conclusions: [{ label: '重点', text: '访问增长但发货偏低。' }],
+  dataQualityNotes: ['访问页 30 日首版缺失。'],
+  rows: [
+    row('101', 'Pocket 3 标准版', { exposure: 2000, publicVisits: 500, amount: 1200, shippedOrders: 3 }),
+    row('102', 'Pocket 3 套装版', { exposure: 3000, publicVisits: 900, amount: 2200, shippedOrders: 5 }),
+    row('103', 'SX70 长焦相机', { exposure: 100, publicVisits: 20, amount: 80, shippedOrders: 0 }),
+  ],
+  lowExposure: [{ identifier: '端内ID 103', action: '观察', reason: '7日曝光低', priority: 'medium' }],
+  weakClick: [],
+  weakConversion: [{ identifier: '端内ID 101', action: '改素材', reason: '访问到发货低', priority: 'high' }],
+  highPotential: [{ identifier: '端内ID 102', action: '加新链', reason: '访问高', priority: 'high' }],
+  newProductObservation: [],
+  lifecycleGovernance: [],
+  custodyAbnormal: [
+    { identifier: '端内ID 201', action: '检查托管', reason: '托管异常', priority: 'high' },
+    { identifier: '端内ID 202', action: '检查托管', reason: '托管异常', priority: 'medium' },
+  ],
+  recommendedActions: [{ identifier: '端内ID 102', action: '铺新链', reason: '高潜', priority: 'high' }],
+  emptySectionNotes: {
+    lowExposure: '',
+    weakClick: '',
+    weakConversion: '',
+    highPotential: '',
+    newProductObservation: '',
+    lifecycleGovernance: '',
+    recommendedActions: '',
+  },
+  orderAnalysis: {
+    runDate: '2026-06-23',
+    capturedAt: '2026-06-23T01:00:00.000Z',
+    pages: {
+      overview: {
+        key: 'overview',
+        label: '标准订单分析',
+        dataDate: '2026-06-22',
+        indicators: [
+          { label: '创建订单数', value: '12', delta: '+2' },
+          { label: '签约发货率', value: '66.67%', delta: '+1.00%' },
+        ],
+      },
+      delivery: { key: 'delivery', label: '发货分析', dataDate: '2026-06-22', indicators: [] },
+      return: { key: 'return', label: '归还分析', dataDate: '2026-06-22', indicators: [] },
+      customs: { key: 'customs', label: '关单分析', dataDate: '2026-06-22', indicators: [] },
+    },
+  },
+};
+
+describe('public traffic report freeform query', () => {
+  it('sorts product rows by selected period metric', () => {
+    const text = runPublicTrafficReportQuery(reportContext, {
+      target: 'products',
+      period: '7d',
+      metrics: ['publicVisits', 'amount'],
+      sortBy: 'publicVisits',
+      limit: 2,
+    });
+
+    expect(text).toContain('公域日报商品查询 2026-06-22');
+    expect(text.indexOf('端内ID 102')).toBeLessThan(text.indexOf('端内ID 101'));
+    expect(text).toContain('访问 900');
+    expect(text).not.toContain('端内ID 103');
+  });
+
+  it('counts all report sections for issue-pool questions', () => {
+    const text = runPublicTrafficReportQuery(reportContext, { target: 'sectionCounts' });
+
+    expect(text).toContain('公域日报问题池数量 2026-06-22');
+    expect(text).toContain('曝光低：1 条');
+    expect(text).toContain('托管异常：2 条');
+    expect(text).toContain('建议操作：1 条');
+  });
+
+  it('queries a named section with filters', () => {
+    const text = runPublicTrafficReportQuery(reportContext, {
+      target: 'section',
+      section: 'custodyAbnormal',
+      filters: [{ field: 'priority', operator: 'eq', value: 'high' }],
+    });
+
+    expect(text).toContain('托管异常');
+    expect(text).toContain('端内ID 201');
+    expect(text).not.toContain('端内ID 202');
+  });
+
+  it('filters order analysis indicators by user wording', () => {
+    const text = runPublicTrafficReportQuery(reportContext, {
+      target: 'orders',
+      orderPage: 'overview',
+      orderIndicator: '签约发货率',
+    });
+
+    expect(text).toContain('订单分析 2026-06-22');
+    expect(text).toContain('签约发货率：66.67%');
+    expect(text).not.toContain('创建订单数');
+  });
+
+  it('reports source data quality and conclusions', () => {
+    expect(runPublicTrafficReportQuery(reportContext, { target: 'dataQuality' })).toContain('访问页 30 日首版缺失');
+    expect(runPublicTrafficReportQuery(reportContext, { target: 'conclusions' })).toContain('访问增长但发货偏低');
+  });
+});

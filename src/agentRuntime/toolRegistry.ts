@@ -3,6 +3,99 @@ import type { AgentToolDefinition } from './tool.js';
 const noArgumentsSchema = { type: 'object', additionalProperties: false };
 const reportDateSchema = { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' };
 const optionalReportDateArgumentsSchema = { type: 'object', properties: { date: reportDateSchema }, additionalProperties: false };
+const reportPeriodSchema = { type: 'string', enum: ['1d', '7d', '30d'] };
+const reportMetricSchema = {
+  type: 'string',
+  enum: [
+    'exposure',
+    'publicVisits',
+    'dashboardVisits',
+    'createdOrders',
+    'signedOrders',
+    'reviewedOrders',
+    'shippedOrders',
+    'createdOrderAmount',
+    'signedOrderAmount',
+    'reviewedOrderAmount',
+    'shippedOrderAmount',
+    'amount',
+    'exposureVisitRate',
+    'visitCreatedOrderRate',
+    'visitShipmentRate',
+    'custodyDays',
+  ],
+};
+const reportSectionSchema = {
+  type: 'string',
+  enum: [
+    'lowExposure',
+    'weakClick',
+    'weakConversion',
+    'highPotential',
+    'newProductObservation',
+    'lifecycleGovernance',
+    'custodyAbnormal',
+    'recommendedActions',
+    'newProductPool',
+    'removedLinks',
+  ],
+};
+const reportQueryFieldSchema = {
+  type: 'string',
+  enum: [
+    ...reportMetricSchema.enum,
+    'productName',
+    'productId',
+    'platformProductId',
+    'action',
+    'reason',
+    'priority',
+  ],
+};
+const reportQuerySortFieldSchema = {
+  type: 'string',
+  enum: [
+    ...reportMetricSchema.enum,
+    'productName',
+    'productId',
+    'platformProductId',
+    'action',
+    'priority',
+  ],
+};
+const publicTrafficReportQueryArgumentsSchema = {
+  type: 'object',
+  properties: {
+    target: { type: 'string', enum: ['summary', 'products', 'section', 'sectionCounts', 'orders', 'dataQuality', 'conclusions'] },
+    date: reportDateSchema,
+    period: reportPeriodSchema,
+    periods: { type: 'array', minItems: 1, maxItems: 3, items: reportPeriodSchema },
+    metrics: { type: 'array', minItems: 1, maxItems: 8, items: reportMetricSchema },
+    productQuery: { type: 'string' },
+    section: reportSectionSchema,
+    sortBy: reportQuerySortFieldSchema,
+    sortDirection: { type: 'string', enum: ['asc', 'desc'] },
+    limit: { type: ['integer', 'string'], pattern: '^[1-9]\\d*$', minimum: 1 },
+    filters: {
+      type: 'array',
+      maxItems: 6,
+      items: {
+        type: 'object',
+        properties: {
+          field: reportQueryFieldSchema,
+          operator: { type: 'string', enum: ['eq', 'neq', 'gt', 'gte', 'lt', 'lte', 'contains'] },
+          value: { type: ['string', 'number', 'boolean'] },
+        },
+        required: ['field', 'operator', 'value'],
+        additionalProperties: false,
+      },
+    },
+    orderPage: { type: 'string', enum: ['overview', 'delivery', 'return', 'customs', 'all'] },
+    orderIndicator: { type: 'string' },
+  },
+  required: ['target'],
+  additionalProperties: false,
+};
 const keywordArgumentsSchema = { type: 'object', properties: { keyword: { type: 'string' }, date: reportDateSchema }, required: ['keyword'], additionalProperties: false };
 const productRankingArgumentsSchema = { type: 'object', properties: { query: { type: 'string' } }, required: ['query'], additionalProperties: false };
 const inventoryStatusQueryArgumentsSchema = { type: 'object', properties: { query: { type: 'string' } }, required: ['query'], additionalProperties: false };
@@ -311,6 +404,13 @@ const agentTools: AgentToolDefinition[] = [
     risk: 'read',
     requiresConfirmation: false,
     inputSchema: optionalReportDateArgumentsSchema,
+  },
+  {
+    name: 'publicTraffic.reportQuery',
+    description: '通用只读日报查询工具：查询已保存公域日报中的汇总、商品明细、问题池、订单分析、数据源状态和结论。适合“访问最高前20”“各问题池多少条”“托管异常有哪些”“订单签约发货率多少”等自然语言问题。',
+    risk: 'read',
+    requiresConfirmation: false,
+    inputSchema: publicTrafficReportQueryArgumentsSchema,
   },
   {
     name: 'product.query',

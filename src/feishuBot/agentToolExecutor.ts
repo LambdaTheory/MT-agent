@@ -71,6 +71,7 @@ import {
   type RentalPriceSkillClient,
 } from './rentalPrice.js';
 import { findReadOnlyTool } from './readOnlyToolRegistry.js';
+import { runPublicTrafficReportQuery, type PublicTrafficReportQueryArguments } from './reportQuery.js';
 import { findLatestReportContext, findReportContextByDate, formatConversionSummary, formatLatestSummary, formatProductRows, parseNumericProductIdList, queryProductRows } from './reportStore.js';
 
 export interface AgentToolExecutionOptions {
@@ -1169,6 +1170,15 @@ export async function executeAgentToolRequest(
       const date = readOptionalDate(request.arguments.date);
       const report = await findReportContextForTool(outputDir, date);
       return { text: report ? formatConversionSummary(report.context) : missingReportContextText(date) };
+    }
+    case 'publicTraffic.reportQuery': {
+      const date = readOptionalDate(request.arguments.date);
+      const report = await findReportContextForTool(outputDir, date);
+      return {
+        text: report
+          ? runPublicTrafficReportQuery(report.context, { ...request.arguments, ...(date ? { date } : {}) } as PublicTrafficReportQueryArguments)
+          : missingReportContextText(date),
+      };
     }
     case 'product.query': {
       const date = readOptionalDate(request.arguments.date);

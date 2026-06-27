@@ -1,3 +1,6 @@
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { executeAgentToolRequest } from '../src/feishuBot/agentToolExecutor.js';
 
@@ -72,6 +75,61 @@ describe('executeAgentToolRequest public traffic report', () => {
     expect(response.text).toContain('访问页补抓完成');
     expect(response.text).toContain('已重建日报并重发飞书');
     expect(response.text).toContain('1日：完整');
+  });
+
+  it('runs generic report queries against an explicit report data date', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'mt-agent-report-query-'));
+    const runDir = join(dir, '2026-06-23');
+    await mkdir(runDir, { recursive: true });
+    const metric = {
+      exposure: 0,
+      publicVisits: 0,
+      dashboardVisits: 0,
+      createdOrders: 0,
+      signedOrders: 0,
+      reviewedOrders: 0,
+      shippedOrders: 0,
+      amount: 0,
+      exposureVisitRate: 0,
+      visitCreatedOrderRate: 0,
+      visitShipmentRate: 0,
+      hasExposureData: true,
+      hasDashboardData: true,
+    };
+    await writeFile(join(runDir, 'report-context.json'), JSON.stringify({
+      date: '2026-06-22',
+      summary: {
+        '1d': { exposure: 100, publicVisits: 10, dashboardVisits: 9, createdOrders: 1, shippedOrders: 0, amount: 8, exposureVisitRate: 0.1, visitCreatedOrderRate: 0.1, visitShipmentRate: 0 },
+        '7d': { exposure: 700, publicVisits: 70, dashboardVisits: 65, createdOrders: 7, shippedOrders: 2, amount: 88, exposureVisitRate: 0.1, visitCreatedOrderRate: 0.1, visitShipmentRate: 0.028 },
+        '30d': { exposure: 3000, publicVisits: 300, dashboardVisits: 280, createdOrders: 30, shippedOrders: 10, amount: 300, exposureVisitRate: 0.1, visitCreatedOrderRate: 0.1, visitShipmentRate: 0.033 },
+      },
+      conclusions: [],
+      rows: [
+        { productName: 'Pocket 3 A', platformProductId: 'p-101', displayProductId: '端内ID 101', custodyDays: 1, periods: { '1d': metric, '7d': { ...metric, publicVisits: 30 }, '30d': metric } },
+        { productName: 'Pocket 3 B', platformProductId: 'p-102', displayProductId: '端内ID 102', custodyDays: 1, periods: { '1d': metric, '7d': { ...metric, publicVisits: 90 }, '30d': metric } },
+      ],
+      lowExposure: [],
+      weakClick: [],
+      weakConversion: [],
+      highPotential: [],
+      newProductObservation: [],
+      lifecycleGovernance: [],
+      recommendedActions: [],
+      emptySectionNotes: {},
+    }));
+
+    const response = await executeAgentToolRequest(
+      {
+        toolName: 'publicTraffic.reportQuery',
+        arguments: { target: 'products', date: '2026-06-22', period: '7d', sortBy: 'publicVisits', metrics: ['publicVisits'], limit: 1 },
+        reason: '查询指定日期访问最高商品',
+      },
+      dir,
+    );
+
+    expect(response.text).toContain('公域日报商品查询 2026-06-22');
+    expect(response.text).toContain('端内ID 102');
+    expect(response.text).not.toContain('端内ID 101');
   });
 
   it('does not expose the old crawlSources boundary through Feishu tool execution', async () => {

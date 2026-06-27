@@ -28,6 +28,38 @@ describe('agent runtime planner proposal validation', () => {
     });
   });
 
+  it('validates generic report query arguments for read-only report questions', () => {
+    expect(validateAgentPlannerProposal(JSON.stringify({
+      goal: '查询指定日期访问最高商品',
+      selectedTool: 'publicTraffic.reportQuery',
+      arguments: {
+        target: 'products',
+        date: '2026-06-22',
+        period: '7d',
+        metrics: ['publicVisits', 'amount'],
+        sortBy: 'publicVisits',
+        limit: 20,
+      },
+      confidence: 0.92,
+      reason: '用户在问日报明细排序',
+    }))).toMatchObject({
+      ok: true,
+      proposal: {
+        selectedTool: 'publicTraffic.reportQuery',
+        arguments: { target: 'products', date: '2026-06-22', period: '7d' },
+      },
+      policy: { decision: 'allow', toolName: 'publicTraffic.reportQuery', risk: 'read' },
+    });
+
+    expect(validateAgentPlannerProposal(JSON.stringify({
+      goal: 'bad report query metric',
+      selectedTool: 'publicTraffic.reportQuery',
+      arguments: { target: 'products', metrics: ['unknownMetric'] },
+      confidence: 0.8,
+      reason: 'invalid metric should be rejected',
+    }))).toEqual({ ok: false, reason: 'invalid_arguments' });
+  });
+
   it('rejects malformed JSON and unknown tools', () => {
     expect(validateAgentPlannerProposal('不是 JSON')).toEqual({ ok: false, reason: 'invalid_json' });
     expect(validateAgentPlannerProposal('{"goal":"删除全部","selectedTool":"danger.deleteAll","arguments":{},"confidence":0.99,"reason":"bad"}')).toEqual({ ok: false, reason: 'unknown_tool' });

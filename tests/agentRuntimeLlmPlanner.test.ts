@@ -40,6 +40,8 @@ describe('agent runtime LLM planner', () => {
     expect(system).toContain('multi-step plan composed only of registered tools');
     expect(system).toContain('Do not return selectedWorkflow');
     expect(system).toContain('resultMetadataSchema');
+    expect(system).toContain('publicTraffic.reportQuery');
+    expect(system).toContain('arbitrary read-only questions about saved public traffic report data');
     expect(system).toContain('use rental.priceSnapshot');
     expect(system).toContain('linkRegistry.resolveProducts');
     expect(system).toContain('rental.pricePreview');
@@ -47,6 +49,7 @@ describe('agent runtime LLM planner', () => {
     expect(system).toContain('should normally be the final step');
     expect(system).not.toContain('For composite flows, return selectedWorkflow');
     expect(user.tools.map((tool) => tool.name)).toContain('rental.newLinkBatchPlan');
+    expect(user.tools.map((tool) => tool.name)).toContain('publicTraffic.reportQuery');
     expect(user.tools.map((tool) => tool.name)).toContain('linkRegistry.resolveProducts');
     expect(user.tools.map((tool) => tool.name)).toContain('rental.pricePreview');
     expect(user.tools.find((tool) => tool.name === 'product.rankBestSameSku')?.resultMetadataSchema).toMatchObject({

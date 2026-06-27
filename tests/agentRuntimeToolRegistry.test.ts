@@ -12,6 +12,7 @@ describe('agent runtime tool registry', () => {
       'system.help',
       'publicTraffic.latestSummary',
       'publicTraffic.conversionSummary',
+      'publicTraffic.reportQuery',
       'product.query',
       'product.rankBestSameSku',
       'productId.lookup',
@@ -64,7 +65,7 @@ describe('agent runtime tool registry', () => {
 
     const tools = listAgentTools();
     tools.pop();
-    expect(listAgentTools()).toHaveLength(43);
+    expect(listAgentTools()).toHaveLength(44);
   });
 
   it('returns defensive copies of tool metadata', () => {
@@ -129,6 +130,7 @@ describe('agent runtime tool registry', () => {
     expect(findAgentTool('system.help')).toMatchObject({ risk: 'read', requiresConfirmation: false });
     expect(findAgentTool('publicTraffic.latestSummary')).toMatchObject({ risk: 'read', requiresConfirmation: false });
     expect(findAgentTool('publicTraffic.conversionSummary')).toMatchObject({ risk: 'read', requiresConfirmation: false });
+    expect(findAgentTool('publicTraffic.reportQuery')).toMatchObject({ risk: 'read', requiresConfirmation: false });
     expect(findAgentTool('product.rankBestSameSku')).toMatchObject({ risk: 'read', requiresConfirmation: false });
     expect(findAgentTool('productId.lookupCard')).toMatchObject({ risk: 'read', requiresConfirmation: false });
     expect(findAgentTool('inventory.statusOverview')).toMatchObject({ risk: 'read', requiresConfirmation: false });
@@ -177,6 +179,17 @@ describe('agent runtime tool registry', () => {
       properties: { date: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' } },
       additionalProperties: false,
     });
+    expect(findAgentTool('publicTraffic.reportQuery')?.inputSchema).toMatchObject({
+      properties: {
+        target: { enum: ['summary', 'products', 'section', 'sectionCounts', 'orders', 'dataQuality', 'conclusions'] },
+        date: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' },
+        period: { enum: ['1d', '7d', '30d'] },
+        metrics: { type: 'array' },
+        filters: { type: 'array' },
+      },
+      required: ['target'],
+      additionalProperties: false,
+    });
     expect(findAgentTool('product.query')?.inputSchema).toMatchObject({
       properties: { keyword: { type: 'string' }, date: { type: 'string' } },
       required: ['keyword'],
@@ -220,6 +233,7 @@ describe('agent runtime tool registry', () => {
       'system.help',
       'publicTraffic.latestSummary',
       'publicTraffic.conversionSummary',
+      'publicTraffic.reportQuery',
       'product.query',
       'product.rankBestSameSku',
       'productId.lookup',
