@@ -33,6 +33,7 @@ export function createAgentPlannerProvider(provider: LlmProvider): AgentPlannerP
               'Never invent tool names or arguments.',
               'For atomic actions, return only a bare JSON object with goal, selectedTool, arguments, confidence, reason, and optional requiresConfirmation.',
               'For composite goals, return only a bare JSON object with goal, steps, confidence, and reason. Each step must contain toolName, arguments, and reason; it may include a stable id such as "rank".',
+              'Tool metadata may include resultMetadataSchema; use those documented result fields as the valid source for later placeholders.',
               'Later steps may reference metadata from earlier steps with string placeholders such as "${rank.bestProductId}", "${rank.best.internalProductId}", or "${steps.rank.sameSkuGroupId}". Only reference prior step ids.',
               'For "find the best link/product, then copy/create/fill new links", use product.rankBestSameSku first with id "rank", then rental.newLinkBatchPlan with sourceProductId "${rank.bestProductId}". This still only creates a confirmation card before copy execution.',
               'For product pricing/status questions such as "x200u pricing/定价情况", use rental.priceSnapshot. Use rental.priceChange only when the user asks to change prices.',

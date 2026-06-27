@@ -1525,6 +1525,49 @@ describe('handleBotIntent', () => {
     expect(secondRequest.arguments).toEqual({ productId: '762' });
   });
 
+  it('continues after confirmed copy with the returned new product id metadata', async () => {
+    const outputDir = await writeContext();
+    const planner: AgentPlannerProvider = {
+      async proposePlan() {
+        return JSON.stringify({
+          goal: '复制商品后查询新商品',
+          steps: [
+            { id: 'copy', toolName: 'rental.copy', arguments: { productId: '761' }, reason: '先复制商品 761' },
+            { toolName: 'product.query', arguments: { keyword: '${copy.newProductId}' }, reason: '按复制返回的新商品 ID 查询' },
+          ],
+          confidence: 0.9,
+          reason: '后续查询依赖 rental.copy 的 resultMetadataSchema.newProductId',
+        });
+      },
+    };
+    const copyCalls: string[] = [];
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run'); },
+      async execute() { throw new Error('execute should not run'); },
+      async copy(productId) {
+        copyCalls.push(productId);
+        return { productId, ok: true, newProductId: '565', lines: ['copy: ok'] };
+      },
+      async delist() { throw new Error('delist should not run'); },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+
+    const response = await handleBotIntent({ type: 'unknown', text: '复制 761 后查新商品' }, outputDir, {
+      agentPlannerProvider: planner,
+      rentalPriceClient,
+    });
+    const request = readAgentToolConfirmRequestFromCard(response.card);
+    const executed = await executeAgentToolRequestWithContinuation(request, outputDir, { rentalPriceClient });
+
+    expect(copyCalls).toEqual(['761']);
+    expect(executed.text).toContain('复制成功：商品 761 → 新商品 565');
+    expect(executed.text).toContain('步骤 2/2：product.query');
+    expect(executed.text).toContain('端内ID 565');
+    expect(executed.card).toBeUndefined();
+  });
+
   it('continues into a dedicated new-link planning card without copying new links before its own confirmation', async () => {
     const { outputDir, registryPaths } = await writeNewLinkWorkflowContext();
     const planner: AgentPlannerProvider = {
@@ -1622,7 +1665,7 @@ describe('handleBotIntent', () => {
         return JSON.stringify({
           goal: 'bad unresolved reference',
           steps: [
-            { id: 'summary', toolName: 'publicTraffic.latestSummary', arguments: {}, reason: 'read summary' },
+            { id: 'rank', toolName: 'publicTraffic.latestSummary', arguments: {}, reason: 'read summary without bestProductId metadata' },
             { toolName: 'rental.copy', arguments: { productId: '${rank.bestProductId}' }, reason: 'bad reference should stop' },
           ],
           confidence: 0.8,

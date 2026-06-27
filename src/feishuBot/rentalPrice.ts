@@ -132,9 +132,15 @@ export interface RentalPriceSpecRemoveResult {
 
 interface RentalOperationConfirmMetadata {
   continuation?: AgentToolConfirmContinuation;
-  plannerToolName?: 'rental.specRemovePlan' | 'rental.operationConfirmRequest';
+  plannerToolName?: 'rental.copy' | 'rental.delist' | 'rental.tenancySet' | 'rental.specDiscover' | 'rental.specAddAndRefresh' | 'rental.specRemovePlan' | 'rental.operationConfirmRequest';
   plannerArguments?: Record<string, unknown>;
   plannerReason?: string;
+}
+
+export interface RentalOperationExecutionResult {
+  ok: boolean;
+  text: string;
+  metadata?: Record<string, unknown>;
 }
 
 export interface RentalPriceSkillClient {
@@ -184,6 +190,16 @@ function money(value: string | number): string {
 
 function confirmationKey(value: Record<string, unknown>): string {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex').slice(0, 24);
+}
+
+function readConfirmationKey(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return /^[a-f0-9]{24}$/i.test(trimmed) ? trimmed.toLowerCase() : null;
+}
+
+function hasValidConfirmationKey(value: Record<string, unknown>, request: Record<string, unknown>): boolean {
+  return readConfirmationKey(value.confirmationKey) === confirmationKey(request);
 }
 
 export function parseRentalPriceChange(text: string): RentalPriceChangeRequest | null {
@@ -1055,6 +1071,7 @@ export function parseRentalPriceConfirmRequest(value: unknown): Extract<RentalPr
   if (!isRecord(value)) return null;
   const request = value.request;
   if (!isRecord(request) || request.mode !== 'explicit_fields' || typeof request.productId !== 'string' || !isRecord(request.fields)) return null;
+  if (!hasValidConfirmationKey(value, request)) return null;
   if (isRecord(request.audit) && request.audit.hasErrors === true) return null;
   const continuation = parseAgentToolConfirmContinuation(request.continuation);
   if (request.continuation !== undefined && !continuation) return null;
@@ -1201,9 +1218,7 @@ export function rentalPriceRollbackRequestFromToolArguments(args: Record<string,
   };
 }
 
-export function parseRentalOperationConfirmRequest(value: unknown): RentalOperationConfirmRequest | null {
-  if (!isRecord(value) || !isRecord(value.request)) return null;
-  const request = value.request;
+function readRentalOperationConfirmRequestRecord(request: Record<string, unknown>): RentalOperationConfirmRequest | null {
   const action = readString(request.action);
   const productId = readProductId(request.productId);
   if (!action || !productId) return null;
@@ -1240,7 +1255,18 @@ export function parseRentalOperationConfirmRequest(value: unknown): RentalOperat
   return null;
 }
 
-export async function executeRentalOperationConfirmRequest(client: RentalPriceSkillClient, request: RentalOperationConfirmRequest): Promise<{ ok: boolean; text: string }> {
+export function rentalOperationConfirmRequestFromToolArguments(args: Record<string, unknown>): RentalOperationConfirmRequest | null {
+  return readRentalOperationConfirmRequestRecord(args);
+}
+
+export function parseRentalOperationConfirmRequest(value: unknown): RentalOperationConfirmRequest | null {
+  if (!isRecord(value) || !isRecord(value.request)) return null;
+  const request = value.request;
+  if (!hasValidConfirmationKey(value, request)) return null;
+  return readRentalOperationConfirmRequestRecord(request);
+}
+
+export async function executeRentalOperationConfirmRequest(client: RentalPriceSkillClient, request: RentalOperationConfirmRequest): Promise<RentalOperationExecutionResult> {
   switch (request.action) {
     case 'copy': {
       const result = await client.copy(request.productId);
@@ -1248,9 +1274,22 @@ export async function executeRentalOperationConfirmRequest(client: RentalPriceSk
         return {
           ok: false,
           text: `复制状态未知：商品 ${result.productId}\n${result.lines.join('\n')}\n注意：本次复制可能已经提交但未拿到新商品ID；为避免重复复制，请先到后台核对，不要直接重试。`,
+          metadata: {
+            productId: result.productId,
+            newProductId: result.newProductId ?? undefined,
+            status: result.status,
+            sideEffectPossible: result.sideEffectPossible,
+          },
         };
       }
-      return { ok: result.ok, text: result.ok ? (result.newProductId ? `复制成功：商品 ${result.productId} → 新商品 ${result.newProductId}` : `复制成功：商品 ${result.productId} 已复制（新商品ID未能自动获取，请到后台确认）`) : `复制失败：商品 ${result.productId}\n${result.lines.join('\n')}` };
+      return {
+        ok: result.ok,
+        text: result.ok ? (result.newProductId ? `复制成功：商品 ${result.productId} → 新商品 ${result.newProductId}` : `复制成功：商品 ${result.productId} 已复制（新商品ID未能自动获取，请到后台确认）`) : `复制失败：商品 ${result.productId}\n${result.lines.join('\n')}`,
+        metadata: {
+          productId: result.productId,
+          newProductId: result.newProductId ?? undefined,
+        },
+      };
     }
     case 'delist': {
       const result = await client.delist(request.productId);

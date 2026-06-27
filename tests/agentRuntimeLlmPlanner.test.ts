@@ -39,11 +39,18 @@ describe('agent runtime LLM planner', () => {
 
     expect(system).toContain('multi-step plan composed only of registered tools');
     expect(system).toContain('Do not return selectedWorkflow');
+    expect(system).toContain('resultMetadataSchema');
     expect(system).toContain('use rental.priceSnapshot');
     expect(system).toContain('use rental.specRemovePlan');
     expect(system).toContain('should normally be the final step');
     expect(system).not.toContain('For composite flows, return selectedWorkflow');
     expect(user.tools.map((tool) => tool.name)).toContain('rental.newLinkBatchPlan');
+    expect(user.tools.find((tool) => tool.name === 'product.rankBestSameSku')?.resultMetadataSchema).toMatchObject({
+      properties: { bestProductId: { type: 'string' } },
+    });
+    expect(user.tools.find((tool) => tool.name === 'rental.copy')?.resultMetadataSchema).toMatchObject({
+      properties: { newProductId: { type: 'string' } },
+    });
     expect(user.workflows).toEqual([]);
   });
 });

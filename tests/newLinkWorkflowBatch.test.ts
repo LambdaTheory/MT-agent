@@ -60,6 +60,19 @@ function row(productId: string, productName: string, platformProductId: string, 
   };
 }
 
+function readButtonValue(card: unknown, buttonName: string): Record<string, unknown> {
+  const body = (card as { body?: { elements?: Array<{ elements?: Array<{ name?: string; behaviors?: Array<{ value?: unknown }> }> }> } }).body;
+  for (const element of body?.elements ?? []) {
+    for (const item of element.elements ?? []) {
+      if (item.name === buttonName) {
+        const value = item.behaviors?.[0]?.value;
+        if (value && typeof value === 'object' && !Array.isArray(value)) return value as Record<string, unknown>;
+      }
+    }
+  }
+  throw new Error(`${buttonName} value not found`);
+}
+
 function context(): PublicTrafficDataReportContext {
   return {
     date: '2026-06-22',
@@ -187,6 +200,11 @@ describe('new link batch workflow', () => {
   });
 
   it('parses only valid confirmation requests', () => {
+    const plan = buildNewLinkBatchPlan({ keyword: 'pocket3', count: 3, sourceProductId: '733' }, context(), registry());
+    const value = readButtonValue(buildNewLinkBatchConfirmCard(plan, 'user wants new links'), 'new_link_batch_confirm_submit');
+
+    expect(parseNewLinkBatchConfirmRequest(value)).toMatchObject({ count: 3, sourceProductId: '733' });
+
     expect(parseNewLinkBatchConfirmRequest({
       request: {
         safetyVersion: 2,
@@ -198,7 +216,7 @@ describe('new link batch workflow', () => {
         dataDate: '2026-06-22',
         reason: '用户要铺新链',
       },
-    })).toMatchObject({ count: 3, sourceProductId: '733' });
+    })).toBeNull();
 
     expect(parseNewLinkBatchConfirmRequest({
       request: {
@@ -238,6 +256,11 @@ describe('new link batch workflow', () => {
         reason: 'mismatched source',
       },
     })).toBeNull();
+
+    expect(parseNewLinkBatchConfirmRequest({
+      ...value,
+      request: { ...(value.request as Record<string, unknown>), sourceProductId: '875' },
+    })).toBeNull();
   });
 
   it('builds and executes one confirmation for multiple best-link copy plans', async () => {
@@ -255,7 +278,13 @@ describe('new link batch workflow', () => {
       ],
     });
     expect(JSON.stringify(buildNewLinkBatchMultiConfirmCard([left, right], '用户要求分别复制'))).toContain('new_link_batch_multi_confirm');
-    expect(parseNewLinkBatchMultiConfirmRequest({ request })).toEqual(request);
+    const confirmValue = readButtonValue(buildNewLinkBatchMultiConfirmCard([left, right], request!.reason), 'new_link_batch_multi_confirm_submit');
+    expect(parseNewLinkBatchMultiConfirmRequest(confirmValue)).toEqual(request);
+    expect(parseNewLinkBatchMultiConfirmRequest({
+      ...confirmValue,
+      request: { ...(confirmValue.request as Record<string, unknown>), items: [{ ...request!.items[0], count: 6 }, request!.items[1]] },
+    })).toBeNull();
+    expect(parseNewLinkBatchMultiConfirmRequest({ request })).toBeNull();
 
     const calls: string[] = [];
     const rentalPriceClient: RentalPriceSkillClient = {

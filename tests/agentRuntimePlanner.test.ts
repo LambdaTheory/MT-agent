@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { validateAgentMultiStepPlannerProposal, validateAgentPlannerClarificationProposal, validateAgentPlannerProposal } from '../src/agentRuntime/planner.js';
+import { validateAgentMultiStepPlannerProposal, validateAgentPlannerClarificationProposal, validateAgentPlannerProposal, validateAgentToolArguments } from '../src/agentRuntime/planner.js';
+import { listAgentTools } from '../src/agentRuntime/toolRegistry.js';
 
 describe('agent runtime planner proposal validation', () => {
   it('validates a read-tool proposal and applies allow policy', () => {
@@ -32,9 +33,111 @@ describe('agent runtime planner proposal validation', () => {
     expect(validateAgentPlannerProposal('{"goal":"删除全部","selectedTool":"danger.deleteAll","arguments":{},"confidence":0.99,"reason":"bad"}')).toEqual({ ok: false, reason: 'unknown_tool' });
   });
 
+  it('rejects all planner-hidden tools even when they exist in the internal registry', () => {
+    const hiddenTools = listAgentTools().filter((tool) => tool.plannerVisible === false);
+    expect(hiddenTools.map((tool) => tool.name)).toEqual(['operations.refreshActivityExecute', 'rental.operationConfirmRequest']);
+
+    for (const tool of hiddenTools) {
+      expect(validateAgentPlannerProposal(JSON.stringify({
+        goal: `direct ${tool.name}`,
+        selectedTool: tool.name,
+        arguments: {},
+        confidence: 0.9,
+        reason: 'planner must not call hidden tools directly',
+      }))).toEqual({ ok: false, reason: 'unknown_tool' });
+
+      expect(validateAgentMultiStepPlannerProposal(JSON.stringify({
+        goal: `multi-step ${tool.name}`,
+        steps: [
+          { toolName: 'system.help', arguments: {}, reason: 'read first' },
+          { toolName: tool.name, arguments: {}, reason: 'hidden tool step' },
+        ],
+        confidence: 0.9,
+        reason: 'planner must not call hidden tools through multi-step plans',
+      }))).toEqual({ ok: false, reason: 'unknown_tool' });
+    }
+  });
+
   it('rejects arguments that do not satisfy tool metadata schema', () => {
     expect(validateAgentPlannerProposal('{"goal":"查询商品表现","selectedTool":"product.query","arguments":{},"confidence":0.88,"reason":"缺少 keyword"}')).toEqual({ ok: false, reason: 'invalid_arguments' });
     expect(validateAgentPlannerProposal('{"goal":"查询商品表现","selectedTool":"product.query","arguments":{"keyword":"565","extra":true},"confidence":0.88,"reason":"多余字段"}')).toEqual({ ok: false, reason: 'invalid_arguments' });
+  });
+
+  it('recursively validates planner array item schemas for multi-product tools', () => {
+    expect(validateAgentPlannerProposal(JSON.stringify({
+      goal: 'multi source new links',
+      selectedTool: 'rental.newLinkBatchPlan',
+      arguments: {
+        items: [
+          { keyword: 'wide 300', count: 5, sourceProductId: '900' },
+          { keyword: 'wide 400', count: '5', sourceProductId: '901' },
+        ],
+      },
+      confidence: 0.9,
+      reason: 'valid structured items',
+    }))).toMatchObject({ ok: true });
+
+    expect(validateAgentPlannerProposal(JSON.stringify({
+      goal: 'bad item array',
+      selectedTool: 'rental.newLinkBatchPlan',
+      arguments: { items: ['wide 300'] },
+      confidence: 0.9,
+      reason: 'array item is not an object',
+    }))).toEqual({ ok: false, reason: 'invalid_arguments' });
+
+    expect(validateAgentPlannerProposal(JSON.stringify({
+      goal: 'bad item shape',
+      selectedTool: 'rental.newLinkBatchPlan',
+      arguments: { items: [{ count: 5, sourceProductId: '900' }] },
+      confidence: 0.9,
+      reason: 'missing keyword',
+    }))).toEqual({ ok: false, reason: 'invalid_arguments' });
+
+    expect(validateAgentPlannerProposal(JSON.stringify({
+      goal: 'bad top-level count shape',
+      selectedTool: 'rental.newLinkBatchPlan',
+      arguments: { keyword: 'wide 300', count: ['5'] },
+      confidence: 0.9,
+      reason: 'count must be a positive integer or numeric string',
+    }))).toEqual({ ok: false, reason: 'invalid_arguments' });
+
+    expect(validateAgentPlannerProposal(JSON.stringify({
+      goal: 'bad item count shape',
+      selectedTool: 'rental.newLinkBatchPlan',
+      arguments: { items: [{ keyword: 'wide 300', count: 0, sourceProductId: '900' }] },
+      confidence: 0.9,
+      reason: 'count must be positive',
+    }))).toEqual({ ok: false, reason: 'invalid_arguments' });
+  });
+
+  it('recursively validates hidden execution tool arguments before confirmation execution', () => {
+    expect(validateAgentToolArguments('operations.refreshActivityExecute', {
+      date: '2026-06-27',
+      delistProductIds: ['433'],
+      newLinkItems: [
+        { keyword: 'wide 300', count: 1, sourceProductId: '900', sourceProductName: 'Wide 300' },
+      ],
+    })).toBe(true);
+
+    expect(validateAgentToolArguments('operations.refreshActivityExecute', {
+      date: '2026-06-27',
+      delistProductIds: ['433'],
+      newLinkItems: [{ keyword: 'wide 300', count: 1, sourceProductId: '900' }],
+    })).toBe(false);
+
+    expect(validateAgentToolArguments('operations.refreshActivityExecute', {
+      date: '2026-06-27',
+      delistProductIds: ['433'],
+      newLinkItems: ['bad'],
+    })).toBe(false);
+
+    expect(validateAgentToolArguments('operations.refreshActivityExecute', {
+      date: '2026-06-27',
+      delistProductIds: ['433'],
+      newLinkItems: [
+        { keyword: 'wide 300', count: 1.5, sourceProductId: '900', sourceProductName: 'Wide 300' },
+      ],
+    })).toBe(false);
   });
 
   it('gates dashboard refresh write proposals behind confirmation and does not execute tools', () => {
@@ -113,6 +216,38 @@ describe('agent runtime planner proposal validation', () => {
     });
   });
 
+  it('rejects multi-step placeholders that do not reference prior steps', () => {
+    expect(validateAgentMultiStepPlannerProposal(JSON.stringify({
+      goal: 'unknown reference',
+      steps: [
+        { id: 'summary', toolName: 'publicTraffic.latestSummary', arguments: {}, reason: 'read summary' },
+        { toolName: 'rental.copy', arguments: { productId: '${rank.bestProductId}' }, reason: 'unknown step id' },
+      ],
+      confidence: 0.8,
+      reason: 'bad reference',
+    }))).toEqual({ ok: false, reason: 'invalid_arguments' });
+
+    expect(validateAgentMultiStepPlannerProposal(JSON.stringify({
+      goal: 'future reference',
+      steps: [
+        { toolName: 'rental.copy', arguments: { productId: '${rank.bestProductId}' }, reason: 'future step id' },
+        { id: 'rank', toolName: 'product.rankBestSameSku', arguments: { query: 'SQ1' }, reason: 'rank too late' },
+      ],
+      confidence: 0.8,
+      reason: 'bad reference',
+    }))).toEqual({ ok: false, reason: 'invalid_arguments' });
+
+    expect(validateAgentMultiStepPlannerProposal(JSON.stringify({
+      goal: 'self reference',
+      steps: [
+        { id: 'rank', toolName: 'product.rankBestSameSku', arguments: { query: '${rank.query}' }, reason: 'self reference' },
+        { toolName: 'system.help', arguments: {}, reason: 'second step' },
+      ],
+      confidence: 0.8,
+      reason: 'bad reference',
+    }))).toEqual({ ok: false, reason: 'invalid_arguments' });
+  });
+
   it('allows placeholders in non-string fields only for multi-step pre-validation', () => {
     expect(validateAgentMultiStepPlannerProposal(JSON.stringify({
       goal: 'rank then price preview',
@@ -145,6 +280,8 @@ describe('agent runtime planner proposal validation', () => {
     expect(validateAgentMultiStepPlannerProposal('{"goal":"bad","steps":[{"toolName":"product.query","arguments":{},"reason":"missing keyword"},{"toolName":"system.help","arguments":{},"reason":"help"}],"confidence":0.7,"reason":"bad"}')).toEqual({ ok: false, reason: 'invalid_arguments' });
     expect(validateAgentMultiStepPlannerProposal('{"goal":"bad","steps":[{"toolName":"missing.tool","arguments":{},"reason":"bad"},{"toolName":"system.help","arguments":{},"reason":"help"}],"confidence":0.7,"reason":"bad"}')).toEqual({ ok: false, reason: 'unknown_tool' });
     expect(validateAgentMultiStepPlannerProposal(JSON.stringify({ goal: 'bad', steps: [{ id: '1bad', toolName: 'system.help', arguments: {}, reason: 'bad id' }, { toolName: 'system.help', arguments: {}, reason: 'help' }], confidence: 0.7, reason: 'bad' }))).toEqual({ ok: false, reason: 'invalid_shape' });
+    expect(validateAgentMultiStepPlannerProposal(JSON.stringify({ goal: 'bad', steps: [{ id: 'last', toolName: 'system.help', arguments: {}, reason: 'reserved id' }, { toolName: 'system.help', arguments: {}, reason: 'help' }], confidence: 0.7, reason: 'bad' }))).toEqual({ ok: false, reason: 'invalid_shape' });
+    expect(validateAgentMultiStepPlannerProposal(JSON.stringify({ goal: 'bad', steps: [{ id: 'steps', toolName: 'system.help', arguments: {}, reason: 'reserved id' }, { toolName: 'system.help', arguments: {}, reason: 'help' }], confidence: 0.7, reason: 'bad' }))).toEqual({ ok: false, reason: 'invalid_shape' });
     expect(validateAgentMultiStepPlannerProposal(JSON.stringify({ goal: 'bad', steps: [{ id: 'dup', toolName: 'system.help', arguments: {}, reason: 'first' }, { id: 'dup', toolName: 'system.help', arguments: {}, reason: 'second' }], confidence: 0.7, reason: 'bad' }))).toEqual({ ok: false, reason: 'invalid_shape' });
   });
 

@@ -5,7 +5,7 @@ import type { AgentWorkflowDefinition } from './workflowRegistry.js';
 import type { AgentClarificationOption, AgentClarificationRequest } from './clarificationCard.js';
 import type { AgentLearningPlannerHint } from '../agentLearning/store.js';
 
-export type AgentPlannerToolMetadata = Pick<AgentToolDefinition, 'name' | 'description' | 'risk' | 'requiresConfirmation' | 'inputSchema'>;
+export type AgentPlannerToolMetadata = Pick<AgentToolDefinition, 'name' | 'description' | 'risk' | 'requiresConfirmation' | 'inputSchema' | 'resultMetadataSchema'>;
 
 export interface AgentPlannerRequest {
   message: string;
@@ -73,6 +73,7 @@ function readStepId(value: unknown): string | undefined | null {
   if (value === undefined) return undefined;
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
+  if (trimmed === 'last' || trimmed === 'steps') return null;
   return /^[A-Za-z][A-Za-z0-9_-]{0,39}$/.test(trimmed) ? trimmed : null;
 }
 
@@ -80,50 +81,139 @@ function isPlannerPlaceholder(value: unknown): boolean {
   return typeof value === 'string' && /^\$\{[^}]+\}$/.test(value.trim());
 }
 
-export function schemaAllowsArguments(schema: unknown, value: Record<string, unknown>, options: { allowPlaceholders?: boolean } = {}): boolean {
-  if (!isRecord(schema)) return true;
-  if (schema.type !== undefined && schema.type !== 'object') return false;
+function readSchemaTypes(value: unknown): string[] | null {
+  if (typeof value === 'string') return [value];
+  if (Array.isArray(value) && value.every((item) => typeof item === 'string')) return value;
+  return null;
+}
 
+function valueMatchesSchemaType(type: string, value: unknown): boolean {
+  switch (type) {
+    case 'string':
+      return typeof value === 'string';
+    case 'number':
+      return typeof value === 'number' && Number.isFinite(value);
+    case 'integer':
+      return typeof value === 'number' && Number.isInteger(value);
+    case 'array':
+      return Array.isArray(value);
+    case 'object':
+      return isRecord(value);
+    case 'boolean':
+      return typeof value === 'boolean';
+    case 'null':
+      return value === null;
+    default:
+      return true;
+  }
+}
+
+function collectPlannerReferences(value: unknown, references: string[] = []): string[] {
+  if (typeof value === 'string') {
+    for (const match of value.matchAll(/\$\{([^}]+)\}/g)) {
+      const reference = match[1]?.trim();
+      if (reference) references.push(reference);
+    }
+    return references;
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) collectPlannerReferences(item, references);
+    return references;
+  }
+
+  if (isRecord(value)) {
+    for (const item of Object.values(value)) collectPlannerReferences(item, references);
+  }
+
+  return references;
+}
+
+function isReferenceToPriorStep(reference: string, priorStepIds: Set<string>, hasPriorStep: boolean): boolean {
+  const normalized = reference.startsWith('steps.') ? reference.slice('steps.'.length) : reference;
+  const root = normalized.split('.')[0]?.trim();
+  if (!root) return false;
+  if (root === 'last') return hasPriorStep;
+  return priorStepIds.has(root);
+}
+
+function schemaAllowsValue(schema: unknown, value: unknown, options: { allowPlaceholders?: boolean }): boolean {
+  if (!isRecord(schema)) return true;
+  if (options.allowPlaceholders && isPlannerPlaceholder(value)) return true;
+  if (Array.isArray(schema.enum) && !schema.enum.includes(value)) return false;
+
+  const schemaTypes = readSchemaTypes(schema.type);
+  if (schemaTypes && !schemaTypes.some((type) => valueMatchesSchemaType(type, value))) return false;
+
+  if (typeof value === 'string') {
+    if (typeof schema.pattern === 'string' && !(new RegExp(schema.pattern).test(value))) return false;
+    if (typeof schema.minLength === 'number' && value.length < schema.minLength) return false;
+    if (typeof schema.maxLength === 'number' && value.length > schema.maxLength) return false;
+  }
+  if (typeof value === 'number') {
+    if (typeof schema.minimum === 'number' && value < schema.minimum) return false;
+    if (typeof schema.maximum === 'number' && value > schema.maximum) return false;
+  }
+
+  const hasArrayConstraints = schemaTypes?.includes('array') || schema.items !== undefined || schema.minItems !== undefined || schema.maxItems !== undefined;
+  if (hasArrayConstraints) {
+    if (!Array.isArray(value)) return false;
+    if (typeof schema.minItems === 'number' && value.length < schema.minItems) return false;
+    if (typeof schema.maxItems === 'number' && value.length > schema.maxItems) return false;
+    if (schema.items !== undefined && !value.every((item) => schemaAllowsValue(schema.items, item, options))) return false;
+    return true;
+  }
+
+  const hasObjectConstraints = schemaTypes?.includes('object') ||
+    schema.properties !== undefined ||
+    schema.required !== undefined ||
+    schema.additionalProperties !== undefined ||
+    schema.minProperties !== undefined ||
+    schema.maxProperties !== undefined;
+  if (!hasObjectConstraints) return true;
+  if (!isRecord(value)) return false;
   const required = Array.isArray(schema.required) ? schema.required : [];
   if (!required.every((key): key is string => typeof key === 'string' && Object.hasOwn(value, key))) return false;
   if (typeof schema.minProperties === 'number' && Object.keys(value).length < schema.minProperties) return false;
+  if (typeof schema.maxProperties === 'number' && Object.keys(value).length > schema.maxProperties) return false;
 
   const properties = isRecord(schema.properties) ? schema.properties : {};
-  if (schema.additionalProperties === false) {
-    for (const key of Object.keys(value)) {
-      if (!Object.hasOwn(properties, key)) return false;
+  for (const [key, item] of Object.entries(value)) {
+    if (Object.hasOwn(properties, key)) {
+      if (!schemaAllowsValue(properties[key], item, options)) return false;
+      continue;
     }
-  }
-
-  for (const [key, propertySchema] of Object.entries(properties)) {
-    if (!Object.hasOwn(value, key)) continue;
-    if (options.allowPlaceholders && isPlannerPlaceholder(value[key])) continue;
-    if (isRecord(propertySchema) && propertySchema.type === 'string' && typeof value[key] !== 'string') return false;
-    if (isRecord(propertySchema) && propertySchema.type === 'number' && typeof value[key] !== 'number') return false;
-    if (isRecord(propertySchema) && propertySchema.type === 'integer' && (!Number.isInteger(value[key]) || typeof value[key] !== 'number')) return false;
-    if (isRecord(propertySchema) && propertySchema.type === 'object' && !isRecord(value[key])) return false;
-    if (isRecord(propertySchema) && propertySchema.type === 'array' && !Array.isArray(value[key])) return false;
-    if (isRecord(propertySchema) && Array.isArray(propertySchema.enum) && !propertySchema.enum.includes(value[key])) return false;
+    if (schema.additionalProperties === false) return false;
+    if (isRecord(schema.additionalProperties) && !schemaAllowsValue(schema.additionalProperties, item, options)) return false;
   }
 
   return true;
 }
 
+export function schemaAllowsArguments(schema: unknown, value: Record<string, unknown>, options: { allowPlaceholders?: boolean } = {}): boolean {
+  return schemaAllowsValue(schema, value, options);
+}
+
 export function listAgentPlannerTools(): AgentPlannerToolMetadata[] {
   return listAgentTools()
     .filter((tool) => tool.plannerVisible !== false)
-    .map(({ name, description, risk, requiresConfirmation, inputSchema }) => ({
+    .map(({ name, description, risk, requiresConfirmation, inputSchema, resultMetadataSchema }) => ({
       name,
       description,
       risk,
       requiresConfirmation,
       inputSchema,
+      ...(resultMetadataSchema !== undefined ? { resultMetadataSchema } : {}),
     }));
 }
 
 export function validateAgentToolArguments(toolName: string, value: Record<string, unknown>): boolean {
   const tool = findAgentTool(toolName);
   return Boolean(tool && schemaAllowsArguments(tool.inputSchema, value));
+}
+
+function isPlannerSelectableTool(tool: AgentToolDefinition): boolean {
+  return tool.plannerVisible !== false;
 }
 
 export function validateAgentPlannerProposal(raw: string): AgentPlannerValidationResult {
@@ -153,6 +243,7 @@ export function validateAgentPlannerProposal(raw: string): AgentPlannerValidatio
 
   const tool = findAgentTool(selectedTool);
   if (!tool) return { ok: false, reason: 'unknown_tool' };
+  if (!isPlannerSelectableTool(tool)) return { ok: false, reason: 'unknown_tool' };
   if (!schemaAllowsArguments(tool.inputSchema, proposalArguments)) return { ok: false, reason: 'invalid_arguments' };
 
   const proposal: AgentPlannerProposal = { goal, selectedTool, arguments: proposalArguments, confidence, reason };
@@ -201,12 +292,17 @@ export function validateAgentMultiStepPlannerProposal(raw: string): AgentMultiSt
     const normalizedId = readStepId(id);
     if (normalizedId === null) return { ok: false, reason: 'invalid_shape' };
     if (normalizedId && stepIds.has(normalizedId)) return { ok: false, reason: 'invalid_shape' };
-    if (normalizedId) stepIds.add(normalizedId);
     const tool = findAgentTool(toolName);
     if (!tool) return { ok: false, reason: 'unknown_tool' };
+    if (!isPlannerSelectableTool(tool)) return { ok: false, reason: 'unknown_tool' };
     if (!schemaAllowsArguments(tool.inputSchema, stepArguments, { allowPlaceholders: true })) return { ok: false, reason: 'invalid_arguments' };
+    const references = collectPlannerReferences(stepArguments);
+    if (!references.every((reference) => isReferenceToPriorStep(reference, stepIds, normalizedSteps.length > 0))) {
+      return { ok: false, reason: 'invalid_arguments' };
+    }
     normalizedSteps.push({ ...(normalizedId ? { id: normalizedId } : {}), toolName, arguments: stepArguments, reason: stepReason });
     policies.push(decideAgentPolicy({ tool, input: stepArguments, reason: stepReason || reason }));
+    if (normalizedId) stepIds.add(normalizedId);
   }
 
   return {

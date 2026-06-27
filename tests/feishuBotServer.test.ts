@@ -2,15 +2,43 @@ import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { buildAgentToolConfirmCard } from '../src/agentRuntime/approvalCard.js';
 import type { AgentPlannerProvider } from '../src/agentRuntime/planner.js';
 import { extractTextMessage, startFeishuBotServer } from '../src/feishuBot/server.js';
-import type { ActivityAutomationSkillClient } from '../src/feishuBot/activityAutomation.js';
+import {
+  buildActivityAutomationCard,
+  buildActivityCancelAssistanceCard,
+  buildActivityPriceCallbackConfirmCard,
+  buildCancelDifferentialPricingCard,
+  type ActivityAutomationSkillClient,
+  type ActivityPriceCallbackConfirmRequest,
+} from '../src/feishuBot/activityAutomation.js';
 import { openLinkRegistryGovernancePrompt } from '../src/linkRegistry/governanceSession.js';
 import { openLinkRegistryMaintenancePrompt } from '../src/linkRegistry/maintenanceSession.js';
 import type { LinkRegistryOverrideRisk } from '../src/linkRegistry/overrides.js';
 import type { LinkRegistryEntry } from '../src/linkRegistry/types.js';
-import type { RentalPriceSkillClient } from '../src/feishuBot/rentalPrice.js';
+import { buildRentalOperationConfirmCard, type RentalPriceSkillClient } from '../src/feishuBot/rentalPrice.js';
 import type { FeishuBotIncomingTextMessage } from '../src/feishuBot/types.js';
+
+function readAgentToolConfirmValue(card: unknown): unknown {
+  const body = (card as { body?: { elements?: Array<{ elements?: Array<{ name?: string; behaviors?: Array<{ value?: unknown }> }> }> } }).body;
+  const form = body?.elements?.find((element) => Array.isArray(element.elements));
+  const button = form?.elements?.find((element) => element.name === 'agent_tool_confirm_submit');
+  return button?.behaviors?.[0]?.value;
+}
+
+function readButtonValue(card: unknown, buttonName: string): Record<string, unknown> {
+  const body = (card as { body?: { elements?: Array<{ elements?: Array<{ name?: string; behaviors?: Array<{ value?: unknown }> }>; actions?: Array<{ name?: string; behaviors?: Array<{ value?: unknown }> }> }> } }).body;
+  for (const element of body?.elements ?? []) {
+    for (const item of [...(element.elements ?? []), ...(element.actions ?? [])]) {
+      if (item.name === buttonName) {
+        const value = item.behaviors?.[0]?.value;
+        if (value && typeof value === 'object' && !Array.isArray(value)) return value as Record<string, unknown>;
+      }
+    }
+  }
+  throw new Error(`${buttonName} value not found`);
+}
 
 const metric = {
   exposure: 10,
@@ -53,6 +81,65 @@ async function writeLearningContext(): Promise<string> {
     emptySectionNotes: {},
   }));
   return dir;
+}
+
+async function writeRankingContinuationContext(): Promise<{
+  outputDir: string;
+  registryPaths: {
+    productIdMapPath: string;
+    productNameMapPath: string;
+    firstSeenPath: string;
+    lifecyclePath: string;
+    overridesPath: string;
+    artifactsDir: string;
+  };
+}> {
+  const rootDir = await mkdtemp(join(tmpdir(), 'mt-agent-http-continuation-registry-'));
+  const outputDir = join(rootDir, 'output');
+  const configDir = join(rootDir, 'config');
+  const stateDir = join(outputDir, 'state');
+  await mkdir(join(outputDir, '2026-06-11'), { recursive: true });
+  await mkdir(configDir, { recursive: true });
+  await mkdir(stateDir, { recursive: true });
+  await writeFile(join(outputDir, '2026-06-11', 'report-context.json'), JSON.stringify({
+    date: '2026-06-11',
+    summary: { '1d': metric, '7d': metric, '30d': metric },
+    conclusions: [],
+    rows: [
+      { productName: 'Alpha 低表现链接', platformProductId: 'p710', displayProductId: '端内ID 710', custodyDays: 10, periods: { '1d': metric, '7d': { ...metric, exposure: 100, publicVisits: 8, shippedOrders: 0, amount: 0 }, '30d': metric } },
+      { productName: 'Alpha 高表现链接', platformProductId: 'p711', displayProductId: '端内ID 711', custodyDays: 10, periods: { '1d': metric, '7d': { ...metric, exposure: 500, publicVisits: 80, shippedOrders: 1, amount: 199 }, '30d': metric } },
+    ],
+    recommendedActions: [],
+    lowExposure: [],
+    weakClick: [],
+    weakConversion: [],
+    highPotential: [],
+    newProductObservation: [],
+    lifecycleGovernance: [],
+    agentData: { removedLinks: [] },
+    emptySectionNotes: {},
+  }), 'utf8');
+  await writeFile(join(configDir, 'product-id-map.json'), JSON.stringify({ p710: '710', p711: '711' }), 'utf8');
+  await writeFile(join(configDir, 'product-name-map.json'), JSON.stringify({ '710': 'Alpha 低表现链接', '711': 'Alpha 高表现链接' }), 'utf8');
+  await writeFile(join(configDir, 'link-registry-overrides.json'), JSON.stringify({
+    version: 1,
+    entries: [
+      { internalProductId: '710', productName: 'Alpha 低表现链接', shortName: 'Alpha', aliases: ['alpha'], sameSkuGroupId: 'alpha-group', status: 'active' },
+      { internalProductId: '711', productName: 'Alpha 高表现链接', shortName: 'Alpha', aliases: ['alpha'], sameSkuGroupId: 'alpha-group', status: 'active' },
+    ],
+    sameSkuGroupAliasRules: [{ sameSkuGroupId: 'alpha-group', aliases: ['alpha'] }],
+  }), 'utf8');
+  return {
+    outputDir,
+    registryPaths: {
+      productIdMapPath: join(configDir, 'product-id-map.json'),
+      productNameMapPath: join(configDir, 'product-name-map.json'),
+      firstSeenPath: join(stateDir, 'goods-first-seen.json'),
+      lifecyclePath: join(stateDir, 'goods-link-lifecycle.json'),
+      overridesPath: join(configDir, 'link-registry-overrides.json'),
+      artifactsDir: outputDir,
+    },
+  };
 }
 
 const linkMaintenanceRegistry: LinkRegistryEntry[] = [
@@ -185,6 +272,16 @@ function fakeActivityCancellationAssistant() {
         ],
       };
     },
+  };
+}
+
+function activityCallbackRequest(submitSessionPath = 'output/latest/activity-automation/activity-submit-session.json'): ActivityPriceCallbackConfirmRequest {
+  return {
+    submitSessionPath,
+    productIds: ['886'],
+    mappedCount: 1,
+    startsAt: '2026-06-24',
+    endsAt: '2026-07-01',
   };
 }
 
@@ -661,6 +758,7 @@ describe('startFeishuBotServer', () => {
       await new Promise<void>((resolve) => server.once('listening', resolve));
       const address = server.address();
       if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+      const confirmValue = readButtonValue(buildActivityAutomationCard(), 'activity_automation_confirm_submit');
 
       const response = await fetch(`http://127.0.0.1:${address.port}`, {
         method: 'POST',
@@ -670,7 +768,7 @@ describe('startFeishuBotServer', () => {
           event: {
             context: { open_message_id: 'mid-http-activity-card' },
             action: {
-              value: { action: 'activity_automation_confirm' },
+              value: confirmValue,
               form_value: {
                 starts_at: '2026-06-23',
                 ends_at: '2026-06-30',
@@ -704,6 +802,51 @@ describe('startFeishuBotServer', () => {
     }
   });
 
+  it('rejects unsigned HTTP differential pricing automation callbacks', async () => {
+    const replies: Array<{ messageId: string; text: string }> = [];
+    const activityAutomationClient = fakeActivityAutomationClient();
+    const server = startFeishuBotServer({
+      port: 0,
+      appId: 'app',
+      appSecret: 'secret',
+      outputDir: 'output',
+      activityAutomationClient,
+      replyText: async ({ messageId }, text) => {
+        replies.push({ messageId, text });
+        return { sent: true, channel: 'app' };
+      },
+    });
+    try {
+      await new Promise<void>((resolve) => server.once('listening', resolve));
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+
+      const response = await fetch(`http://127.0.0.1:${address.port}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          header: { event_type: 'card.action.trigger' },
+          event: {
+            context: { open_message_id: 'mid-http-activity-card-unsigned' },
+            action: {
+              value: { action: 'activity_automation_confirm' },
+              form_value: {
+                starts_at: '2026-06-23',
+                ends_at: '2026-06-30',
+              },
+            },
+          },
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(activityAutomationClient.executions).toEqual([]);
+      expect(replies).toEqual([{ messageId: 'mid-http-activity-card-unsigned', text: '差异化定价确认参数无效，请重新发起。' }]);
+    } finally {
+      server.close();
+    }
+  });
+
   it('accepts nested differential_pricing_form values in HTTP differential pricing callbacks', async () => {
     const cards: Array<{ messageId: string; card: unknown }> = [];
     let resolveReplySent!: () => void;
@@ -730,6 +873,7 @@ describe('startFeishuBotServer', () => {
       await new Promise<void>((resolve) => server.once('listening', resolve));
       const address = server.address();
       if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+      const confirmValue = readButtonValue(buildActivityAutomationCard(), 'activity_automation_confirm_submit');
 
       const response = await fetch(`http://127.0.0.1:${address.port}`, {
         method: 'POST',
@@ -739,7 +883,7 @@ describe('startFeishuBotServer', () => {
           event: {
             context: { open_message_id: 'mid-http-activity-card-nested' },
             action: {
-              value: { action: 'activity_automation_confirm' },
+              value: confirmValue,
               form_value: {
                 differential_pricing_form: {
                   starts_at: '2026-06-24',
@@ -782,6 +926,7 @@ describe('startFeishuBotServer', () => {
       await new Promise<void>((resolve) => server.once('listening', resolve));
       const address = server.address();
       if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+      const openValue = readButtonValue(buildCancelDifferentialPricingCard(activityCallbackRequest(submitSessionPath)), 'cancel_differential_pricing_open_submit');
 
       const response = await fetch(`http://127.0.0.1:${address.port}`, {
         method: 'POST',
@@ -792,16 +937,7 @@ describe('startFeishuBotServer', () => {
             context: { open_message_id: 'mid-http-activity-cancel-open' },
             action: {
               name: 'cancel_differential_pricing_open_submit',
-              value: {
-                action: 'cancel_differential_pricing_open',
-                request: {
-                  submitSessionPath,
-                  productIds: ['886'],
-                  mappedCount: 1,
-                  startsAt: '2026-06-24',
-                  endsAt: '2026-07-01',
-                },
-              },
+              value: openValue,
             },
           },
         }),
@@ -838,6 +974,10 @@ describe('startFeishuBotServer', () => {
       await new Promise<void>((resolve) => server.once('listening', resolve));
       const address = server.address();
       if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+      const doneValue = readButtonValue(
+        buildActivityCancelAssistanceCard(activityCallbackRequest(submitSessionPath), { openedUrl: 'https://example.test/activity', requiresManualLogin: false, lines: [] }),
+        'cancel_differential_pricing_done_submit',
+      );
 
       const response = await fetch(`http://127.0.0.1:${address.port}`, {
         method: 'POST',
@@ -848,16 +988,7 @@ describe('startFeishuBotServer', () => {
             context: { open_message_id: 'mid-http-activity-cancel-done' },
             action: {
               name: 'cancel_differential_pricing_done_submit',
-              value: {
-                action: 'cancel_differential_pricing_done',
-                request: {
-                  submitSessionPath,
-                  productIds: ['886'],
-                  mappedCount: 1,
-                  startsAt: '2026-06-24',
-                  endsAt: '2026-07-01',
-                },
-              },
+              value: doneValue,
             },
           },
         }),
@@ -883,6 +1014,7 @@ describe('startFeishuBotServer', () => {
       await new Promise<void>((resolve) => server.once('listening', resolve));
       const address = server.address();
       if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+      const cancelValue = readButtonValue(buildActivityAutomationCard(), 'activity_automation_cancel_submit');
 
       const response = await fetch(`http://127.0.0.1:${address.port}`, {
         method: 'POST',
@@ -892,7 +1024,7 @@ describe('startFeishuBotServer', () => {
           event: {
             context: { open_message_id: 'mid-http-activity-card-cancel' },
             action: {
-              value: { action: 'activity_automation_cancel' },
+              value: cancelValue,
             },
           },
         }),
@@ -916,21 +1048,20 @@ describe('startFeishuBotServer', () => {
       await new Promise<void>((resolve) => server.once('listening', resolve));
       const address = server.address();
       if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+      const request: ActivityPriceCallbackConfirmRequest = {
+        submitSessionPath: 'output/latest/activity-automation/activity-submit-session.json',
+        productIds: ['770', '800'],
+        mappedCount: 2,
+        startsAt: '2026-06-24',
+        endsAt: '2026-06-30',
+      };
+      const cancelValue = readButtonValue(buildActivityPriceCallbackConfirmCard(request), 'activity_price_callback_cancel_submit');
       const body = {
         header: { event_type: 'card.action.trigger' },
         event: {
           context: { open_message_id: 'mid-http-activity-price-callback-cancel' },
           action: {
-            value: {
-              action: 'activity_price_callback_cancel',
-              request: {
-                submitSessionPath: 'output/latest/activity-automation/activity-submit-session.json',
-                productIds: ['770', '800'],
-                mappedCount: 2,
-                startsAt: '2026-06-24',
-                endsAt: '2026-06-30',
-              },
-            },
+            value: cancelValue,
           },
         },
       };
@@ -973,12 +1104,13 @@ describe('startFeishuBotServer', () => {
       await new Promise<void>((resolve) => server.once('listening', resolve));
       const address = server.address();
       if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+      const confirmValue = readButtonValue(buildRentalOperationConfirmCard({ action: 'copy', productId: '875' }, 'test reason'), 'rental_operation_confirm_submit');
       const body = {
         header: { event_type: 'card.action.trigger' },
         event: {
           context: { open_message_id: 'mid-http-rental-operation-confirm' },
           action: {
-            value: { action: 'rental_operation_confirm', request: { action: 'copy', productId: '875' } },
+            value: confirmValue,
           },
         },
       };
@@ -999,6 +1131,67 @@ describe('startFeishuBotServer', () => {
       expect(rentalPriceClient.calls).toEqual(['875']);
       expect(replies).toHaveLength(1);
       expect(JSON.stringify(await second.json())).toContain('已经执行完成');
+    } finally {
+      server.close();
+    }
+  });
+
+  it('passes registry paths into HTTP Agent continuation steps after a confirmed write', async () => {
+    const replies: Array<{ messageId: string; text: string }> = [];
+    const fixtures = await writeRankingContinuationContext();
+    const rentalPriceClient = fakeRentalPriceClient();
+    const server = startFeishuBotServer({
+      port: 0,
+      appId: 'app',
+      appSecret: 'secret',
+      outputDir: fixtures.outputDir,
+      rentalPriceClient,
+      closedOrderRegistryPaths: fixtures.registryPaths,
+      replyText: async ({ messageId }, text) => {
+        replies.push({ messageId, text });
+        return { sent: true, channel: 'app' };
+      },
+    });
+    try {
+      await new Promise<void>((resolve) => server.once('listening', resolve));
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+      const confirmValue = readAgentToolConfirmValue(buildAgentToolConfirmCard({
+        toolName: 'rental.copy',
+        arguments: { productId: '875' },
+        reason: '先复制，再查询 alpha 最佳链接',
+        continuation: {
+          goal: '先复制再查 alpha 最佳链接',
+          reason: '确认后继续读链接档案',
+          steps: [
+            { toolName: 'product.rankBestSameSku', arguments: { query: 'alpha' }, reason: '查询 alpha 同款组最佳链接' },
+          ],
+          nextIndex: 1,
+          totalSteps: 2,
+          currentStepId: 'copy',
+          currentStepIndex: 0,
+          metadataStore: {},
+        },
+      }));
+      const response = await fetch(`http://127.0.0.1:${address.port}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          header: { event_type: 'card.action.trigger' },
+          event: {
+            context: { open_message_id: 'mid-http-agent-continuation-registry' },
+            action: {
+              value: confirmValue,
+            },
+          },
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(rentalPriceClient.calls).toEqual(['875']);
+      expect(replies).toHaveLength(1);
+      expect(replies[0].text).toContain('步骤 2/2：product.rankBestSameSku');
+      expect(replies[0].text).toContain('数据最好的 alpha 是：端内ID 711');
     } finally {
       server.close();
     }

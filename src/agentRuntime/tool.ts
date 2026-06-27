@@ -12,5 +12,6 @@ export interface AgentToolDefinition<Input = unknown, Output = unknown> {
   requiresConfirmation: boolean;
   plannerVisible?: boolean;
   inputSchema?: unknown;
+  resultMetadataSchema?: unknown;
   execute?: (input: Input, context: AgentToolContext) => Promise<Output>;
 }

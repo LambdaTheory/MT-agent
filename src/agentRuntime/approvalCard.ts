@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import type { FeishuCardPayload } from '../notify/feishuApp.js';
 import { findAgentTool } from './toolRegistry.js';
 import { schemaAllowsArguments, validateAgentToolArguments, type AgentPlannerStep } from './planner.js';
+import type { AgentToolDefinition } from './tool.js';
 
 export interface AgentToolConfirmRequest {
   toolName: string;
@@ -32,6 +33,7 @@ function readString(value: unknown): string | null {
 function readStepId(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
+  if (trimmed === 'last' || trimmed === 'steps') return null;
   return /^[A-Za-z][A-Za-z0-9_-]{0,39}$/.test(trimmed) ? trimmed : null;
 }
 
@@ -47,7 +49,7 @@ function parseContinuationStep(value: unknown): AgentPlannerStep | null {
   const id = value.id === undefined ? undefined : readStepId(value.id);
   if (!toolName || !reason || !isRecord(args) || id === null) return null;
   const tool = findAgentTool(toolName);
-  if (!tool || !schemaAllowsArguments(tool.inputSchema, args, { allowPlaceholders: true })) return null;
+  if (!tool || tool.plannerVisible === false || !schemaAllowsArguments(tool.inputSchema, args, { allowPlaceholders: true })) return null;
   return { ...(id ? { id } : {}), toolName, arguments: args, reason };
 }
 
@@ -99,6 +101,22 @@ function compactJson(value: Record<string, unknown>): string {
 
 function confirmationKey(request: AgentToolConfirmRequest): string {
   return createHash('sha256').update(JSON.stringify(request)).digest('hex').slice(0, 24);
+}
+
+function readConfirmationKey(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return /^[a-f0-9]{24}$/i.test(trimmed) ? trimmed.toLowerCase() : null;
+}
+
+function hasValidConfirmationKey(value: Record<string, unknown>, request: AgentToolConfirmRequest): boolean {
+  const suppliedKey = readConfirmationKey(value.confirmationKey);
+  if (!suppliedKey) return false;
+  return suppliedKey === confirmationKey(request);
+}
+
+function requiresConfirmationKey(tool: AgentToolDefinition): boolean {
+  return tool.plannerVisible === false;
 }
 
 export function buildAgentToolConfirmCard(request: AgentToolConfirmRequest): FeishuCardPayload {
@@ -155,8 +173,13 @@ export function parseAgentToolConfirmRequest(value: unknown): AgentToolConfirmRe
   const reason = readString(request.reason);
   const args = request.arguments;
   if (!toolName || !reason || !isRecord(args)) return null;
-  if (!findAgentTool(toolName) || !validateAgentToolArguments(toolName, args)) return null;
+  const tool = findAgentTool(toolName);
+  if (!tool || !validateAgentToolArguments(toolName, args)) return null;
   const continuation = parseAgentToolConfirmContinuation(request.continuation);
   if (request.continuation !== undefined && !continuation) return null;
-  return { toolName, arguments: args, reason, ...(continuation ? { continuation } : {}) };
+  const parsedRequest = { toolName, arguments: args, reason, ...(continuation ? { continuation } : {}) };
+  if (value.confirmationKey !== undefined && !hasValidConfirmationKey(value, parsedRequest)) return null;
+  if (continuation && !hasValidConfirmationKey(value, parsedRequest)) return null;
+  if (requiresConfirmationKey(tool) && !hasValidConfirmationKey(value, parsedRequest)) return null;
+  return parsedRequest;
 }

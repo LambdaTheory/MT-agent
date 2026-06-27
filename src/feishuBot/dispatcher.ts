@@ -8,6 +8,7 @@ import type { RentalPriceSkillClient } from './rentalPrice.js';
 import type { ActivityAutomationSkillClient } from './activityAutomation.js';
 import type { BotIntent, BotIntentResolver, BotResponse, FeishuBotDispatchResult, FeishuBotIncomingTextMessage } from './types.js';
 import type { AgentPlannerProvider } from '../agentRuntime/planner.js';
+import type { ClosedOrderRegistryPathsInput } from '../closedOrderFeedback/runtime.js';
 
 export interface FeishuMessageDispatcherConfig {
   outputDir?: string;
@@ -21,6 +22,8 @@ export interface FeishuMessageDispatcherConfig {
   agentPlannerProvider?: AgentPlannerProvider;
   rentalPriceClient?: RentalPriceSkillClient;
   activityAutomationClient?: ActivityAutomationSkillClient;
+  closedOrderFetchImpl?: typeof fetch;
+  closedOrderRegistryPaths?: ClosedOrderRegistryPathsInput;
   logError?: (error: unknown, message: FeishuBotIncomingTextMessage) => void;
 }
 
@@ -150,6 +153,8 @@ export function createFeishuMessageDispatcher(config: FeishuMessageDispatcherCon
     agentPlannerProvider: config.agentPlannerProvider,
     rentalPriceClient: config.rentalPriceClient,
     activityAutomationClient: config.activityAutomationClient,
+    closedOrderFetchImpl: config.closedOrderFetchImpl,
+    closedOrderRegistryPaths: config.closedOrderRegistryPaths,
   }));
   const logError = config.logError ?? ((error, message) => console.error(`飞书消息处理失败 ${message.messageId}:`, error));
 
@@ -170,6 +175,8 @@ export function createFeishuMessageDispatcher(config: FeishuMessageDispatcherCon
           agentPlannerProvider: config.agentPlannerProvider,
           rentalPriceClient: config.rentalPriceClient,
           activityAutomationClient: config.activityAutomationClient,
+          closedOrderFetchImpl: config.closedOrderFetchImpl,
+          closedOrderRegistryPaths: config.closedOrderRegistryPaths,
         });
         const response = toBotResponse(await runtime.handle(toAgentRequest(message, text)));
         return { ...response, skipped: false };

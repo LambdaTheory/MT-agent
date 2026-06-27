@@ -7,6 +7,7 @@ import type { AgentPlannerProvider } from '../agentRuntime/planner.js';
 import { recordAgentLearningEvent } from '../agentLearning/store.js';
 import { handleLinkRegistryGovernanceCardAction } from '../linkRegistry/governanceSession.js';
 import { handleLinkRegistryMaintenanceCardAction } from '../linkRegistry/maintenanceSession.js';
+import type { ClosedOrderRegistryPathsInput } from '../closedOrderFeedback/runtime.js';
 import { replyFeishuMessageCard, replyFeishuMessageText, type FeishuAppSendResult, type FeishuCardPayload, type FeishuReplyConfig } from '../notify/feishuApp.js';
 import { handleOperationsLearningFeedback, handleOperationsLearningStop } from '../operationsLearningLoop/session.js';
 import { findLatestReportContext } from './reportStore.js';
@@ -23,6 +24,7 @@ import {
   buildActivityPriceCallbackStatusCard,
   createActivityAutomationSkillClient,
   formatActivityAutomationExecutionResult,
+  hasValidActivityAutomationCardAction,
   parseActivityAutomationConfirmRequest,
   parseActivityPriceCallbackConfirmRequest,
   type ActivityAutomationSkillClient,
@@ -58,6 +60,8 @@ export interface FeishuBotServerConfig {
   replyCard?: (config: FeishuReplyConfig, card: FeishuCardPayload) => Promise<FeishuAppSendResult>;
   rentalPriceClient?: RentalPriceSkillClient;
   activityAutomationClient?: ActivityAutomationSkillClient;
+  closedOrderFetchImpl?: typeof fetch;
+  closedOrderRegistryPaths?: ClosedOrderRegistryPathsInput;
   activityCancellationAssistant?: ActivityCancellationAssistant;
   llmIntentProposalProvider?: LlmIntentProposalProvider;
   agentPlannerProvider?: AgentPlannerProvider;
@@ -141,6 +145,8 @@ function expectedActionForButtonName(name: string | undefined): string | undefin
     rental_price_cancel_submit: 'rental_price_cancel',
     rental_operation_confirm_submit: 'rental_operation_confirm',
     rental_operation_cancel_submit: 'rental_operation_cancel',
+    activity_automation_confirm_submit: 'activity_automation_confirm',
+    activity_automation_cancel_submit: 'activity_automation_cancel',
     activity_price_callback_confirm_submit: 'activity_price_callback_confirm',
     activity_price_callback_cancel_submit: 'activity_price_callback_cancel',
     id_lookup_submit: 'id_lookup',
@@ -320,6 +326,8 @@ async function handleCardActionTrigger(
   ): Promise<BotResponse> {
     return continueAgentPlannerStepsAfterResponse(request, response, outputDir, {
       rentalPriceClient: config.rentalPriceClient,
+      closedOrderFetchImpl: config.closedOrderFetchImpl,
+      closedOrderRegistryPaths: config.closedOrderRegistryPaths,
     });
   }
 
@@ -503,6 +511,8 @@ async function handleCardActionTrigger(
     });
     const response = await executeAgentToolRequestWithContinuation(request, config.outputDir ?? 'output', {
       rentalPriceClient: config.rentalPriceClient,
+      closedOrderFetchImpl: config.closedOrderFetchImpl,
+      closedOrderRegistryPaths: config.closedOrderRegistryPaths,
     });
     setServerCardActionStatus(claim.key, 'completed');
     await recordAgentLearningEvent(outputDir, {
@@ -648,6 +658,10 @@ async function handleCardActionTrigger(
   }
 
   if (actionName === 'activity_automation_confirm') {
+    if (!hasValidActivityAutomationCardAction(value, 'activity_automation_confirm')) {
+      await replyText(replyConfig, '差异化定价确认参数无效，请重新发起。');
+      return;
+    }
     const actionForm = readActionForm(payload.event?.action);
     const request = parseActivityAutomationConfirmRequest(actionForm);
     if (!request) {
@@ -671,6 +685,10 @@ async function handleCardActionTrigger(
   }
 
   if (actionName === 'activity_automation_cancel') {
+    if (!hasValidActivityAutomationCardAction(value, 'activity_automation_cancel')) {
+      await replyText(replyConfig, '差异化定价取消参数无效，请重新发起。');
+      return;
+    }
     const claim = claimServerCardAction(messageId, 'activity_automation', actionName);
     if (!claim.claimed) {
       return claimStatusCard('差异化定价已处理', claim.claim);
@@ -817,6 +835,8 @@ export function startFeishuBotServer(config: FeishuBotServerConfig) {
     handleIntent: config.handleIntent,
     rentalPriceClient: config.rentalPriceClient,
     activityAutomationClient: config.activityAutomationClient,
+    closedOrderFetchImpl: config.closedOrderFetchImpl,
+    closedOrderRegistryPaths: config.closedOrderRegistryPaths,
     llmIntentProposalProvider: config.llmIntentProposalProvider,
     agentPlannerProvider: config.agentPlannerProvider,
   });

@@ -58,7 +58,7 @@ import {
   buildRentalPricePreviewCard,
   createRentalPriceSkillClient,
   executeRentalOperationConfirmRequest,
-  parseRentalOperationConfirmRequest,
+  rentalOperationConfirmRequestFromToolArguments,
   rentalPriceChangeRequestFromToolArguments,
   rentalPriceRollbackRequestFromToolArguments,
   type RentalOperationConfirmRequest,
@@ -1047,7 +1047,15 @@ export async function executeAgentToolRequest(
       const rentalRequest = rentalAgentToolRequest(request.toolName, request.arguments);
       if (!rentalRequest) throw new Error('租赁商品操作参数无效，请重新发起。');
       const result = await executeRentalOperationConfirmRequest(options.rentalPriceClient ?? createRentalPriceSkillClient(), rentalRequest);
-      return { text: result.text, metadata: { toolName: request.toolName, ok: result.ok, productId: rentalRequest.productId } };
+      return {
+        text: result.text,
+        metadata: {
+          ...(result.metadata ?? {}),
+          toolName: request.toolName,
+          ok: result.ok,
+          productId: rentalRequest.productId,
+        },
+      };
     }
     case 'rental.specRemovePlan': {
       const query = requireString(request.arguments.query, 'query');
@@ -1055,7 +1063,7 @@ export async function executeAgentToolRequest(
       return rentalSpecRemovePlanResponse(query, keyword, request.reason, options.rentalPriceClient ?? createRentalPriceSkillClient(), options, request.continuation);
     }
     case 'rental.operationConfirmRequest': {
-      const rentalRequest = parseRentalOperationConfirmRequest({ request: request.arguments });
+      const rentalRequest = rentalOperationConfirmRequestFromToolArguments(request.arguments);
       if (!rentalRequest) throw new Error('租赁商品操作参数无效，请重新发起。');
       const result = await executeRentalOperationConfirmRequest(options.rentalPriceClient ?? createRentalPriceSkillClient(), rentalRequest);
       return { text: result.text };

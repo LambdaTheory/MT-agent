@@ -2,10 +2,18 @@ import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { buildAgentToolConfirmCard } from '../src/agentRuntime/approvalCard.js';
+import { buildAgentToolConfirmCard, type AgentToolConfirmContinuation } from '../src/agentRuntime/approvalCard.js';
 import { createFeishuSdkBot } from '../src/feishuBot/sdkClient.js';
-import type { ActivityAutomationSkillClient } from '../src/feishuBot/activityAutomation.js';
-import type { RentalPriceSkillClient } from '../src/feishuBot/rentalPrice.js';
+import {
+  buildActivityAutomationCard,
+  buildActivityCancelAssistanceCard,
+  buildActivityPriceCallbackConfirmCard,
+  buildCancelDifferentialPricingCard,
+  type ActivityAutomationSkillClient,
+  type ActivityPriceCallbackConfirmRequest,
+} from '../src/feishuBot/activityAutomation.js';
+import { buildRentalOperationConfirmCard, buildRentalPricePreviewCard, type RentalPriceSkillClient } from '../src/feishuBot/rentalPrice.js';
+import { buildNewLinkBatchConfirmCard, type NewLinkBatchPlan } from '../src/newLinkWorkflow/batch.js';
 import { openLinkRegistryGovernancePrompt } from '../src/linkRegistry/governanceSession.js';
 import type { LinkRegistryEntry } from '../src/linkRegistry/types.js';
 import { openLinkRegistryMaintenancePrompt } from '../src/linkRegistry/maintenanceSession.js';
@@ -86,6 +94,16 @@ function fakeActivityCancellationAssistant() {
   };
 }
 
+function activityCallbackRequest(submitSessionPath = 'output/latest/activity-automation/activity-submit-session.json'): ActivityPriceCallbackConfirmRequest {
+  return {
+    submitSessionPath,
+    productIds: ['886'],
+    mappedCount: 1,
+    startsAt: '2026-06-24',
+    endsAt: '2026-07-01',
+  };
+}
+
 function agentToolConfirmActionValue(card: unknown): Record<string, unknown> {
   const body = (card as { body?: { elements?: Array<{ elements?: Array<{ name?: string; behaviors?: Array<{ value?: unknown }> }> }> } }).body;
   const form = body?.elements?.find((element) => Array.isArray(element.elements));
@@ -93,6 +111,50 @@ function agentToolConfirmActionValue(card: unknown): Record<string, unknown> {
   const value = button?.behaviors?.[0]?.value;
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('agent tool confirm value not found');
   return value as Record<string, unknown>;
+}
+
+function readButtonValue(card: unknown, buttonName: string): Record<string, unknown> {
+  const body = (card as { body?: { elements?: Array<{ elements?: Array<{ name?: string; behaviors?: Array<{ value?: unknown }> }>; actions?: Array<{ name?: string; behaviors?: Array<{ value?: unknown }> }> }> } }).body;
+  for (const element of body?.elements ?? []) {
+    for (const item of [...(element.elements ?? []), ...(element.actions ?? [])]) {
+      if (item.name === buttonName) {
+        const value = item.behaviors?.[0]?.value;
+        if (value && typeof value === 'object' && !Array.isArray(value)) return value as Record<string, unknown>;
+      }
+    }
+  }
+  throw new Error(`${buttonName} value not found`);
+}
+
+function newLinkPlan(): NewLinkBatchPlan {
+  return {
+    status: 'ready',
+    request: { keyword: 'SQ1', count: 2, sourceProductId: '388' },
+    dataDate: '2026-06-11',
+    requestedSourceProductId: '388',
+    selectedSource: {
+      productId: '388',
+      platformProductId: 'platform-388',
+      productName: 'SQ1 source',
+      score: 100,
+      reasons: ['fixture'],
+    },
+    candidates: [],
+    warnings: [],
+  };
+}
+
+function query565Continuation(currentStepId: string, currentStepIndex: number): AgentToolConfirmContinuation {
+  return {
+    goal: 'continue after confirmed write',
+    reason: 'continue with product query after confirmation',
+    steps: [{ toolName: 'product.query', arguments: { keyword: '565' }, reason: 'query product 565' }],
+    nextIndex: 1,
+    totalSteps: 2,
+    currentStepId,
+    currentStepIndex,
+    metadataStore: {},
+  };
 }
 
 function patchedCard(sentItem: unknown): unknown {
@@ -144,6 +206,66 @@ async function writeContext(): Promise<string> {
     agentData: { removedLinks: [] },
   }));
   return dir;
+}
+
+async function writeRankingContinuationContext(): Promise<{
+  outputDir: string;
+  registryPaths: {
+    productIdMapPath: string;
+    productNameMapPath: string;
+    firstSeenPath: string;
+    lifecyclePath: string;
+    overridesPath: string;
+    artifactsDir: string;
+  };
+}> {
+  const rootDir = await mkdtemp(join(tmpdir(), 'mt-agent-sdk-continuation-registry-'));
+  const outputDir = join(rootDir, 'output');
+  const configDir = join(rootDir, 'config');
+  const stateDir = join(outputDir, 'state');
+  await mkdir(join(outputDir, '2026-06-11'), { recursive: true });
+  await mkdir(configDir, { recursive: true });
+  await mkdir(stateDir, { recursive: true });
+  await writeFile(join(outputDir, '2026-06-11', 'report-context.json'), JSON.stringify({
+    date: '2026-06-11',
+    summary: { '1d': metric, '7d': metric, '30d': metric },
+    conclusions: [],
+    rows: [
+      { productName: 'Alpha 低表现链接', platformProductId: 'p710', displayProductId: '端内ID 710', custodyDays: 10, periods: { '1d': metric, '7d': { ...metric, exposure: 100, publicVisits: 8, shippedOrders: 0, amount: 0 }, '30d': metric } },
+      { productName: 'Alpha 高表现链接', platformProductId: 'p711', displayProductId: '端内ID 711', custodyDays: 10, periods: { '1d': metric, '7d': { ...metric, exposure: 500, publicVisits: 80, shippedOrders: 1, amount: 199 }, '30d': metric } },
+    ],
+    lowExposure: [],
+    weakClick: [],
+    weakConversion: [],
+    highPotential: [],
+    newProductObservation: [],
+    lifecycleGovernance: [],
+    recommendedActions: [],
+    emptySectionNotes: {},
+    orderAnalysis: { runDate: '2026-06-11', pages: {} },
+    agentData: { removedLinks: [] },
+  }), 'utf8');
+  await writeFile(join(configDir, 'product-id-map.json'), JSON.stringify({ p710: '710', p711: '711' }), 'utf8');
+  await writeFile(join(configDir, 'product-name-map.json'), JSON.stringify({ '710': 'Alpha 低表现链接', '711': 'Alpha 高表现链接' }), 'utf8');
+  await writeFile(join(configDir, 'link-registry-overrides.json'), JSON.stringify({
+    version: 1,
+    entries: [
+      { internalProductId: '710', productName: 'Alpha 低表现链接', shortName: 'Alpha', aliases: ['alpha'], sameSkuGroupId: 'alpha-group', status: 'active' },
+      { internalProductId: '711', productName: 'Alpha 高表现链接', shortName: 'Alpha', aliases: ['alpha'], sameSkuGroupId: 'alpha-group', status: 'active' },
+    ],
+    sameSkuGroupAliasRules: [{ sameSkuGroupId: 'alpha-group', aliases: ['alpha'] }],
+  }), 'utf8');
+  return {
+    outputDir,
+    registryPaths: {
+      productIdMapPath: join(configDir, 'product-id-map.json'),
+      productNameMapPath: join(configDir, 'product-name-map.json'),
+      firstSeenPath: join(stateDir, 'goods-first-seen.json'),
+      lifecyclePath: join(stateDir, 'goods-link-lifecycle.json'),
+      overridesPath: join(configDir, 'link-registry-overrides.json'),
+      artifactsDir: outputDir,
+    },
+  };
 }
 
 async function writeLearningContext(): Promise<string> {
@@ -393,6 +515,72 @@ describe('createFeishuSdkBot card.action.trigger', () => {
     expect(calls).toEqual(['copy:761', 'delist:762']);
   });
 
+  it('passes registry paths into SDK Agent continuation steps after a confirmed write', async () => {
+    const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
+    const sent: unknown[] = [];
+    const fixtures = await writeRankingContinuationContext();
+    const calls: string[] = [];
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run'); },
+      async execute() { throw new Error('execute should not run'); },
+      async copy(productId) {
+        calls.push(productId);
+        return { productId, ok: true, newProductId: '901', lines: ['copy: ok'] };
+      },
+      async delist() { throw new Error('delist should not run'); },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+    const bot = createFeishuSdkBot({
+      appId: 'app',
+      appSecret: 'x',
+      outputDir: fixtures.outputDir,
+      rentalPriceClient,
+      closedOrderRegistryPaths: fixtures.registryPaths,
+      sdk: fakeSdk(sent, registered),
+    });
+
+    bot.start();
+    const card = buildAgentToolConfirmCard({
+      toolName: 'rental.copy',
+      arguments: { productId: '875' },
+      reason: '先复制，再查询 alpha 最佳链接',
+      continuation: {
+        goal: '先复制再查 alpha 最佳链接',
+        reason: '确认后继续读链接档案',
+        steps: [
+          { toolName: 'product.rankBestSameSku', arguments: { query: 'alpha' }, reason: '查询 alpha 同款组最佳链接' },
+        ],
+        nextIndex: 1,
+        totalSteps: 2,
+        currentStepId: 'copy',
+        currentStepIndex: 0,
+        metadataStore: {},
+      },
+    });
+
+    await registered['card.action.trigger']({
+      event: {
+        context: { open_message_id: 'om-agent-tool-continuation-registry' },
+        operator: { open_id: 'ou_agent' },
+        action: {
+          tag: 'button',
+          name: 'agent_tool_confirm_submit',
+          behaviors: [{ type: 'callback', value: agentToolConfirmActionValue(card) }],
+        },
+      },
+    });
+
+    for (let attempt = 0; attempt < 100 && !sent.some((item) => JSON.stringify(item).includes('数据最好的 alpha 是：端内ID 711')); attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    expect(calls).toEqual(['875']);
+    expect(JSON.stringify(sent)).toContain('步骤 2/2：product.rankBestSameSku');
+    expect(JSON.stringify(sent)).toContain('数据最好的 alpha 是：端内ID 711');
+  });
+
   it('continues a planner sequence after a dedicated new-link confirmation succeeds', async () => {
     const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
     const sent: unknown[] = [];
@@ -417,6 +605,10 @@ describe('createFeishuSdkBot card.action.trigger', () => {
       rentalPriceClient,
       sdk: fakeSdk(sent, registered),
     });
+    const confirmValue = readButtonValue(
+      buildNewLinkBatchConfirmCard(newLinkPlan(), 'test reason', query565Continuation('newLinks', 0)),
+      'new_link_batch_confirm_submit',
+    );
 
     bot.start();
     await registered['card.action.trigger']({
@@ -426,32 +618,7 @@ describe('createFeishuSdkBot card.action.trigger', () => {
         action: {
           tag: 'button',
           name: 'new_link_batch_confirm_submit',
-          value: {
-            action: 'new_link_batch_confirm',
-            confirmationKey: 'new-link-step-1',
-            request: {
-              safetyVersion: 2,
-              workflowName: 'rental.newLinkBatch',
-              keyword: 'SQ1',
-              count: 2,
-              sourceProductId: '388',
-              sourceProductName: 'SQ1 最佳源',
-              dataDate: '2026-06-11',
-              reason: '先铺 SQ1 新链，再查询商品表现',
-              continuation: {
-                goal: '先铺新链再查商品',
-                reason: '用户要求确认复制后继续查询',
-                steps: [
-                  { toolName: 'product.query', arguments: { keyword: '565' }, reason: '复制后查询 565' },
-                ],
-                nextIndex: 1,
-                totalSteps: 2,
-                currentStepId: 'newLinks',
-                currentStepIndex: 0,
-                metadataStore: {},
-              },
-            },
-          },
+          value: confirmValue,
         },
       },
     });
@@ -484,6 +651,12 @@ describe('createFeishuSdkBot card.action.trigger', () => {
       async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
     };
     const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'x', outputDir, rentalPriceClient, sdk: fakeSdk(sent, registered) });
+    const confirmValue = readButtonValue(buildRentalPricePreviewCard({
+      productId: '761',
+      fields: { rent1day: '22.00' },
+      lines: ['rent1day -> 22.00'],
+      warnings: [],
+    }, { reason: 'test reason', continuation: query565Continuation('price', 0) }), 'rental_price_confirm_submit');
 
     bot.start();
     await registered['card.action.trigger']({
@@ -492,26 +665,7 @@ describe('createFeishuSdkBot card.action.trigger', () => {
         action: {
           tag: 'button',
           name: 'rental_price_confirm_submit',
-          value: {
-            action: 'rental_price_confirm',
-            confirmationKey: 'price-step-1',
-            request: {
-              mode: 'explicit_fields',
-              productId: '761',
-              fields: { rent1day: '22.00' },
-              reason: '先改价再查询',
-              continuation: {
-                goal: '先改价再查商品',
-                reason: '用户要求确认改价后继续查询',
-                steps: [{ toolName: 'product.query', arguments: { keyword: '565' }, reason: '改价后查询 565' }],
-                nextIndex: 1,
-                totalSteps: 2,
-                currentStepId: 'price',
-                currentStepIndex: 0,
-                metadataStore: {},
-              },
-            },
-          },
+          value: confirmValue,
         },
       },
     });
@@ -544,6 +698,14 @@ describe('createFeishuSdkBot card.action.trigger', () => {
       async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
     };
     const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'x', outputDir, rentalPriceClient, sdk: fakeSdk(sent, registered) });
+    const confirmValue = readButtonValue(buildRentalOperationConfirmCard({
+      action: 'delist',
+      productId: '761',
+      plannerToolName: 'rental.operationConfirmRequest',
+      plannerArguments: { action: 'delist', productId: '761' },
+      plannerReason: 'test reason',
+      continuation: query565Continuation('delist', 0),
+    }, 'test reason'), 'rental_operation_confirm_submit');
 
     bot.start();
     await registered['card.action.trigger']({
@@ -552,27 +714,7 @@ describe('createFeishuSdkBot card.action.trigger', () => {
         action: {
           tag: 'button',
           name: 'rental_operation_confirm_submit',
-          value: {
-            action: 'rental_operation_confirm',
-            confirmationKey: 'operation-step-1',
-            request: {
-              action: 'delist',
-              productId: '761',
-              plannerToolName: 'rental.operationConfirmRequest',
-              plannerArguments: { action: 'delist', productId: '761' },
-              plannerReason: '先下架再查询',
-              continuation: {
-                goal: '先下架再查商品',
-                reason: '用户要求确认下架后继续查询',
-                steps: [{ toolName: 'product.query', arguments: { keyword: '565' }, reason: '下架后查询 565' }],
-                nextIndex: 1,
-                totalSteps: 2,
-                currentStepId: 'delist',
-                currentStepIndex: 0,
-                metadataStore: {},
-              },
-            },
-          },
+          value: confirmValue,
         },
       },
     });
@@ -600,12 +742,13 @@ describe('createFeishuSdkBot card.action.trigger', () => {
     });
 
     bot.start();
+    const confirmValue = readButtonValue(buildActivityAutomationCard(), 'activity_automation_confirm_submit');
     await registered['card.action.trigger']({
       event: {
         context: { open_message_id: 'om-activity-automation' },
         action: {
           tag: 'button',
-          value: { action: 'activity_automation_confirm' },
+          value: confirmValue,
           form_value: {
             starts_at: '2026-06-23',
             ends_at: '2026-06-30',
@@ -639,7 +782,7 @@ describe('createFeishuSdkBot card.action.trigger', () => {
     expect(JSON.stringify(sent[1])).toContain('770');
   });
 
-  it('accepts date picker objects and omitted default discounts for differential pricing automation', async () => {
+  it('rejects unsigned differential pricing automation callbacks', async () => {
     const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
     const sent: unknown[] = [];
     const activityAutomationClient = fakeActivityAutomationClient();
@@ -654,10 +797,76 @@ describe('createFeishuSdkBot card.action.trigger', () => {
     bot.start();
     await registered['card.action.trigger']({
       event: {
-        context: { open_message_id: 'om-activity-automation-defaults' },
+        context: { open_message_id: 'om-activity-automation-unsigned' },
         action: {
           tag: 'button',
           value: { action: 'activity_automation_confirm' },
+          form_value: {
+            starts_at: '2026-06-23',
+            ends_at: '2026-06-30',
+          },
+        },
+      },
+    });
+
+    expect(activityAutomationClient.executions).toEqual([]);
+    expect(sent).toHaveLength(1);
+    expect(JSON.stringify(sent[0])).toContain('参数无效');
+  });
+
+  it('rejects differential pricing callbacks when the card key belongs to another action', async () => {
+    const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
+    const sent: unknown[] = [];
+    const activityAutomationClient = fakeActivityAutomationClient();
+    const bot = createFeishuSdkBot({
+      appId: 'app',
+      appSecret: 'secret',
+      outputDir: 'output',
+      activityAutomationClient,
+      sdk: fakeSdk(sent, registered),
+    });
+
+    bot.start();
+    const cancelValue = readButtonValue(buildActivityAutomationCard(), 'activity_automation_cancel_submit');
+    await registered['card.action.trigger']({
+      event: {
+        context: { open_message_id: 'om-activity-automation-wrong-action-key' },
+        action: {
+          tag: 'button',
+          value: { ...cancelValue, action: 'activity_automation_confirm' },
+          form_value: {
+            starts_at: '2026-06-23',
+            ends_at: '2026-06-30',
+          },
+        },
+      },
+    });
+
+    expect(activityAutomationClient.executions).toEqual([]);
+    expect(sent).toHaveLength(1);
+    expect(JSON.stringify(sent[0])).toContain('参数无效');
+  });
+
+  it('accepts date picker objects and omitted default discounts for differential pricing automation', async () => {
+    const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
+    const sent: unknown[] = [];
+    const activityAutomationClient = fakeActivityAutomationClient();
+    const bot = createFeishuSdkBot({
+      appId: 'app',
+      appSecret: 'secret',
+      outputDir: 'output',
+      activityAutomationClient,
+      sdk: fakeSdk(sent, registered),
+    });
+
+    bot.start();
+    const confirmValue = readButtonValue(buildActivityAutomationCard(), 'activity_automation_confirm_submit');
+    await registered['card.action.trigger']({
+      event: {
+        context: { open_message_id: 'om-activity-automation-defaults' },
+        action: {
+          tag: 'button',
+          value: confirmValue,
           form_value: {
             starts_at: { date: '2026-06-24' },
             ends_at: { value: '2026-06-30' },
@@ -693,12 +902,13 @@ describe('createFeishuSdkBot card.action.trigger', () => {
     });
 
     bot.start();
+    const confirmValue = readButtonValue(buildActivityAutomationCard(), 'activity_automation_confirm_submit');
     await registered['card.action.trigger']({
       event: {
         context: { open_message_id: 'om-activity-automation-nested' },
         action: {
           tag: 'button',
-          value: { action: 'activity_automation_confirm' },
+          value: confirmValue,
           form_value: {
             differential_pricing_form: {
               starts_at: '2026-06-24',
@@ -736,12 +946,13 @@ describe('createFeishuSdkBot card.action.trigger', () => {
     });
 
     bot.start();
+    const cancelValue = readButtonValue(buildActivityAutomationCard(), 'activity_automation_cancel_submit');
     const result = await registered['card.action.trigger']({
       event: {
         context: { open_message_id: 'om-activity-automation-cancel' },
         action: {
           tag: 'button',
-          value: { action: 'activity_automation_cancel' },
+          value: cancelValue,
         },
       },
     });
@@ -759,21 +970,20 @@ describe('createFeishuSdkBot card.action.trigger', () => {
     const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', outputDir: 'output', sdk: fakeSdk(sent, registered) });
 
     bot.start();
+    const request: ActivityPriceCallbackConfirmRequest = {
+      submitSessionPath: 'output/latest/activity-automation/activity-submit-session.json',
+      productIds: ['770', '800'],
+      mappedCount: 2,
+      startsAt: '2026-06-24',
+      endsAt: '2026-06-30',
+    };
+    const cancelValue = readButtonValue(buildActivityPriceCallbackConfirmCard(request), 'activity_price_callback_cancel_submit');
     const event = {
       event: {
         context: { open_message_id: 'om-activity-price-callback-cancel' },
         action: {
           tag: 'button',
-          value: {
-            action: 'activity_price_callback_cancel',
-            request: {
-              submitSessionPath: 'output/latest/activity-automation/activity-submit-session.json',
-              productIds: ['770', '800'],
-              mappedCount: 2,
-              startsAt: '2026-06-24',
-              endsAt: '2026-06-30',
-            },
-          },
+          value: cancelValue,
         },
       },
     };
@@ -803,22 +1013,15 @@ describe('createFeishuSdkBot card.action.trigger', () => {
     } as any);
 
     bot.start();
+    const request = activityCallbackRequest(submitSessionPath);
+    const openValue = readButtonValue(buildCancelDifferentialPricingCard(request), 'cancel_differential_pricing_open_submit');
     await registered['card.action.trigger']({
       event: {
         context: { open_message_id: 'om-activity-cancel-open' },
         action: {
           tag: 'button',
           name: 'cancel_differential_pricing_open_submit',
-          value: {
-            action: 'cancel_differential_pricing_open',
-            request: {
-              submitSessionPath,
-              productIds: ['886'],
-              mappedCount: 1,
-              startsAt: '2026-06-24',
-              endsAt: '2026-07-01',
-            },
-          },
+          value: openValue,
         },
       },
     });
@@ -854,22 +1057,18 @@ describe('createFeishuSdkBot card.action.trigger', () => {
     });
 
     bot.start();
+    const request = activityCallbackRequest(submitSessionPath);
+    const doneValue = readButtonValue(
+      buildActivityCancelAssistanceCard(request, { openedUrl: 'https://example.test/activity', requiresManualLogin: false, lines: [] }),
+      'cancel_differential_pricing_done_submit',
+    );
     await registered['card.action.trigger']({
       event: {
         context: { open_message_id: 'om-activity-cancel-done' },
         action: {
           tag: 'button',
           name: 'cancel_differential_pricing_done_submit',
-          value: {
-            action: 'cancel_differential_pricing_done',
-            request: {
-              submitSessionPath,
-              productIds: ['886'],
-              mappedCount: 1,
-              startsAt: '2026-06-24',
-              endsAt: '2026-07-01',
-            },
-          },
+          value: doneValue,
         },
       },
     });
@@ -891,22 +1090,18 @@ describe('createFeishuSdkBot card.action.trigger', () => {
     });
 
     bot.start();
+    const request = activityCallbackRequest(submitSessionPath);
+    const abortValue = readButtonValue(
+      buildActivityCancelAssistanceCard(request, { openedUrl: 'https://example.test/activity', requiresManualLogin: false, lines: [] }),
+      'cancel_differential_pricing_abort_submit',
+    );
     await registered['card.action.trigger']({
       event: {
         context: { open_message_id: 'om-activity-cancel-abort' },
         action: {
           tag: 'button',
           name: 'cancel_differential_pricing_abort_submit',
-          value: {
-            action: 'cancel_differential_pricing_abort',
-            request: {
-              submitSessionPath,
-              productIds: ['886'],
-              mappedCount: 1,
-              startsAt: '2026-06-24',
-              endsAt: '2026-07-01',
-            },
-          },
+          value: abortValue,
         },
       },
     });
