@@ -33,6 +33,7 @@ function readString(value: unknown): string | null {
 function readStepId(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
+  if (trimmed === 'last' || trimmed === 'steps') return null;
   return /^[A-Za-z][A-Za-z0-9_-]{0,39}$/.test(trimmed) ? trimmed : null;
 }
 
@@ -178,6 +179,7 @@ export function parseAgentToolConfirmRequest(value: unknown): AgentToolConfirmRe
   if (request.continuation !== undefined && !continuation) return null;
   const parsedRequest = { toolName, arguments: args, reason, ...(continuation ? { continuation } : {}) };
   if (value.confirmationKey !== undefined && !hasValidConfirmationKey(value, parsedRequest)) return null;
+  if (continuation && !hasValidConfirmationKey(value, parsedRequest)) return null;
   if (requiresConfirmationKey(tool) && !hasValidConfirmationKey(value, parsedRequest)) return null;
   return parsedRequest;
 }

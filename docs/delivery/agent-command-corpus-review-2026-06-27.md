@@ -35,6 +35,8 @@
 - HTTP 和 SDK 两条卡片确认通道都会把租赁客户端、关单 fetch 注入和链接档案路径继续传给剩余步骤，确认后续跑不会丢失执行上下文。
 - Agent 通用确认卡现在会校验 `confirmationKey` 与请求内容是否一致；卡片 value 被改过、或隐藏工具缺少合法 key，都会拒绝执行。
 - 确认卡续跑步骤继续执行前会再次拒绝隐藏工具，避免把内部执行工具塞进 future step 绕过 planner 可见性边界。
+- 带 continuation 的确认卡必须有合法生成 key；普通旧卡可保留兼容，但不能携带多步骤续跑。
+- planner step id 保留 `last` 和 `steps`，避免与 `${last...}`、`${steps.xxx...}` 运行时引用语义冲突。
 
 ## 测试证据
 
@@ -62,9 +64,11 @@
 - `tests/agentRuntimePlanner.test.ts`
   - 多步骤占位符引用必须指向前序步骤；未知、未来、自引用均拒绝。
   - 所有隐藏执行工具不能被原子计划或多步骤计划直接选择。
+  - 多步骤 step id 拒绝 `last` / `steps` 等运行时保留字。
 - `tests/agentRuntimeApprovalCard.test.ts`
   - 通用确认卡真实 payload 可解析；篡改 request 后 key 不匹配会拒绝。
   - 隐藏当前工具必须带系统生成的合法 key；隐藏工具不能作为续跑步骤出现。
+  - 带续跑步骤的确认卡必须来自真实生成卡片；无 key continuation 或保留字 currentStepId 会拒绝。
 
 本轮自测结果：
 

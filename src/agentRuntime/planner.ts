@@ -73,6 +73,7 @@ function readStepId(value: unknown): string | undefined | null {
   if (value === undefined) return undefined;
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
+  if (trimmed === 'last' || trimmed === 'steps') return null;
   return /^[A-Za-z][A-Za-z0-9_-]{0,39}$/.test(trimmed) ? trimmed : null;
 }
 

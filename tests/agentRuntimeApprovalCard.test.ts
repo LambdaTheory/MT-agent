@@ -126,25 +126,24 @@ describe('agent runtime approval card', () => {
   });
 
   it('parses continuation payloads for confirmed multi-step plans', () => {
-    expect(parseAgentToolConfirmRequest({
-      request: {
-        toolName: 'rental.copy',
-        arguments: { productId: '761' },
-        reason: '复制商品需要确认',
-        continuation: {
-          goal: '先复制再查询',
-          reason: '用户要求复合操作',
-          steps: [
-            { id: 'query', toolName: 'product.query', arguments: { keyword: '${copy.newProductId}' }, reason: '继续查询新商品' },
-          ],
-          nextIndex: 2,
-          totalSteps: 3,
-          currentStepId: 'copy',
-          currentStepIndex: 1,
-          metadataStore: { summary: { text: 'ok' } },
-        },
+    const request = {
+      toolName: 'rental.copy',
+      arguments: { productId: '761' },
+      reason: '复制商品需要确认',
+      continuation: {
+        goal: '先复制再查询',
+        reason: '用户要求复合操作',
+        steps: [
+          { id: 'query', toolName: 'product.query', arguments: { keyword: '${copy.newProductId}' }, reason: '继续查询新商品' },
+        ],
+        nextIndex: 2,
+        totalSteps: 3,
+        currentStepId: 'copy',
+        currentStepIndex: 1,
+        metadataStore: { summary: { text: 'ok' } },
       },
-    })).toMatchObject({
+    };
+    expect(parseAgentToolConfirmRequest(readAgentToolConfirmValue(buildAgentToolConfirmCard(request)))).toMatchObject({
       toolName: 'rental.copy',
       continuation: {
         goal: '先复制再查询',
@@ -154,6 +153,12 @@ describe('agent runtime approval card', () => {
         steps: [{ id: 'query', toolName: 'product.query', arguments: { keyword: '${copy.newProductId}' } }],
       },
     });
+    expect(parseAgentToolConfirmRequest({ request })).toBeNull();
+
+    expect(parseAgentToolConfirmRequest(readAgentToolConfirmValue(buildAgentToolConfirmCard({
+      ...request,
+      continuation: { ...request.continuation, currentStepId: 'last' },
+    })))).toBeNull();
 
     expect(parseAgentToolConfirmRequest({
       request: {
