@@ -1,0 +1,2434 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "internalProductId": "218",
+      "sameSkuGroupId": "vivo-蔡司-2-35x增距镜-神器",
+      "confidence": 0.95,
+      "reason": "link_registry_merge_review_approval",
+      "maintainer": "merge_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "234",
+      "shortName": "X Half",
+      "aliases": [
+        "X Half"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "235",
+      "shortName": "Mini 11",
+      "aliases": [
+        "Mini 11",
+        "Mini11"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "236",
+      "shortName": "mini liplay",
+      "aliases": [
+        "mini liplay"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "242",
+      "shortName": "mini EVO",
+      "aliases": [
+        "mini EVO"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_audit_review_approval",
+      "maintainer": "audit_review_markdown",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "247",
+      "shortName": "CP1500",
+      "aliases": [
+        "CP 1500",
+        "CP1500"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "250",
+      "shortName": "mini 40",
+      "aliases": [
+        "mini 40",
+        "mini40"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "252",
+      "shortName": "G11",
+      "aliases": [
+        "G 11",
+        "G11"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "253",
+      "sameSkuGroupId": "canon r50",
+      "confidence": 0.95,
+      "reason": "link_registry_merge_review_approval",
+      "maintainer": "merge_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "254",
+      "shortName": "G9",
+      "aliases": [
+        "G 9",
+        "G9"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "256",
+      "shortName": "rf 50 f1.8",
+      "aliases": [
+        "rf 50 f 1.8",
+        "rf 50 f1.8",
+        "rf50f1.8"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "282",
+      "sameSkuGroupId": "dji-action-5-pro",
+      "confidence": 0.95,
+      "reason": "link_registry_merge_review_approval",
+      "maintainer": "merge_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "284",
+      "shortName": "SX740",
+      "aliases": [
+        "SX 740",
+        "SX740"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "298",
+      "shortName": "觅光 彩虹光面罩",
+      "aliases": [
+        "觅光 彩虹光面罩",
+        "觅光/AMIRO 彩虹光面罩ABM502"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "310",
+      "shortName": "SX740",
+      "aliases": [
+        "SX 740",
+        "SX740"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "315",
+      "sameSkuGroupId": "vivo x304 pro",
+      "confidence": 0.95,
+      "reason": "link_registry_merge_review_approval",
+      "maintainer": "merge_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "316",
+      "shortName": "Wide 300",
+      "aliases": [
+        "Wide 300",
+        "Wide300"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "325",
+      "categoryName": "稳定器",
+      "productType": "phone-gimbal",
+      "shortName": "大疆 Mobile 7P",
+      "aliases": [
+        "大疆 Mobile 7 P",
+        "大疆 Mobile 7P",
+        "大疆Mobile7P"
+      ],
+      "sameSkuGroupId": "大疆 mobile",
+      "confidence": 0.95,
+      "reason": "link_registry_audit_review_approval",
+      "maintainer": "audit_review_markdown",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "327",
+      "sameSkuGroupId": "vivo-蔡司-2-35x增距镜-神器",
+      "confidence": 0.95,
+      "reason": "link_registry_merge_review_approval",
+      "maintainer": "merge_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "333",
+      "shortName": "rf 100-400",
+      "aliases": [
+        "rf 100-400",
+        "rf100-400"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "355",
+      "sameSkuGroupId": "三星galaxy s23ultra",
+      "confidence": 0.95,
+      "reason": "link_registry_merge_review_approval",
+      "maintainer": "merge_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "370",
+      "categoryName": "手机",
+      "productType": "smartphone",
+      "shortName": "S23U",
+      "aliases": [
+        "S 23U",
+        "S23 U",
+        "S23U"
+      ],
+      "sameSkuGroupId": "三星galaxy s23ultra",
+      "confidence": 0.95,
+      "reason": "link_registry_audit_review_approval",
+      "maintainer": "audit_review_markdown",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "372",
+      "sameSkuGroupId": "vivo-蔡司-2-35x增距镜-神器",
+      "confidence": 0.95,
+      "reason": "link_registry_merge_review_approval",
+      "maintainer": "merge_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "373",
+      "categoryName": "相机",
+      "productType": "instant-camera",
+      "shortName": "mini 12",
+      "aliases": [
+        "mini 12",
+        "mini12"
+      ],
+      "sameSkuGroupId": "fujifilm-instax-mini-12",
+      "confidence": 0.95,
+      "reason": "link_registry_audit_review_approval",
+      "maintainer": "audit_review_markdown",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "380",
+      "shortName": "G7X2",
+      "aliases": [
+        "G 7X 2",
+        "G7 X2",
+        "G7X2"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "383",
+      "categoryName": "稳定器",
+      "productType": "phone-gimbal",
+      "shortName": "大疆 Mobile 7P",
+      "aliases": [
+        "大疆 Mobile 7 P",
+        "大疆 Mobile 7P",
+        "大疆Mobile7P"
+      ],
+      "sameSkuGroupId": "大疆 mobile",
+      "confidence": 0.95,
+      "reason": "link_registry_audit_review_approval",
+      "maintainer": "audit_review_markdown",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "388",
+      "shortName": "SQ1",
+      "aliases": [
+        "SQ 1",
+        "SQ1"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "389",
+      "shortName": "Ixus 130",
+      "aliases": [
+        "Ixus 130",
+        "Ixus130"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "392",
+      "shortName": "富图宝 FY820/830 三脚架",
+      "aliases": [
+        "富图宝 FY820/830 三脚架",
+        "富图宝 FY820/830 专业三脚架短租"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "397",
+      "shortName": "mini 90",
+      "aliases": [
+        "mini 90",
+        "mini90"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "398",
+      "shortName": "Mini 99",
+      "aliases": [
+        "Mini 99",
+        "Mini99"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "399",
+      "shortName": "mini EVO",
+      "aliases": [
+        "mini EVO"
+      ],
+      "sameSkuGroupId": "fujifilm-mini-evo",
+      "confidence": 0.95,
+      "reason": "link_registry_audit_review_approval",
+      "maintainer": "audit_review_markdown",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "400",
+      "shortName": "mini EVO",
+      "aliases": [
+        "mini EVO"
+      ],
+      "sameSkuGroupId": "fujifilm-mini-evo",
+      "confidence": 0.95,
+      "reason": "link_registry_audit_review_approval",
+      "maintainer": "audit_review_markdown",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "401",
+      "shortName": "mini link2",
+      "aliases": [
+        "mini link 2",
+        "mini link2",
+        "minilink2"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "404",
+      "shortName": "mini link3",
+      "aliases": [
+        "mini link 3",
+        "mini link3",
+        "minilink3"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "428",
+      "shortName": "P1000",
+      "aliases": [
+        "P 1000",
+        "P1000"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "429",
+      "shortName": "nikon a900",
+      "aliases": [
+        "nikon a 900",
+        "nikon a900",
+        "nikona900"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "433",
+      "categoryName": "相机",
+      "productType": "camera",
+      "shortName": "FZ80D",
+      "aliases": [
+        "FZ 80D",
+        "FZ80 D",
+        "FZ80D"
+      ],
+      "sameSkuGroupId": "panasonic-fz80d",
+      "confidence": 0.95,
+      "reason": "link_registry_audit_review_approval",
+      "maintainer": "audit_review_markdown",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "435",
+      "shortName": "B700",
+      "aliases": [
+        "B 700",
+        "B700"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "436",
+      "shortName": "ZS99",
+      "aliases": [
+        "ZS 99",
+        "ZS99"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "437",
+      "shortName": "zs220d",
+      "aliases": [
+        "zs 220d",
+        "zs220 d",
+        "zs220d"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "438",
+      "shortName": "fz80d",
+      "aliases": [
+        "fz 80d",
+        "fz80 d",
+        "fz80d"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "439",
+      "shortName": "zs80d",
+      "aliases": [
+        "zs 80d",
+        "zs80 d",
+        "zs80d"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "441",
+      "shortName": "vivo 蔡司增距镜",
+      "aliases": [
+        "vivo 蔡司增距镜",
+        "vivo蔡司增距镜"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "455",
+      "shortName": "wide 400",
+      "aliases": [
+        "wide 400",
+        "wide400"
+      ],
+      "sameSkuGroupId": "fujifilm-instax-wide-400",
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "461",
+      "shortName": "Ipad 2021",
+      "aliases": [
+        "Ipad 2021",
+        "Ipad2021"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "470",
+      "shortName": "CP1500",
+      "aliases": [
+        "CP 1500",
+        "CP1500"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "471",
+      "shortName": "G7X3",
+      "aliases": [
+        "G 7X 3",
+        "G7 X3",
+        "G7X3"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "472",
+      "categoryName": "相机",
+      "productType": "camera",
+      "shortName": "G7X2",
+      "aliases": [
+        "G 7",
+        "G 7X 2",
+        "G7",
+        "G7 X2",
+        "G7X2"
+      ],
+      "sameSkuGroupId": "canon-g7x2",
+      "confidence": 0.95,
+      "reason": "link_registry_audit_review_approval",
+      "maintainer": "audit_review_markdown",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "473",
+      "shortName": "Ipad Air 5",
+      "aliases": [
+        "Ipad Air 5",
+        "IpadAir5"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "474",
+      "shortName": "Ipad Air 6",
+      "aliases": [
+        "Ipad Air 6",
+        "IpadAir6"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "475",
+      "shortName": "ipad air 7",
+      "aliases": [
+        "ipad air 7",
+        "ipadair7"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "478",
+      "shortName": "pocket3",
+      "aliases": [
+        "pocket 3",
+        "pocket3"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "485",
+      "shortName": "wide 400",
+      "aliases": [
+        "wide 400",
+        "wide400"
+      ],
+      "sameSkuGroupId": "fujifilm-instax-wide-400",
+      "confidence": 0.95,
+      "reason": "wide400_group_id_fix",
+      "maintainer": "codex",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "490",
+      "shortName": "SQ1",
+      "aliases": [
+        "SQ 1",
+        "SQ1"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "497",
+      "shortName": "Wide 300",
+      "aliases": [
+        "Wide 300",
+        "Wide300"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "499",
+      "sameSkuGroupId": "三星galaxy s23ultra",
+      "confidence": 0.95,
+      "reason": "link_registry_merge_review_approval",
+      "maintainer": "merge_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "500",
+      "sameSkuGroupId": "三星galaxy s23ultra",
+      "confidence": 0.95,
+      "reason": "link_registry_merge_review_approval",
+      "maintainer": "merge_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "501",
+      "sameSkuGroupId": "三星galaxy s23ultra",
+      "confidence": 0.95,
+      "reason": "link_registry_merge_review_approval",
+      "maintainer": "merge_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "502",
+      "categoryName": "相机",
+      "productType": "instant-camera",
+      "shortName": "wide EVO",
+      "aliases": [
+        "wide EVO"
+      ],
+      "sameSkuGroupId": "fujifilm wide evo",
+      "confidence": 0.95,
+      "reason": "link_registry_audit_review_approval",
+      "maintainer": "audit_review_markdown",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "503",
+      "categoryName": "相机",
+      "productType": "instant-camera",
+      "shortName": "wide EVO",
+      "aliases": [
+        "wide EVO"
+      ],
+      "sameSkuGroupId": "fujifilm wide evo",
+      "confidence": 0.95,
+      "reason": "link_registry_audit_review_approval",
+      "maintainer": "audit_review_markdown",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "504",
+      "sameSkuGroupId": "sony zv1",
+      "confidence": 0.95,
+      "reason": "link_registry_merge_review_approval",
+      "maintainer": "merge_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "505",
+      "sameSkuGroupId": "sony zv1",
+      "confidence": 0.95,
+      "reason": "link_registry_merge_review_approval",
+      "maintainer": "merge_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "507",
+      "sameSkuGroupId": "canon r50",
+      "confidence": 0.95,
+      "reason": "link_registry_merge_review_approval",
+      "maintainer": "merge_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "513",
+      "shortName": "SX70",
+      "aliases": [
+        "SX 70",
+        "SX70"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "514",
+      "sameSkuGroupId": "vivo x301 pro",
+      "confidence": 0.95,
+      "reason": "link_registry_merge_review_approval",
+      "maintainer": "merge_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "515",
+      "shortName": "wide 400",
+      "aliases": [
+        "wide 400",
+        "wide400"
+      ],
+      "sameSkuGroupId": "fujifilm-instax-wide-400",
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "516",
+      "shortName": "ZS99",
+      "aliases": [
+        "ZS 99",
+        "ZS99"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "527",
+      "shortName": "x300u",
+      "aliases": [
+        "x 300u",
+        "x300 u",
+        "x300u"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "530",
+      "shortName": "Pocket 3",
+      "aliases": [
+        "Pocket 3",
+        "Pocket3"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "533",
+      "shortName": "Pocket 3",
+      "aliases": [
+        "Pocket 3",
+        "Pocket3"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "534",
+      "shortName": "Pocket 3",
+      "aliases": [
+        "Pocket 3",
+        "Pocket3"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "540",
+      "shortName": "Pocket 3",
+      "aliases": [
+        "Pocket 3",
+        "Pocket3"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "544",
+      "shortName": "x300u",
+      "aliases": [
+        "x 300u",
+        "x300 u",
+        "x300u"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "545",
+      "shortName": "Ipad Pro 2021",
+      "aliases": [
+        "Ipad Pro 2021",
+        "IpadPro2021"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "550",
+      "shortName": "Ipad Pro 2022",
+      "aliases": [
+        "Ipad Pro 2022",
+        "IpadPro2022"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "551",
+      "shortName": "Ipad Pro 2024",
+      "aliases": [
+        "Ipad Pro 2024",
+        "IpadPro2024"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "553",
+      "shortName": "ipad mini 6",
+      "aliases": [
+        "ipad mini 6",
+        "ipadmini6"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "555",
+      "shortName": "Action 5 Pro",
+      "aliases": [
+        "Action 5 Pro",
+        "Action5Pro"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "556",
+      "shortName": "ipad mini 7",
+      "aliases": [
+        "ipad mini 7",
+        "ipadmini7"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "561",
+      "shortName": "Action 5 Pro",
+      "aliases": [
+        "Action 5 Pro",
+        "Action5Pro"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "562",
+      "shortName": "Action 5 Pro",
+      "aliases": [
+        "Action 5 Pro",
+        "Action5Pro"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "565",
+      "shortName": "Iphone 17",
+      "aliases": [
+        "Iphone 17",
+        "Iphone17"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "578",
+      "shortName": "Ixus 130",
+      "aliases": [
+        "Ixus 130",
+        "Ixus130"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "579",
+      "shortName": "Ixus 130",
+      "aliases": [
+        "Ixus 130",
+        "Ixus130"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "580",
+      "shortName": "Ixus 130",
+      "aliases": [
+        "Ixus 130",
+        "Ixus130"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "581",
+      "shortName": "Ixus 130",
+      "aliases": [
+        "Ixus 130",
+        "Ixus130"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "584",
+      "shortName": "ixus 130",
+      "aliases": [
+        "ixus 130",
+        "ixus130"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "585",
+      "shortName": "Osmo Nano",
+      "aliases": [
+        "Osmo Nano"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "586",
+      "shortName": "Osmo Nano",
+      "aliases": [
+        "Osmo Nano"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "589",
+      "shortName": "Osmo Nano",
+      "aliases": [
+        "Osmo Nano"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "602",
+      "shortName": "Pocket 4",
+      "aliases": [
+        "Pocket 4",
+        "Pocket4"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "604",
+      "shortName": "Pocket 4",
+      "aliases": [
+        "Pocket 4",
+        "Pocket4"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "605",
+      "shortName": "Pocket 4",
+      "aliases": [
+        "Pocket 4",
+        "Pocket4"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "628",
+      "shortName": "Ace Pro 2",
+      "aliases": [
+        "Ace Pro 2",
+        "AcePro2"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "635",
+      "shortName": "Mini 12",
+      "aliases": [
+        "Mini 12",
+        "Mini12"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "641",
+      "categoryName": "配件",
+      "productType": "tripod",
+      "shortName": "FY820/830 三脚架",
+      "aliases": [
+        "FY 820/830 三脚架",
+        "FY820/830 三脚架",
+        "FY820/830三脚架"
+      ],
+      "sameSkuGroupId": "富图宝-fy820-830-专业三脚架短租",
+      "confidence": 0.95,
+      "reason": "link_registry_audit_review_approval",
+      "maintainer": "audit_review_markdown",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "648",
+      "sameSkuGroupId": "vivo-x300-ultra",
+      "confidence": 0.95,
+      "reason": "link_registry_merge_review_approval",
+      "maintainer": "merge_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "649",
+      "shortName": "x300u",
+      "aliases": [
+        "x 300u",
+        "x300 u",
+        "x300u"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "650",
+      "shortName": "x300u",
+      "aliases": [
+        "x 300u",
+        "x300 u",
+        "x300u"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "653",
+      "shortName": "ipod touch 6",
+      "aliases": [
+        "ipod touch 6",
+        "ipodtouch6"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "663",
+      "shortName": "Pocket 3",
+      "aliases": [
+        "Pocket 3",
+        "Pocket3"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "666",
+      "shortName": "x300 u",
+      "aliases": [
+        "x 300 u",
+        "x300 u",
+        "x300u"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "667",
+      "sameSkuGroupId": "vivo-x300-ultra",
+      "confidence": 0.95,
+      "reason": "link_registry_merge_review_approval",
+      "maintainer": "merge_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "668",
+      "sameSkuGroupId": "vivo-x300-ultra",
+      "confidence": 0.95,
+      "reason": "link_registry_merge_review_approval",
+      "maintainer": "merge_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "669",
+      "sameSkuGroupId": "vivo-x300-ultra",
+      "confidence": 0.95,
+      "reason": "link_registry_merge_review_approval",
+      "maintainer": "merge_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "673",
+      "shortName": "Pocket 4",
+      "aliases": [
+        "Pocket 4",
+        "Pocket4"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "676",
+      "shortName": "x100v",
+      "aliases": [
+        "x 100v",
+        "x100 v",
+        "x100v"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "677",
+      "shortName": "x100v",
+      "aliases": [
+        "x 100v",
+        "x100 v",
+        "x100v"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "678",
+      "shortName": "x100v",
+      "aliases": [
+        "x 100v",
+        "x100 v",
+        "x100v"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "679",
+      "shortName": "x100v",
+      "aliases": [
+        "x 100v",
+        "x100 v",
+        "x100v"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "680",
+      "shortName": "x100v",
+      "aliases": [
+        "x 100v",
+        "x100 v",
+        "x100v"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "681",
+      "shortName": "R50",
+      "aliases": [
+        "R 50",
+        "R50"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "682",
+      "shortName": "R50",
+      "aliases": [
+        "R 50",
+        "R50"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "683",
+      "shortName": "R50",
+      "aliases": [
+        "R 50",
+        "R50"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "686",
+      "shortName": "R50",
+      "aliases": [
+        "R 50",
+        "R50"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "687",
+      "shortName": "R50",
+      "aliases": [
+        "R 50",
+        "R50"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "690",
+      "sameSkuGroupId": "canon r50",
+      "confidence": 0.95,
+      "reason": "link_registry_merge_review_approval",
+      "maintainer": "merge_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "691",
+      "sameSkuGroupId": "canon r50",
+      "confidence": 0.95,
+      "reason": "link_registry_merge_review_approval",
+      "maintainer": "merge_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "692",
+      "sameSkuGroupId": "vivo x300 pro",
+      "confidence": 0.95,
+      "reason": "link_registry_merge_review_approval",
+      "maintainer": "merge_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "693",
+      "sameSkuGroupId": "vivo x303 pro",
+      "confidence": 0.95,
+      "reason": "link_registry_merge_review_approval",
+      "maintainer": "merge_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "694",
+      "sameSkuGroupId": "vivo x300 pro",
+      "confidence": 0.95,
+      "reason": "link_registry_merge_review_approval",
+      "maintainer": "merge_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "695",
+      "sameSkuGroupId": "vivo x300 pro",
+      "confidence": 0.95,
+      "reason": "link_registry_merge_review_approval",
+      "maintainer": "merge_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "696",
+      "sameSkuGroupId": "vivo x302 pro",
+      "confidence": 0.95,
+      "reason": "link_registry_merge_review_approval",
+      "maintainer": "merge_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "713",
+      "shortName": "G7X3",
+      "aliases": [
+        "G 7X 3",
+        "G7 X3",
+        "G7X3"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "715",
+      "shortName": "G7X2",
+      "aliases": [
+        "G 7X 2",
+        "G7 X2",
+        "G7X2"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "717",
+      "shortName": "SX740",
+      "aliases": [
+        "SX 740",
+        "SX740"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "720",
+      "shortName": "SX740",
+      "aliases": [
+        "SX 740",
+        "SX740"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "738",
+      "shortName": "wide 400",
+      "aliases": [
+        "wide 400",
+        "wide400"
+      ],
+      "sameSkuGroupId": "fujifilm-instax-wide-400",
+      "confidence": 0.95,
+      "reason": "wide400_group_id_fix",
+      "maintainer": "codex",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "739",
+      "shortName": "wide 400",
+      "aliases": [
+        "wide 400",
+        "wide400"
+      ],
+      "sameSkuGroupId": "fujifilm-instax-wide-400",
+      "confidence": 0.95,
+      "reason": "wide400_group_id_fix",
+      "maintainer": "codex",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "740",
+      "shortName": "wide 400",
+      "aliases": [
+        "wide 400",
+        "wide400"
+      ],
+      "sameSkuGroupId": "fujifilm-instax-wide-400",
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "742",
+      "shortName": "Wide 300",
+      "aliases": [
+        "Wide 300",
+        "Wide300"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "744",
+      "shortName": "Mini 12",
+      "aliases": [
+        "Mini 12",
+        "Mini12"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "745",
+      "shortName": "Mini 12",
+      "aliases": [
+        "Mini 12",
+        "Mini12"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "746",
+      "shortName": "Mini 12",
+      "aliases": [
+        "Mini 12",
+        "Mini12"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "747",
+      "shortName": "Mini 11",
+      "aliases": [
+        "Mini 11",
+        "Mini11"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "748",
+      "shortName": "mini 90",
+      "aliases": [
+        "mini 90",
+        "mini90"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "749",
+      "shortName": "mini 40",
+      "aliases": [
+        "mini 40",
+        "mini40"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "750",
+      "shortName": "ixus 130",
+      "aliases": [
+        "ixus 130",
+        "ixus130"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "751",
+      "shortName": "ixus 130",
+      "aliases": [
+        "ixus 130",
+        "ixus130"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "752",
+      "shortName": "ixus 130",
+      "aliases": [
+        "ixus 130",
+        "ixus130"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "753",
+      "shortName": "ixus 130",
+      "aliases": [
+        "ixus 130",
+        "ixus130"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "757",
+      "shortName": "Action 5 Pro",
+      "aliases": [
+        "Action 5 Pro",
+        "Action5Pro"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "759",
+      "shortName": "Osmo Nano",
+      "aliases": [
+        "Osmo Nano"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "762",
+      "shortName": "s24U",
+      "aliases": [
+        "s 24U",
+        "s24 U",
+        "s24U"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "765",
+      "shortName": "Osmo Nano",
+      "aliases": [
+        "Osmo Nano"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "766",
+      "sameSkuGroupId": "vivo x301 pro",
+      "confidence": 0.95,
+      "reason": "link_registry_merge_review_approval",
+      "maintainer": "merge_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "768",
+      "sameSkuGroupId": "三星galaxy s23ultra",
+      "confidence": 0.95,
+      "reason": "link_registry_merge_review_approval",
+      "maintainer": "merge_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "769",
+      "sameSkuGroupId": "vivo x300 pro",
+      "confidence": 0.95,
+      "reason": "link_registry_merge_review_approval",
+      "maintainer": "merge_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "770",
+      "sameSkuGroupId": "vivo-x300-ultra",
+      "confidence": 0.95,
+      "reason": "link_registry_merge_review_approval",
+      "maintainer": "merge_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "771",
+      "shortName": "SX740",
+      "aliases": [
+        "SX 740",
+        "SX740"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "785",
+      "sameSkuGroupId": "三星galaxy s23ultra",
+      "confidence": 0.95,
+      "reason": "link_registry_merge_review_approval",
+      "maintainer": "merge_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "786",
+      "sameSkuGroupId": "三星galaxy s23ultra",
+      "confidence": 0.95,
+      "reason": "link_registry_merge_review_approval",
+      "maintainer": "merge_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "787",
+      "sameSkuGroupId": "三星galaxy s23ultra",
+      "confidence": 0.95,
+      "reason": "link_registry_merge_review_approval",
+      "maintainer": "merge_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "788",
+      "sameSkuGroupId": "三星galaxy s23ultra",
+      "confidence": 0.95,
+      "reason": "link_registry_merge_review_approval",
+      "maintainer": "merge_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "789",
+      "sameSkuGroupId": "三星galaxy s23ultra",
+      "confidence": 0.95,
+      "reason": "link_registry_merge_review_approval",
+      "maintainer": "merge_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "790",
+      "sameSkuGroupId": "三星galaxy s23ultra",
+      "confidence": 0.95,
+      "reason": "link_registry_merge_review_approval",
+      "maintainer": "merge_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "791",
+      "sameSkuGroupId": "三星galaxy s23ultra",
+      "confidence": 0.95,
+      "reason": "link_registry_merge_review_approval",
+      "maintainer": "merge_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "792",
+      "sameSkuGroupId": "三星galaxy s23ultra",
+      "confidence": 0.95,
+      "reason": "link_registry_merge_review_approval",
+      "maintainer": "merge_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "794",
+      "shortName": "mini 13",
+      "aliases": [
+        "mini 13",
+        "mini13"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "795",
+      "shortName": "mini 13",
+      "aliases": [
+        "mini 13",
+        "mini13"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "796",
+      "shortName": "vivo 蔡司增距镜",
+      "aliases": [
+        "vivo 蔡司增距镜",
+        "vivo蔡司增距镜"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "798",
+      "status": "removed",
+      "confidence": 0.95,
+      "reason": "link_registry_audit_review_approval",
+      "maintainer": "audit_review_markdown",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "799",
+      "shortName": "mini-liplay",
+      "aliases": [
+        "mini-liplay"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "804",
+      "shortName": "Mini 12",
+      "aliases": [
+        "Mini 12",
+        "Mini12"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "805",
+      "shortName": "Action 5 Pro",
+      "aliases": [
+        "Action 5 Pro",
+        "Action5Pro"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "820",
+      "shortName": "SX70",
+      "aliases": [
+        "SX 70",
+        "SX70"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "823",
+      "shortName": "SX70",
+      "aliases": [
+        "SX 70",
+        "SX70"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "825",
+      "shortName": "SX70",
+      "aliases": [
+        "SX 70",
+        "SX70"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "826",
+      "shortName": "SX70",
+      "aliases": [
+        "SX 70",
+        "SX70"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "835",
+      "sameSkuGroupId": "canon r50",
+      "confidence": 0.95,
+      "reason": "link_registry_merge_review_approval",
+      "maintainer": "merge_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "836",
+      "sameSkuGroupId": "canon r50",
+      "confidence": 0.95,
+      "reason": "link_registry_merge_review_approval",
+      "maintainer": "merge_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "837",
+      "sameSkuGroupId": "canon r50",
+      "confidence": 0.95,
+      "reason": "link_registry_merge_review_approval",
+      "maintainer": "merge_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "838",
+      "sameSkuGroupId": "canon r50",
+      "confidence": 0.95,
+      "reason": "link_registry_merge_review_approval",
+      "maintainer": "merge_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "839",
+      "sameSkuGroupId": "canon r50",
+      "confidence": 0.95,
+      "reason": "link_registry_merge_review_approval",
+      "maintainer": "merge_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "840",
+      "sameSkuGroupId": "canon r50",
+      "confidence": 0.95,
+      "reason": "link_registry_merge_review_approval",
+      "maintainer": "merge_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "841",
+      "sameSkuGroupId": "canon r50",
+      "confidence": 0.95,
+      "reason": "link_registry_merge_review_approval",
+      "maintainer": "merge_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "847",
+      "shortName": "wide 400",
+      "aliases": [
+        "wide 400",
+        "wide400"
+      ],
+      "sameSkuGroupId": "fujifilm-instax-wide-400",
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "848",
+      "shortName": "G12",
+      "aliases": [
+        "G 12",
+        "G12"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "849",
+      "shortName": "wide 400",
+      "aliases": [
+        "wide 400",
+        "wide400"
+      ],
+      "sameSkuGroupId": "fujifilm-instax-wide-400",
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "850",
+      "shortName": "wide 400",
+      "aliases": [
+        "wide 400",
+        "wide400"
+      ],
+      "sameSkuGroupId": "fujifilm-instax-wide-400",
+      "confidence": 0.95,
+      "reason": "wide400_group_id_fix",
+      "maintainer": "codex",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "851",
+      "shortName": "rx10m4",
+      "aliases": [
+        "rx 10m 4",
+        "rx10 m4",
+        "rx10m4"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "856",
+      "shortName": "Pocket 4",
+      "aliases": [
+        "Pocket 4",
+        "Pocket4"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "857",
+      "shortName": "x300u",
+      "aliases": [
+        "x 300u",
+        "x300 u",
+        "x300u"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "860",
+      "sameSkuGroupId": "vivo-x300-ultra",
+      "confidence": 0.95,
+      "reason": "link_registry_merge_review_approval",
+      "maintainer": "merge_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "863",
+      "shortName": "SQ1",
+      "aliases": [
+        "SQ 1",
+        "SQ1"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "865",
+      "shortName": "Ace Pro 2",
+      "aliases": [
+        "Ace Pro 2",
+        "AcePro2"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "867",
+      "shortName": "Ace Pro 2",
+      "aliases": [
+        "Ace Pro 2",
+        "AcePro2"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "870",
+      "shortName": "Ace Pro 2",
+      "aliases": [
+        "Ace Pro 2",
+        "AcePro2"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "871",
+      "shortName": "Ace Pro 2",
+      "aliases": [
+        "Ace Pro 2",
+        "AcePro2"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "882",
+      "shortName": "pocket 3",
+      "aliases": [
+        "pocket 3",
+        "pocket3"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_audit_review_approval",
+      "maintainer": "audit_review_markdown",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "885",
+      "categoryName": "相机",
+      "productType": "camera",
+      "shortName": "G12",
+      "aliases": [
+        "G 12",
+        "G12"
+      ],
+      "sameSkuGroupId": "canon-g12",
+      "confidence": 0.95,
+      "reason": "link_registry_audit_review_approval",
+      "maintainer": "audit_review_markdown",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "886",
+      "categoryName": "相机",
+      "productType": "camera",
+      "shortName": "G12",
+      "aliases": [
+        "G 12",
+        "G12"
+      ],
+      "sameSkuGroupId": "canon-g12",
+      "confidence": 0.95,
+      "reason": "link_registry_audit_review_approval",
+      "maintainer": "audit_review_markdown",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "887",
+      "categoryName": "相机",
+      "productType": "camera",
+      "shortName": "G12",
+      "aliases": [
+        "G 12",
+        "G12"
+      ],
+      "sameSkuGroupId": "canon-g12",
+      "confidence": 0.95,
+      "reason": "link_registry_audit_review_approval",
+      "maintainer": "audit_review_markdown",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "888",
+      "shortName": "mini se",
+      "aliases": [
+        "mini se"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "889",
+      "shortName": "X200 Ultra",
+      "aliases": [
+        "X 200 Ultra",
+        "X200 Ultra",
+        "X200Ultra"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "890",
+      "shortName": "X200 Ultra",
+      "aliases": [
+        "X 200 Ultra",
+        "X200 Ultra",
+        "X200Ultra"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "892",
+      "shortName": "X200 Ultra",
+      "aliases": [
+        "X 200 Ultra",
+        "X200 Ultra",
+        "X200Ultra"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "899",
+      "shortName": "SQ1",
+      "aliases": [
+        "SQ 1",
+        "SQ1"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "900",
+      "categoryName": "相机",
+      "productType": "instant-camera",
+      "shortName": "SQ1",
+      "aliases": [
+        "SQ 1",
+        "SQ1"
+      ],
+      "sameSkuGroupId": "fujifilm-instax-square-sq1",
+      "confidence": 0.95,
+      "reason": "link_registry_audit_review_approval",
+      "maintainer": "audit_review_markdown",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "903",
+      "shortName": "SQ1",
+      "aliases": [
+        "SQ 1",
+        "SQ1"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "907",
+      "shortName": "Wide 300",
+      "aliases": [
+        "Wide 300",
+        "Wide300"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "908",
+      "shortName": "Wide 300",
+      "aliases": [
+        "Wide 300",
+        "Wide300"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "911",
+      "shortName": "X200 Ultra",
+      "aliases": [
+        "X 200 Ultra",
+        "X200 Ultra",
+        "X200Ultra"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "913",
+      "shortName": "X200 Ultra",
+      "aliases": [
+        "X 200 Ultra",
+        "X200 Ultra",
+        "X200Ultra"
+      ],
+      "confidence": 0.95,
+      "reason": "link_registry_group_review_approval",
+      "maintainer": "group_review_csv",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "914",
+      "categoryName": "相机",
+      "productType": "gimbal-camera",
+      "shortName": "pocket 4p",
+      "aliases": [
+        "pocket 4 p",
+        "pocket 4p",
+        "pocket4p"
+      ],
+      "sameSkuGroupId": "dji-pocket-4",
+      "confidence": 0.95,
+      "reason": "link_registry_audit_review_approval",
+      "maintainer": "audit_review_markdown",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "915",
+      "categoryName": "相机",
+      "productType": "gimbal-camera",
+      "shortName": "pocket 4p",
+      "aliases": [
+        "pocket 4 p",
+        "pocket 4p",
+        "pocket4p"
+      ],
+      "sameSkuGroupId": "dji-pocket-4",
+      "confidence": 0.95,
+      "reason": "link_registry_audit_review_approval",
+      "maintainer": "audit_review_markdown",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "916",
+      "categoryName": "相机",
+      "productType": "gimbal-camera",
+      "shortName": "pocket 4p",
+      "aliases": [
+        "pocket 4 p",
+        "pocket 4p",
+        "pocket4p"
+      ],
+      "sameSkuGroupId": "dji-pocket-4",
+      "confidence": 0.95,
+      "reason": "link_registry_audit_review_approval",
+      "maintainer": "audit_review_markdown",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "917",
+      "categoryName": "相机",
+      "productType": "gimbal-camera",
+      "shortName": "pocket 4p",
+      "aliases": [
+        "pocket 4 p",
+        "pocket 4p",
+        "pocket4p"
+      ],
+      "sameSkuGroupId": "dji-pocket-4",
+      "confidence": 0.95,
+      "reason": "link_registry_audit_review_approval",
+      "maintainer": "audit_review_markdown",
+      "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "918",
+      "categoryName": "相机",
+      "productType": "gimbal-camera",
+      "shortName": "pocket 4p",
+      "aliases": [
+        "pocket 4 p",
+        "pocket 4p",
+        "pocket4p"
+      ],
+      "sameSkuGroupId": "dji-pocket-4",
+      "confidence": 0.95,
+      "reason": "link_registry_audit_review_approval",
+      "maintainer": "audit_review_markdown",
+      "updatedAt": "2026-06-26"
+    }
+  ]
+}
