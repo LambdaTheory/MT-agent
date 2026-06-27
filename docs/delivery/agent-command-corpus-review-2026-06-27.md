@@ -33,6 +33,8 @@
 - 多步骤计划的 `${...}` 占位符只允许引用已经出现过的 step id；未知、未来或自引用会在 planner 校验阶段被拒绝。
 - 所有 `plannerVisible:false` 的内部执行工具即使存在于 runtime registry，也会被 planner validator 当作未知工具拒绝，只能由确认卡内部续跑触发；当前覆盖 `operations.refreshActivityExecute` 和 `rental.operationConfirmRequest`。
 - HTTP 和 SDK 两条卡片确认通道都会把租赁客户端、关单 fetch 注入和链接档案路径继续传给剩余步骤，确认后续跑不会丢失执行上下文。
+- Agent 通用确认卡现在会校验 `confirmationKey` 与请求内容是否一致；卡片 value 被改过、或隐藏工具缺少合法 key，都会拒绝执行。
+- 确认卡续跑步骤继续执行前会再次拒绝隐藏工具，避免把内部执行工具塞进 future step 绕过 planner 可见性边界。
 
 ## 测试证据
 
@@ -60,14 +62,18 @@
 - `tests/agentRuntimePlanner.test.ts`
   - 多步骤占位符引用必须指向前序步骤；未知、未来、自引用均拒绝。
   - 所有隐藏执行工具不能被原子计划或多步骤计划直接选择。
+- `tests/agentRuntimeApprovalCard.test.ts`
+  - 通用确认卡真实 payload 可解析；篡改 request 后 key 不匹配会拒绝。
+  - 隐藏当前工具必须带系统生成的合法 key；隐藏工具不能作为续跑步骤出现。
 
 本轮自测结果：
 
 - `tsc -p tsconfig.json --noEmit`：通过。
+- `vitest run tests/agentRuntimeApprovalCard.test.ts tests/agentRuntimePlanner.test.ts tests/feishuBotTools.test.ts tests/feishuBotSdkCardAction.test.ts tests/feishuBotServer.test.ts`：5 个文件、141 个测试通过。
 - `vitest run tests/agentRuntimePlanner.test.ts tests/agentRuntimeToolRegistry.test.ts tests/agentRuntimeLlmPlanner.test.ts tests/feishuBotTools.test.ts`：4 个文件、88 个测试通过。
 - `vitest run tests/feishuBotServer.test.ts tests/feishuBotSdkCardAction.test.ts tests/feishuBotDispatcher.test.ts tests/feishuBotSdkClient.test.ts tests/agentRuntime.test.ts tests/feishuBotTools.test.ts`：6 个文件、146 个测试通过。
 - `vitest run tests/cliLoadEnvSource.test.ts tests/agentRuntime.test.ts tests/feishuBotDispatcher.test.ts`：3 个文件、23 个测试通过。
-- `vitest run --exclude "**/.worktrees/**"`：142 个文件、963 个测试通过。
+- `vitest run --exclude "**/.worktrees/**"`：142 个文件、965 个测试通过。
 - 全量测试中的 stderr 来自既有用例：坏同款组跳过库存快照、飞书卡片 patch 失败回退；均为测试故意覆盖的异常路径。
 
 ## Review 结论

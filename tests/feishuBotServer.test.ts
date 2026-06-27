@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { buildAgentToolConfirmCard } from '../src/agentRuntime/approvalCard.js';
 import type { AgentPlannerProvider } from '../src/agentRuntime/planner.js';
 import { extractTextMessage, startFeishuBotServer } from '../src/feishuBot/server.js';
 import type { ActivityAutomationSkillClient } from '../src/feishuBot/activityAutomation.js';
@@ -11,6 +12,13 @@ import type { LinkRegistryOverrideRisk } from '../src/linkRegistry/overrides.js'
 import type { LinkRegistryEntry } from '../src/linkRegistry/types.js';
 import type { RentalPriceSkillClient } from '../src/feishuBot/rentalPrice.js';
 import type { FeishuBotIncomingTextMessage } from '../src/feishuBot/types.js';
+
+function readAgentToolConfirmValue(card: unknown): unknown {
+  const body = (card as { body?: { elements?: Array<{ elements?: Array<{ name?: string; behaviors?: Array<{ value?: unknown }> }> }> } }).body;
+  const form = body?.elements?.find((element) => Array.isArray(element.elements));
+  const button = form?.elements?.find((element) => element.name === 'agent_tool_confirm_submit');
+  return button?.behaviors?.[0]?.value;
+}
 
 const metric = {
   exposure: 10,
@@ -1083,6 +1091,23 @@ describe('startFeishuBotServer', () => {
       await new Promise<void>((resolve) => server.once('listening', resolve));
       const address = server.address();
       if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+      const confirmValue = readAgentToolConfirmValue(buildAgentToolConfirmCard({
+        toolName: 'rental.copy',
+        arguments: { productId: '875' },
+        reason: '先复制，再查询 alpha 最佳链接',
+        continuation: {
+          goal: '先复制再查 alpha 最佳链接',
+          reason: '确认后继续读链接档案',
+          steps: [
+            { toolName: 'product.rankBestSameSku', arguments: { query: 'alpha' }, reason: '查询 alpha 同款组最佳链接' },
+          ],
+          nextIndex: 1,
+          totalSteps: 2,
+          currentStepId: 'copy',
+          currentStepIndex: 0,
+          metadataStore: {},
+        },
+      }));
       const response = await fetch(`http://127.0.0.1:${address.port}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1091,27 +1116,7 @@ describe('startFeishuBotServer', () => {
           event: {
             context: { open_message_id: 'mid-http-agent-continuation-registry' },
             action: {
-              value: {
-                action: 'agent_tool_confirm',
-                confirmationKey: 'copy-then-rank-alpha',
-                request: {
-                  toolName: 'rental.copy',
-                  arguments: { productId: '875' },
-                  reason: '先复制，再查询 alpha 最佳链接',
-                  continuation: {
-                    goal: '先复制再查 alpha 最佳链接',
-                    reason: '确认后继续读链接档案',
-                    steps: [
-                      { toolName: 'product.rankBestSameSku', arguments: { query: 'alpha' }, reason: '查询 alpha 同款组最佳链接' },
-                    ],
-                    nextIndex: 1,
-                    totalSteps: 2,
-                    currentStepId: 'copy',
-                    currentStepIndex: 0,
-                    metadataStore: {},
-                  },
-                },
-              },
+              value: confirmValue,
             },
           },
         }),

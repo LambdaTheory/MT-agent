@@ -2,6 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { buildAgentToolConfirmCard, parseAgentToolConfirmRequest } from '../src/agentRuntime/approvalCard.js';
 import { buildAgentClarificationCard, buildClarifiedMessage, parseAgentClarificationCustomSelection, parseAgentClarificationSelection } from '../src/agentRuntime/clarificationCard.js';
 
+function readAgentToolConfirmValue(card: unknown): unknown {
+  const body = (card as { body?: { elements?: Array<{ elements?: Array<{ name?: string; behaviors?: Array<{ value?: unknown }> }> }> } }).body;
+  const form = body?.elements?.find((element) => Array.isArray(element.elements));
+  const button = form?.elements?.find((element) => element.name === 'agent_tool_confirm_submit');
+  return button?.behaviors?.[0]?.value;
+}
+
 describe('agent runtime approval card', () => {
   it('builds a generic Feishu confirmation card for registered agent tools', () => {
     const card = buildAgentToolConfirmCard({
@@ -14,6 +21,42 @@ describe('agent runtime approval card', () => {
     expect(JSON.stringify(card)).toContain('agent_tool_confirm');
     expect(JSON.stringify(card)).toContain('rental.copy');
     expect(JSON.stringify(card)).toContain('875');
+  });
+
+  it('parses generated confirmation payloads and rejects tampered requests', () => {
+    const card = buildAgentToolConfirmCard({
+      toolName: 'rental.copy',
+      arguments: { productId: '761' },
+      reason: 'copy 761 after confirmation',
+    });
+    const value = readAgentToolConfirmValue(card);
+
+    expect(parseAgentToolConfirmRequest(value)).toEqual({
+      toolName: 'rental.copy',
+      arguments: { productId: '761' },
+      reason: 'copy 761 after confirmation',
+    });
+
+    const tampered = JSON.parse(JSON.stringify(value)) as { request: { arguments: { productId: string } } };
+    tampered.request.arguments.productId = '762';
+    expect(parseAgentToolConfirmRequest(tampered)).toBeNull();
+  });
+
+  it('requires valid generated confirmation keys for hidden current tools', () => {
+    const request = {
+      toolName: 'operations.refreshActivityExecute',
+      arguments: {
+        date: '2026-06-11',
+        delistProductIds: ['901'],
+        newLinkItems: [{ keyword: 'pocket3', count: 1, sourceProductId: '900', sourceProductName: 'Pocket3 source' }],
+      },
+      reason: 'execute an internally generated activity refresh plan',
+    };
+    const card = buildAgentToolConfirmCard(request);
+
+    expect(parseAgentToolConfirmRequest(readAgentToolConfirmValue(card))).toMatchObject(request);
+    expect(parseAgentToolConfirmRequest({ request })).toBeNull();
+    expect(parseAgentToolConfirmRequest({ request, confirmationKey: '000000000000000000000000' })).toBeNull();
   });
 
   it('parses only registered tools with schema-valid arguments', () => {
@@ -35,11 +78,7 @@ describe('agent runtime approval card', () => {
         arguments: { action: 'delist', productId: '761' },
         reason: '兼容升级前已发出的旧确认卡',
       },
-    })).toEqual({
-      toolName: 'rental.operationConfirmRequest',
-      arguments: { action: 'delist', productId: '761' },
-      reason: '兼容升级前已发出的旧确认卡',
-    });
+    })).toBeNull();
 
     expect(parseAgentToolConfirmRequest({
       request: {
@@ -131,6 +170,30 @@ describe('agent runtime approval card', () => {
           totalSteps: 3,
           currentStepId: 'copy',
           currentStepIndex: 1,
+          metadataStore: {},
+        },
+      },
+    })).toBeNull();
+
+    expect(parseAgentToolConfirmRequest({
+      request: {
+        toolName: 'rental.copy',
+        arguments: { productId: '761' },
+        reason: 'bad hidden continuation',
+        continuation: {
+          goal: 'bad',
+          reason: 'bad',
+          steps: [
+            {
+              toolName: 'operations.refreshActivityExecute',
+              arguments: { date: '2026-06-11', delistProductIds: ['901'], newLinkItems: [] },
+              reason: 'hidden follow-up',
+            },
+          ],
+          nextIndex: 1,
+          totalSteps: 2,
+          currentStepId: 'copy',
+          currentStepIndex: 0,
           metadataStore: {},
         },
       },
