@@ -1313,7 +1313,11 @@ describe('createFeishuSdkBot card.action.trigger', () => {
     const result = await registered['card.action.trigger']({
       event: {
         context: { open_message_id: 'om-link-maintenance-start' },
-        action: { tag: 'button', value: { action: 'link_registry_maintenance_start', date: '2026-06-24' } },
+        action: {
+          tag: 'button',
+          name: 'link_registry_maintenance_start_submit',
+          behaviors: [{ type: 'callback', value: { action: 'link_registry_maintenance_start', date: '2026-06-24' } }],
+        },
       },
     });
 

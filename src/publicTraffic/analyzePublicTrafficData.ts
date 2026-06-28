@@ -43,16 +43,55 @@ function percent(value: number): string {
   return `${(value * 100).toFixed(2)}%`;
 }
 
-function signedNumber(value: number): string {
-  if (value > 0) return `上升 ${Number.isInteger(value) ? value : value.toFixed(2)}`;
-  if (value < 0) return `下降 ${Number.isInteger(value) ? Math.abs(value) : Math.abs(value).toFixed(2)}`;
+function roundTo(value: number, digits: number): number {
+  const factor = 10 ** digits;
+  return Math.round((value + Number.EPSILON) * factor) / factor;
+}
+
+function count(value: number): number {
+  return Math.round(value);
+}
+
+function money(value: number): number {
+  return roundTo(value, 2);
+}
+
+function rate(value: number): number {
+  return roundTo(value, 6);
+}
+
+function displayNumber(value: number, digits: number): string {
+  const rounded = roundTo(value, digits);
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(digits);
+}
+
+function normalizeSummary(summary: PublicTrafficDataSummary): PublicTrafficDataSummary {
+  return {
+    exposure: count(summary.exposure),
+    publicVisits: count(summary.publicVisits),
+    dashboardVisits: count(summary.dashboardVisits),
+    createdOrders: count(summary.createdOrders),
+    shippedOrders: count(summary.shippedOrders),
+    amount: money(summary.amount),
+    exposureVisitRate: rate(summary.exposureVisitRate),
+    visitCreatedOrderRate: rate(summary.visitCreatedOrderRate),
+    visitShipmentRate: rate(summary.visitShipmentRate),
+  };
+}
+
+function signedNumber(value: number, digits: number): string {
+  const rounded = roundTo(value, digits);
+  if (rounded > 0) return `上升 ${displayNumber(rounded, digits)}`;
+  if (rounded < 0) return `下降 ${displayNumber(Math.abs(rounded), digits)}`;
   return '持平 0';
 }
 
-function changeText(label: string, current: number, previous: number, unit = ''): string {
-  const diff = current - previous;
+function changeText(label: string, current: number, previous: number, unit = '', digits = 2): string {
+  const normalizedCurrent = roundTo(current, digits);
+  const normalizedPrevious = roundTo(previous, digits);
+  const diff = normalizedCurrent - normalizedPrevious;
   const change = previous > 0 ? `，变化 ${((diff / previous) * 100).toFixed(2)}%` : '';
-  return `${label} ${current}${unit}，较昨日${signedNumber(diff)}${unit}${change}`;
+  return `${label} ${displayNumber(normalizedCurrent, digits)}${unit}，较昨日${signedNumber(diff, digits)}${unit}${change}`;
 }
 
 function pointChangeText(label: string, current: number, previous: number): string {
@@ -63,20 +102,22 @@ function pointChangeText(label: string, current: number, previous: number): stri
 }
 
 function buildConclusions(summary: PublicTrafficDataSummary, previous?: PublicTrafficDataSummary) {
+  const current = normalizeSummary(summary);
   if (!previous) {
     return [
       {
         label: '基准',
-        text: `暂无昨日公域数据上下文，今日仅展示基准值：曝光 ${summary.exposure}，公域访问 ${summary.publicVisits}，公域金额 ¥${summary.amount.toFixed(2)}，转化率 ${percent(summary.exposureVisitRate)}。`,
+        text: `暂无昨日公域数据上下文，今日仅展示基准值：曝光 ${current.exposure}，公域访问 ${current.publicVisits}，公域金额 ¥${current.amount.toFixed(2)}，转化率 ${percent(current.exposureVisitRate)}。`,
       },
     ];
   }
+  const baseline = normalizeSummary(previous);
 
   return [
-    { label: '曝光', text: changeText('曝光', summary.exposure, previous.exposure) },
-    { label: '公域访问', text: changeText('公域访问', summary.publicVisits, previous.publicVisits) },
-    { label: '公域金额', text: changeText('公域金额', summary.amount, previous.amount, '元') },
-    { label: '转化率', text: pointChangeText('转化率', summary.exposureVisitRate, previous.exposureVisitRate) },
+    { label: '曝光', text: changeText('曝光', current.exposure, baseline.exposure, '', 0) },
+    { label: '公域访问', text: changeText('公域访问', current.publicVisits, baseline.publicVisits, '', 0) },
+    { label: '公域金额', text: changeText('公域金额', current.amount, baseline.amount, '元') },
+    { label: '转化率', text: pointChangeText('转化率', current.exposureVisitRate, baseline.exposureVisitRate) },
   ];
 }
 
@@ -94,18 +135,18 @@ function summarize(rows: PublicTrafficProductDataRow[], period: PeriodKey): Publ
   summary.exposureVisitRate = summary.exposure > 0 ? summary.publicVisits / summary.exposure : 0;
   summary.visitCreatedOrderRate = summary.dashboardVisits > 0 ? summary.createdOrders / summary.dashboardVisits : 0;
   summary.visitShipmentRate = summary.dashboardVisits > 0 ? summary.shippedOrders / summary.dashboardVisits : 0;
-  return summary;
+  return normalizeSummary(summary);
 }
 
 function applyOverview(summary: PublicTrafficDataSummary, overview: ExposureOverviewMetric | undefined): PublicTrafficDataSummary {
   if (!overview) return summary;
-  return {
+  return normalizeSummary({
     ...summary,
-    exposure: overview.exposure,
-    publicVisits: overview.visits,
-    amount: overview.amount,
-    exposureVisitRate: overview.conversionRate / 100,
-  };
+    exposure: count(overview.exposure),
+    publicVisits: count(overview.visits),
+    amount: money(overview.amount),
+    exposureVisitRate: rate(overview.conversionRate / 100),
+  });
 }
 
 function item(row: PublicTrafficProductDataRow, action: string, reason: string, priority?: PublicTrafficReportSectionItem['priority']): PublicTrafficReportSectionItem {

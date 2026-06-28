@@ -1438,7 +1438,10 @@ describe('startFeishuBotServer', () => {
           header: { event_type: 'card.action.trigger' },
           event: {
             context: { open_message_id: 'mid-http-link-maintenance-start' },
-            action: { value: { action: 'link_registry_maintenance_start', date: '2026-06-24' } },
+            action: {
+              name: 'link_registry_maintenance_start_submit',
+              behaviors: [{ type: 'callback', value: { action: 'link_registry_maintenance_start', date: '2026-06-24' } }],
+            },
           },
         }),
       });

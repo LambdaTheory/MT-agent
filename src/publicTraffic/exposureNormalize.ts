@@ -32,11 +32,20 @@ export function parseNumberText(value: unknown): number {
   const cleaned = normalize(value).replace(/[,%，]/g, '').replace(/天$/, '');
   const multiplier = cleaned.includes('亿') ? 100000000 : cleaned.includes('万') ? 10000 : 1;
   const parsed = Number.parseFloat(cleaned.replace(/[万亿]/g, ''));
-  return Number.isFinite(parsed) ? parsed * multiplier : 0;
+  return Number.isFinite(parsed) ? roundTo(parsed * multiplier, 6) : 0;
+}
+
+function roundTo(value: number, digits: number): number {
+  const factor = 10 ** digits;
+  return Math.round((value + Number.EPSILON) * factor) / factor;
+}
+
+function parseCountText(value: unknown): number {
+  return Math.round(parseNumberText(value));
 }
 
 export function parseMoney(value: unknown): number {
-  return parseNumberText(normalize(value).replace(/[¥￥]/g, ''));
+  return roundTo(parseNumberText(normalize(value).replace(/[¥￥]/g, '')), 2);
 }
 
 export function normalizeExposureProductRows(headers: string[], rows: string[][]): ExposureCumulativeProduct[] {
@@ -61,10 +70,10 @@ export function normalizeExposureProductRows(headers: string[], rows: string[][]
       return {
         productName: normalize(row[nameIndex]),
         platformProductId: normalize(row[idIndex]),
-        exposure: parseNumberText(row[exposureIndex]),
-        visits: parseNumberText(row[visitsIndex]),
+        exposure: parseCountText(row[exposureIndex]),
+        visits: parseCountText(row[visitsIndex]),
         amount: parseMoney(row[amountIndex]),
-        custodyDays: custodyIndex >= 0 ? parseNumberText(row[custodyIndex]) : null,
+        custodyDays: custodyIndex >= 0 ? parseCountText(row[custodyIndex]) : null,
         raw,
       };
     })

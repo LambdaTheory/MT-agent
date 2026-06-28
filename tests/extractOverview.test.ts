@@ -13,6 +13,17 @@ describe('extractOverviewFromText', () => {
     });
   });
 
+  it('rounds compact count and money values to report-safe numbers', () => {
+    const text = '曝光次数 3.26 万 商品访问次数 1,481 交易金额 2138 交易转化率 1.32 %';
+    const result = extractOverviewFromText(text);
+    expect(result).toEqual({
+      exposure: 32600,
+      visits: 1481,
+      amount: 2138,
+      conversionRate: 1.32,
+    });
+  });
+
   it('returns null when metrics not found', () => {
     expect(extractOverviewFromText('暂无数据')).toBeNull();
   });

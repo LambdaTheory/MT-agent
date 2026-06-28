@@ -70,10 +70,16 @@ describe('link registry maintenance session', () => {
     expect(response).not.toBeNull();
     expect(response?.text).toContain('发现 2 条待维护链接');
     expect(JSON.stringify(response?.card)).toContain('开始维护');
-    expect(JSON.stringify(response?.card)).toContain('link_registry_maintenance_start');
-    const promptButtons = ((response?.card as { body?: { elements?: Array<{ columns?: Array<{ elements?: Array<Record<string, unknown>> }> }> } }).body?.elements?.[2]?.columns ?? [])
-      .flatMap((column) => column.elements ?? []);
-    expect(promptButtons.every((button) => !('action_type' in button))).toBe(true);
+    expect(JSON.stringify(response?.card)).toContain('link_registry_maintenance_start_submit');
+    const promptForms = ((response?.card as { body?: { elements?: Array<{ tag?: string; name?: string; elements?: Array<Record<string, unknown>> }> } }).body?.elements ?? [])
+      .filter((element) => element.tag === 'form');
+    const promptButtons = promptForms.flatMap((form) => form.elements ?? []);
+    expect(promptForms.map((form) => form.name)).toEqual([
+      'link_registry_maintenance_start_form',
+      'link_registry_maintenance_snooze_form',
+      'link_registry_maintenance_ignore_form',
+    ]);
+    expect(promptButtons.every((button) => button.form_action_type === 'submit')).toBe(true);
 
     const saved = JSON.parse(await readFile(join(outputDir, '2026-06-24', 'link-registry-maintenance-session.json'), 'utf8')) as {
       queue: Array<{ internalProductId: string }>;

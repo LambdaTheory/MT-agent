@@ -67,9 +67,15 @@ describe('link registry governance session', () => {
     expect(JSON.stringify(response?.card)).toContain('开始治理');
     expect(JSON.stringify(response?.card)).toContain('同款组样本不足');
     expect(JSON.stringify(response?.card)).toContain('人工覆盖风险');
-    const promptButtons = ((response?.card as { body?: { elements?: Array<{ columns?: Array<{ elements?: Array<Record<string, unknown>> }> }> } }).body?.elements?.[2]?.columns ?? [])
-      .flatMap((column) => column.elements ?? []);
-    expect(promptButtons.every((button) => !('action_type' in button))).toBe(true);
+    const promptForms = ((response?.card as { body?: { elements?: Array<{ tag?: string; name?: string; elements?: Array<Record<string, unknown>> }> } }).body?.elements ?? [])
+      .filter((element) => element.tag === 'form');
+    const promptButtons = promptForms.flatMap((form) => form.elements ?? []);
+    expect(promptForms.map((form) => form.name)).toEqual([
+      'link_registry_governance_start_form',
+      'link_registry_governance_snooze_form',
+      'link_registry_governance_ignore_form',
+    ]);
+    expect(promptButtons.every((button) => button.form_action_type === 'submit')).toBe(true);
   });
 
   it('submits governance decisions, persists records, and suppresses duplicate reminders for the same signature', async () => {

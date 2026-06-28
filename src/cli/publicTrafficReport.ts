@@ -42,7 +42,7 @@ import { savePublicTrafficRunState } from '../publicTraffic/publicTrafficRunStat
 import { loadRecentExposureDeltas } from '../publicTraffic/recentExposureDeltas.js';
 import type { PeriodProductMetrics, RawTableData } from '../domain/types.js';
 import type { GoodsManagerNewProductPoolItem } from '../publicTraffic/goodsManagerNewProducts.js';
-import type { ExposureCumulativeProduct, GoodsSnapshotItem, PublicTrafficDataReportContext, PublicTrafficDataSummary } from '../publicTraffic/types.js';
+import type { ExposureCumulativeProduct, ExposureOverviewMetric, GoodsSnapshotItem, PublicTrafficDataReportContext, PublicTrafficDataSummary } from '../publicTraffic/types.js';
 import { createRunLog } from '../storage/runLog.js';
 
 const TODAY_DASHBOARD_NOT_UPDATED_NOTE = '今日访问数据支付宝暂未更新，本期访问量板块指标缺失。';
@@ -77,6 +77,21 @@ function yesterday(date: string): string {
   const d = new Date(date);
   d.setDate(d.getDate() - 1);
   return d.toISOString().slice(0, 10);
+}
+
+function roundTo(value: number, digits: number): number {
+  const factor = 10 ** digits;
+  return Math.round((value + Number.EPSILON) * factor) / factor;
+}
+
+function normalizeExposureOverview(overview: ExposureOverviewMetric[]): ExposureOverviewMetric[] {
+  return overview.map((item) => ({
+    period: item.period,
+    exposure: Math.round(item.exposure),
+    visits: Math.round(item.visits),
+    amount: roundTo(item.amount, 2),
+    conversionRate: roundTo(item.conversionRate, 2),
+  }));
 }
 
 function daysBefore(date: string, days: number): string {
@@ -541,11 +556,12 @@ export async function runPublicTrafficReportCli(): Promise<PublicTrafficReportCl
       files: { orderAnalysis: paths.orderAnalysis },
     }), log);
 
+    const exposureOverview = normalizeExposureOverview(crawlResult.overview);
     let exposureOverviewWritten = false;
-    if (crawlResult.overview.length > 0) {
-      await writeFile(paths.exposureOverview, JSON.stringify(crawlResult.overview, null, 2), 'utf8');
+    if (exposureOverview.length > 0) {
+      await writeFile(paths.exposureOverview, JSON.stringify(exposureOverview, null, 2), 'utf8');
       exposureOverviewWritten = true;
-      log.addEvent(`保存总体概况: ${crawlResult.overview.length} 个周期`);
+      log.addEvent(`保存总体概况: ${exposureOverview.length} 个周期`);
     }
     await saveArtifactManifestSafely(paths.artifactManifests.exposure, buildPublicTrafficArtifactManifest({
       runDate,
@@ -623,7 +639,7 @@ export async function runPublicTrafficReportCli(): Promise<PublicTrafficReportCl
     const context = analyzePublicTrafficData({
       date: dataDate,
       rows: merged.rows,
-      overview: crawlResult.overview,
+      overview: exposureOverview,
       previousSummary,
       dataQualityNotes,
       dailyDelta,

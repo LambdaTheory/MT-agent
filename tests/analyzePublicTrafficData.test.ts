@@ -78,6 +78,34 @@ describe('analyzePublicTrafficData', () => {
     expect(report.summary['1d'].visitShipmentRate).toBeCloseTo(0.1);
   });
 
+  it('normalizes floating point artifacts from overview metrics before writing summary text', () => {
+    const overview: ExposureOverviewMetric[] = [
+      { period: '1d', exposure: 32599.999999999996, visits: 1481, amount: 2138.000000000004, conversionRate: 1.32 },
+    ];
+
+    const report = analyzePublicTrafficData({
+      date: '2026-06-27',
+      rows: [row('端内ID 1', metric(1, 1, 1, 0))],
+      overview,
+      previousSummary: {
+        exposure: 39400,
+        publicVisits: 1723,
+        dashboardVisits: 0,
+        createdOrders: 0,
+        shippedOrders: 0,
+        amount: 3160,
+        exposureVisitRate: 0.0199,
+        visitCreatedOrderRate: 0,
+        visitShipmentRate: 0,
+      },
+    });
+
+    expect(report.summary['1d'].exposure).toBe(32600);
+    expect(report.summary['1d'].amount).toBe(2138);
+    expect(report.conclusions[0].text).toContain('曝光 32600');
+    expect(report.conclusions[0].text).not.toContain('999999');
+  });
+
   it('classifies problem and opportunity groups', () => {
     const report = analyzePublicTrafficData({
       date: '2026-06-10',

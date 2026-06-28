@@ -191,6 +191,22 @@ function expectedActionForButtonName(name: string | undefined): string | undefin
     activity_price_callback_confirm_submit: 'activity_price_callback_confirm',
     activity_price_callback_cancel_submit: 'activity_price_callback_cancel',
     id_lookup_submit: 'id_lookup',
+    link_registry_maintenance_start_submit: 'link_registry_maintenance_start',
+    link_registry_maintenance_start_form: 'link_registry_maintenance_start',
+    link_registry_maintenance_snooze_submit: 'link_registry_maintenance_snooze',
+    link_registry_maintenance_snooze_form: 'link_registry_maintenance_snooze',
+    link_registry_maintenance_ignore_submit: 'link_registry_maintenance_ignore',
+    link_registry_maintenance_ignore_form: 'link_registry_maintenance_ignore',
+    link_registry_maintenance_submit: 'link_registry_maintenance_submit',
+    link_registry_maintenance_form: 'link_registry_maintenance_submit',
+    link_registry_governance_start_submit: 'link_registry_governance_start',
+    link_registry_governance_start_form: 'link_registry_governance_start',
+    link_registry_governance_snooze_submit: 'link_registry_governance_snooze',
+    link_registry_governance_snooze_form: 'link_registry_governance_snooze',
+    link_registry_governance_ignore_submit: 'link_registry_governance_ignore',
+    link_registry_governance_ignore_form: 'link_registry_governance_ignore',
+    link_registry_governance_submit: 'link_registry_governance_submit',
+    link_registry_governance_form: 'link_registry_governance_submit',
   };
   if (exact[name]) return exact[name];
   if (name.startsWith('agent_clarify_select_')) return 'agent_clarify_select';

@@ -10,6 +10,19 @@ function parseCompactNumber(text: string): number {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function roundTo(value: number, digits: number): number {
+  const factor = 10 ** digits;
+  return Math.round((value + Number.EPSILON) * factor) / factor;
+}
+
+function parseCompactCount(text: string): number {
+  return Math.round(parseCompactNumber(text));
+}
+
+function parseCompactMoney(text: string): number {
+  return roundTo(parseCompactNumber(text), 2);
+}
+
 export interface OverviewMetrics {
   exposure: number;
   visits: number;
@@ -28,9 +41,9 @@ export function extractOverviewFromText(text: string): OverviewMetrics | null {
   }
 
   return {
-    exposure: parseCompactNumber(exposureMatch[1]),
-    visits: parseCompactNumber(visitsMatch[1]),
-    amount: parseCompactNumber(amountMatch[1]),
-    conversionRate: Number.parseFloat(rateMatch[1]) || 0,
+    exposure: parseCompactCount(exposureMatch[1]),
+    visits: parseCompactCount(visitsMatch[1]),
+    amount: parseCompactMoney(amountMatch[1]),
+    conversionRate: roundTo(Number.parseFloat(rateMatch[1]) || 0, 2),
   };
 }
