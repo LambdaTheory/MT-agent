@@ -40,6 +40,17 @@ const metric = {
   hasDashboardData: true,
 };
 
+interface TestRegistryPaths {
+  productIdMapPath: string;
+  productNameMapPath: string;
+  goodsSnapshotPath: string;
+  firstSeenPath: string;
+  lifecyclePath: string;
+  daemonCatalogPath: string;
+  overridesPath: string;
+  artifactsDir: string;
+}
+
 function readAgentToolConfirmRequestFromCard(card: unknown) {
   const body = (card as { body?: { elements?: Array<{ elements?: Array<{ name?: string; behaviors?: Array<{ value?: unknown }> }> }> } }).body;
   const form = body?.elements?.find((element) => Array.isArray(element.elements));
@@ -223,14 +234,7 @@ async function writeX200RankingContext(): Promise<string> {
   return dir;
 }
 
-async function writeRankingRegistryFixtures(rootDir: string, artifactsDir: string): Promise<{
-  productIdMapPath: string;
-  productNameMapPath: string;
-  firstSeenPath: string;
-  lifecyclePath: string;
-  overridesPath: string;
-  artifactsDir: string;
-}> {
+async function writeRankingRegistryFixtures(rootDir: string, artifactsDir: string): Promise<TestRegistryPaths> {
   const configDir = join(rootDir, 'config');
   const stateDir = join(rootDir, 'output', 'state');
   await mkdir(configDir, { recursive: true });
@@ -241,21 +245,16 @@ async function writeRankingRegistryFixtures(rootDir: string, artifactsDir: strin
   return {
     productIdMapPath: join(configDir, 'product-id-map.json'),
     productNameMapPath: join(configDir, 'product-name-map.json'),
+    goodsSnapshotPath: join(stateDir, 'goods-current-snapshot.json'),
     firstSeenPath: join(stateDir, 'goods-first-seen.json'),
     lifecyclePath: join(stateDir, 'goods-link-lifecycle.json'),
+    daemonCatalogPath: join(stateDir, 'link-registry-daemon-catalog.json'),
     overridesPath: join(configDir, 'link-registry-overrides.json'),
     artifactsDir,
   };
 }
 
-async function writeX200RankingRegistryFixtures(rootDir: string, artifactsDir: string): Promise<{
-  productIdMapPath: string;
-  productNameMapPath: string;
-  firstSeenPath: string;
-  lifecyclePath: string;
-  overridesPath: string;
-  artifactsDir: string;
-}> {
+async function writeX200RankingRegistryFixtures(rootDir: string, artifactsDir: string): Promise<TestRegistryPaths> {
   const configDir = join(rootDir, 'config');
   const stateDir = join(rootDir, 'output', 'state');
   await mkdir(configDir, { recursive: true });
@@ -278,21 +277,16 @@ async function writeX200RankingRegistryFixtures(rootDir: string, artifactsDir: s
   return {
     productIdMapPath: join(configDir, 'product-id-map.json'),
     productNameMapPath: join(configDir, 'product-name-map.json'),
+    goodsSnapshotPath: join(stateDir, 'goods-current-snapshot.json'),
     firstSeenPath: join(stateDir, 'goods-first-seen.json'),
     lifecyclePath: join(stateDir, 'goods-link-lifecycle.json'),
+    daemonCatalogPath: join(stateDir, 'link-registry-daemon-catalog.json'),
     overridesPath: join(configDir, 'link-registry-overrides.json'),
     artifactsDir,
   };
 }
 
-async function writeX200PriceSnapshotRegistryFixtures(rootDir: string): Promise<{
-  productIdMapPath: string;
-  productNameMapPath: string;
-  firstSeenPath: string;
-  lifecyclePath: string;
-  overridesPath: string;
-  artifactsDir: string;
-}> {
+async function writeX200PriceSnapshotRegistryFixtures(rootDir: string): Promise<TestRegistryPaths> {
   const configDir = join(rootDir, 'config');
   const outputDir = join(rootDir, 'output');
   const stateDir = join(outputDir, 'state');
@@ -311,26 +305,22 @@ async function writeX200PriceSnapshotRegistryFixtures(rootDir: string): Promise<
   return {
     productIdMapPath: join(configDir, 'product-id-map.json'),
     productNameMapPath: join(configDir, 'product-name-map.json'),
+    goodsSnapshotPath: join(stateDir, 'goods-current-snapshot.json'),
     firstSeenPath: join(stateDir, 'goods-first-seen.json'),
     lifecyclePath: join(stateDir, 'goods-link-lifecycle.json'),
+    daemonCatalogPath: join(stateDir, 'link-registry-daemon-catalog.json'),
     overridesPath: join(configDir, 'link-registry-overrides.json'),
     artifactsDir: outputDir,
   };
 }
 
-async function writeAceProPriceRegistryFixtures(rootDir: string): Promise<{
-  productIdMapPath: string;
-  productNameMapPath: string;
-  firstSeenPath: string;
-  lifecyclePath: string;
-  overridesPath: string;
-  artifactsDir: string;
-}> {
+async function writeAceProPriceRegistryFixtures(rootDir: string): Promise<TestRegistryPaths> {
   const configDir = join(rootDir, 'config');
   const outputDir = join(rootDir, 'output');
   const stateDir = join(outputDir, 'state');
   await mkdir(configDir, { recursive: true });
   await mkdir(stateDir, { recursive: true });
+  await mkdir(join(outputDir, '2026-06-27'), { recursive: true });
   await writeFile(join(configDir, 'product-id-map.json'), JSON.stringify({ p841: '841', p842: '842' }), 'utf8');
   await writeFile(join(configDir, 'product-name-map.json'), JSON.stringify({
     '841': '影石 Insta360 Ace Pro 2 标准套装',
@@ -347,21 +337,16 @@ async function writeAceProPriceRegistryFixtures(rootDir: string): Promise<{
   return {
     productIdMapPath: join(configDir, 'product-id-map.json'),
     productNameMapPath: join(configDir, 'product-name-map.json'),
+    goodsSnapshotPath: join(stateDir, 'goods-current-snapshot.json'),
     firstSeenPath: join(stateDir, 'goods-first-seen.json'),
     lifecyclePath: join(stateDir, 'goods-link-lifecycle.json'),
+    daemonCatalogPath: join(stateDir, 'link-registry-daemon-catalog.json'),
     overridesPath: join(configDir, 'link-registry-overrides.json'),
     artifactsDir: outputDir,
   };
 }
 
-async function writeX300SpecRemoveRegistryFixtures(rootDir: string): Promise<{
-  productIdMapPath: string;
-  productNameMapPath: string;
-  firstSeenPath: string;
-  lifecyclePath: string;
-  overridesPath: string;
-  artifactsDir: string;
-}> {
+async function writeX300SpecRemoveRegistryFixtures(rootDir: string): Promise<TestRegistryPaths> {
   const configDir = join(rootDir, 'config');
   const outputDir = join(rootDir, 'output');
   const stateDir = join(outputDir, 'state');
@@ -380,21 +365,16 @@ async function writeX300SpecRemoveRegistryFixtures(rootDir: string): Promise<{
   return {
     productIdMapPath: join(configDir, 'product-id-map.json'),
     productNameMapPath: join(configDir, 'product-name-map.json'),
+    goodsSnapshotPath: join(stateDir, 'goods-current-snapshot.json'),
     firstSeenPath: join(stateDir, 'goods-first-seen.json'),
     lifecyclePath: join(stateDir, 'goods-link-lifecycle.json'),
+    daemonCatalogPath: join(stateDir, 'link-registry-daemon-catalog.json'),
     overridesPath: join(configDir, 'link-registry-overrides.json'),
     artifactsDir: outputDir,
   };
 }
 
-async function writeBulkSpecRemoveRegistryFixtures(rootDir: string, ids: string[]): Promise<{
-  productIdMapPath: string;
-  productNameMapPath: string;
-  firstSeenPath: string;
-  lifecyclePath: string;
-  overridesPath: string;
-  artifactsDir: string;
-}> {
+async function writeBulkSpecRemoveRegistryFixtures(rootDir: string, ids: string[]): Promise<TestRegistryPaths> {
   const configDir = join(rootDir, 'config');
   const outputDir = join(rootDir, 'output');
   const stateDir = join(outputDir, 'state');
@@ -418,8 +398,10 @@ async function writeBulkSpecRemoveRegistryFixtures(rootDir: string, ids: string[
   return {
     productIdMapPath: join(configDir, 'product-id-map.json'),
     productNameMapPath: join(configDir, 'product-name-map.json'),
+    goodsSnapshotPath: join(stateDir, 'goods-current-snapshot.json'),
     firstSeenPath: join(stateDir, 'goods-first-seen.json'),
     lifecyclePath: join(stateDir, 'goods-link-lifecycle.json'),
+    daemonCatalogPath: join(stateDir, 'link-registry-daemon-catalog.json'),
     overridesPath: join(configDir, 'link-registry-overrides.json'),
     artifactsDir: outputDir,
   };
@@ -427,14 +409,7 @@ async function writeBulkSpecRemoveRegistryFixtures(rootDir: string, ids: string[
 
 async function writeRefreshActivityFixtures(): Promise<{
   outputDir: string;
-  registryPaths: {
-    productIdMapPath: string;
-    productNameMapPath: string;
-    firstSeenPath: string;
-    lifecyclePath: string;
-    overridesPath: string;
-    artifactsDir: string;
-  };
+  registryPaths: TestRegistryPaths;
 }> {
   const rootDir = await mkdtemp(join(tmpdir(), 'mt-agent-refresh-activity-'));
   const outputDir = join(rootDir, 'output');
@@ -491,22 +466,17 @@ async function writeRefreshActivityFixtures(): Promise<{
     registryPaths: {
       productIdMapPath: join(configDir, 'product-id-map.json'),
       productNameMapPath: join(configDir, 'product-name-map.json'),
+      goodsSnapshotPath: join(stateDir, 'goods-current-snapshot.json'),
       firstSeenPath: join(stateDir, 'goods-first-seen.json'),
       lifecyclePath: join(stateDir, 'goods-link-lifecycle.json'),
+      daemonCatalogPath: join(stateDir, 'link-registry-daemon-catalog.json'),
       overridesPath: join(configDir, 'link-registry-overrides.json'),
       artifactsDir: outputDir,
     },
   };
 }
 
-async function writeClosedOrderRegistryFixtures(rootDir: string): Promise<{
-  productIdMapPath: string;
-  productNameMapPath: string;
-  firstSeenPath: string;
-  lifecyclePath: string;
-  overridesPath: string;
-  artifactsDir: string;
-}> {
+async function writeClosedOrderRegistryFixtures(rootDir: string): Promise<TestRegistryPaths> {
   const configDir = join(rootDir, 'config');
   const outputDir = join(rootDir, 'output');
   await mkdir(configDir, { recursive: true });
@@ -528,21 +498,16 @@ async function writeClosedOrderRegistryFixtures(rootDir: string): Promise<{
   return {
     productIdMapPath: join(configDir, 'product-id-map.json'),
     productNameMapPath: join(configDir, 'product-name-map.json'),
+    goodsSnapshotPath: join(outputDir, 'state', 'goods-current-snapshot.json'),
     firstSeenPath: join(outputDir, 'state', 'goods-first-seen.json'),
     lifecyclePath: join(outputDir, 'state', 'goods-link-lifecycle.json'),
+    daemonCatalogPath: join(outputDir, 'state', 'link-registry-daemon-catalog.json'),
     overridesPath: join(configDir, 'link-registry-overrides.json'),
     artifactsDir: outputDir,
   };
 }
 
-async function writeLinkRegistryOverviewFixtures(rootDir: string): Promise<{
-  productIdMapPath: string;
-  productNameMapPath: string;
-  firstSeenPath: string;
-  lifecyclePath: string;
-  overridesPath: string;
-  artifactsDir: string;
-}> {
+async function writeLinkRegistryOverviewFixtures(rootDir: string): Promise<TestRegistryPaths> {
   const configDir = join(rootDir, 'config');
   const outputDir = join(rootDir, 'output');
   await mkdir(configDir, { recursive: true });
@@ -637,8 +602,10 @@ async function writeLinkRegistryOverviewFixtures(rootDir: string): Promise<{
   return {
     productIdMapPath: join(configDir, 'product-id-map.json'),
     productNameMapPath: join(configDir, 'product-name-map.json'),
+    goodsSnapshotPath: join(outputDir, 'state', 'goods-current-snapshot.json'),
     firstSeenPath: join(outputDir, 'state', 'goods-first-seen.json'),
     lifecyclePath: join(outputDir, 'state', 'goods-link-lifecycle.json'),
+    daemonCatalogPath: join(outputDir, 'state', 'link-registry-daemon-catalog.json'),
     overridesPath: join(configDir, 'link-registry-overrides.json'),
     artifactsDir: outputDir,
   };
@@ -646,14 +613,7 @@ async function writeLinkRegistryOverviewFixtures(rootDir: string): Promise<{
 
 async function writeInventoryStatusFixtures(rootDir: string): Promise<{
   outputDir: string;
-  registryPaths: {
-    productIdMapPath: string;
-    productNameMapPath: string;
-    firstSeenPath: string;
-    lifecyclePath: string;
-    overridesPath: string;
-    artifactsDir: string;
-  };
+  registryPaths: TestRegistryPaths;
 }> {
   const outputDir = join(rootDir, 'output');
   const configDir = join(rootDir, 'config');
@@ -758,8 +718,10 @@ async function writeInventoryStatusFixtures(rootDir: string): Promise<{
     registryPaths: {
       productIdMapPath: join(configDir, 'product-id-map.json'),
       productNameMapPath: join(configDir, 'product-name-map.json'),
+      goodsSnapshotPath: join(stateDir, 'goods-current-snapshot.json'),
       firstSeenPath: join(stateDir, 'goods-first-seen.json'),
       lifecyclePath: join(stateDir, 'goods-link-lifecycle.json'),
+      daemonCatalogPath: join(stateDir, 'link-registry-daemon-catalog.json'),
       overridesPath: join(configDir, 'link-registry-overrides.json'),
       artifactsDir: outputDir,
     },
@@ -768,14 +730,7 @@ async function writeInventoryStatusFixtures(rootDir: string): Promise<{
 
 async function writeNewLinkWorkflowContext(): Promise<{
   outputDir: string;
-  registryPaths: {
-    productIdMapPath: string;
-    productNameMapPath: string;
-    firstSeenPath: string;
-    lifecyclePath: string;
-    overridesPath: string;
-    artifactsDir: string;
-  };
+  registryPaths: TestRegistryPaths;
 }> {
   const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-new-link-workflow-output-'));
   const registryRoot = await mkdtemp(join(tmpdir(), 'mt-agent-new-link-workflow-registry-'));
@@ -926,8 +881,10 @@ async function writeNewLinkWorkflowContext(): Promise<{
     registryPaths: {
       productIdMapPath: join(configDir, 'product-id-map.json'),
       productNameMapPath: join(configDir, 'product-name-map.json'),
+      goodsSnapshotPath: join(stateDir, 'goods-current-snapshot.json'),
       firstSeenPath: join(stateDir, 'goods-first-seen.json'),
       lifecyclePath: join(stateDir, 'goods-link-lifecycle.json'),
+      daemonCatalogPath: join(stateDir, 'link-registry-daemon-catalog.json'),
       overridesPath: join(configDir, 'link-registry-overrides.json'),
       artifactsDir: outputDir,
     },
@@ -1419,6 +1376,38 @@ describe('handleBotIntent', () => {
     expect(response.text).toContain('公域日报商品聚合统计 2026-06-11');
     expect(response.text).toContain('匹配 2 条商品');
     expect(response.text).toContain('访问总和 = 82');
+    expect(response.card).toBeUndefined();
+  });
+
+  it('lets the Agent planner answer link count questions through link registry instead of report aggregation', async () => {
+    const outputDir = await writeContext();
+    const registryRoot = await mkdtemp(join(tmpdir(), 'mt-agent-link-count-registry-'));
+    const registryPaths = await writeAceProPriceRegistryFixtures(registryRoot);
+    const planner: AgentPlannerProvider = {
+      async proposePlan(request) {
+        expect(request.message).toBe('acepro2有多少条链接');
+        expect(request.tools.map((tool) => tool.name)).toContain('linkRegistry.resolveProducts');
+        expect(request.tools.map((tool) => tool.name)).toContain('publicTraffic.reportQuery');
+        return JSON.stringify({
+          goal: '统计 acepro2 的链接数量',
+          selectedTool: 'linkRegistry.resolveProducts',
+          arguments: { query: 'acepro2' },
+          confidence: 0.93,
+          reason: '用户询问的是链接档案数量，应以链接维护档案为准，而不是日报商品聚合行。',
+          requiresConfirmation: false,
+        });
+      },
+    };
+
+    const response = await handleBotIntent({ type: 'unknown', text: 'acepro2有多少条链接' }, outputDir, {
+      agentPlannerProvider: planner,
+      closedOrderRegistryPaths: registryPaths,
+    });
+
+    expect(response.text).toContain('商品集合解析：acepro2');
+    expect(response.text).toContain('同款组：insta360-ace-pro-2');
+    expect(response.text).toContain('链接数量：2 条');
+    expect(response.text).toContain('可用端内ID：841、842');
     expect(response.card).toBeUndefined();
   });
 
@@ -2176,7 +2165,8 @@ describe('handleBotIntent', () => {
 
     expect(response.text).toContain('活跃度刷新计划：2026-06-11');
     expect(response.text).toContain('待下架候选：2 条');
-    expect(response.text).toContain('DJI Pocket 3｜云台相机｜dji-pocket-3：待下架 2 条，建议补回 2 条新链');
+    expect(response.text).toContain('DJI Pocket 3');
+    expect(response.text).toContain('dji-pocket-3：待下架 2 条，建议补回 2 条新链');
     expect(response.text).toContain('补链源 900 Pocket3 健康源');
     expect(response.text).toContain('端内ID 901、902');
     expect(response.text).toContain('30日访问页缺失 1 条');
@@ -2757,6 +2747,7 @@ describe('handleBotIntent', () => {
     ]);
     expect(response.text).toContain('步骤 1/2：linkRegistry.resolveProducts');
     expect(response.text).toContain('步骤 2/2：rental.pricePreview');
+    expect(response.text).toContain('链接数量：2 条');
     expect(response.text).toContain('端内ID：841、842');
     expect(JSON.stringify(response.card)).toContain('agent_tool_confirm');
     expect(JSON.stringify(response.card)).toContain('rental.priceApply');

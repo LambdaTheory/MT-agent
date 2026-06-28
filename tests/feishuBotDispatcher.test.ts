@@ -161,6 +161,29 @@ describe('createFeishuMessageDispatcher', () => {
     expect(handleIntent).toHaveBeenCalledTimes(1);
   });
 
+  it('strips visible bot mention names when Feishu does not provide a mention key', async () => {
+    const texts: string[] = [];
+    const handleIntent = vi.fn(async () => ({ text: 'handled' }));
+    const dispatcher = createFeishuMessageDispatcher({
+      botMentionName: '公域数据日报',
+      resolveIntent: (text) => {
+        texts.push(text);
+        return { type: 'unknown', text };
+      },
+      handleIntent,
+    });
+
+    await expect(dispatcher.dispatch({
+      messageId: 'mid-group-visible-bot-name',
+      text: '@公域数据日报 acepro2有多少条链接',
+      source: 'sdk',
+      chatType: 'group',
+      mentions: [{ name: '公域数据日报' }],
+    })).resolves.toEqual({ text: 'handled', skipped: false });
+    expect(texts).toEqual(['acepro2有多少条链接']);
+    expect(handleIntent).toHaveBeenCalledTimes(1);
+  });
+
   it('skips group messages that mention someone other than the configured bot', async () => {
     const handleIntent = vi.fn(async () => ({ text: 'handled' }));
     const dispatcher = createFeishuMessageDispatcher({

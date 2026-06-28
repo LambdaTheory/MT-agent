@@ -421,7 +421,7 @@ const agentTools: AgentToolDefinition[] = [
   },
   {
     name: 'publicTraffic.reportQuery',
-    description: '通用只读日报查询工具：查询已保存公域日报中的汇总、商品明细、问题池、订单分析、数据源状态和结论。适合“访问最高前20”“各问题池多少条”“托管异常有哪些”“订单签约发货率多少”等自然语言问题。',
+    description: '通用只读日报查询工具：查询已保存公域日报中的汇总、商品明细、问题池、订单分析、数据源状态和结论。适合“访问最高前20”“各问题池多少条”“托管异常有哪些”“订单签约发货率多少”等自然语言问题。不用于“某商品有多少条链接/有哪些端内ID”这类链接档案总数问题。',
     risk: 'read',
     requiresConfirmation: false,
     inputSchema: publicTrafficReportQueryArgumentsSchema,
@@ -478,7 +478,7 @@ const agentTools: AgentToolDefinition[] = [
   },
   {
     name: 'linkRegistry.resolveProducts',
-    description: '按商品名、别名、端内ID或同款组解析链接档案，返回可供后续工具使用的端内ID列表；只做解析，不执行运营动作',
+    description: '按商品名、别名、端内ID或同款组解析链接档案，返回可供后续工具使用的端内ID列表和数量；适合“某商品有多少条链接/有哪些端内ID/链接总数”这类链接档案问题；只做解析，不执行运营动作',
     risk: 'read',
     requiresConfirmation: false,
     inputSchema: linkRegistryResolveProductsArgumentsSchema,

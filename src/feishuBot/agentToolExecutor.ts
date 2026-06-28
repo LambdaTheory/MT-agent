@@ -282,6 +282,7 @@ async function linkRegistryResolveProductsResponse(
       `商品集合解析：${query}`,
       resolution.sameSkuGroupId ? `同款组：${resolution.sameSkuGroupId}` : undefined,
       `匹配依据：${resolution.matchText}`,
+      `链接数量：${productIds.length} 条`,
       `可用端内ID：${productIds.join('、') || '无'}`,
       '',
       ...shown,

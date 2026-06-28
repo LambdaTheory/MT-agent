@@ -51,6 +51,10 @@ function normalized(value: string | undefined): string | undefined {
   return trimmed ? trimmed : undefined;
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function hasBotMentionIdentity(config: FeishuMessageDispatcherConfig): boolean {
   return Boolean(normalized(config.botMentionOpenId) || normalized(config.botMentionName));
 }
@@ -74,6 +78,16 @@ function textWithoutMentionKeys(message: FeishuBotIncomingTextMessage, config: F
   let text = message.text;
   for (const mention of botMentions(message, config)) {
     if (mention.key) text = text.replaceAll(mention.key, ' ');
+    const names = [mention.name, config.botMentionName]
+      .map(normalized)
+      .filter((value, index, items): value is string => Boolean(value && items.indexOf(value) === index));
+    for (const name of names) {
+      const escapedName = escapeRegExp(name);
+      text = text
+        .replace(new RegExp(`<at\\b[^>]*>\\s*${escapedName}\\s*<\\/at>`, 'giu'), ' ')
+        .replace(new RegExp(`(^|\\s)@\\s*${escapedName}(?=\\s|$)`, 'giu'), '$1 ')
+        .replace(new RegExp(`(^|\\s)${escapedName}(?=\\s|$)`, 'giu'), '$1 ');
+    }
   }
   return text.replace(/\s+/g, ' ').trim();
 }
