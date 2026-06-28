@@ -64,12 +64,12 @@ export interface BuildLinkRegistryMaintenanceOptions {
 const DEFAULT_RECENT_WINDOW_DAYS = 7;
 
 const REASON_LABELS: Record<LinkRegistryMaintenanceReasonCode, string> = {
-  same_sku_group_missing: '缺同款组',
-  classification_missing: '缺分类',
-  platform_mapping_missing: '缺平台映射',
-  recent_new_link: '近7天新链接',
-  same_sku_group_sample_insufficient: '同款组样本不足',
-  override_risk: '人工覆盖风险',
+  same_sku_group_missing: '\u7f3a\u540c\u6b3e\u7ec4',
+  classification_missing: '\u7f3a\u5206\u7c7b',
+  platform_mapping_missing: '\u7f3a\u5e73\u53f0\u6620\u5c04',
+  recent_new_link: '\u8fd17\u5929\u65b0\u94fe\u63a5',
+  same_sku_group_sample_insufficient: '\u540c\u6b3e\u7ec4\u6837\u672c\u4e0d\u8db3',
+  override_risk: '\u4eba\u5de5\u8986\u76d6\u98ce\u9669',
 };
 
 function ratio(ready: number, total: number): number {
@@ -93,12 +93,31 @@ function hasMapping(entry: LinkRegistryEntry): boolean {
   return Boolean(entry.platformProductId?.trim());
 }
 
+function isPlatformMappingExpected(entry: LinkRegistryEntry): boolean {
+  if (hasMapping(entry)) return true;
+  if (!entry.source.includes('daemon_catalog')) return true;
+
+  const syncStatus = entry.daemonSyncStatus?.trim() ?? '';
+  if (!syncStatus) return false;
+
+  return /(?:\u53ef\u552e\u5356|\u5df2\u540c\u6b65|\u901a\u8fc7)/u.test(syncStatus);
+}
+
 function isReady(entry: LinkRegistryEntry): boolean {
   return hasGroup(entry) && hasClassification(entry) && hasMapping(entry);
 }
 
 export function isMqOfflineLinkText(value: string): boolean {
   return /(^|[\s\-_()])mq(?=$|[\s\-_()])/i.test(value.trim());
+}
+
+export function isXianyuTrafficEntryText(value: string): boolean {
+  const trimmed = value.trim();
+  return trimmed.includes('\u95f2\u9c7c') || trimmed.includes('\u54b8\u9c7c');
+}
+
+export function isGenericFreeDepositEntryText(value: string): boolean {
+  return value.trim().includes('\u514d\u62bc\u94fe\u63a5');
 }
 
 function entryTexts(entry: LinkRegistryEntry): string[] {
@@ -111,7 +130,11 @@ function entryTexts(entry: LinkRegistryEntry): string[] {
 }
 
 export function isLinkRegistryMaintenanceIgnoredEntry(entry: LinkRegistryEntry): boolean {
-  return entryTexts(entry).some(isMqOfflineLinkText);
+  return entryTexts(entry).some((value) => (
+    isMqOfflineLinkText(value)
+    || isXianyuTrafficEntryText(value)
+    || isGenericFreeDepositEntryText(value)
+  ));
 }
 
 function parseDate(value: string | undefined): Date | null {
@@ -136,8 +159,8 @@ function entryReasonCodes(
   const reasons: LinkRegistryMaintenanceReasonCode[] = [];
   if (entry.status !== 'removed' && !hasGroup(entry)) reasons.push('same_sku_group_missing');
   if (entry.status !== 'removed' && !hasClassification(entry)) reasons.push('classification_missing');
-  if (!hasMapping(entry)) reasons.push('platform_mapping_missing');
-  if (entry.status === 'active' && !isReady(entry) && isRecent(entry, options.referenceDate, options.recentWindowDays)) {
+  if (!hasMapping(entry) && isPlatformMappingExpected(entry)) reasons.push('platform_mapping_missing');
+  if (entry.status === 'active' && reasons.length > 0 && isRecent(entry, options.referenceDate, options.recentWindowDays)) {
     reasons.push('recent_new_link');
   }
   return reasons;
@@ -173,6 +196,12 @@ function labelsFor(reasons: LinkRegistryMaintenanceReasonCode[]): string[] {
   return reasons.map((reason) => REASON_LABELS[reason]);
 }
 
+function isNaturallySparseSameSkuGroup(groupId: string | undefined): boolean {
+  const trimmed = groupId?.trim() ?? '';
+  if (!trimmed) return false;
+  return /^canon-ixus-\d+(?:is|hs)?$/i.test(trimmed);
+}
+
 function entryQueueItem(
   entry: LinkRegistryEntry,
   reasons: LinkRegistryMaintenanceReasonCode[],
@@ -206,6 +235,10 @@ function overrideRiskQueueItem(risk: LinkRegistryOverrideRisk): LinkRegistryMain
   };
 }
 
+function isActionableOverrideRisk(risk: LinkRegistryOverrideRisk): boolean {
+  return Boolean(risk.internalProductId?.trim());
+}
+
 export function buildLinkRegistryMaintenanceReport(
   entries: LinkRegistryEntry[],
   overrideRisks: LinkRegistryOverrideRisk[] = [],
@@ -235,6 +268,7 @@ export function buildLinkRegistryMaintenanceReport(
     .map<LinkRegistryMaintenanceQueueItem | null>((group) => {
       const visibleEntries = group.entries.filter((entry) => !isLinkRegistryMaintenanceIgnoredEntry(entry));
       if (visibleEntries.length === 0 || visibleEntries.length >= MIN_SAME_SKU_GROUP_SAMPLE_SIZE) return null;
+      if (isNaturallySparseSameSkuGroup(group.sameSkuGroupId)) return null;
       const updatedAt = visibleEntries.find((entry) => entry.updatedAt)?.updatedAt;
       return {
         kind: 'same_sku_group',
@@ -247,7 +281,7 @@ export function buildLinkRegistryMaintenanceReport(
     })
     .filter((item): item is LinkRegistryMaintenanceQueueItem => item !== null);
 
-  const riskQueue = overrideRisks.map(overrideRiskQueueItem);
+  const riskQueue = overrideRisks.filter(isActionableOverrideRisk).map(overrideRiskQueueItem);
   const queue = [...entryQueue, ...groupQueue, ...riskQueue].sort(queueSort);
 
   return {

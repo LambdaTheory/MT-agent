@@ -435,6 +435,33 @@ function inferredClassificationFrom(draft: DraftEntry): InferredClassification |
   return undefined;
 }
 
+function normalizedClassificationOverride(draft: DraftEntry): InferredClassification | undefined {
+  const key = [
+    draft.sameSkuGroupId?.trim(),
+    draft.shortName?.trim(),
+    bestNameHint(draft.nameHints),
+    draft.productName?.trim(),
+  ].filter(Boolean).join(' ').toLowerCase();
+
+  if (!key) return undefined;
+  if (/vivo-zeiss-telephoto-lens/.test(key)) {
+    return { categoryId: 'lens', categoryName: '\u955c\u5934', productType: 'lens-accessory' };
+  }
+  if (/vivo\s*蔡司增距镜|2\.35x\s*长焦增距镜|长焦增距镜/.test(key)) {
+    return { categoryId: 'lens', categoryName: '\u955c\u5934', productType: 'lens-accessory' };
+  }
+  if (/dji-pocket-\d|pocket\s*\d/.test(key)) {
+    return { categoryId: 'camera', categoryName: '\u76f8\u673a', productType: 'gimbal-camera' };
+  }
+  if (/insta360-go-3s|go\s*3s/.test(key)) {
+    return { categoryId: 'camera', categoryName: '\u8fd0\u52a8\u76f8\u673a', productType: 'action-camera' };
+  }
+  if (/canon-g9|\bg9\b/.test(key)) {
+    return { categoryId: 'camera', categoryName: '\u76f8\u673a', productType: 'camera' };
+  }
+  return undefined;
+}
+
 function inferDraftMetadata(drafts: Map<string, DraftEntry>): void {
   for (const draft of drafts.values()) {
     draft.shortName = normalizedShortName(draft.shortName) ?? draft.shortName;
@@ -456,6 +483,13 @@ function inferDraftMetadata(drafts: Map<string, DraftEntry>): void {
         draft.categoryName ??= inferred.categoryName;
         draft.productType ??= inferred.productType;
       }
+    }
+
+    const normalized = normalizedClassificationOverride(draft);
+    if (normalized) {
+      draft.categoryId = normalized.categoryId;
+      draft.categoryName = normalized.categoryName;
+      draft.productType = normalized.productType;
     }
   }
 }

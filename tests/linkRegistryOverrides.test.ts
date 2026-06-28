@@ -72,6 +72,22 @@ describe('link registry overrides', () => {
     expect(result.risks).toEqual([]);
   });
 
+  it('keeps manually reviewed same sku group short names instead of re-normalizing them back', () => {
+    const result = applyLinkRegistryOverrides([
+      { internalProductId: '801', productName: '富士 mini link3 手机照片打印机短租', shortName: 'Mini Link 3', sameSkuGroupId: 'fujifilm-instax-mini-link-3', status: 'active', source: ['daemon_catalog'] },
+    ], {
+      version: 1,
+      sameSkuGroupRules: [{ matchSameSkuGroupId: 'fujifilm-instax-mini-link-3', shortName: 'mini Link 3' }],
+    });
+
+    expect(result.entries[0]).toMatchObject({
+      internalProductId: '801',
+      shortName: 'mini Link 3',
+      sameSkuGroupId: 'fujifilm-instax-mini-link-3',
+      classificationSource: 'manual_override',
+    });
+  });
+
   it('fails fast for duplicate manual overrides', () => {
     expect(() => applyLinkRegistryOverrides(entries, {
       version: 1,

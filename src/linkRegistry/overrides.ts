@@ -288,6 +288,8 @@ function comparableShortName(value: string): string {
 
 function normalizePreferredGroupShortNames(entries: LinkRegistryEntry[]): LinkRegistryEntry[] {
   return entries.map((entry) => {
+    if (entry.classificationSource === 'manual_override') return entry;
+
     const sameSkuGroupId = entry.sameSkuGroupId?.trim();
     const currentShortName = entry.shortName?.trim();
     if (!sameSkuGroupId || !currentShortName) return entry;
@@ -301,6 +303,30 @@ function normalizePreferredGroupShortNames(entries: LinkRegistryEntry[]): LinkRe
       shortName: preferredShortName,
       aliases: normalizedAliases([...(entry.aliases ?? []), currentShortName, preferredShortName]),
     };
+  });
+}
+
+function normalizedClassificationPatch(entry: LinkRegistryEntry): Partial<LinkRegistryEntry> | null {
+  const key = [
+    entry.sameSkuGroupId?.trim(),
+    entry.shortName?.trim(),
+    entry.productName?.trim(),
+  ].filter(Boolean).join(' ').toLowerCase();
+
+  if (!key) return null;
+  if (/vivo-zeiss-telephoto-lens|vivo\s*蔡司增距镜|长焦增距镜/.test(key)) {
+    return { categoryId: 'lens', categoryName: '\u955c\u5934', productType: 'lens-accessory' };
+  }
+  if (/dji-pocket-\d|pocket\s*\d/.test(key)) {
+    return { categoryId: 'camera', categoryName: '\u76f8\u673a', productType: 'gimbal-camera' };
+  }
+  return null;
+}
+
+function normalizeKnownClassifications(entries: LinkRegistryEntry[]): LinkRegistryEntry[] {
+  return entries.map((entry) => {
+    const patch = normalizedClassificationPatch(entry);
+    return patch ? { ...entry, ...patch } : entry;
   });
 }
 
@@ -497,5 +523,5 @@ export function applyLinkRegistryOverrides(entries: LinkRegistryEntry[], overrid
     if (!matchedSameSkuGroups.has(rule.sameSkuGroupId.trim())) risks.push({ type: 'unknown_same_sku_group_id', message: `Same sku group alias rule target not found: ${rule.sameSkuGroupId}`, internalProductId: undefined, shortName: rule.sameSkuGroupId });
   }
 
-  return { entries: normalizePreferredGroupShortNames(nextEntries), risks };
+  return { entries: normalizeKnownClassifications(normalizePreferredGroupShortNames(nextEntries)), risks };
 }

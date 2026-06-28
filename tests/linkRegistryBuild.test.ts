@@ -305,4 +305,31 @@ describe('link registry build', () => {
       expect.objectContaining({ internalProductId: '1202', shortName: 'Mini Link 3', sameSkuGroupId: 'fujifilm-instax-mini-link-3' }),
     ]));
   });
+
+  it('normalizes known misclassification edges for pocket, vivo lens, go3s, and g9', () => {
+    const registry = buildLinkRegistry({
+      daemonCatalog: {
+        generatedAt: '2026-06-28T10:00:00.000Z',
+        count: 4,
+        excludedCount: 0,
+        entries: [
+          { internalProductId: '1301', productName: '99新大疆pocket3 手持云台相机 租物', discoveredAt: '2026-06-28T10:00:00.000Z' },
+          { internalProductId: '1302', productName: 'vivoX200Ultra增距镜 蔡司2.35倍长焦演唱会追星 免押ZFB', discoveredAt: '2026-06-28T10:00:00.000Z' },
+          { internalProductId: '1303', productName: '影石 Insta360 GO3S 拇指相机 4K 高清防抖', discoveredAt: '2026-06-28T10:00:00.000Z' },
+          { internalProductId: '1304', productName: '佳能 G9 CCD 复古相机', discoveredAt: '2026-06-28T10:00:00.000Z' },
+        ],
+      },
+      productNameMap: {
+        '1302': 'vivo 蔡司增距镜',
+        '1304': 'G9',
+      },
+    });
+
+    expect(registry).toEqual(expect.arrayContaining([
+      expect.objectContaining({ internalProductId: '1301', categoryId: 'camera', categoryName: '相机', productType: 'gimbal-camera' }),
+      expect.objectContaining({ internalProductId: '1302', categoryId: 'lens', categoryName: '镜头', productType: 'lens-accessory' }),
+      expect.objectContaining({ internalProductId: '1303', categoryId: 'camera', categoryName: '运动相机', productType: 'action-camera' }),
+      expect.objectContaining({ internalProductId: '1304', categoryId: 'camera', categoryName: '相机', productType: 'camera' }),
+    ]));
+  });
 });
