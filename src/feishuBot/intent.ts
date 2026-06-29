@@ -199,6 +199,10 @@ export function parseExactBotIntent(input: string): BotIntent {
   if (/^(链接档案维护|维护链接档案|链接维护卡|链接档案治理)$/.test(canonicalText)) return { type: 'link_registry_maintenance_hub' };
   if (/^(?:商品)?ID(?:查询|互查|转换|换算)$|^打开(?:商品)?ID(?:查询|互查|转换|换算)$|^查ID$/i.test(canonicalText)) return { type: 'lookup_product_id_card' };
 
+  if (/^(链接维护|开始链接维护|打开链接维护|呼出链接维护卡)\s+daemon$/i.test(canonicalText)) {
+    return { type: 'link_registry_maintenance_prompt', sourceMode: 'daemon_only' };
+  }
+
   const shortMultiProductQuery = parseShortMultiProductQuery(canonicalText);
   if (shortMultiProductQuery) return { type: 'query_product', keyword: shortMultiProductQuery };
 

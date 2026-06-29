@@ -167,6 +167,12 @@ describe('parseBotIntent', () => {
   });
 });
 
+it('parses daemon-only link registry maintenance commands', () => {
+  expect(parseBotIntent('链接维护 daemon')).toEqual({ type: 'link_registry_maintenance_prompt', sourceMode: 'daemon_only' });
+  expect(parseBotIntent('链接维护 DAEMON')).toEqual({ type: 'link_registry_maintenance_prompt', sourceMode: 'daemon_only' });
+  expect(parseAgentFirstBotIntent('链接维护 daemon')).toEqual({ type: 'link_registry_maintenance_prompt', sourceMode: 'daemon_only' });
+});
+
 describe('parseAgentFirstBotIntent', () => {
   it('keeps natural commands unknown so the Agent planner chooses tools', () => {
     expect(parseAgentFirstBotIntent('查 565')).toEqual({ type: 'unknown', text: '查 565' });

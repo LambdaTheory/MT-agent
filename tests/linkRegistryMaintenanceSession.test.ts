@@ -97,6 +97,7 @@ describe('link registry maintenance session', () => {
       overridesPath: join(outputDir, 'config', 'link-registry-overrides.json'),
       promptSummary: {
         referenceDate: '2026-06-24',
+        refreshMode: 'default',
         goodsExportRefreshed: true,
         daemonRefreshed: true,
         newLinkCount: 5,
@@ -128,6 +129,7 @@ describe('link registry maintenance session', () => {
       overridesPath: join(outputDir, 'config', 'link-registry-overrides.json'),
       promptSummary: {
         referenceDate: '2026-06-24',
+        refreshMode: 'daemon_only',
         goodsExportRefreshed: true,
         daemonRefreshed: false,
         newLinkCount: 2,

@@ -315,6 +315,9 @@ function refreshHeadline(summary: LinkRegistryRefreshSummary | undefined, fallba
     `商品总表 ${summary.goodsExportRefreshed ? '已刷新' : '沿用旧快照'}`,
     `daemon ${summary.daemonRefreshed ? '已刷新' : '沿用旧快照'}`,
   ];
+  if (summary.refreshMode === 'daemon_only') {
+    sourceBits[0] = '商品总表 已跳过（daemon-only）';
+  }
   const warningLine = summary.warnings.length > 0 ? `\n${summary.warnings.map((warning) => `- ${warning}`).join('\n')}` : '';
   return [
     `**本次刷新结果**`,

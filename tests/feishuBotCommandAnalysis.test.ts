@@ -300,6 +300,11 @@ describe('explicit commands — current parser behavior', () => {
     expect(parseBotIntent('链接档案维护；')).toEqual({ type: 'link_registry_maintenance_hub' });
   });
 
+  it('parses daemon-only link registry maintenance commands with trailing punctuation', () => {
+    expect(parseBotIntent('链接维护 daemon;')).toEqual({ type: 'link_registry_maintenance_prompt', sourceMode: 'daemon_only' });
+    expect(parseBotIntent('链接维护 DAEMON；')).toEqual({ type: 'link_registry_maintenance_prompt', sourceMode: 'daemon_only' });
+  });
+
   it('parses rental copy command', () => {
     expect(parseBotIntent('复制商品 761')).toEqual({ type: 'rental_copy', productId: '761' });
     expect(parseBotIntent('商品复制 761')).toEqual({ type: 'rental_copy', productId: '761' });

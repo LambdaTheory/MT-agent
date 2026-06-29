@@ -20,6 +20,8 @@ import { buildPublicTrafficPaths } from '../publicTraffic/paths.js';
 import type { GoodsSnapshotItem } from '../publicTraffic/types.js';
 import type { LinkRegistryEntry } from './types.js';
 
+export type LinkRegistryRefreshMode = 'default' | 'daemon_only';
+
 export interface LinkRegistryRefreshGroupSummary {
   label: string;
   totalCount: number;
@@ -29,6 +31,7 @@ export interface LinkRegistryRefreshGroupSummary {
 
 export interface LinkRegistryRefreshSummary {
   referenceDate: string;
+  refreshMode: LinkRegistryRefreshMode;
   goodsExportRefreshed: boolean;
   daemonRefreshed: boolean;
   newLinkCount: number;
@@ -93,7 +96,7 @@ function summarizeNewEntries(
   beforeRegistry: LinkRegistryEntry[],
   afterRegistry: LinkRegistryEntry[],
   referenceDate: string,
-): Omit<LinkRegistryRefreshSummary, 'referenceDate' | 'goodsExportRefreshed' | 'daemonRefreshed' | 'warnings'> {
+): Omit<LinkRegistryRefreshSummary, 'referenceDate' | 'refreshMode' | 'goodsExportRefreshed' | 'daemonRefreshed' | 'warnings'> {
   const beforeIds = new Set(beforeRegistry.map((entry) => entry.internalProductId));
   const maintenance = buildLinkRegistryMaintenanceReport(afterRegistry, [], { referenceDate });
   const pendingIds = new Set(
@@ -126,9 +129,14 @@ function summarizeNewEntries(
   };
 }
 
-export async function refreshLinkRegistryForPrompt(outputDir: string, referenceDate: string): Promise<LinkRegistryRefreshResult> {
+export async function refreshLinkRegistryForPrompt(
+  outputDir: string,
+  referenceDate: string,
+  options: { mode?: LinkRegistryRefreshMode } = {},
+): Promise<LinkRegistryRefreshResult> {
   await loadEnv();
   const config = await loadConfig();
+  const refreshMode = options.mode ?? 'default';
   const mappingPath = config.productIdMappingPath ?? 'config/product-id-map.json';
   const registryInput = { productIdMapPath: mappingPath, artifactsDir: outputDir };
   const beforeContext = await loadClosedOrderRegistryContext(registryInput).catch(() => null);
@@ -147,13 +155,15 @@ export async function refreshLinkRegistryForPrompt(outputDir: string, referenceD
   let daemonRefreshed = false;
   let goodsSnapshotFromExport: GoodsSnapshotItem[] | null = null;
 
-  try {
-    const goodsExportPath = await downloadGoodsExport(config, paths.goodsExportWorkbook);
-    await writeProductIdMappingFromExport(goodsExportPath, resolvedPaths.productIdMapPath, paths.productIdMappingSyncLog);
-    goodsSnapshotFromExport = parseGoodsExportSnapshot(goodsExportPath);
-    goodsExportRefreshed = true;
-  } catch (error) {
-    warnings.push(`商品总表刷新失败：${errorMessage(error)}`);
+  if (refreshMode === 'default') {
+    try {
+      const goodsExportPath = await downloadGoodsExport(config, paths.goodsExportWorkbook);
+      await writeProductIdMappingFromExport(goodsExportPath, resolvedPaths.productIdMapPath, paths.productIdMappingSyncLog);
+      goodsSnapshotFromExport = parseGoodsExportSnapshot(goodsExportPath);
+      goodsExportRefreshed = true;
+    } catch (error) {
+      warnings.push(`商品总表刷新失败：${errorMessage(error)}`);
+    }
   }
 
   const mapping = await loadProductIdMapping(resolvedPaths.productIdMapPath).catch(() => ({}));
@@ -200,6 +210,7 @@ export async function refreshLinkRegistryForPrompt(outputDir: string, referenceD
     registryContext,
     summary: {
       referenceDate,
+      refreshMode,
       goodsExportRefreshed,
       daemonRefreshed,
       warnings,

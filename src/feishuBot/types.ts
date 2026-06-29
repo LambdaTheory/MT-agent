@@ -2,6 +2,7 @@ import type { FeishuCardPayload } from '../notify/feishuApp.js';
 import type { RentalPriceChangeRequest } from './rentalPrice.js';
 
 export type FeishuSendTo = 'personal' | 'group' | 'both';
+export type LinkRegistryMaintenanceSourceMode = 'daemon_only';
 
 export type BotIntent =
   | { type: 'help' }
@@ -22,7 +23,7 @@ export type BotIntent =
   | { type: 'query_product'; keyword: string; date?: string }
   | { type: 'lookup_product_id_card' }
   | { type: 'link_registry_overview' }
-  | { type: 'link_registry_maintenance_prompt' }
+  | { type: 'link_registry_maintenance_prompt'; sourceMode?: LinkRegistryMaintenanceSourceMode }
   | { type: 'link_registry_governance_prompt' }
   | { type: 'link_registry_maintenance_hub' }
   | { type: 'inventory_status_overview' }

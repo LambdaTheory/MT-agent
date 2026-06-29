@@ -103,13 +103,14 @@ function canonicalizeIntent(intent: BotIntent): BotIntent {
     case 'agent_learning_summary':
     case 'lookup_product_id_card':
     case 'link_registry_overview':
-    case 'link_registry_maintenance_prompt':
     case 'link_registry_governance_prompt':
     case 'link_registry_maintenance_hub':
     case 'inventory_status_overview':
     case 'sync_closed_order_feedback':
     case 'run_closed_order_observation_report':
       return { type: intent.type };
+    case 'link_registry_maintenance_prompt':
+      return { type: intent.type, ...(intent.sourceMode ? { sourceMode: intent.sourceMode } : {}) };
     case 'latest_summary':
     case 'conversion_summary':
       return { type: intent.type, ...(intent.date ? { date: intent.date } : {}) };

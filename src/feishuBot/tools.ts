@@ -175,6 +175,7 @@ async function handleLinkRegistryPromptIntent(
   mode: LinkRegistryPromptMode,
   outputDir: string,
   options: HandleBotIntentOptions,
+  maintenanceSourceMode?: 'daemon_only',
 ): Promise<BotResponse> {
   const date = currentLocalDate();
   let registryContext = await loadClosedOrderRegistryContext(options.closedOrderRegistryPaths);
@@ -182,7 +183,9 @@ async function handleLinkRegistryPromptIntent(
 
   if (!options.closedOrderRegistryPaths && (mode === 'maintenance' || mode === 'hub')) {
     try {
-      const refreshed = await refreshLinkRegistryForPrompt(outputDir, date);
+      const refreshed = await refreshLinkRegistryForPrompt(outputDir, date, {
+        mode: maintenanceSourceMode === 'daemon_only' ? 'daemon_only' : 'default',
+      });
       registryContext = refreshed.registryContext;
       promptSummary = refreshed.summary;
     } catch {
@@ -490,7 +493,7 @@ export async function handleBotIntent(intent: BotIntent, outputDir = 'output', o
   }
 
   if (intent.type === 'link_registry_maintenance_prompt') {
-    return handleLinkRegistryPromptIntent('maintenance', outputDir, options);
+    return handleLinkRegistryPromptIntent('maintenance', outputDir, options, intent.sourceMode);
   }
 
   if (intent.type === 'link_registry_governance_prompt') {

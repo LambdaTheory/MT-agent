@@ -136,6 +136,19 @@ describe('createFeishuMessageDispatcher', () => {
     expect(intents).toEqual([{ type: 'link_registry_maintenance_prompt' }]);
   });
 
+  it('preserves daemon-only maintenance mode through canonicalization', async () => {
+    const intents: BotIntent[] = [];
+    const dispatcher = createFeishuMessageDispatcher({
+      handleIntent: async (intent) => {
+        intents.push(intent);
+        return { text: intent.type };
+      },
+    });
+
+    await expect(dispatcher.dispatch({ messageId: 'mid-link-maintenance-daemon', text: '链接维护 daemon', source: 'sdk' })).resolves.toEqual({ text: 'link_registry_maintenance_prompt', skipped: false });
+    expect(intents).toEqual([{ type: 'link_registry_maintenance_prompt', sourceMode: 'daemon_only' }]);
+  });
+
   it('skips group messages that do not mention the bot', async () => {
     const handleIntent = vi.fn(async () => ({ text: 'handled' }));
     const dispatcher = createFeishuMessageDispatcher({
