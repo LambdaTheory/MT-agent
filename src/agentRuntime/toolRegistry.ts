@@ -187,6 +187,17 @@ const refreshActivityPlanResultMetadataSchema = {
   properties: {
     date: { type: 'string' },
     candidateCount: { type: 'integer' },
+    shownCandidateCount: { type: 'integer' },
+    skipped: {
+      type: 'object',
+      properties: {
+        inactive: { type: 'integer' },
+        missingRow: { type: 'integer' },
+        missing30dDashboard: { type: 'integer' },
+        onlineLessThan30d: { type: 'integer' },
+        onlineDaysUnknown: { type: 'integer' },
+      },
+    },
     executeRequest: { type: 'object', description: 'Hidden execution request included only inside the generated confirmation card.' },
     blockers: { type: 'array', items: { type: 'string' } },
   },
