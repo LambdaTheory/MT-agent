@@ -308,6 +308,17 @@ function buildReviewCard(
                 value: { action: 'link_registry_governance_submit', date: session.date, reviewIndex },
               }],
             },
+            {
+              tag: 'button',
+              text: plainText('退出治理'),
+              type: 'default',
+              form_action_type: 'submit',
+              name: 'link_registry_governance_exit_submit',
+              behaviors: [{
+                type: 'callback',
+                value: { action: 'link_registry_governance_snooze', date: session.date },
+              }],
+            },
           ],
         },
       ],

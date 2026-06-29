@@ -93,12 +93,13 @@ describe('link registry governance session', () => {
     expect(started.text).toContain('组级治理 1/3');
     expect(JSON.stringify(started.card)).toContain('dji-pocket-3');
     expect(JSON.stringify(started.card)).toContain('link_registry_governance_submit');
+    expect(JSON.stringify(started.card)).toContain('link_registry_governance_exit_submit');
 
     const startedFormButtons = ((((started.card as { body?: { elements?: Array<{ tag?: string; elements?: Array<Record<string, unknown>> }> } }).body?.elements ?? [])
       .find((element) => element.tag === 'form'))?.elements ?? [])
       .filter((element) => element.tag === 'button');
-    expect(startedFormButtons).toHaveLength(1);
-    expect(startedFormButtons[0]?.form_action_type).toBe('submit');
+    expect(startedFormButtons).toHaveLength(2);
+    expect(startedFormButtons.every((button) => button.form_action_type === 'submit')).toBe(true);
 
     const second = await handleLinkRegistryGovernanceCardAction(outputDir, {
       date: '2026-06-24',

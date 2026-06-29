@@ -200,6 +200,7 @@ function expectedActionForButtonName(name: string | undefined): string | undefin
     link_registry_maintenance_snooze_form: 'link_registry_maintenance_snooze',
     link_registry_maintenance_ignore_submit: 'link_registry_maintenance_ignore',
     link_registry_maintenance_ignore_form: 'link_registry_maintenance_ignore',
+    link_registry_maintenance_exit_submit: 'link_registry_maintenance_snooze',
     link_registry_maintenance_submit: 'link_registry_maintenance_submit',
     link_registry_maintenance_form: 'link_registry_maintenance_submit',
     link_registry_governance_start_submit: 'link_registry_governance_start',
@@ -208,6 +209,7 @@ function expectedActionForButtonName(name: string | undefined): string | undefin
     link_registry_governance_snooze_form: 'link_registry_governance_snooze',
     link_registry_governance_ignore_submit: 'link_registry_governance_ignore',
     link_registry_governance_ignore_form: 'link_registry_governance_ignore',
+    link_registry_governance_exit_submit: 'link_registry_governance_snooze',
     link_registry_governance_submit: 'link_registry_governance_submit',
     link_registry_governance_form: 'link_registry_governance_submit',
   };

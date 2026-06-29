@@ -491,6 +491,20 @@ function buildReviewCard(
                 },
               }],
             },
+            {
+              tag: 'button',
+              text: plainText('退出维护'),
+              type: 'default',
+              form_action_type: 'submit',
+              name: 'link_registry_maintenance_exit_submit',
+              behaviors: [{
+                type: 'callback',
+                value: {
+                  action: 'link_registry_maintenance_snooze',
+                  date: session.date,
+                },
+              }],
+            },
           ],
         },
       ],
