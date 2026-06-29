@@ -6,16 +6,19 @@ export interface OpenAiCompatibleLlmEnv {
   LLM_BASE_URL?: string;
   LLM_API_KEY?: string;
   LLM_MODEL?: string;
+  LLM_TIMEOUT_MS?: string;
   MT_AGENT_LLM_PROVIDER?: string;
   MT_AGENT_LLM_BASE_URL?: string;
   MT_AGENT_LLM_API_KEY?: string;
   MT_AGENT_LLM_MODEL?: string;
+  MT_AGENT_LLM_TIMEOUT_MS?: string;
 }
 
 export interface OpenAiCompatibleLlmProviderConfig {
   baseUrl: string;
   apiKey?: string;
   model: string;
+  timeoutMs?: number;
   fetchImpl?: typeof fetch;
 }
 
@@ -33,6 +36,8 @@ interface ChatCompletionResponse {
   choices?: Array<{ message?: { content?: unknown } }>;
 }
 
+const DEFAULT_LLM_TIMEOUT_MS = 45_000;
+
 function normalized(value: string | undefined): string | undefined {
   const trimmed = value?.trim();
   return trimmed ? trimmed : undefined;
@@ -40,6 +45,12 @@ function normalized(value: string | undefined): string | undefined {
 
 function envValue(env: OpenAiCompatibleLlmEnv, primary: keyof OpenAiCompatibleLlmEnv, fallback: keyof OpenAiCompatibleLlmEnv): string | undefined {
   return normalized(env[primary]) ?? normalized(env[fallback]);
+}
+
+function positiveInteger(value: string | undefined): number | undefined {
+  if (!value) return undefined;
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
 }
 
 export function summarizeLlmProviderEnv(env: OpenAiCompatibleLlmEnv = process.env): LlmProviderEnvSummary {
@@ -101,29 +112,46 @@ export class OpenAiCompatibleLlmProvider implements LlmProvider {
   private readonly baseUrl: string;
   private readonly apiKey?: string;
   private readonly model: string;
+  private readonly timeoutMs: number;
   private readonly fetchImpl: typeof fetch;
 
   constructor(config: OpenAiCompatibleLlmProviderConfig) {
     this.baseUrl = config.baseUrl;
     this.apiKey = config.apiKey;
     this.model = config.model;
+    this.timeoutMs = config.timeoutMs ?? DEFAULT_LLM_TIMEOUT_MS;
     this.fetchImpl = config.fetchImpl ?? fetch;
   }
 
   async generateJson(input: LlmGenerateJsonInput): Promise<LlmProviderResult> {
-    const response = await this.fetchImpl(chatCompletionsUrl(this.baseUrl), {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {}),
-      },
-      body: JSON.stringify({
-        model: this.model,
-        messages: input.messages,
-        ...(input.temperature !== undefined ? { temperature: input.temperature } : {}),
-        ...(input.maxTokens !== undefined ? { max_tokens: input.maxTokens } : {}),
-      }),
-    });
+    const controller = new AbortController();
+    let didTimeout = false;
+    const timeout = setTimeout(() => {
+      didTimeout = true;
+      controller.abort();
+    }, this.timeoutMs);
+    let response: Response;
+    try {
+      response = await this.fetchImpl(chatCompletionsUrl(this.baseUrl), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {}),
+        },
+        body: JSON.stringify({
+          model: this.model,
+          messages: input.messages,
+          ...(input.temperature !== undefined ? { temperature: input.temperature } : {}),
+          ...(input.maxTokens !== undefined ? { max_tokens: input.maxTokens } : {}),
+        }),
+        signal: controller.signal,
+      });
+    } catch (error) {
+      if (didTimeout) throw new Error(`LLM provider request timed out after ${this.timeoutMs}ms`);
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
 
     if (!response.ok) throw new Error(`LLM provider request failed: ${response.status}`);
     const payload: unknown = await response.json();
@@ -141,7 +169,8 @@ export function createLlmProviderFromEnv(env: OpenAiCompatibleLlmEnv = process.e
   const model = envValue(env, 'MT_AGENT_LLM_MODEL', 'LLM_MODEL');
   if (!baseUrl || !model) return null;
   const apiKey = envValue(env, 'MT_AGENT_LLM_API_KEY', 'LLM_API_KEY');
-  return new OpenAiCompatibleLlmProvider({ baseUrl, model, apiKey, fetchImpl });
+  const timeoutMs = positiveInteger(envValue(env, 'MT_AGENT_LLM_TIMEOUT_MS', 'LLM_TIMEOUT_MS'));
+  return new OpenAiCompatibleLlmProvider({ baseUrl, model, apiKey, ...(timeoutMs ? { timeoutMs } : {}), fetchImpl });
 }
 
 export function createOpenAiCompatibleProviderFromEnv(env: OpenAiCompatibleLlmEnv = process.env): OpenAiCompatibleLlmProvider | null {

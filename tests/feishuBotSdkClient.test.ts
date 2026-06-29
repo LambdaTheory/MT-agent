@@ -75,6 +75,7 @@ describe('createFeishuSdkBot', () => {
     const starts: unknown[] = [];
     const sent: unknown[] = [];
     const dispatched: FeishuBotIncomingTextMessage[] = [];
+    const logs: string[] = [];
 
     class FakeClient {
       im = { v1: { message: { reply: async (request: unknown) => sent.push(request) } } };
@@ -100,6 +101,7 @@ describe('createFeishuSdkBot', () => {
         dispatched.push(message);
         return { text: `reply:${message.text}`, skipped: false };
       },
+      logInfo: (message) => logs.push(message),
       sdk: { Client: FakeClient, WSClient: FakeWSClient, EventDispatcher: FakeEventDispatcher },
     });
 
@@ -112,6 +114,11 @@ describe('createFeishuSdkBot', () => {
     expect(dispatched).toEqual([{ messageId: 'mid-sdk-reply', text: '帮助', source: 'sdk', chatId: 'chat', senderOpenId: undefined }]);
     expect(sent).toEqual([
       { path: { message_id: 'mid-sdk-reply' }, data: { content: JSON.stringify({ text: 'reply:帮助' }), msg_type: 'text' } },
+    ]);
+    expect(logs).toEqual([
+      '飞书SDK收到消息 mid-sdk-reply: chat=unknown text="帮助"',
+      expect.stringMatching(/^飞书SDK消息dispatch完成 mid-sdk-reply: skipped=false hasCard=false elapsedMs=\d+$/),
+      expect.stringMatching(/^飞书SDK消息回复成功 mid-sdk-reply: type=text elapsedMs=\d+$/),
     ]);
   });
 
