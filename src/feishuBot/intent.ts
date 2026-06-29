@@ -55,9 +55,48 @@ function offsetLocalDate(days: number): string {
   return formatLocalDate(date);
 }
 
+function currentLocalYear(): number {
+  return new Date().getFullYear();
+}
+
+function padDatePart(value: number): string {
+  return String(value).padStart(2, '0');
+}
+
+function dateHintFromParts(raw: string, year: number, month: number, day: number): DateHint | null {
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return null;
+  if (year < 2000 || year > 2099 || month < 1 || month > 12 || day < 1 || day > 31) return null;
+  const date = new Date(year, month - 1, day);
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return null;
+  return { date: `${year}-${padDatePart(month)}-${padDatePart(day)}`, raw };
+}
+
 function parseDateHint(text: string): DateHint | null {
-  const absolute = /\b(20\d{2}-\d{2}-\d{2})\b/.exec(text);
-  if (absolute?.[1]) return { date: absolute[1], raw: absolute[1] };
+  const absolute = /\b(20\d{2})[-./](\d{1,2})[-./](\d{1,2})\b/.exec(text);
+  if (absolute?.[1] && absolute[2] && absolute[3]) {
+    const parsed = dateHintFromParts(absolute[0], Number(absolute[1]), Number(absolute[2]), Number(absolute[3]));
+    if (parsed) return parsed;
+  }
+
+  const shortYear = /(^|[^\d])(\d{2})[./-](\d{1,2})[./-](\d{1,2})(?!\d)/.exec(text);
+  if (shortYear?.[2] && shortYear[3] && shortYear[4]) {
+    const raw = shortYear[0].slice(shortYear[1]?.length ?? 0);
+    const parsed = dateHintFromParts(raw, 2000 + Number(shortYear[2]), Number(shortYear[3]), Number(shortYear[4]));
+    if (parsed) return parsed;
+  }
+
+  const monthDayWithChinese = /(\d{1,2})\s*\u6708\s*(\d{1,2})\s*\u65e5?/.exec(text);
+  if (monthDayWithChinese?.[1] && monthDayWithChinese[2]) {
+    const parsed = dateHintFromParts(monthDayWithChinese[0], currentLocalYear(), Number(monthDayWithChinese[1]), Number(monthDayWithChinese[2]));
+    if (parsed) return parsed;
+  }
+
+  const monthDay = /(^|[^\d])(\d{1,2})[./-](\d{1,2})(?!\d)/.exec(text);
+  if (monthDay?.[2] && monthDay[3]) {
+    const raw = monthDay[0].slice(monthDay[1]?.length ?? 0);
+    const parsed = dateHintFromParts(raw, currentLocalYear(), Number(monthDay[2]), Number(monthDay[3]));
+    if (parsed) return parsed;
+  }
 
   const relative = /(昨天|前天)/.exec(text);
   if (!relative?.[1]) return null;

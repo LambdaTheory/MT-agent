@@ -25,11 +25,21 @@ describe('parseBotIntent', () => {
     expect(parseBotIntent('重发日报')).toEqual({ type: 'resend_latest_report', sendTo: undefined });
     expect(parseBotIntent('重发公域日报 发全部')).toEqual({ type: 'resend_latest_report', sendTo: 'both' });
     expect(parseBotIntent('重发 2026-06-22 日报 发全部')).toEqual({ type: 'resend_latest_report', sendTo: 'both', date: '2026-06-22' });
+
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 5, 29, 8));
+    expect(parseBotIntent('\u91cd\u53d16.22\u65e5\u62a5')).toEqual({ type: 'resend_latest_report', sendTo: undefined, date: '2026-06-22' });
+    expect(parseBotIntent('\u91cd\u53d126.6.22\u65e5\u62a5 \u53d1\u5168\u90e8')).toEqual({ type: 'resend_latest_report', sendTo: 'both', date: '2026-06-22' });
+    expect(parseBotIntent('\u91cd\u53d16\u670822\u65e5\u62a5')).toEqual({ type: 'resend_latest_report', sendTo: undefined, date: '2026-06-22' });
   });
 
   it('parses private push latest report to group intent', () => {
     expect(parseBotIntent('推送日报到群')).toEqual({ type: 'push_latest_report_to_group' });
     expect(parseBotIntent('推送 2026-06-22 日报到群')).toEqual({ type: 'push_latest_report_to_group', date: '2026-06-22' });
+
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 5, 29, 8));
+    expect(parseBotIntent('\u63a8\u90016.22\u65e5\u62a5\u5230\u7fa4')).toEqual({ type: 'push_latest_report_to_group', date: '2026-06-22' });
   });
 
   it('parses operations learning quiz intent', () => {
@@ -69,6 +79,9 @@ describe('parseBotIntent', () => {
 
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 5, 26, 8));
+    expect(parseBotIntent('\u770b6.22\u65e5\u62a5')).toEqual({ type: 'latest_summary', date: '2026-06-22' });
+    expect(parseBotIntent('26.6.22 \u67e5\u8be2 733')).toEqual({ type: 'query_product', keyword: '733', date: '2026-06-22' });
+    expect(parseBotIntent('6\u670822\u65e5\u7684\u8f6c\u5316\u7387\u591a\u5c11')).toEqual({ type: 'conversion_summary', date: '2026-06-22' });
     expect(parseBotIntent('查昨天日报')).toEqual({ type: 'latest_summary', date: '2026-06-25' });
     expect(parseBotIntent('昨天转化数据')).toEqual({ type: 'conversion_summary', date: '2026-06-25' });
   });
