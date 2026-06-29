@@ -17,7 +17,7 @@ function fakeRentalPriceClient() {
 }
 
 describe('agent rental price preview multiplier handling', () => {
-  it('accepts price preview multipliers above 1', async () => {
+  it('accepts price preview multipliers above 1 and keeps them rent-field scoped', async () => {
     const { client, preview } = fakeRentalPriceClient();
 
     const response = await executeAgentToolRequest(
@@ -30,12 +30,12 @@ describe('agent rental price preview multiplier handling', () => {
       { rentalPriceClient: client },
     );
 
-    expect(preview).toHaveBeenCalledWith({ mode: 'global_discount', productId: '851', discount: 1.8, scope: 'all_price_fields' });
+    expect(preview).toHaveBeenCalledWith({ mode: 'global_discount', productId: '851', discount: 1.8, scope: 'rent_fields' });
     expect(response.text).toContain('折扣：180%');
     expect(response.card).toBeDefined();
   });
 
-  it('infers a missing direct price preview multiplier and all-price scope from the reason', async () => {
+  it('infers a missing direct price preview multiplier and keeps the scope to rent fields', async () => {
     const { client, preview } = fakeRentalPriceClient();
 
     const response = await executeAgentToolRequest(
@@ -48,8 +48,8 @@ describe('agent rental price preview multiplier handling', () => {
       { rentalPriceClient: client },
     );
 
-    expect(preview).toHaveBeenCalledWith({ mode: 'global_discount', productId: '851', discount: 1.8, scope: 'all_price_fields' });
-    expect(response.text).toContain('范围：所有价格字段');
+    expect(preview).toHaveBeenCalledWith({ mode: 'global_discount', productId: '851', discount: 1.8, scope: 'rent_fields' });
+    expect(response.text).toContain('范围：租金字段');
     expect(response.card).toBeDefined();
   });
 
@@ -74,10 +74,44 @@ describe('agent rental price preview multiplier handling', () => {
       options: { rentalPriceClient: client },
     });
 
-    expect(preview).toHaveBeenCalledWith({ mode: 'global_discount', productId: '851', discount: 1.8, scope: 'all_price_fields' });
-    expect(preview).toHaveBeenCalledWith({ mode: 'global_discount', productId: '929', discount: 1.8, scope: 'all_price_fields' });
+    expect(preview).toHaveBeenCalledWith({ mode: 'global_discount', productId: '851', discount: 1.8, scope: 'rent_fields' });
+    expect(preview).toHaveBeenCalledWith({ mode: 'global_discount', productId: '929', discount: 1.8, scope: 'rent_fields' });
     expect(response?.text).toContain('步骤 1/1：rental.pricePreview');
     expect(response?.text).toContain('折扣：180%');
     expect(response?.card).toBeDefined();
+  });
+
+  it('filters non-rent explicit fields when the reason does not name that field', async () => {
+    const { client, preview } = fakeRentalPriceClient();
+
+    const response = await executeAgentToolRequest(
+      {
+        toolName: 'rental.pricePreview',
+        arguments: { productIds: ['851'], fields: { rent1day: '22.00', marketPrice: '330.00' } },
+        reason: 'rx10m4 整体调价',
+      },
+      'output',
+      { rentalPriceClient: client },
+    );
+
+    expect(preview).toHaveBeenCalledWith({ mode: 'explicit_fields', productId: '851', fields: { rent1day: '22.00' } });
+    expect(response.card).toBeDefined();
+  });
+
+  it('allows a non-rent explicit field when the reason names that exact field', async () => {
+    const { client, preview } = fakeRentalPriceClient();
+
+    const response = await executeAgentToolRequest(
+      {
+        toolName: 'rental.pricePreview',
+        arguments: { productIds: ['851'], fields: { marketPrice: '330.00' } },
+        reason: 'rx10m4 市场价改成 330',
+      },
+      'output',
+      { rentalPriceClient: client },
+    );
+
+    expect(preview).toHaveBeenCalledWith({ mode: 'explicit_fields', productId: '851', fields: { marketPrice: '330.00' } });
+    expect(response.card).toBeDefined();
   });
 });

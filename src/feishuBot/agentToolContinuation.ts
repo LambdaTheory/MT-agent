@@ -60,7 +60,7 @@ function completePricePreviewArguments(
   return {
     ...args,
     discount: inferred,
-    ...(args.scope === undefined && /(整体|所有|全部)/.test(contextText) ? { scope: 'all_price_fields' } : {}),
+    scope: 'rent_fields',
   };
 }
 

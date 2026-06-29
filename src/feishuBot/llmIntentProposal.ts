@@ -44,7 +44,7 @@ export function getSupportedLlmIntentProposals(): LlmIntentProposalRequest['inte
   return [
     {
       name: 'rental_price_change',
-      description: '租赁商品改价。必须提供 productId 和 fields，例如 { rent1day: "22.00" }。只生成确认卡，不直接执行。',
+      description: '租赁商品改价。默认只改租金字段，例如 { rent1day: "22.00" }。marketPrice、deposit、purchasePrice、costPrice、finalPayment 只有在用户精准点名该字段时才允许放入 fields。只生成确认卡，不直接执行。',
       argumentsSchema: { type: 'object', required: ['productId', 'fields'] },
     },
     {

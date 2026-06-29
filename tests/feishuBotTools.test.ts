@@ -3112,7 +3112,7 @@ describe('handleBotIntent', () => {
         if (request.mode !== 'global_discount') throw new Error('expected global discount preview');
         return {
           productId: request.productId,
-          fields: { rent1day: request.productId === '841' ? '90.00' : '81.00', marketPrice: '900.00' },
+          fields: { rent1day: request.productId === '841' ? '90.00' : '81.00' },
           lines: ['preview: ok'],
           warnings: [],
           audit: { taskId: `task_${request.productId}_preview`, rollbackFile: `rollback-${request.productId}.json`, hasErrors: false },
@@ -3133,8 +3133,8 @@ describe('handleBotIntent', () => {
     });
 
     expect(previewCalls).toEqual([
-      { mode: 'global_discount', productId: '841', discount: 0.9, scope: 'all_price_fields' },
-      { mode: 'global_discount', productId: '842', discount: 0.9, scope: 'all_price_fields' },
+      { mode: 'global_discount', productId: '841', discount: 0.9, scope: 'rent_fields' },
+      { mode: 'global_discount', productId: '842', discount: 0.9, scope: 'rent_fields' },
     ]);
     expect(response.text).toContain('步骤 1/2：linkRegistry.resolveProducts');
     expect(response.text).toContain('步骤 2/2：rental.pricePreview');
@@ -3157,10 +3157,10 @@ describe('handleBotIntent', () => {
           goal: '对端内ID 914 整体改价 0.99',
           steps: [
             { id: 'resolve', toolName: 'linkRegistry.resolveProducts', arguments: { query: '914' }, reason: '先解析用户给出的端内ID' },
-            { toolName: 'rental.pricePreview', arguments: { productIds: '${resolve.productIds}', discount: 0.99, scope: 'all_price_fields' }, reason: '对指定端内ID生成所有价格字段改价预览' },
+            { toolName: 'rental.pricePreview', arguments: { productIds: '${resolve.productIds}', discount: 0.99, scope: 'all_price_fields' }, reason: '对指定端内ID生成租金字段改价预览' },
           ],
           confidence: 0.94,
-          reason: '用户给出的是明确端内ID，整体改价只表示该商品所有价格字段',
+          reason: '用户给出的是明确端内ID，整体改价只表示该商品租金字段',
         });
       },
     };
@@ -3171,7 +3171,7 @@ describe('handleBotIntent', () => {
         if (request.mode !== 'global_discount') throw new Error('expected global discount preview');
         return {
           productId: request.productId,
-          fields: { rent1day: '99.00', marketPrice: '999.00' },
+          fields: { rent1day: '99.00' },
           lines: ['preview: ok'],
           warnings: [],
           audit: { taskId: `task_${request.productId}_preview`, rollbackFile: `rollback-${request.productId}.json`, hasErrors: false },
@@ -3192,7 +3192,7 @@ describe('handleBotIntent', () => {
     });
 
     expect(previewCalls).toEqual([
-      { mode: 'global_discount', productId: '914', discount: 0.99, scope: 'all_price_fields' },
+      { mode: 'global_discount', productId: '914', discount: 0.99, scope: 'rent_fields' },
     ]);
     expect(response.text).toContain('914');
     expect(response.text).not.toContain('915');

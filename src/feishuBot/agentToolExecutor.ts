@@ -93,6 +93,13 @@ const RENTAL_SPEC_REMOVE_PLAN_BULK_WARNING_PRODUCTS = 12;
 const RENTAL_SPEC_REMOVE_PLAN_MAX_PRODUCTS = 60;
 const RENTAL_SPEC_REMOVE_PLAN_MAX_ITEMS = 50;
 const REFRESH_ACTIVITY_DEFAULT_MAX_CANDIDATES = 20;
+const NON_RENT_PRICE_FIELD_LABELS: Record<string, string[]> = {
+  marketPrice: ['marketPrice', '市场价', '市场价格'],
+  deposit: ['deposit', '押金'],
+  purchasePrice: ['purchasePrice', '采购价', '购买价', '买入价'],
+  costPrice: ['costPrice', '成本价'],
+  finalPayment: ['finalPayment', '尾款'],
+};
 const REFRESH_ACTIVITY_EXECUTION_MAX_PRODUCTS = 20;
 const RENT_FIELD_ORDER: Array<{ field: string; label: string }> = [
   { field: 'rent1day', label: '1天' },
@@ -129,6 +136,25 @@ function readLinkRegistryResolutionMode(value: unknown): 'single' | 'sameSkuGrou
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isRentPriceField(field: string): boolean {
+  return /^rent\d+day$/.test(field);
+}
+
+function reasonMentionsPriceField(reason: string, field: string): boolean {
+  const labels = NON_RENT_PRICE_FIELD_LABELS[field] ?? [];
+  const normalizedReason = reason.toLowerCase();
+  return labels.some((label) => normalizedReason.includes(label.toLowerCase()));
+}
+
+function sanitizeExplicitPriceFields(fields: unknown, reason: string): Record<string, unknown> | unknown {
+  if (!isRecord(fields)) return fields;
+  const sanitized: Record<string, unknown> = {};
+  for (const [field, value] of Object.entries(fields)) {
+    if (isRentPriceField(field) || reasonMentionsPriceField(reason, field)) sanitized[field] = value;
+  }
+  return sanitized;
 }
 
 function requireString(value: unknown, fieldName: string): string {
@@ -532,8 +558,8 @@ async function rentalPriceSnapshotResponse(
   return { text: formatRentalPriceSnapshot(query, resolution, reads) };
 }
 
-function readPriceChangeScope(value: unknown): 'rent_fields' | 'all_price_fields' {
-  return value === 'all_price_fields' ? 'all_price_fields' : 'rent_fields';
+function readPriceChangeScope(_value: unknown): 'rent_fields' | 'all_price_fields' {
+  return 'rent_fields';
 }
 
 function formatDiscountText(discount: number): string {
@@ -560,7 +586,7 @@ function formatPricePreviewText(input: {
   return [
     `改价预览：${input.productIds.length} 个端内ID`,
     input.discount !== undefined ? `折扣：${formatDiscountText(input.discount)}` : undefined,
-    input.scope ? `范围：${input.scope === 'all_price_fields' ? '所有价格字段' : '租金字段'}` : undefined,
+    input.scope ? '范围：租金字段' : undefined,
     `端内ID：${input.productIds.join('、')}`,
     '',
     ...readyLines,
@@ -588,19 +614,19 @@ async function rentalPricePreviewResponse(
   const productIds = readProductIdArray(args.productIds, RENTAL_PRICE_PREVIEW_MAX_PRODUCTS);
   if (!productIds) return { text: `改价预览参数无效：productIds 需要是 1 到 ${RENTAL_PRICE_PREVIEW_MAX_PRODUCTS} 个端内ID。`, metadata: { toolName: 'rental.pricePreview', ok: false } };
 
-  const hasExplicitFields = isRecord(args.fields);
-  const discount = hasExplicitFields ? undefined : (readPriceMultiplierArgument(args.discount) ?? inferPriceMultiplierFromText(reason));
+  const priceArgs = isRecord(args.fields) ? { ...args, fields: sanitizeExplicitPriceFields(args.fields, reason) } : args;
+  const hasExplicitFields = isRecord(priceArgs.fields);
+  const discount = hasExplicitFields ? undefined : (readPriceMultiplierArgument(priceArgs.discount) ?? inferPriceMultiplierFromText(reason));
   if (!hasExplicitFields && discount === null) {
     return { text: '改价预览参数无效：需要提供 fields，或提供 discount 折扣倍数，例如九折传 0.9。', metadata: { toolName: 'rental.pricePreview', ok: false, productIds } };
   }
-  const inferredScope = args.scope ?? (/(整体|所有|全部)/.test(reason) ? 'all_price_fields' : undefined);
-  const scope = hasExplicitFields ? undefined : readPriceChangeScope(inferredScope);
+  const scope = hasExplicitFields ? undefined : readPriceChangeScope(priceArgs.scope);
 
   const blocked: string[] = [];
   const readyItems: Array<{ productId: string; fields: Record<string, string>; audit?: RentalPriceAuditReference }> = [];
   for (const productId of productIds) {
     const requestArgs: Record<string, unknown> = hasExplicitFields
-      ? { productId, fields: args.fields }
+      ? { productId, fields: priceArgs.fields }
       : { productId, discount, scope };
     const rentalRequest = rentalPriceChangeRequestFromToolArguments(requestArgs);
     if (!rentalRequest) {
@@ -1603,7 +1629,10 @@ export async function executeAgentToolRequest(
       return { text: result.text };
     }
     case 'rental.priceChange': {
-      const rentalRequest = rentalPriceChangeRequestFromToolArguments(request.arguments);
+      const priceArguments = isRecord(request.arguments.fields)
+        ? { ...request.arguments, fields: sanitizeExplicitPriceFields(request.arguments.fields, request.reason) }
+        : request.arguments;
+      const rentalRequest = rentalPriceChangeRequestFromToolArguments(priceArguments);
       if (!rentalRequest) throw new Error('租赁商品改价参数无效，请重新发起。');
       const client = options.rentalPriceClient ?? createRentalPriceSkillClient();
       const preview = await client.preview(rentalRequest);

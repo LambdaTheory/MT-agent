@@ -191,6 +191,10 @@ function money(value: string | number): string {
   return Number(value).toFixed(2);
 }
 
+function isRentPriceField(field: string): boolean {
+  return /^rent\d+day$/.test(field);
+}
+
 function confirmationKey(value: Record<string, unknown>): string {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex').slice(0, 24);
 }
@@ -217,7 +221,7 @@ export function parseRentalPriceChange(text: string): RentalPriceChangeRequest |
   if (globalDiscount) return { mode: 'global_discount', productId, discount: Number(globalDiscount[1]), scope: 'rent_fields' };
   if (/全部租金/.test(body)) return { mode: 'global_discount', productId, discount: 0.9, scope: 'rent_fields' };
   const allPriceDiscount = /所有价格\s*\*\s*([0-9]+(?:\.[0-9]+)?)/.exec(body);
-  if (allPriceDiscount) return { mode: 'global_discount', productId, discount: Number(allPriceDiscount[1]), scope: 'all_price_fields' };
+  if (allPriceDiscount) return { mode: 'global_discount', productId, discount: Number(allPriceDiscount[1]), scope: 'rent_fields' };
 
   const fields: Record<string, string> = {};
   for (const match of body.matchAll(RENT_FIELD_PATTERN)) {
@@ -404,8 +408,7 @@ function selectedFields(values: Record<string, unknown>, request: RentalPriceCha
   const firstSpec = Object.values(values).find(isRecord) as Record<string, unknown> | undefined;
   const source = firstSpec ?? values;
   for (const [field, raw] of Object.entries(source)) {
-    const isRent = /^rent\d+day$/.test(field);
-    if ((request.scope === 'rent_fields' && !isRent) || (request.scope === 'all_price_fields' && !PRICE_FIELD_NAMES.has(field))) continue;
+    if (!isRentPriceField(field)) continue;
     const current = Number(raw);
     if (Number.isFinite(current)) fields[field] = money(current * request.discount);
   }
@@ -1191,9 +1194,7 @@ export function rentalPriceChangeRequestFromToolArguments(args: Record<string, u
   const rawDiscount = args.discount;
   const discount = typeof rawDiscount === 'number' ? rawDiscount : typeof rawDiscount === 'string' ? Number(rawDiscount) : NaN;
   if (Number.isFinite(discount) && discount > 0) {
-    const rawScope = readString(args.scope);
-    const scope = rawScope === 'all_price_fields' ? 'all_price_fields' : 'rent_fields';
-    return { mode: 'global_discount', productId, discount, scope };
+    return { mode: 'global_discount', productId, discount, scope: 'rent_fields' };
   }
 
   return null;

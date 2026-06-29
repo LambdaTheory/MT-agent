@@ -74,7 +74,7 @@ describe('rental price Feishu integration', () => {
     expect(parseBotIntent('改价 商品761 全部租金九折')).toEqual({ type: 'rental_price_change', productId: '761', request: { mode: 'global_discount', productId: '761', discount: 0.9, scope: 'rent_fields' } });
     expect(parseBotIntent('改价 商品761 全部租金打折')).toEqual({ type: 'rental_price_change', productId: '761', request: { mode: 'global_discount', productId: '761', discount: 0.9, scope: 'rent_fields' } });
     expect(parseBotIntent('改价 商品761 全部租金改价')).toEqual({ type: 'rental_price_change', productId: '761', request: { mode: 'global_discount', productId: '761', discount: 0.9, scope: 'rent_fields' } });
-    expect(parseBotIntent('改价 商品761 所有价格 *0.9')).toEqual({ type: 'rental_price_change', productId: '761', request: { mode: 'global_discount', productId: '761', discount: 0.9, scope: 'all_price_fields' } });
+    expect(parseBotIntent('改价 商品761 所有价格 *0.9')).toEqual({ type: 'rental_price_change', productId: '761', request: { mode: 'global_discount', productId: '761', discount: 0.9, scope: 'rent_fields' } });
   });
 
   it('returns a confirmation card without executing the rental skill', async () => {
@@ -278,6 +278,41 @@ describe('rental price skill client copy diagnostics', () => {
     expect(result.message).toBe('Product not found: 844');
     expect(result.lines).toContain('message: Product not found: 844');
     expect(result.lines).toContain('currentUrl: https://example.test/goods/list');
+  });
+
+  it('keeps global discount previews scoped to rent fields even when all_price_fields is passed', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      status: 'ok',
+      productId: '761',
+      specs: [{ specId: '3862', title: '默认' }],
+      values: {
+        '3862': {
+          rent1day: '20.00',
+          rent10day: '50.00',
+          rent30day: '80.00',
+          marketPrice: '300.00',
+          deposit: '300.00',
+          purchasePrice: '300.00',
+          costPrice: '300.00',
+          finalPayment: '0.00',
+        },
+      },
+    }))));
+    const rootDir = await mkdtemp(join(tmpdir(), 'mt-agent-rent-fields-only-'));
+    const client = createRentalPriceSkillClient({ rootDir, daemonUrl: 'http://127.0.0.1:9223', daemonToken: 'test-token' });
+
+    const preview = await client.preview({ mode: 'global_discount', productId: '761', discount: 1.1, scope: 'all_price_fields' });
+
+    expect(preview.fields).toEqual({
+      rent1day: '22.00',
+      rent10day: '55.00',
+      rent30day: '88.00',
+    });
+    expect(preview.fields).not.toHaveProperty('marketPrice');
+    expect(preview.fields).not.toHaveProperty('deposit');
+    expect(preview.fields).not.toHaveProperty('purchasePrice');
+    expect(preview.fields).not.toHaveProperty('costPrice');
+    expect(preview.fields).not.toHaveProperty('finalPayment');
   });
 
   it('surfaces daemon read errors during price preview instead of treating them as empty fields', async () => {
