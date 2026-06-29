@@ -13,6 +13,7 @@ import {
   MAX_NEW_LINK_BATCH_MULTI_TOTAL_COUNT,
   parseNewLinkBatchMultiConfirmRequest,
   parseNewLinkBatchConfirmRequest,
+  readNewLinkBatchWorkflowRequest,
 } from '../src/newLinkWorkflow/batch.js';
 import type { RentalPriceSkillClient } from '../src/feishuBot/rentalPrice.js';
 import type { PublicTrafficDataReportContext, PublicTrafficPeriodMetrics } from '../src/publicTraffic/types.js';
@@ -191,6 +192,27 @@ describe('new link batch workflow', () => {
     expect(plan.selectedSource?.productId).toBe('848');
     expect(plan.candidates.map((candidate) => candidate.productId)).toEqual(['848']);
     expect(JSON.stringify(buildNewLinkBatchConfirmCard(plan, '从端内ID 848 复制'))).toContain('"requestedSourceProductId":"848"');
+  });
+
+  it('treats numeric new-link keywords as explicit source product ids', () => {
+    const request = readNewLinkBatchWorkflowRequest({ keyword: '875', count: 3 });
+    expect(request).toEqual({ keyword: '875', count: 3, sourceProductId: '875' });
+
+    const plan = buildNewLinkBatchPlan(request!, context(), registry());
+
+    expect(plan.status).toBe('ready');
+    expect(plan.requestedSourceProductId).toBe('875');
+    expect(plan.selectedSource?.productId).toBe('875');
+    expect(plan.candidates.map((candidate) => candidate.productId)).toEqual(['875']);
+  });
+
+  it('accepts source-product-id-only new-link requests from the planner', () => {
+    expect(readNewLinkBatchWorkflowRequest({ sourceProductId: '875', count: 3 }))
+      .toEqual({ keyword: '875', count: 3, sourceProductId: '875' });
+    expect(readNewLinkBatchWorkflowRequest({ keyword: 'ID844', count: 5 }))
+      .toEqual({ keyword: 'ID844', count: 5, sourceProductId: '844' });
+    expect(readNewLinkBatchWorkflowRequest({ keyword: '\u7aef\u5185ID648', count: 5 }))
+      .toEqual({ keyword: '\u7aef\u5185ID648', count: 5, sourceProductId: '648' });
   });
 
   it('carries signed fallback source candidates for agent-ranked new-link plans', () => {

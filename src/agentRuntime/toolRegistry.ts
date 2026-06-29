@@ -374,7 +374,8 @@ const newLinkBatchPlanArgumentsSchema = {
           count: positiveIntegerLikeSchema,
           sourceProductId: { type: 'string' },
         },
-        required: ['keyword', 'count'],
+        required: ['count'],
+        minProperties: 2,
         additionalProperties: false,
       },
     },
@@ -710,7 +711,7 @@ const agentTools: AgentToolDefinition[] = [
   },
   {
     name: 'rental.newLinkBatchPlan',
-    description: '生成新链批量复制计划和专用确认卡；可指定 keyword/count/sourceProductId，或用 items 数组分别补链。确认前不会复制商品。',
+    description: '生成新链批量复制计划和专用确认卡；可指定 keyword/count/sourceProductId，或用 items 数组分别补链。确认前不会复制商品。If the user gives an explicit internal product id such as 648, ID648, or 端内ID648, pass it as sourceProductId and do not rank/select another same-sku source.',
     risk: 'high',
     requiresConfirmation: true,
     inputSchema: newLinkBatchPlanArgumentsSchema,
