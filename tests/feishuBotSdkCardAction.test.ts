@@ -1328,6 +1328,30 @@ describe('createFeishuSdkBot card.action.trigger', () => {
     expect(JSON.stringify((result as any).card.data)).toContain('Pocket3');
   });
 
+  it('handles maintenance start callbacks that only include the Feishu form button name', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-link-maintenance-sdk-name-only-'));
+    await seedLinkMaintenanceSession(outputDir);
+    const registered: Record<string, (data: unknown) => Promise<void>> = {};
+    const sent: unknown[] = [];
+    const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', outputDir, sdk: fakeSdk(sent, registered) });
+
+    bot.start();
+    const result = await registered['card.action.trigger']({
+      event: {
+        context: { open_message_id: 'om-link-maintenance-start-name-only' },
+        action: {
+          tag: 'button',
+          name: 'link_registry_maintenance_start_submit',
+        },
+      },
+    });
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ kind: 'patch', request: { path: { message_id: 'om-link-maintenance-start-name-only' } } });
+    expect(result).toMatchObject({ card: { type: 'raw', data: { schema: '2.0' } } });
+    expect(JSON.stringify((result as any).card.data)).toContain('link_registry_maintenance_form');
+  });
+
   it('replaces the maintenance reminder card with a non-clickable ignored status card', async () => {
     const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-link-maintenance-sdk-ignore-'));
     await seedLinkMaintenanceSession(outputDir);
@@ -1385,6 +1409,39 @@ describe('createFeishuSdkBot card.action.trigger', () => {
     await expect(readFile(overridesPath, 'utf8')).resolves.toContain('"sameSkuGroupId": "dji-pocket-3"');
   });
 
+  it('submits maintenance edits when Feishu omits callback value fields', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-link-maintenance-sdk-submit-name-only-'));
+    const overridesPath = await seedLinkMaintenanceSession(outputDir);
+    const registered: Record<string, (data: unknown) => Promise<void>> = {};
+    const sent: unknown[] = [];
+    const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', outputDir, sdk: fakeSdk(sent, registered) });
+
+    bot.start();
+    const result = await registered['card.action.trigger']({
+      event: {
+        context: { open_message_id: 'om-link-maintenance-submit-name-only' },
+        operator: { open_id: 'ou_link_reviewer_name_only' },
+        action: {
+          tag: 'button',
+          name: 'link_registry_maintenance_submit',
+          form_value: {
+            decision: 'accept_with_edit',
+            same_sku_group_id_custom: 'dji-pocket-3',
+            category_id: 'camera',
+            product_type: 'gimbal-camera',
+            short_name: 'DJI Pocket 3',
+          },
+        },
+      },
+    });
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ kind: 'patch', request: { path: { message_id: 'om-link-maintenance-submit-name-only' } } });
+    expect(result).toMatchObject({ card: { type: 'raw', data: { schema: '2.0' } } });
+    await expect(readFile(overridesPath, 'utf8')).resolves.toContain('"internalProductId": "702"');
+    await expect(readFile(overridesPath, 'utf8')).resolves.toContain('"sameSkuGroupId": "dji-pocket-3"');
+  });
+
   it('replaces the proactive governance reminder card with the first review card', async () => {
     const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-link-governance-sdk-'));
     await seedLinkGovernanceSession(outputDir);
@@ -1402,6 +1459,30 @@ describe('createFeishuSdkBot card.action.trigger', () => {
 
     expect(sent).toHaveLength(1);
     expect(sent[0]).toMatchObject({ kind: 'patch', request: { path: { message_id: 'om-link-governance-start' } } });
+    expect(result).toMatchObject({ card: { type: 'raw', data: { schema: '2.0' } } });
+    expect(JSON.stringify((result as any).card.data)).toContain('link_registry_governance_form');
+  });
+
+  it('handles governance start callbacks that only include the Feishu form button name', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-link-governance-sdk-name-only-'));
+    await seedLinkGovernanceSession(outputDir);
+    const registered: Record<string, (data: unknown) => Promise<void>> = {};
+    const sent: unknown[] = [];
+    const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', outputDir, sdk: fakeSdk(sent, registered) });
+
+    bot.start();
+    const result = await registered['card.action.trigger']({
+      event: {
+        context: { open_message_id: 'om-link-governance-start-name-only' },
+        action: {
+          tag: 'button',
+          name: 'link_registry_governance_start_submit',
+        },
+      },
+    });
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ kind: 'patch', request: { path: { message_id: 'om-link-governance-start-name-only' } } });
     expect(result).toMatchObject({ card: { type: 'raw', data: { schema: '2.0' } } });
     expect(JSON.stringify((result as any).card.data)).toContain('link_registry_governance_form');
   });

@@ -64,6 +64,83 @@ function completePricePreviewArguments(
   };
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function readString(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function inferPositiveCountFromText(text: string): number | undefined {
+  const digit = /(?:复制|铺|新增|新建|生成)\s*(\d+)\s*(?:条|个|款|份)?\s*(?:新链|链接)?/.exec(text)
+    ?? /(\d+)\s*(?:条|个|款|份)\s*(?:新链|链接)?/.exec(text);
+  if (digit?.[1]) {
+    const value = Number(digit[1]);
+    return Number.isInteger(value) && value > 0 ? value : undefined;
+  }
+  const chineseNumbers: Record<string, number> = {
+    一: 1,
+    壹: 1,
+    两: 2,
+    二: 2,
+    贰: 2,
+    俩: 2,
+    三: 3,
+    叁: 3,
+    四: 4,
+    五: 5,
+    六: 6,
+    七: 7,
+    八: 8,
+    九: 9,
+    十: 10,
+  };
+  const chinese = /(?:复制|铺|新增|新建|生成)\s*([一壹两二贰俩三叁四五六七八九十])\s*(?:条|个|款|份)?\s*(?:新链|链接)?/.exec(text);
+  return chinese?.[1] ? chineseNumbers[chinese[1]] : undefined;
+}
+
+function rankMetadataFromStore(store: AgentStepMetadataStore): Record<string, unknown> | null {
+  const candidates = Object.values(store)
+    .filter(isRecord)
+    .reverse();
+  for (const candidate of candidates) {
+    if (
+      readString(candidate.toolName) === 'product.rankBestSameSku'
+      && readString(candidate.bestProductId)
+      && readString(candidate.query)
+    ) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+function completeNewLinkBatchArguments(
+  toolName: string,
+  args: Record<string, unknown>,
+  metadataStore: AgentStepMetadataStore,
+  contextText: string,
+): Record<string, unknown> {
+  if (toolName !== 'rental.newLinkBatchPlan' || Array.isArray(args.items)) return args;
+  if (args.keyword !== undefined && args.count !== undefined && args.sourceProductId !== undefined) return args;
+
+  const rank = rankMetadataFromStore(metadataStore);
+  if (!rank) return args;
+
+  const keyword = readString(args.keyword) ?? readString(rank.query);
+  const sourceProductId = readString(args.sourceProductId) ?? readString(rank.bestProductId);
+  const count = args.count ?? inferPositiveCountFromText(contextText);
+  if (!keyword || !sourceProductId || count === undefined) return args;
+
+  return {
+    ...args,
+    keyword,
+    count,
+    sourceProductId,
+  };
+}
+
 export async function continueAgentPlannerSteps(input: ContinuePlannerStepsInput): Promise<BotResponse | null> {
   for (const [localIndex, step] of input.steps.entries()) {
     const absoluteIndex = input.baseIndex + localIndex;
@@ -80,7 +157,13 @@ export async function continueAgentPlannerSteps(input: ContinuePlannerStepsInput
       resolvedArguments.value,
       [input.goal, input.reason, step.reason].filter(Boolean).join('\n'),
     );
-    if (!validateAgentToolArguments(step.toolName, completedArguments)) {
+    const finalArguments = completeNewLinkBatchArguments(
+      step.toolName,
+      completedArguments,
+      input.metadataStore,
+      [input.goal, input.reason, step.reason].filter(Boolean).join('\n'),
+    );
+    if (!validateAgentToolArguments(step.toolName, finalArguments)) {
       input.textParts.push('');
       input.textParts.push(`步骤 ${absoluteIndex + 1}/${input.totalSteps} 参数校验失败：${step.toolName}`);
       input.textParts.push('已停止执行后续步骤，未触发任何未确认的写操作。');
@@ -92,10 +175,10 @@ export async function continueAgentPlannerSteps(input: ContinuePlannerStepsInput
 
     const request: AgentToolConfirmRequest = {
       toolName: step.toolName,
-      arguments: completedArguments,
+      arguments: finalArguments,
       reason: step.reason || input.reason,
     };
-    const policy = decideAgentPolicy({ tool, input: completedArguments, reason: request.reason });
+    const policy = decideAgentPolicy({ tool, input: finalArguments, reason: request.reason });
     const remainingSteps = input.steps.slice(localIndex + 1);
     if (policy?.decision === 'confirmation_required' || isPreConfirmationPlanningTool(step.toolName)) {
       request.continuation = buildContinuation(input, stepId, absoluteIndex, remainingSteps);

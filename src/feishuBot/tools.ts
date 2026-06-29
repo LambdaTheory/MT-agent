@@ -8,6 +8,8 @@ import { parseAgentDataIntent } from '../agentData/intent.js';
 import { loadClosedOrderRegistryContext, type ClosedOrderRegistryPathsInput } from '../closedOrderFeedback/runtime.js';
 import { queryInventoryStatus } from '../inventoryStatus/query.js';
 import { readInventorySameSkuSnapshot } from '../inventoryStatus/store.js';
+import { openLinkRegistryGovernancePrompt } from '../linkRegistry/governanceSession.js';
+import { openLinkRegistryMaintenancePrompt } from '../linkRegistry/maintenanceSession.js';
 import { createLinkRegistry } from '../linkRegistry/store.js';
 import type { LinkRegistryEntry } from '../linkRegistry/types.js';
 import { startOperationsLearningSession, summarizeOperationsLearningHistory, summarizeOperationsLearningSession } from '../operationsLearningLoop/session.js';
@@ -71,6 +73,7 @@ const HELP_TEXT = `📋 查询与分析
   x200u的定价情况怎么样 — 按同款组汇总SKU平均租金
   查ID 565 / 商品ID互查 — 端内ID与平台商品ID互查
   库存情况 / 库存情况 pocket3 — 查看库存与同款组状态
+  链接维护 / 组级治理 / 链接档案维护 — 主动呼出链接维护或组级治理卡片
   新链接池怎么样 / 待处理任务 / 下架链接 / 订单情况 — 查询运营数据池
 
 📊 报表与数据
@@ -158,6 +161,60 @@ async function findReportContextForIntent(outputDir: string, date?: string) {
 
 function missingReportContextText(date?: string): string {
   return date ? `没有找到 ${date} 的公域日报上下文。` : '还没有找到公域日报上下文。';
+}
+
+function currentLocalDate(): string {
+  const date = new Date();
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+type LinkRegistryPromptMode = 'maintenance' | 'governance' | 'hub';
+
+async function handleLinkRegistryPromptIntent(
+  mode: LinkRegistryPromptMode,
+  outputDir: string,
+  options: HandleBotIntentOptions,
+): Promise<BotResponse> {
+  const registryContext = await loadClosedOrderRegistryContext(options.closedOrderRegistryPaths);
+  const date = currentLocalDate();
+  const maintenance = async () => openLinkRegistryMaintenancePrompt(outputDir, {
+    date,
+    registry: registryContext.registry,
+    referenceDate: date,
+    overridesPath: registryContext.resolvedPaths.overridesPath,
+    force: true,
+  });
+  const governance = async () => openLinkRegistryGovernancePrompt(outputDir, {
+    date,
+    registry: registryContext.registry,
+    overrideRisks: registryContext.overrideRisks,
+    referenceDate: date,
+    force: true,
+  });
+
+  if (mode === 'maintenance') {
+    const response = await maintenance();
+    return response ?? { text: '当前没有需要主动维护的链接条目。' };
+  }
+
+  if (mode === 'governance') {
+    const response = await governance();
+    return response ?? { text: '当前没有需要主动处理的组级治理问题。' };
+  }
+
+  const maintenanceResponse = await maintenance();
+  if (maintenanceResponse?.card) {
+    return {
+      text: `${maintenanceResponse.text}\n如需处理组级治理问题，可以再发“组级治理”。`,
+      card: maintenanceResponse.card,
+    };
+  }
+  const governanceResponse = await governance();
+  if (governanceResponse) return governanceResponse;
+  return { text: '当前没有需要主动维护的链接条目，也没有需要主动处理的组级治理问题。' };
 }
 
 function rollbackTaskConfirmResponse(text: string): BotResponse | null {
@@ -407,6 +464,18 @@ export async function handleBotIntent(intent: BotIntent, outputDir = 'output', o
     const registryContext = await loadClosedOrderRegistryContext(options.closedOrderRegistryPaths);
     const audit = createLinkRegistry(registryContext.registry, registryContext.overrideRisks).audit();
     return { text: formatLinkRegistryOverviewText(audit), card: buildLinkRegistryOverviewCard(audit) };
+  }
+
+  if (intent.type === 'link_registry_maintenance_prompt') {
+    return handleLinkRegistryPromptIntent('maintenance', outputDir, options);
+  }
+
+  if (intent.type === 'link_registry_governance_prompt') {
+    return handleLinkRegistryPromptIntent('governance', outputDir, options);
+  }
+
+  if (intent.type === 'link_registry_maintenance_hub') {
+    return handleLinkRegistryPromptIntent('hub', outputDir, options);
   }
 
   if (intent.type === 'rental_price_change') {

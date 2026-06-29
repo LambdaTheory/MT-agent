@@ -1456,6 +1456,43 @@ describe('startFeishuBotServer', () => {
     }
   });
 
+  it('returns the first maintenance review card when HTTP callback only has a button name', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-link-maintenance-http-name-only-'));
+    await seedLinkMaintenanceSession(outputDir);
+    const server = startFeishuBotServer({
+      port: 0,
+      appId: 'app',
+      appSecret: 'secret',
+      outputDir,
+    });
+    try {
+      await new Promise<void>((resolve) => server.once('listening', resolve));
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+
+      const response = await fetch(`http://127.0.0.1:${address.port}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          header: { event_type: 'card.action.trigger' },
+          event: {
+            context: { open_message_id: 'mid-http-link-maintenance-start-name-only' },
+            action: {
+              name: 'link_registry_maintenance_start_submit',
+            },
+          },
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      const card = await response.json();
+      expect(JSON.stringify(card)).toContain('link_registry_maintenance_form');
+      expect(JSON.stringify(card)).toContain('Pocket3');
+    } finally {
+      server.close();
+    }
+  });
+
   it('returns a non-clickable ignored maintenance status card for HTTP callbacks', async () => {
     const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-link-maintenance-http-ignore-'));
     await seedLinkMaintenanceSession(outputDir);
@@ -1542,6 +1579,42 @@ describe('startFeishuBotServer', () => {
       expect(JSON.stringify(card)).toContain('link_registry_governance_form');
       await expect(readFile(join(outputDir, '2026-06-24', 'link-registry-governance-session.json'), 'utf8')).resolves.toContain('Wide300 next-round backlog confirmed');
       await expect(readFile(join(outputDir, '2026-06-24', 'link-registry-governance-session.json'), 'utf8')).resolves.toContain('ou_http_governance');
+    } finally {
+      server.close();
+    }
+  });
+
+  it('returns the first governance review card when HTTP callback only has a button name', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-link-governance-http-name-only-'));
+    await seedLinkGovernanceSession(outputDir);
+    const server = startFeishuBotServer({
+      port: 0,
+      appId: 'app',
+      appSecret: 'secret',
+      outputDir,
+    });
+    try {
+      await new Promise<void>((resolve) => server.once('listening', resolve));
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+
+      const response = await fetch(`http://127.0.0.1:${address.port}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          header: { event_type: 'card.action.trigger' },
+          event: {
+            context: { open_message_id: 'mid-http-link-governance-start-name-only' },
+            action: {
+              name: 'link_registry_governance_start_submit',
+            },
+          },
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      const card = await response.json();
+      expect(JSON.stringify(card)).toContain('link_registry_governance_form');
     } finally {
       server.close();
     }

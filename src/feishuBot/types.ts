@@ -22,6 +22,9 @@ export type BotIntent =
   | { type: 'query_product'; keyword: string; date?: string }
   | { type: 'lookup_product_id_card' }
   | { type: 'link_registry_overview' }
+  | { type: 'link_registry_maintenance_prompt' }
+  | { type: 'link_registry_governance_prompt' }
+  | { type: 'link_registry_maintenance_hub' }
   | { type: 'inventory_status_overview' }
   | { type: 'inventory_status_query'; query: string }
   | { type: 'lookup_product_id'; query: string; date?: string }

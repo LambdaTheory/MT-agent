@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import type { FeishuCardPayload } from '../notify/feishuApp.js';
 import { createLinkRegistry } from './store.js';
@@ -69,6 +69,7 @@ export interface OpenLinkRegistryMaintenancePromptInput {
   registry: LinkRegistryEntry[];
   referenceDate?: string;
   overridesPath: string;
+  force?: boolean;
 }
 
 export interface LinkRegistryMaintenanceCardActionInput {
@@ -166,10 +167,6 @@ function productTypeOptions(registry: LinkRegistryEntry[]): string[] {
   return sortedUnique(registry.flatMap((entry) => entry.productType?.trim() ? [entry.productType.trim()] : []));
 }
 
-function safeReviewIndex(input: number | undefined): number {
-  return Number.isFinite(input) && input && input > 0 ? input : 1;
-}
-
 async function readOptionalJson<T>(path: string, fallback: T): Promise<T> {
   try {
     return JSON.parse(await readFile(path, 'utf8')) as T;
@@ -192,6 +189,35 @@ function nextQueueIndex(session: LinkRegistryMaintenanceSession): number {
   const reviewed = new Set(session.reviewRecords.map((record) => record.internalProductId));
   const index = session.queue.findIndex((item) => !reviewed.has(item.internalProductId));
   return index === -1 ? session.queue.length + 1 : index + 1;
+}
+
+async function loadLatestSession(outputDir: string): Promise<{ path: string; session: LinkRegistryMaintenanceSession } | null> {
+  let entries: Array<{ name: string; isDirectory(): boolean }>;
+  try {
+    entries = await readdir(outputDir, { withFileTypes: true });
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return null;
+    throw error;
+  }
+
+  const dates = entries
+    .filter((entry) => entry.isDirectory() && /^\d{4}-\d{2}-\d{2}$/.test(entry.name))
+    .map((entry) => entry.name)
+    .sort((left, right) => right.localeCompare(left));
+  for (const date of dates) {
+    const session = await loadSession(outputDir, date);
+    if (session) return { path: sessionPath(outputDir, date), session };
+  }
+  return null;
+}
+
+async function resolveSessionForAction(outputDir: string, date: string): Promise<{ path: string; session: LinkRegistryMaintenanceSession } | null> {
+  const trimmedDate = date.trim();
+  if (trimmedDate) {
+    const session = await loadSession(outputDir, trimmedDate);
+    return session ? { path: sessionPath(outputDir, trimmedDate), session } : null;
+  }
+  return loadLatestSession(outputDir);
 }
 
 function sameSkuGroupCandidates(
@@ -524,11 +550,22 @@ export async function openLinkRegistryMaintenancePrompt(
 
   const signature = buildSessionSignature(queue);
   const existing = await loadSession(outputDir, input.date);
-  if (existing?.signature === signature) return null;
-  if (existing && (existing.status === 'open' || existing.status === 'reviewing')) return null;
+  if (existing?.signature === signature) {
+    if (!input.force) return null;
+    if (existing.status === 'reviewing' || existing.status === 'completed') return currentReviewResponse(existing);
+    existing.status = 'open';
+    existing.updatedAt = new Date().toISOString();
+    await saveSession(sessionPath(outputDir, input.date), existing);
+    await saveReminderStatus(outputDir, existing, existing.status);
+    return {
+      text: `发现 ${existing.queue.length} 条待维护链接，请确认是否开始维护。`,
+      card: buildPromptCard(existing),
+    };
+  }
+  if (!input.force && existing && (existing.status === 'open' || existing.status === 'reviewing')) return null;
 
   const reminderState = await loadLinkRegistryReminderState(outputDir, 'maintenance');
-  if (reminderState?.signature === signature) return null;
+  if (!input.force && reminderState?.signature === signature) return null;
 
   const now = new Date().toISOString();
   const session: LinkRegistryMaintenanceSession = {
@@ -555,9 +592,9 @@ export async function handleLinkRegistryMaintenanceCardAction(
   outputDir: string,
   input: LinkRegistryMaintenanceCardActionInput,
 ): Promise<LinkRegistryMaintenanceResponse> {
-  const path = sessionPath(outputDir, input.date);
-  const session = await loadSession(outputDir, input.date);
-  if (!session) return { text: '还没有可用的链接维护会话，请等待下一次提醒。' };
+  const resolved = await resolveSessionForAction(outputDir, input.date);
+  if (!resolved) return { text: '还没有可用的链接维护会话，请等待下一次提醒。' };
+  const { path, session } = resolved;
 
   if (input.action === 'start') {
     session.status = 'reviewing';
@@ -589,9 +626,10 @@ export async function handleLinkRegistryMaintenanceCardAction(
     };
   }
 
-  const reviewIndex = safeReviewIndex(input.reviewIndex);
+  const reviewIndex = input.reviewIndex && input.reviewIndex > 0 ? input.reviewIndex : nextQueueIndex(session);
   const item = session.queue[reviewIndex - 1];
-  if (!item || item.internalProductId !== input.internalProductId) {
+  const internalProductId = input.internalProductId ?? item?.internalProductId;
+  if (!item || item.internalProductId !== internalProductId) {
     return { text: '没有找到对应的链接维护条目，请从最新卡片继续。' };
   }
 

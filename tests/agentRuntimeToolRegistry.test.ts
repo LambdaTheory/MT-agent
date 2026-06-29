@@ -20,6 +20,9 @@ describe('agent runtime tool registry', () => {
       'inventory.statusOverview',
       'inventory.statusQuery',
       'linkRegistry.overview',
+      'linkRegistry.maintenancePrompt',
+      'linkRegistry.governancePrompt',
+      'linkRegistry.maintenanceHub',
       'linkRegistry.resolveProducts',
       'operationsLearning.startQuiz',
       'operationsLearning.summary',
@@ -65,7 +68,7 @@ describe('agent runtime tool registry', () => {
 
     const tools = listAgentTools();
     tools.pop();
-    expect(listAgentTools()).toHaveLength(44);
+    expect(listAgentTools()).toHaveLength(47);
   });
 
   it('returns defensive copies of tool metadata', () => {
@@ -245,6 +248,9 @@ describe('agent runtime tool registry', () => {
       'inventory.statusOverview',
       'inventory.statusQuery',
       'linkRegistry.overview',
+      'linkRegistry.maintenancePrompt',
+      'linkRegistry.governancePrompt',
+      'linkRegistry.maintenanceHub',
       'linkRegistry.resolveProducts',
       'operationsLearning.startQuiz',
       'operationsLearning.summary',

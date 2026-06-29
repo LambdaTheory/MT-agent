@@ -477,6 +477,27 @@ const agentTools: AgentToolDefinition[] = [
     inputSchema: noArgumentsSchema,
   },
   {
+    name: 'linkRegistry.maintenancePrompt',
+    description: '主动呼出链接维护提醒卡片，用于逐条补齐链接档案里的短名、同款组、品类、商品类型等维护信息。适用于“链接维护”“打开链接维护卡”“我要维护链接档案”。',
+    risk: 'read',
+    requiresConfirmation: false,
+    inputSchema: noArgumentsSchema,
+  },
+  {
+    name: 'linkRegistry.governancePrompt',
+    description: '主动呼出组级治理提醒卡片，用于处理同款组样本不足、人工 override 风险等组级链接档案治理问题。适用于“组级治理”“链接治理”“打开组级治理卡”。',
+    risk: 'read',
+    requiresConfirmation: false,
+    inputSchema: noArgumentsSchema,
+  },
+  {
+    name: 'linkRegistry.maintenanceHub',
+    description: '主动呼出链接档案维护入口，优先返回链接维护卡；如果没有逐条维护项，则返回组级治理卡。适用于“链接档案维护”“链接维护卡”“维护链接档案”。',
+    risk: 'read',
+    requiresConfirmation: false,
+    inputSchema: noArgumentsSchema,
+  },
+  {
     name: 'linkRegistry.resolveProducts',
     description: '按商品名、别名、端内ID或同款组解析链接档案，返回可供后续工具使用的端内ID列表和数量；适合“某商品有多少条链接/有哪些端内ID/链接总数”这类链接档案问题；只做解析，不执行运营动作',
     risk: 'read',

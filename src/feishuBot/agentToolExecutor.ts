@@ -9,6 +9,8 @@ import { loadClosedOrderIngestState } from '../closedOrderFeedback/ingest.js';
 import { buildClosedOrderObservationReport, writeClosedOrderObservationReportArtifacts } from '../closedOrderFeedback/observation.js';
 import { loadClosedOrderRegistryContext, type ClosedOrderRegistryPathsInput } from '../closedOrderFeedback/runtime.js';
 import type { AgentIntent, AgentProblemType } from '../agentData/types.js';
+import { openLinkRegistryGovernancePrompt } from '../linkRegistry/governanceSession.js';
+import { openLinkRegistryMaintenancePrompt } from '../linkRegistry/maintenanceSession.js';
 import { createLinkRegistry } from '../linkRegistry/store.js';
 import type { LinkRegistryEntry } from '../linkRegistry/types.js';
 import { summarizeAgentLearning } from '../agentLearning/store.js';
@@ -1226,6 +1228,50 @@ function today(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+type LinkRegistryPromptMode = 'maintenance' | 'governance' | 'hub';
+
+async function linkRegistryPromptResponse(
+  mode: LinkRegistryPromptMode,
+  outputDir: string,
+  options: AgentToolExecutionOptions,
+): Promise<BotResponse> {
+  const registryContext = await loadClosedOrderRegistryContext(options.closedOrderRegistryPaths);
+  const date = today();
+  const maintenance = async () => openLinkRegistryMaintenancePrompt(outputDir, {
+    date,
+    registry: registryContext.registry,
+    referenceDate: date,
+    overridesPath: registryContext.resolvedPaths.overridesPath,
+    force: true,
+  });
+  const governance = async () => openLinkRegistryGovernancePrompt(outputDir, {
+    date,
+    registry: registryContext.registry,
+    overrideRisks: registryContext.overrideRisks,
+    referenceDate: date,
+    force: true,
+  });
+
+  if (mode === 'maintenance') {
+    const response = await maintenance();
+    return response ?? { text: '当前没有需要主动维护的链接条目。' };
+  }
+  if (mode === 'governance') {
+    const response = await governance();
+    return response ?? { text: '当前没有需要主动处理的组级治理问题。' };
+  }
+  const maintenanceResponse = await maintenance();
+  if (maintenanceResponse?.card) {
+    return {
+      text: `${maintenanceResponse.text}\n如需处理组级治理问题，可以再发“组级治理”。`,
+      card: maintenanceResponse.card,
+    };
+  }
+  const governanceResponse = await governance();
+  if (governanceResponse) return governanceResponse;
+  return { text: '当前没有需要主动维护的链接条目，也没有需要主动处理的组级治理问题。' };
+}
+
 export async function executeAgentToolRequest(
   request: AgentToolConfirmRequest,
   outputDir = 'output',
@@ -1290,6 +1336,12 @@ export async function executeAgentToolRequest(
       const audit = createLinkRegistry(registryContext.registry, registryContext.overrideRisks).audit();
       return { text: formatLinkRegistryOverviewText(audit), card: buildLinkRegistryOverviewCard(audit) };
     }
+    case 'linkRegistry.maintenancePrompt':
+      return linkRegistryPromptResponse('maintenance', outputDir, options);
+    case 'linkRegistry.governancePrompt':
+      return linkRegistryPromptResponse('governance', outputDir, options);
+    case 'linkRegistry.maintenanceHub':
+      return linkRegistryPromptResponse('hub', outputDir, options);
     case 'linkRegistry.resolveProducts':
       return linkRegistryResolveProductsResponse(request.arguments, options);
     case 'operationsLearning.startQuiz': {

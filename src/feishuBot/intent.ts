@@ -137,6 +137,9 @@ export function parseExactBotIntent(input: string): BotIntent {
   const matchedInventoryQuery = inventoryQuery?.[1];
   if (matchedInventoryQuery) return { type: 'inventory_status_query', query: matchedInventoryQuery!.trim() };
   if (/^(链接档案概览|链接概览)$/.test(text)) return { type: 'link_registry_overview' };
+  if (/^(链接维护|开始链接维护|打开链接维护|呼出链接维护卡)$/.test(text)) return { type: 'link_registry_maintenance_prompt' };
+  if (/^(组级治理|链接治理|开始组级治理|打开组级治理|呼出组级治理卡)$/.test(text)) return { type: 'link_registry_governance_prompt' };
+  if (/^(链接档案维护|维护链接档案|链接维护卡|链接档案治理)$/.test(text)) return { type: 'link_registry_maintenance_hub' };
   if (/^(?:商品)?ID(?:查询|互查|转换|换算)$|^打开(?:商品)?ID(?:查询|互查|转换|换算)$|^查ID$/i.test(text)) return { type: 'lookup_product_id_card' };
 
   const shortMultiProductQuery = parseShortMultiProductQuery(text);
