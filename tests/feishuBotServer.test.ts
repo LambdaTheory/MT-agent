@@ -439,7 +439,7 @@ describe('startFeishuBotServer', () => {
     }
   });
 
-  it('routes legacy exact HTTP text commands through the Agent planner when configured', async () => {
+  it('keeps risky exact HTTP text commands planner-first but opens operations learning locally', async () => {
     const outputDir = await writeLearningContext();
     const cards: Array<{ messageId: string; card: Record<string, unknown> }> = [];
     const texts: Array<{ messageId: string; text: string }> = [];
@@ -462,15 +462,6 @@ describe('startFeishuBotServer', () => {
             arguments: {},
             confidence: 0.95,
             reason: '用户要求跑日报，写操作必须确认',
-          });
-        }
-        if (request.message === '运营学习') {
-          return JSON.stringify({
-            goal: '开始运营学习测验',
-            selectedTool: 'operationsLearning.startQuiz',
-            arguments: {},
-            confidence: 0.93,
-            reason: '用户要求开始运营学习',
           });
         }
         if (request.message === '复制商品 761') {
@@ -516,7 +507,7 @@ describe('startFeishuBotServer', () => {
       }
 
       await cardsSent;
-      expect(plannerMessages).toEqual(['跑日报', '运营学习', '复制商品 761']);
+      expect(plannerMessages).toEqual(['跑日报', '复制商品 761']);
       expect(texts).toEqual([]);
       const cardByMessageId = new Map(cards.map((item) => [item.messageId, item.card]));
       const runReportCard = JSON.stringify(cardByMessageId.get('mid-http-planner-first-0'));

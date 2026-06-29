@@ -157,4 +157,10 @@ describe('parseAgentFirstBotIntent', () => {
     expect(parseAgentFirstBotIntent('库存情况')).toEqual({ type: 'unknown', text: '库存情况' });
     expect(parseAgentFirstBotIntent('Agent学习汇总')).toEqual({ type: 'unknown', text: 'Agent学习汇总' });
   });
+
+  it('preserves exact operations learning commands so the planner cannot confuse start with history', () => {
+    expect(parseAgentFirstBotIntent('运营学习')).toEqual({ type: 'operations_learning_quiz' });
+    expect(parseAgentFirstBotIntent('运营学习汇总')).toEqual({ type: 'operations_learning_summary' });
+    expect(parseAgentFirstBotIntent('运营学习历史')).toEqual({ type: 'operations_learning_history' });
+  });
 });

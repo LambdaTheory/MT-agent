@@ -1583,6 +1583,23 @@ describe('handleBotIntent', () => {
     expect(copyResponse.card).toBeUndefined();
   });
 
+  it('allows exact operations learning quiz to open locally in planner-first mode', async () => {
+    const outputDir = await writeContext();
+    let plannerCalled = false;
+    const planner: AgentPlannerProvider = {
+      async proposePlan() {
+        plannerCalled = true;
+        return '{}';
+      },
+    };
+
+    const response = await handleBotIntent({ type: 'operations_learning_quiz' }, outputDir, { agentPlannerProvider: planner });
+
+    expect(plannerCalled).toBe(false);
+    expect(response.text).toContain('运营学习 loop 测验');
+    expect(JSON.stringify(response.card)).toContain('运营学习 loop 测验');
+  });
+
   it('lets the Agent planner handle help as a registered tool', async () => {
     const planner: AgentPlannerProvider = {
       async proposePlan(request) {

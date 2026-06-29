@@ -36,7 +36,7 @@ import { getSupportedLlmIntentProposals, parseLlmIntentProposal, type LlmIntentP
 import { runReadOnlyToolSelection } from './llmReadOnlyToolAdapter.js';
 import { parseLlmToolSelection, type LlmReadOnlyToolName, type LlmToolSelectionProvider } from './llmProvider.js';
 import { getRegistryBackedLlmTools } from './llmToolSelector.js';
-import { parseExactBotIntent } from './intent.js';
+import { allowsPlannerFirstExactIntent, parseExactBotIntent } from './intent.js';
 import {
   buildRentalOperationConfirmCard,
   buildRentalPricePreviewCard,
@@ -393,7 +393,7 @@ async function agentPlannerResponse(
 }
 
 export async function handleBotIntent(intent: BotIntent, outputDir = 'output', options: HandleBotIntentOptions = {}): Promise<BotResponse> {
-  if (options.agentPlannerProvider && intent.type !== 'unknown') {
+  if (options.agentPlannerProvider && intent.type !== 'unknown' && !allowsPlannerFirstExactIntent(intent)) {
     return { text: `${PLANNER_FIRST_EXACT_INTENT_BLOCKED}\nintent.type=${intent.type}` };
   }
 
