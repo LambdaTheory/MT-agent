@@ -251,9 +251,34 @@ export function parseBotIntent(input: string): BotIntent {
   return { type: 'unknown', text };
 }
 
+function isAgentFirstLocalDirectIntent(intent: BotIntent): boolean {
+  switch (intent.type) {
+    case 'help':
+    case 'operations_learning_quiz':
+    case 'operations_learning_summary':
+    case 'operations_learning_history':
+    case 'agent_learning_summary':
+    case 'lookup_product_id_card':
+    case 'lookup_product_id':
+    case 'link_registry_overview':
+    case 'link_registry_maintenance_prompt':
+    case 'link_registry_governance_prompt':
+    case 'link_registry_maintenance_hub':
+    case 'inventory_status_overview':
+    case 'differential_pricing_card':
+    case 'cancel_differential_pricing_card':
+      return true;
+    default:
+      return false;
+  }
+}
+
 export function parseAgentFirstBotIntent(input: string): BotIntent {
   const text = normalize(input);
   if (!text) return { type: 'help' };
+
+  const localIntent = parseBotIntent(text);
+  if (isAgentFirstLocalDirectIntent(localIntent)) return localIntent;
 
   return { type: 'unknown', text };
 }

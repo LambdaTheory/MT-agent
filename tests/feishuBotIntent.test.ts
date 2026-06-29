@@ -174,16 +174,30 @@ describe('parseAgentFirstBotIntent', () => {
     expect(parseAgentFirstBotIntent('s23最好的链接是哪条?')).toEqual({ type: 'unknown', text: 's23最好的链接是哪条?' });
   });
 
-  it('routes exact text commands to the Agent planner instead of deterministic shortcuts', () => {
+  it('lets only hard local entry commands bypass the Agent planner', () => {
     expect(parseAgentFirstBotIntent('')).toEqual({ type: 'help' });
-    expect(parseAgentFirstBotIntent('帮助')).toEqual({ type: 'unknown', text: '帮助' });
+    expect(parseAgentFirstBotIntent('帮助')).toEqual({ type: 'help' });
+    expect(parseAgentFirstBotIntent('商品ID互查')).toEqual({ type: 'lookup_product_id_card' });
+    expect(parseAgentFirstBotIntent('查ID 565')).toEqual({ type: 'lookup_product_id', query: '565' });
+    expect(parseAgentFirstBotIntent('库存情况')).toEqual({ type: 'inventory_status_overview' });
+    expect(parseAgentFirstBotIntent('链接维护')).toEqual({ type: 'link_registry_maintenance_prompt' });
+    expect(parseAgentFirstBotIntent('组级治理')).toEqual({ type: 'link_registry_governance_prompt' });
+    expect(parseAgentFirstBotIntent('链接档案维护')).toEqual({ type: 'link_registry_maintenance_hub' });
+    expect(parseAgentFirstBotIntent('Agent学习汇总')).toEqual({ type: 'agent_learning_summary' });
+    expect(parseAgentFirstBotIntent('运营学习')).toEqual({ type: 'operations_learning_quiz' });
+    expect(parseAgentFirstBotIntent('运营学习汇总')).toEqual({ type: 'operations_learning_summary' });
+    expect(parseAgentFirstBotIntent('运营学习历史')).toEqual({ type: 'operations_learning_history' });
+    expect(parseAgentFirstBotIntent('差异化定价')).toEqual({ type: 'differential_pricing_card' });
+    expect(parseAgentFirstBotIntent('取消差异化定价')).toEqual({ type: 'cancel_differential_pricing_card' });
+  });
+
+  it('keeps mixed read and write commands planner-first even when legacy parsing can match them', () => {
     expect(parseAgentFirstBotIntent('跑日报')).toEqual({ type: 'unknown', text: '跑日报' });
-    expect(parseAgentFirstBotIntent('商品ID互查')).toEqual({ type: 'unknown', text: '商品ID互查' });
-    expect(parseAgentFirstBotIntent('库存情况')).toEqual({ type: 'unknown', text: '库存情况' });
-    expect(parseAgentFirstBotIntent('链接维护')).toEqual({ type: 'unknown', text: '链接维护' });
-    expect(parseAgentFirstBotIntent('Agent学习汇总')).toEqual({ type: 'unknown', text: 'Agent学习汇总' });
-    expect(parseAgentFirstBotIntent('运营学习')).toEqual({ type: 'unknown', text: '运营学习' });
-    expect(parseAgentFirstBotIntent('运营学习汇总')).toEqual({ type: 'unknown', text: '运营学习汇总' });
-    expect(parseAgentFirstBotIntent('运营学习历史')).toEqual({ type: 'unknown', text: '运营学习历史' });
+    expect(parseAgentFirstBotIntent('重发6.22日报')).toEqual({ type: 'unknown', text: '重发6.22日报' });
+    expect(parseAgentFirstBotIntent('2026-06-22 的转化率多少')).toEqual({ type: 'unknown', text: '2026-06-22 的转化率多少' });
+    expect(parseAgentFirstBotIntent('库存情况 pocket3')).toEqual({ type: 'unknown', text: '库存情况 pocket3' });
+    expect(parseAgentFirstBotIntent('查 433, 798, 872')).toEqual({ type: 'unknown', text: '查 433, 798, 872' });
+    expect(parseAgentFirstBotIntent('同步关单')).toEqual({ type: 'unknown', text: '同步关单' });
+    expect(parseAgentFirstBotIntent('复制商品 761')).toEqual({ type: 'unknown', text: '复制商品 761' });
   });
 });
