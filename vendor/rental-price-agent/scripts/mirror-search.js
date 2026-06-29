@@ -39,7 +39,7 @@ function request(method, endpoint, body) {
     const url = new URL(endpoint, baseUrl);
     const opts = {
       hostname: url.hostname, port: url.port, path: url.pathname + url.search,
-      method, headers: { "X-API-Key": apiKey, "ngrok-skip-browser-warning": "true" },
+      method, headers: { "X-API-Key": apiKey },
     };
     if (body) { opts.headers["Content-Type"] = "application/json"; }
     const req = https.request(opts, (res) => {

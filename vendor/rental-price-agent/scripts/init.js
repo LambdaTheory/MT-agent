@@ -110,7 +110,7 @@ async function checkMirror(cfg) {
   if (!cfg?.mirror?.baseUrl || !cfg?.mirror?.apiKey) { warn("Mirror check skipped (no config)"); return false; }
   try {
     const resp = await fetch(cfg.mirror.baseUrl + "/skill/products/search?limit=1", {
-      headers: { "X-API-Key": cfg.mirror.apiKey, "ngrok-skip-browser-warning": "true" },
+      headers: { "X-API-Key": cfg.mirror.apiKey },
       signal: AbortSignal.timeout(8000),
     });
     if (resp.ok) { ok("Mirror API reachable"); return true; }
