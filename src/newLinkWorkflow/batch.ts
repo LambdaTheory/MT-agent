@@ -420,24 +420,22 @@ export function buildNewLinkBatchConfirmCard(plan: NewLinkBatchPlan, reason: str
           ].join('\n'),
         },
         {
-          tag: 'action',
-          actions: [
+          tag: 'form',
+          name: 'new_link_batch_confirm_form',
+          elements: [
             {
               tag: 'button',
               text: { tag: 'plain_text', content: '确认复制' },
               type: 'primary',
+              form_action_type: 'submit',
               name: 'new_link_batch_confirm_submit',
               behaviors: [{ type: 'callback', value: confirmValue }],
             },
-          ],
-        },
-        {
-          tag: 'action',
-          actions: [
             {
               tag: 'button',
               text: { tag: 'plain_text', content: '取消' },
               type: 'default',
+              form_action_type: 'submit',
               name: 'new_link_batch_cancel_submit',
               behaviors: [{
                 type: 'callback',
@@ -485,24 +483,22 @@ export function buildNewLinkBatchMultiConfirmCard(plans: NewLinkBatchPlan[], rea
           ].join('\n'),
         },
         {
-          tag: 'action',
-          actions: [
+          tag: 'form',
+          name: 'new_link_batch_multi_confirm_form',
+          elements: [
             {
               tag: 'button',
               text: { tag: 'plain_text', content: '确认分别复制' },
               type: 'primary',
+              form_action_type: 'submit',
               name: 'new_link_batch_multi_confirm_submit',
               behaviors: [{ type: 'callback', value: confirmValue }],
             },
-          ],
-        },
-        {
-          tag: 'action',
-          actions: [
             {
               tag: 'button',
               text: { tag: 'plain_text', content: '取消' },
               type: 'default',
+              form_action_type: 'submit',
               name: 'new_link_batch_cancel_submit',
               behaviors: [{
                 type: 'callback',
