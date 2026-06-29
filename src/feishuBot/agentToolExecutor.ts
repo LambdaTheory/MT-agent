@@ -23,6 +23,7 @@ import {
   buildNewLinkBatchPlan,
   executeNewLinkBatchConfirmRequest,
   executeNewLinkBatchMultiConfirmRequest,
+  explainNewLinkBatchMultiConfirmBlocker,
   formatNewLinkBatchPlan,
   formatNewLinkBatchMultiPlan,
   MAX_NEW_LINK_BATCH_COUNT,
@@ -1480,11 +1481,14 @@ export async function executeAgentToolRequest(
 
       const plans = workflowRequests.map((item) => buildNewLinkBatchPlan(item, latest.context, registryContext.registry));
       if (plans.length > 1) {
-        const text = formatNewLinkBatchMultiPlan(plans);
+        const ready = plans.every((plan) => plan.status === 'ready');
+        const card = ready ? buildNewLinkBatchMultiConfirmCard(plans, request.reason, request.continuation) : undefined;
+        const confirmBlocker = card ? null : explainNewLinkBatchMultiConfirmBlocker(plans);
+        const text = formatNewLinkBatchMultiPlan(plans, { confirmable: Boolean(card), confirmBlocker });
         return {
           text,
-          ...(plans.every((plan) => plan.status === 'ready') ? { card: buildNewLinkBatchMultiConfirmCard(plans, request.reason, request.continuation) } : {}),
-          metadata: { toolName: 'rental.newLinkBatchPlan', plans, ready: plans.every((plan) => plan.status === 'ready') },
+          ...(card ? { card } : {}),
+          metadata: { toolName: 'rental.newLinkBatchPlan', plans, ready, confirmable: Boolean(card) },
         };
       }
 

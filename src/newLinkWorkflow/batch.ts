@@ -7,6 +7,7 @@ import type { RentalPriceSkillClient } from '../feishuBot/rentalPrice.js';
 
 export const NEW_LINK_BATCH_WORKFLOW_NAME = 'rental.newLinkBatch';
 export const MAX_NEW_LINK_BATCH_COUNT = 20;
+export const MAX_NEW_LINK_BATCH_MULTI_TOTAL_COUNT = 50;
 export const NEW_LINK_BATCH_CONFIRMATION_VERSION = 2;
 
 export interface NewLinkBatchWorkflowRequest {
@@ -347,7 +348,7 @@ export function buildNewLinkBatchMultiConfirmRequest(plans: NewLinkBatchPlan[], 
   if (items.some((item) => item === null)) return null;
   const requests = items as NewLinkBatchConfirmRequest[];
   const totalCount = requests.reduce((sum, request) => sum + request.count, 0);
-  if (totalCount > MAX_NEW_LINK_BATCH_COUNT) return null;
+  if (totalCount > MAX_NEW_LINK_BATCH_MULTI_TOTAL_COUNT) return null;
   const dataDate = requests[0]?.dataDate;
   if (!dataDate || requests.some((request) => request.dataDate !== dataDate)) return null;
   return {
@@ -361,7 +362,23 @@ export function buildNewLinkBatchMultiConfirmRequest(plans: NewLinkBatchPlan[], 
   };
 }
 
-export function formatNewLinkBatchMultiPlan(plans: NewLinkBatchPlan[]): string {
+export function explainNewLinkBatchMultiConfirmBlocker(plans: NewLinkBatchPlan[]): string | null {
+  if (plans.length < 2) return '多商品新链确认至少需要 2 个商品。';
+  const reviewPlan = plans.find((plan) => plan.status !== 'ready');
+  if (reviewPlan) {
+    return `${reviewPlan.request.keyword} 需要复核：${reviewPlan.warnings.join('；') || '未达到可直接执行条件'}`;
+  }
+  const totalCount = plans.reduce((sum, plan) => sum + plan.request.count, 0);
+  if (totalCount > MAX_NEW_LINK_BATCH_MULTI_TOTAL_COUNT) {
+    return `复制总数 ${totalCount} 条超过多商品单次确认上限 ${MAX_NEW_LINK_BATCH_MULTI_TOTAL_COUNT} 条，请减少商品或数量后重试。`;
+  }
+  return buildNewLinkBatchMultiConfirmRequest(plans, 'confirmability check') ? null : '确认请求校验未通过，请重新发起。';
+}
+
+export function formatNewLinkBatchMultiPlan(
+  plans: NewLinkBatchPlan[],
+  options: { confirmable?: boolean; confirmBlocker?: string | null } = {},
+): string {
   const lines = plans.map((plan, index) => {
     const source = plan.selectedSource
       ? `源商品 ${plan.selectedSource.productId} ${plan.selectedSource.productName}`
@@ -369,11 +386,14 @@ export function formatNewLinkBatchMultiPlan(plans: NewLinkBatchPlan[]): string {
     const warnings = plan.warnings.length ? `；复核：${plan.warnings.join('；')}` : '';
     return `${index + 1}. ${plan.request.keyword}：${source}，复制 ${plan.request.count} 条${warnings}`;
   });
+  const note = options.confirmable === false
+    ? `注意：当前仅生成计划，未生成确认卡${options.confirmBlocker ? `：${options.confirmBlocker}` : '。'}确认前不会复制商品。`
+    : '注意：当前仅生成计划和确认卡，确认前不会复制商品。';
   return [
     `多商品新链批量铺设计划：准备分别复制 ${plans.length} 个商品`,
     ...lines,
     '',
-    '注意：当前仅生成计划和确认卡，确认前不会复制商品。',
+    note,
   ].join('\n');
 }
 
@@ -576,7 +596,7 @@ export function parseNewLinkBatchMultiConfirmRequest(value: unknown): NewLinkBat
   const parsedItems = items as NewLinkBatchConfirmRequest[];
   if (parsedItems.some((item) => item.dataDate !== dataDate || item.reason !== reason)) return null;
   const totalCount = parsedItems.reduce((sum, item) => sum + item.count, 0);
-  if (totalCount > MAX_NEW_LINK_BATCH_COUNT) return null;
+  if (totalCount > MAX_NEW_LINK_BATCH_MULTI_TOTAL_COUNT) return null;
   return {
     safetyVersion: NEW_LINK_BATCH_CONFIRMATION_VERSION,
     workflowName,

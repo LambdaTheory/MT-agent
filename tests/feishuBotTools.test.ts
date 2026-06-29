@@ -2674,6 +2674,56 @@ describe('handleBotIntent', () => {
     expect(cardText).toContain('"sourceProductId":"402"');
   });
 
+  it('returns a multi-source confirmation card when five products each need five new links', async () => {
+    const { outputDir, registryPaths } = await writeNewLinkWorkflowContext();
+    const planner: AgentPlannerProvider = {
+      async proposePlan() {
+        return JSON.stringify({
+          goal: '五个商品各铺五条新链',
+          selectedTool: 'rental.newLinkBatchPlan',
+          arguments: {
+            items: [
+              { keyword: 'pocket3', count: 5, sourceProductId: '733' },
+              { keyword: 'action5', count: 5, sourceProductId: '841' },
+              { keyword: 'wide 300', count: 5, sourceProductId: '302' },
+              { keyword: 'wide 400', count: 5, sourceProductId: '402' },
+              { keyword: 'SQ1', count: 5, sourceProductId: '388' },
+            ],
+          },
+          confidence: 0.95,
+          reason: '用户要求多个商品分别铺设 5 条新链，需生成多商品确认卡',
+          requiresConfirmation: true,
+        });
+      },
+    };
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run'); },
+      async execute() { throw new Error('execute should not run'); },
+      async copy() { throw new Error('copy should not run before workflow confirmation'); },
+      async delist() { throw new Error('delist should not run'); },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+
+    const response = await handleBotIntent(
+      { type: 'unknown', text: 'pocket3, action5,wide 300,wide 400,SQ1,各铺五条链接' },
+      outputDir,
+      { agentPlannerProvider: planner, rentalPriceClient, closedOrderRegistryPaths: registryPaths },
+    );
+
+    const cardText = JSON.stringify(response.card);
+    expect(response.text).toContain('多商品新链批量铺设计划：准备分别复制 5 个商品');
+    expect(response.text).toContain('注意：当前仅生成计划和确认卡');
+    expect(response.card).toBeDefined();
+    expect(cardText).toContain('new_link_batch_multi_confirm');
+    expect(cardText).toContain('"keyword":"pocket3"');
+    expect(cardText).toContain('"keyword":"action5"');
+    expect(cardText).toContain('"keyword":"wide 300"');
+    expect(cardText).toContain('"keyword":"wide 400"');
+    expect(cardText).toContain('"keyword":"SQ1"');
+  });
+
   it('rejects legacy selectedWorkflow output in the planner-first Feishu path', async () => {
     const outputDir = await writeContext();
     const planner: AgentPlannerProvider = {

@@ -8,7 +8,9 @@ import {
   buildNewLinkBatchMultiConfirmRequest,
   executeNewLinkBatchConfirmRequest,
   executeNewLinkBatchMultiConfirmRequest,
+  explainNewLinkBatchMultiConfirmBlocker,
   formatNewLinkBatchPlan,
+  MAX_NEW_LINK_BATCH_MULTI_TOTAL_COUNT,
   parseNewLinkBatchMultiConfirmRequest,
   parseNewLinkBatchConfirmRequest,
 } from '../src/newLinkWorkflow/batch.js';
@@ -315,6 +317,27 @@ describe('new link batch workflow', () => {
     expect(result).toMatchObject({ ok: true, completedCount: 10 });
     expect(result.text).toContain('wide 300');
     expect(result.text).toContain('wide 400');
+  });
+
+  it('allows multi-product new-link confirmations above the single-product copy cap', () => {
+    const plans = ['pocket3', 'action5', 'wide 300', 'wide 400', 'SQ1'].map((keyword, index) =>
+      buildNewLinkBatchPlan({ keyword, count: 5, sourceProductId: index % 2 === 0 ? '733' : '841' }, context(), registry()));
+    const request = buildNewLinkBatchMultiConfirmRequest(plans, '用户要求 5 个商品各铺 5 条');
+    const card = buildNewLinkBatchMultiConfirmCard(plans, '用户要求 5 个商品各铺 5 条');
+
+    expect(request?.items).toHaveLength(5);
+    expect(request?.items.reduce((sum, item) => sum + item.count, 0)).toBe(25);
+    expect(card).toBeDefined();
+    expect(JSON.stringify(card)).toContain('new_link_batch_multi_confirm');
+  });
+
+  it('blocks multi-product new-link confirmations only when they exceed the multi-total cap', () => {
+    const plans = ['pocket3', 'wide 300', 'SQ1'].map((keyword, index) =>
+      buildNewLinkBatchPlan({ keyword, count: 20, sourceProductId: index % 2 === 0 ? '733' : '841' }, context(), registry()));
+
+    expect(buildNewLinkBatchMultiConfirmRequest(plans, 'too many links')).toBeNull();
+    expect(buildNewLinkBatchMultiConfirmCard(plans, 'too many links')).toBeUndefined();
+    expect(explainNewLinkBatchMultiConfirmBlocker(plans)).toContain(`超过多商品单次确认上限 ${MAX_NEW_LINK_BATCH_MULTI_TOTAL_COUNT} 条`);
   });
 
   it('copies the selected source once per requested new link after confirmation', async () => {
