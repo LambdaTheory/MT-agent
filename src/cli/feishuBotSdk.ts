@@ -1,5 +1,6 @@
 import { pathToFileURL } from 'node:url';
 import { createAgentPlannerProvider } from '../agentRuntime/llmPlanner.js';
+import { startClosedOrderPriceAlertMonitor } from '../closedOrderFeedback/priceAlertMonitor.js';
 import { loadEnv } from '../config/loadEnv.js';
 import { createFeishuSdkBot } from '../feishuBot/sdkClient.js';
 import { createLlmProviderFromEnv, formatLlmProviderEnvSummary, summarizeLlmProviderEnv } from '../llm/openAiCompatibleProvider.js';
@@ -22,6 +23,10 @@ export async function main(): Promise<void> {
     ...(llmProvider ? { agentPlannerProvider: createAgentPlannerProvider(llmProvider) } : {}),
   });
   await bot.start();
+  startClosedOrderPriceAlertMonitor({
+    env: process.env,
+    outputDir: process.env.MT_AGENT_OUTPUT_DIR ?? 'output',
+  });
   console.log('Feishu SDK bot long connection started.');
 }
 

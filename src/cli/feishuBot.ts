@@ -1,5 +1,6 @@
 import { pathToFileURL } from 'node:url';
 import { createAgentPlannerProvider } from '../agentRuntime/llmPlanner.js';
+import { startClosedOrderPriceAlertMonitor } from '../closedOrderFeedback/priceAlertMonitor.js';
 import { loadEnv } from '../config/loadEnv.js';
 import { startFeishuBotServer } from '../feishuBot/server.js';
 import { createLlmProviderFromEnv, formatLlmProviderEnvSummary, summarizeLlmProviderEnv } from '../llm/openAiCompatibleProvider.js';
@@ -20,6 +21,10 @@ export async function runFeishuBotCli(): Promise<void> {
     encryptKey: process.env.FEISHU_BOT_ENCRYPT_KEY,
     outputDir: process.env.MT_AGENT_OUTPUT_DIR ?? 'output',
     ...(llmProvider ? { agentPlannerProvider: createAgentPlannerProvider(llmProvider) } : {}),
+  });
+  startClosedOrderPriceAlertMonitor({
+    env: process.env,
+    outputDir: process.env.MT_AGENT_OUTPUT_DIR ?? 'output',
   });
   console.log(`Feishu bot listening on http://localhost:${port}`);
 }
