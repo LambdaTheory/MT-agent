@@ -167,6 +167,25 @@ describe('operations learning session', () => {
     expect(stored.feedbacks).toEqual([]);
   });
 
+  it('restarts a stopped same-day session and returns the next question card', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-learning-restart-'));
+    await startOperationsLearningSession(outputDir, context());
+    await handleOperationsLearningStop(outputDir, { date: '2026-06-16', reviewerId: 'ou_stop' });
+
+    const restarted = await startOperationsLearningSession(outputDir, context());
+
+    expect(restarted.text).toContain('第 1/2 题');
+    expect(JSON.stringify(restarted.card)).toContain('运营学习 loop 测验 1/2');
+    const storedAfterRestart = JSON.parse(await readFile(join(outputDir, '2026-06-16', 'operations-learning-session.json'), 'utf8')) as { stoppedAt?: string; stoppedBy?: string; feedbacks: unknown[] };
+    expect(storedAfterRestart.stoppedAt).toBeUndefined();
+    expect(storedAfterRestart.stoppedBy).toBeUndefined();
+    expect(storedAfterRestart.feedbacks).toEqual([]);
+
+    const next = await handleOperationsLearningFeedback(outputDir, { date: '2026-06-16', productId: '701', feedback: 'reasonable', questionIndex: 1, reviewerId: 'ou_restart' });
+    expect(next.text).toContain('第 2/2 题');
+    expect(JSON.stringify(next.card)).toContain('运营学习 loop 测验 2/2');
+  });
+
   it('summarizes cross-day history and per-reviewer stats', async () => {
     const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-learning-history-'));
     await startOperationsLearningSession(outputDir, context());

@@ -44,6 +44,8 @@ describe('parseBotIntent', () => {
 
   it('parses operations learning quiz intent', () => {
     expect(parseBotIntent('运营学习')).toEqual({ type: 'operations_learning_quiz' });
+    expect(parseBotIntent('开始运营学习')).toEqual({ type: 'operations_learning_quiz' });
+    expect(parseBotIntent('开始个运营学习')).toEqual({ type: 'operations_learning_quiz' });
     expect(parseBotIntent('loop测验')).toEqual({ type: 'operations_learning_quiz' });
   });
 
@@ -191,6 +193,7 @@ describe('parseAgentFirstBotIntent', () => {
     expect(parseAgentFirstBotIntent('链接档案维护')).toEqual({ type: 'link_registry_maintenance_hub' });
     expect(parseAgentFirstBotIntent('Agent学习汇总')).toEqual({ type: 'agent_learning_summary' });
     expect(parseAgentFirstBotIntent('运营学习')).toEqual({ type: 'operations_learning_quiz' });
+    expect(parseAgentFirstBotIntent('开始运营学习')).toEqual({ type: 'operations_learning_quiz' });
     expect(parseAgentFirstBotIntent('运营学习汇总')).toEqual({ type: 'operations_learning_summary' });
     expect(parseAgentFirstBotIntent('运营学习历史')).toEqual({ type: 'operations_learning_history' });
     expect(parseAgentFirstBotIntent('差异化定价')).toEqual({ type: 'differential_pricing_card' });

@@ -20,7 +20,7 @@ const PUSH_PATTERNS = [
 
 const QUIZ_PATTERNS = [
   /^(?:做|来|开始|出)(?:个|一下|一)?(?:运营)?(?:测验|题)/,
-  /^(?:做|来)(?:个|一下|一)?运营学习/,
+  /^(?:做|来|开始)(?:个|一下|一)?运营学习/,
 ];
 
 const CLOSED_ORDER_REPORT_PATTERNS = [

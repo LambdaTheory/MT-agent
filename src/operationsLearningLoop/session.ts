@@ -116,19 +116,27 @@ export async function loadOperationsLearningSession(outputDir: string, date: str
 }
 
 export async function startOperationsLearningSession(outputDir: string, context: PublicTrafficDataReportContext): Promise<OperationsLearningSessionResponse> {
-  const existing = await loadOperationsLearningSession(outputDir, context.date);
-  if (existing && existing.items.length > 0) {
-    return currentSessionResponse(existing);
-  }
+  return withSessionLock(outputDir, context.date, async () => {
+    const existing = await loadOperationsLearningSession(outputDir, context.date);
+    if (existing && existing.items.length > 0) {
+      if (existing.stoppedAt) {
+        delete existing.stoppedAt;
+        delete existing.stoppedBy;
+        existing.updatedAt = new Date().toISOString();
+        await saveSession(outputDir, existing);
+      }
+      return currentSessionResponse(existing);
+    }
 
-  const items = selectOperationsLearningQuizItems(context);
-  if (items.length === 0) return { text: '今日暂无可用于学习的运营候选。' };
+    const items = selectOperationsLearningQuizItems(context);
+    if (items.length === 0) return { text: '今日暂无可用于学习的运营候选。' };
 
-  const now = new Date().toISOString();
-  const session: OperationsLearningSession = { date: context.date, createdAt: now, updatedAt: now, items, feedbacks: [], learnedSignals: emptySignals() };
-  await saveSession(outputDir, session);
+    const now = new Date().toISOString();
+    const session: OperationsLearningSession = { date: context.date, createdAt: now, updatedAt: now, items, feedbacks: [], learnedSignals: emptySignals() };
+    await saveSession(outputDir, session);
 
-  return { text: `运营学习 loop 测验 ${context.date}（第 1/${items.length} 题）`, card: buildOperationsLearningQuestionCard(context.date, items[0], { index: 1, total: items.length }) };
+    return { text: `运营学习 loop 测验 ${context.date}（第 1/${items.length} 题）`, card: buildOperationsLearningQuestionCard(context.date, items[0], { index: 1, total: items.length }) };
+  });
 }
 
 function applySignals(session: OperationsLearningSession, item: OperationsLearningQuizItem, feedback: OperationsLearningFeedbackOption): void {
