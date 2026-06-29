@@ -352,6 +352,7 @@ function setRentalActionStatus(key: string, status: RentalActionStatus): void {
 function duplicateRentalActionText(claim: RentalActionClaim): string {
   if (claim.status === 'processing') return '该确认卡片已经在执行中，请勿重复点击。';
   if (claim.status === 'completed') return '该确认卡片已经执行完成，请勿重复点击。';
+  if (claim.status === 'failed') return '该确认卡片已经执行失败，请重新发起命令。';
   if (claim.status === 'cancelled') return '该确认卡片已经取消，请勿重复点击。';
   return '该确认卡片已经处理过，请重新发起命令。';
 }
@@ -359,6 +360,7 @@ function duplicateRentalActionText(claim: RentalActionClaim): string {
 function newLinkBatchClaimStatusCard(claim: RentalActionClaim): FeishuCardPayload {
   if (claim.status === 'processing') return statusCard('新链批量复制处理中', duplicateRentalActionText(claim), 'blue');
   if (claim.status === 'completed') return statusCard('新链批量复制已完成', duplicateRentalActionText(claim), 'green');
+  if (claim.status === 'failed') return statusCard('新链批量复制失败', duplicateRentalActionText(claim), 'red');
   if (claim.status === 'cancelled') return statusCard('新链批量复制已取消', duplicateRentalActionText(claim), 'grey');
   return statusCard('新链批量复制已处理', duplicateRentalActionText(claim), 'grey');
 }
@@ -370,6 +372,16 @@ function statusCard(title: string, content: string, template: 'blue' | 'green' |
     header: { title: { tag: 'plain_text', content: title }, template },
     body: { elements: [{ tag: 'markdown', content }] },
   };
+}
+
+function isFailedBotResponse(response: { metadata?: Record<string, unknown> }): boolean {
+  return response.metadata?.ok === false;
+}
+
+function agentToolResultStatusCard(response: { text: string; metadata?: Record<string, unknown> }): FeishuCardPayload {
+  return isFailedBotResponse(response)
+    ? statusCard('Agent 操作失败', response.text, 'red')
+    : statusCard('Agent 操作已完成', response.text, 'green');
 }
 
 function claimStatusCard(title: string, claim: RentalActionClaim): FeishuCardPayload {
@@ -493,11 +505,12 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
     ok: boolean,
   ): Promise<void> {
     const finalResponse = await continueAgentPlannerStepsAfterResponse(request, response, outputDir, agentToolExecutionOptions);
+    const finalOk = ok && !isFailedBotResponse(finalResponse);
     if (finalResponse.card) {
       await deliverCard(client, messageId, finalResponse.card, logError);
       return;
     }
-    await deliverCard(client, messageId, statusCard(ok ? titles.success : titles.failure, finalResponse.text, ok ? 'green' : 'red'), logError);
+    await deliverCard(client, messageId, statusCard(finalOk ? titles.success : titles.failure, finalResponse.text, finalOk ? 'green' : 'red'), logError);
   }
 
   function recordLearning(input: AgentLearningEventInput, contextMessageId: string): void {
@@ -804,9 +817,10 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
             await deliverCard(client, messageId, statusCard('Agent 操作处理中', `工具 ${request.toolName} 已收到确认，正在执行。`, 'blue'), logError);
             try {
               const response = await executeAgentToolRequestWithContinuation(request, config.outputDir ?? 'output', agentToolExecutionOptions);
-              setRentalActionStatus(claim.key, 'completed');
+              const ok = !isFailedBotResponse(response);
+              setRentalActionStatus(claim.key, ok ? 'completed' : 'failed');
               recordLearning({
-                type: 'tool_completed',
+                type: ok ? 'tool_completed' : 'tool_failed',
                 messageId,
                 actorId: extractCardReviewerId(data),
                 toolName: request.toolName,
@@ -817,7 +831,7 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
               if (response.card) {
                 await deliverCard(client, messageId, response.card, logError);
               } else {
-                await deliverCard(client, messageId, statusCard('Agent 操作已完成', response.text, 'green'), logError);
+                await deliverCard(client, messageId, agentToolResultStatusCard(response), logError);
               }
             } catch (error) {
               setRentalActionStatus(claim.key, 'failed');

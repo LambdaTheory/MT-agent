@@ -580,6 +580,76 @@ describe('createFeishuSdkBot card.action.trigger', () => {
     expect(JSON.stringify(sent)).toContain('rental.priceApply');
   });
 
+  it('renders failed Agent price apply results as a failure card from the SDK callback', async () => {
+    const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
+    const sent: unknown[] = [];
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-sdk-agent-tool-failed-ref-'));
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run'); },
+      async execute(request) {
+        return { productId: request.productId, ok: false, lines: ['apply: partial', 'submit: skipped', 'verify: skipped'] };
+      },
+      async copy() { throw new Error('copy should not run'); },
+      async delist() { throw new Error('delist should not run'); },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+    const bot = createFeishuSdkBot({
+      appId: 'app',
+      appSecret: 'x',
+      outputDir,
+      rentalPriceClient,
+      sdk: fakeSdk(sent, registered),
+    });
+
+    bot.start();
+    const request = {
+      toolName: 'rental.priceApply',
+      arguments: {
+        items: [
+          {
+            productId: '653',
+            fields: { rent1day: '29.85', rent10day: '74.85' },
+            audit: { taskId: 'task_653_ref', rollbackFile: 'rollback-653.json' },
+          },
+        ],
+      },
+      reason: 'confirmed preview',
+    };
+    const requestRef = await saveAgentToolConfirmRequest(outputDir, request);
+    const card = buildAgentToolConfirmCard(request, { requestRef });
+    const event = {
+      event: {
+        context: { open_message_id: 'om-agent-tool-ref-price-failed' },
+        operator: { open_id: 'ou_agent' },
+        action: {
+          tag: 'button',
+          name: 'agent_tool_confirm_submit',
+          behaviors: [{ type: 'callback', value: agentToolConfirmActionValue(card) }],
+        },
+      },
+    };
+
+    await registered['card.action.trigger'](event);
+
+    for (let attempt = 0; attempt < 100 && !JSON.stringify(sent).includes('Agent 操作失败'); attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    const finalCard = patchedCard(sent[sent.length - 1]) as { header?: { title?: { content?: string }; template?: string } };
+    expect(finalCard.header?.title?.content).toBe('Agent 操作失败');
+    expect(finalCard.header?.template).toBe('red');
+    expect(JSON.stringify(finalCard)).toContain('成功 0/1');
+    expect(JSON.stringify(finalCard)).toContain('apply: partial');
+    expect(JSON.stringify(finalCard)).not.toContain('Agent 操作已完成');
+
+    const duplicate = await registered['card.action.trigger'](event);
+    const duplicateCard = (duplicate as { card?: { data?: { header?: { template?: string }; body?: unknown } } }).card?.data;
+    expect(duplicateCard?.header?.template).toBe('red');
+    expect(JSON.stringify(duplicateCard)).toContain('已经执行失败');
+  });
+
   it('passes registry paths into SDK Agent continuation steps after a confirmed write', async () => {
     const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
     const sent: unknown[] = [];

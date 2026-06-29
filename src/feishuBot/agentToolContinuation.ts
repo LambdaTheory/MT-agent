@@ -207,7 +207,11 @@ export async function continueAgentPlannerSteps(input: ContinuePlannerStepsInput
     if (shouldStopAfterConfirmedResponse(response)) {
       input.textParts.push('');
       input.textParts.push('当前步骤执行未成功，已停止后续步骤。');
-      return { text: input.textParts.join('\n'), ...(response.card ? { card: response.card } : {}) };
+      return {
+        text: input.textParts.join('\n'),
+        ...(response.card ? { card: response.card } : {}),
+        ...(response.metadata ? { metadata: response.metadata } : {}),
+      };
     }
     if (response.card) {
       if (remainingSteps.length > 0) {
@@ -243,7 +247,11 @@ export async function continueAgentPlannerStepsAfterResponse(
   if (shouldStopAfterConfirmedResponse(response)) {
     textParts.push('');
     textParts.push('当前步骤执行未成功，已停止后续步骤。');
-    return { text: textParts.join('\n'), ...(response.card ? { card: response.card } : {}) };
+    return {
+      text: textParts.join('\n'),
+      ...(response.card ? { card: response.card } : {}),
+      ...(response.metadata ? { metadata: response.metadata } : {}),
+    };
   }
 
   if (response.card) {

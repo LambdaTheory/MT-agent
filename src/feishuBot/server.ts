@@ -258,6 +258,7 @@ function setServerCardActionStatus(key: string, status: ServerCardActionStatus):
 function duplicateServerCardActionText(claim: ServerCardActionClaim): string {
   if (claim.status === 'processing') return '该确认卡片已经在执行中，请勿重复点击。';
   if (claim.status === 'completed') return '该确认卡片已经执行完成，请勿重复点击。';
+  if (claim.status === 'failed') return '该确认卡片已经执行失败，请重新发起命令。';
   if (claim.status === 'cancelled') return '该确认卡片已经取消，请勿重复点击。';
   return '该确认卡片已经处理过，请重新发起命令。';
 }
@@ -535,9 +536,10 @@ async function handleCardActionTrigger(
       closedOrderFetchImpl: config.closedOrderFetchImpl,
       closedOrderRegistryPaths: config.closedOrderRegistryPaths,
     });
-    setServerCardActionStatus(claim.key, 'completed');
+    const ok = response.metadata?.ok !== false;
+    setServerCardActionStatus(claim.key, ok ? 'completed' : 'failed');
     await recordAgentLearningEvent(outputDir, {
-      type: 'tool_completed',
+      type: ok ? 'tool_completed' : 'tool_failed',
       messageId,
       actorId,
       toolName: request.toolName,
