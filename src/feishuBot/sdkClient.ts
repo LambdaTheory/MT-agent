@@ -134,6 +134,7 @@ export interface FeishuSdkBotConfig {
   agentPlannerProvider?: AgentPlannerProvider;
   dispatchMessage?: (message: FeishuBotIncomingTextMessage) => Promise<FeishuBotDispatchResult>;
   logError?: (error: unknown, context: { messageId: string; phase: 'reply' | 'dispatch' }) => void;
+  logInfo?: (message: string) => void;
   rentalPriceClient?: RentalPriceSkillClient;
   activityAutomationClient?: ActivityAutomationSkillClient;
   closedOrderFetchImpl?: typeof fetch;
@@ -464,6 +465,7 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
     closedOrderRegistryPaths: config.closedOrderRegistryPaths,
   }).dispatch;
   const logError = config.logError ?? ((error: unknown, context: { messageId: string; phase: 'reply' | 'dispatch' }) => console.error(`飞书SDK消息处理失败 ${context.phase} ${context.messageId}:`, error));
+  const logInfo = config.logInfo ?? ((message: string) => console.log(message));
   const rentalPriceClient = config.rentalPriceClient ?? createRentalPriceSkillClient();
   const activityAutomationClient = config.activityAutomationClient ?? createActivityAutomationSkillClient();
   const activityCancellationAssistant = config.activityCancellationAssistant ?? createActivityCancellationAssistant();
@@ -493,23 +495,50 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
     void recordAgentLearningEvent(outputDir, input).catch((error) => logError(error, { messageId: contextMessageId, phase: 'reply' }));
   }
 
+  function messagePreview(text: string): string {
+    const compact = text.replace(/\s+/g, ' ').trim();
+    return compact.length > 120 ? `${compact.slice(0, 117)}...` : compact;
+  }
+
+  function formatErrorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
+  }
+
   eventDispatcher.register({
     'im.message.receive_v1': async (data: unknown) => {
       const message = extractSdkTextMessage(data);
       if (!message) return;
 
-      const response = await dispatchMessage(message);
+      const startedAt = Date.now();
+      logInfo(`飞书SDK收到消息 ${message.messageId}: chat=${message.chatType ?? 'unknown'} text="${messagePreview(message.text)}"`);
+
+      let response: FeishuBotDispatchResult;
+      try {
+        response = await dispatchMessage(message);
+      } catch (error) {
+        logError(error, { messageId: message.messageId, phase: 'dispatch' });
+        await replyText(client, message.messageId, `处理失败：${formatErrorMessage(error)}`).catch((replyError) => {
+          logError(replyError, { messageId: message.messageId, phase: 'reply' });
+        });
+        logInfo(`飞书SDK消息dispatch失败 ${message.messageId}: elapsedMs=${Date.now() - startedAt}`);
+        return;
+      }
+
+      logInfo(`飞书SDK消息dispatch完成 ${message.messageId}: skipped=${response.skipped ? 'true' : 'false'} hasCard=${response.card ? 'true' : 'false'} elapsedMs=${Date.now() - startedAt}`);
       if (response.skipped) return;
 
       try {
         if (response.card) await replyCard(client, message.messageId, response.card);
         else await replyText(client, message.messageId, response.text);
+        logInfo(`飞书SDK消息回复成功 ${message.messageId}: type=${response.card ? 'card' : 'text'} elapsedMs=${Date.now() - startedAt}`);
       } catch (error) {
         logError(error, { messageId: message.messageId, phase: 'reply' });
         if (response.card) {
-          await replyText(client, message.messageId, response.text).catch((fallbackError) => {
-            logError(fallbackError, { messageId: message.messageId, phase: 'reply' });
-          });
+          await replyText(client, message.messageId, response.text)
+            .then(() => logInfo(`飞书SDK消息卡片失败后文本兜底成功 ${message.messageId}: elapsedMs=${Date.now() - startedAt}`))
+            .catch((fallbackError) => {
+              logError(fallbackError, { messageId: message.messageId, phase: 'reply' });
+            });
         }
       }
     },

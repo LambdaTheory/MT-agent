@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createLlmProviderFromEnv,
   createOpenAiCompatibleProviderFromEnv,
@@ -12,6 +12,10 @@ function jsonResponse(value: unknown, status = 200): Response {
 }
 
 describe('OpenAiCompatibleLlmProvider', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('posts chat completion request and parses JSON content', async () => {
     const fetchImpl = vi.fn(async () =>
       jsonResponse({
@@ -46,6 +50,21 @@ describe('OpenAiCompatibleLlmProvider', () => {
     const provider = new OpenAiCompatibleLlmProvider({ baseUrl: 'https://llm.example/v1', apiKey: 'secret', model: 'test-model', fetchImpl });
 
     await expect(provider.generateJson({ messages: [{ role: 'user', content: 'x' }] })).rejects.toThrow('LLM provider response missing message content');
+  });
+
+  it('aborts hanging requests with a bounded timeout', async () => {
+    vi.useFakeTimers();
+    const fetchImpl = vi.fn((_url, init) => new Promise<Response>((_resolve, reject) => {
+      const signal = init?.signal;
+      signal?.addEventListener('abort', () => reject(new Error('aborted')));
+    })) as unknown as typeof fetch;
+    const provider = new OpenAiCompatibleLlmProvider({ baseUrl: 'https://llm.example/v1', apiKey: 'secret', model: 'test-model', timeoutMs: 50, fetchImpl });
+
+    const promise = provider.generateJson({ messages: [{ role: 'user', content: 'x' }] });
+    const assertion = expect(promise).rejects.toThrow('LLM provider request timed out after 50ms');
+    await vi.advanceTimersByTimeAsync(50);
+
+    await assertion;
   });
 
   it('creates provider from legacy env and returns null when config is missing', () => {
