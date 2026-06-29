@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { buildAgentToolConfirmCard, type AgentToolConfirmContinuation } from '../src/agentRuntime/approvalCard.js';
+import { buildAgentClarificationCard } from '../src/agentRuntime/clarificationCard.js';
 import { createFeishuSdkBot } from '../src/feishuBot/sdkClient.js';
 import {
   buildActivityAutomationCard,
@@ -431,6 +432,55 @@ describe('createFeishuSdkBot card.action.trigger', () => {
     expect(JSON.stringify((first as any).card.data)).toContain('已取消');
     expect(second).toMatchObject({ card: { type: 'raw', data: { schema: '2.0' } } });
     expect(JSON.stringify((second as any).card.data)).toContain('已经取消');
+  });
+
+  it('renders failed Agent clarification continuation as a red status card', async () => {
+    const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
+    const sent: unknown[] = [];
+    const bot = createFeishuSdkBot({
+      appId: 'app',
+      appSecret: 'secret',
+      outputDir: 'output',
+      dispatchMessage: async () => ({
+        text: 'Agent 暂时没有把这次指令或补充解析成可执行计划。',
+        skipped: false,
+        metadata: { ok: false, errorType: 'llm_json_parse_failed' },
+      }),
+      sdk: fakeSdk(sent, registered),
+    });
+
+    bot.start();
+    const card = buildAgentClarificationCard({
+      originalMessage: 'RX10M4整体价格 -1',
+      question: '请确认改价方式',
+      reason: '金额或比例不明确',
+      options: [
+        { label: '按金额', message: 'RX10M4同款组整体价格按金额减1' },
+        { label: '按比例', message: 'RX10M4同款组整体价格乘以0.9' },
+      ],
+    });
+    const value = readButtonValue(card, 'agent_clarify_custom');
+    await registered['card.action.trigger']({
+      event: {
+        context: { open_message_id: 'om-agent-clarify-json-failed' },
+        operator: { open_id: 'ou_agent' },
+        action: {
+          tag: 'button',
+          name: 'agent_clarify_custom',
+          behaviors: [{ type: 'callback', value }],
+          form_value: { custom_message: '-1是金额;RX10M4是同款组' },
+        },
+      },
+    });
+
+    for (let attempt = 0; attempt < 100 && sent.length < 2; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    const finalCard = patchedCard(sent[sent.length - 1]) as { header?: { title?: { content?: string }; template?: string } };
+    expect(finalCard.header?.template).toBe('red');
+    expect(finalCard.header?.title?.content).toBe('Agent 澄清处理失败');
+    expect(JSON.stringify(finalCard)).not.toContain('Agent 澄清处理完成');
   });
 
   it('allows a continued Agent tool confirmation on the same message after the first write completes', async () => {

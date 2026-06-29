@@ -384,6 +384,12 @@ function agentToolResultStatusCard(response: { text: string; metadata?: Record<s
     : statusCard('Agent 操作已完成', response.text, 'green');
 }
 
+function agentClarificationResultStatusCard(response: { text: string; metadata?: Record<string, unknown> }): FeishuCardPayload {
+  return isFailedBotResponse(response)
+    ? statusCard('Agent 澄清处理失败', response.text, 'red')
+    : statusCard('Agent 澄清处理完成', response.text, 'green');
+}
+
 function claimStatusCard(title: string, claim: RentalActionClaim): FeishuCardPayload {
   const template = claim.status === 'processing' ? 'blue' : claim.status === 'completed' ? 'green' : claim.status === 'failed' ? 'red' : 'grey';
   return statusCard(title, duplicateRentalActionText(claim), template);
@@ -720,10 +726,10 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
                 source: 'sdk',
                 chatType: 'p2p',
               });
-              setRentalActionStatus(claim.key, 'completed');
+              setRentalActionStatus(claim.key, isFailedBotResponse(response) ? 'failed' : 'completed');
               if (!response.skipped) {
                 if (response.card) await deliverCard(client, messageId, response.card, logError);
-                else await deliverCard(client, messageId, statusCard('Agent 澄清处理完成', response.text, 'green'), logError);
+                else await deliverCard(client, messageId, agentClarificationResultStatusCard(response), logError);
               }
             } catch (error) {
               setRentalActionStatus(claim.key, 'failed');
@@ -765,10 +771,10 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
                 source: 'sdk',
                 chatType: 'p2p',
               });
-              setRentalActionStatus(claim.key, 'completed');
+              setRentalActionStatus(claim.key, isFailedBotResponse(response) ? 'failed' : 'completed');
               if (!response.skipped) {
                 if (response.card) await deliverCard(client, messageId, response.card, logError);
-                else await deliverCard(client, messageId, statusCard('Agent 澄清处理完成', response.text, 'green'), logError);
+                else await deliverCard(client, messageId, agentClarificationResultStatusCard(response), logError);
               }
             } catch (error) {
               setRentalActionStatus(claim.key, 'failed');

@@ -42,7 +42,8 @@ export interface RentalPriceAuditReference {
 
 export type RentalPriceChangeRequest =
   | { mode: 'explicit_fields'; productId: string; fields: Record<string, string>; audit?: RentalPriceAuditReference; reason?: string; continuation?: AgentToolConfirmContinuation }
-  | { mode: 'global_discount'; productId: string; discount: number; scope: 'rent_fields' | 'all_price_fields' };
+  | { mode: 'global_discount'; productId: string; discount: number; scope: 'rent_fields' | 'all_price_fields' }
+  | { mode: 'global_adjustment'; productId: string; adjustmentAmount: number; scope: 'rent_fields' };
 
 export interface RentalPricePreview {
   productId: string;
@@ -410,7 +411,10 @@ function selectedFields(values: Record<string, unknown>, request: RentalPriceCha
   for (const [field, raw] of Object.entries(source)) {
     if (!isRentPriceField(field)) continue;
     const current = Number(raw);
-    if (Number.isFinite(current)) fields[field] = money(current * request.discount);
+    if (!Number.isFinite(current)) continue;
+    fields[field] = money(request.mode === 'global_discount'
+      ? current * request.discount
+      : current + request.adjustmentAmount);
   }
   return fields;
 }
@@ -1195,6 +1199,16 @@ export function rentalPriceChangeRequestFromToolArguments(args: Record<string, u
   const discount = typeof rawDiscount === 'number' ? rawDiscount : typeof rawDiscount === 'string' ? Number(rawDiscount) : NaN;
   if (Number.isFinite(discount) && discount > 0) {
     return { mode: 'global_discount', productId, discount, scope: 'rent_fields' };
+  }
+
+  const rawAdjustmentAmount = args.adjustmentAmount;
+  const adjustmentAmount = typeof rawAdjustmentAmount === 'number'
+    ? rawAdjustmentAmount
+    : typeof rawAdjustmentAmount === 'string'
+      ? Number(rawAdjustmentAmount.trim())
+      : NaN;
+  if (Number.isFinite(adjustmentAmount) && adjustmentAmount !== 0) {
+    return { mode: 'global_adjustment', productId, adjustmentAmount, scope: 'rent_fields' };
   }
 
   return null;
