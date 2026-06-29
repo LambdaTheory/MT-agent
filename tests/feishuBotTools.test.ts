@@ -938,6 +938,53 @@ describe('handleBotIntent', () => {
     expect(cardText).toContain('未归类商品');
   });
 
+  it('opens the link registry maintenance prompt card from an explicit command intent', async () => {
+    const registryRoot = await mkdtemp(join(tmpdir(), 'mt-agent-link-registry-maintenance-prompt-'));
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-link-registry-maintenance-output-'));
+    const registryPaths = await writeLinkRegistryOverviewFixtures(registryRoot);
+
+    const response = await handleBotIntent(
+      { type: 'link_registry_maintenance_prompt' },
+      outputDir,
+      { closedOrderRegistryPaths: registryPaths },
+    );
+
+    expect(response.card).toBeDefined();
+    const cardText = JSON.stringify(response.card);
+    expect(cardText).toContain('link_registry_maintenance_start_submit');
+    expect(cardText).toContain('link_registry_maintenance_snooze_submit');
+  });
+
+  it('opens the link registry governance prompt card from an explicit command intent', async () => {
+    const registryRoot = await mkdtemp(join(tmpdir(), 'mt-agent-link-registry-governance-prompt-'));
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-link-registry-governance-output-'));
+    const registryPaths = await writeLinkRegistryOverviewFixtures(registryRoot);
+
+    const response = await handleBotIntent(
+      { type: 'link_registry_governance_prompt' },
+      outputDir,
+      { closedOrderRegistryPaths: registryPaths },
+    );
+
+    expect(response.card).toBeDefined();
+    expect(JSON.stringify(response.card)).toContain('link_registry_governance_start_submit');
+  });
+
+  it('opens the same maintenance prompt through the Agent tool executor', async () => {
+    const registryRoot = await mkdtemp(join(tmpdir(), 'mt-agent-link-registry-agent-maintenance-'));
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-link-registry-agent-output-'));
+    const registryPaths = await writeLinkRegistryOverviewFixtures(registryRoot);
+
+    const response = await executeAgentToolRequest(
+      { toolName: 'linkRegistry.maintenancePrompt', arguments: {}, reason: 'open maintenance card' },
+      outputDir,
+      { closedOrderRegistryPaths: registryPaths },
+    );
+
+    expect(response.card).toBeDefined();
+    expect(JSON.stringify(response.card)).toContain('link_registry_maintenance_start_submit');
+  });
+
   it('returns an inventory status overview card for the new command', async () => {
     const rootDir = await mkdtemp(join(tmpdir(), 'mt-agent-inventory-status-overview-'));
     const fixtures = await writeInventoryStatusFixtures(rootDir);
@@ -2529,6 +2576,48 @@ describe('handleBotIntent', () => {
     expect(cardText).toContain('"keyword":"SQ1"');
     expect(cardText).toContain('"count":5');
     expect(cardText).toContain('"sourceProductId":"388"');
+  });
+
+  it('fills missing new-link keyword and count from a prior best-link step for one-link copy requests', async () => {
+    const { outputDir, registryPaths } = await writeNewLinkWorkflowContext();
+    const planner: AgentPlannerProvider = {
+      async proposePlan() {
+        return JSON.stringify({
+          goal: '按 SQ1 同款组中表现最好的链接复制一条新链',
+          steps: [
+            { id: 'rank', toolName: 'product.rankBestSameSku', arguments: { query: 'SQ1' }, reason: '先找到 SQ1 表现最好的端内ID' },
+            { toolName: 'rental.newLinkBatchPlan', arguments: { sourceProductId: '${rank.bestProductId}' }, reason: '按最佳端内ID复制一条新链' },
+          ],
+          confidence: 0.95,
+          reason: '用户请求复制一条 SQ1 链接，需要先找最优源，再生成复制确认卡。',
+        });
+      },
+    };
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run'); },
+      async execute() { throw new Error('execute should not run'); },
+      async copy() { throw new Error('copy should not run before workflow confirmation'); },
+      async delist() { throw new Error('delist should not run'); },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+
+    const response = await handleBotIntent(
+      { type: 'unknown', text: '复制一条SQ1的链接' },
+      outputDir,
+      { agentPlannerProvider: planner, rentalPriceClient, closedOrderRegistryPaths: registryPaths },
+    );
+
+    const cardText = JSON.stringify(response.card);
+    expect(response.text).toContain('准备复制 1 条');
+    expect(response.text).toContain('SQ1');
+    expect(response.card).toBeDefined();
+    expect(cardText).toContain('new_link_batch_confirm');
+    expect(cardText).toContain('"keyword":"SQ1"');
+    expect(cardText).toContain('"count":1');
+    expect(cardText).toContain('"sourceProductId":"388"');
+    expect(response.text).not.toContain('参数无效');
   });
 
   it('turns multiple best-link follow-up copy commands into one multi-source confirmation card without executing', async () => {

@@ -104,6 +104,12 @@ describe('parseBotIntent', () => {
     expect(parseBotIntent('链接档案概览')).toEqual({ type: 'link_registry_overview' });
   });
 
+  it('parses explicit link registry maintenance card intents', () => {
+    expect(parseBotIntent('链接维护')).toEqual({ type: 'link_registry_maintenance_prompt' });
+    expect(parseBotIntent('组级治理')).toEqual({ type: 'link_registry_governance_prompt' });
+    expect(parseBotIntent('链接档案维护')).toEqual({ type: 'link_registry_maintenance_hub' });
+  });
+
   it('parses explicit product lookup questions', () => {
     expect(parseBotIntent('这个商品 721 数据如何')).toEqual({ type: 'query_product', keyword: '721' });
   });

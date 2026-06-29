@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import type { FeishuCardPayload } from '../notify/feishuApp.js';
 import { buildLinkRegistryMaintenanceReport } from './maintenance.js';
@@ -49,6 +49,7 @@ export interface OpenLinkRegistryGovernancePromptInput {
   registry: LinkRegistryEntry[];
   overrideRisks?: LinkRegistryOverrideRisk[];
   referenceDate?: string;
+  force?: boolean;
 }
 
 export interface LinkRegistryGovernanceCardActionInput {
@@ -117,6 +118,41 @@ async function saveSession(path: string, session: LinkRegistryGovernanceSession)
 
 async function loadSession(outputDir: string, date: string): Promise<LinkRegistryGovernanceSession | null> {
   return readOptionalJson<LinkRegistryGovernanceSession | null>(sessionPath(outputDir, date), null);
+}
+
+async function loadLatestSession(outputDir: string): Promise<{ path: string; session: LinkRegistryGovernanceSession } | null> {
+  let entries: Array<{ name: string; isDirectory(): boolean }>;
+  try {
+    entries = await readdir(outputDir, { withFileTypes: true });
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return null;
+    throw error;
+  }
+
+  const dates = entries
+    .filter((entry) => entry.isDirectory() && /^\d{4}-\d{2}-\d{2}$/.test(entry.name))
+    .map((entry) => entry.name)
+    .sort((left, right) => right.localeCompare(left));
+  for (const date of dates) {
+    const session = await loadSession(outputDir, date);
+    if (session) return { path: sessionPath(outputDir, date), session };
+  }
+  return null;
+}
+
+async function resolveSessionForAction(outputDir: string, date: string): Promise<{ path: string; session: LinkRegistryGovernanceSession } | null> {
+  const trimmedDate = date.trim();
+  if (trimmedDate) {
+    const session = await loadSession(outputDir, trimmedDate);
+    return session ? { path: sessionPath(outputDir, trimmedDate), session } : null;
+  }
+  return loadLatestSession(outputDir);
+}
+
+function nextReviewIndex(session: LinkRegistryGovernanceSession): number {
+  const reviewed = new Set(session.reviewRecords.map((record) => record.reviewIndex));
+  const index = session.queue.findIndex((_, itemIndex) => !reviewed.has(itemIndex + 1));
+  return index === -1 ? session.queue.length + 1 : index + 1;
 }
 
 function buildQueue(
@@ -319,11 +355,22 @@ export async function openLinkRegistryGovernancePrompt(
 
   const signature = buildSessionSignature(queue);
   const existing = await loadSession(outputDir, input.date);
-  if (existing?.signature === signature) return null;
-  if (existing && (existing.status === 'open' || existing.status === 'reviewing')) return null;
+  if (existing?.signature === signature) {
+    if (!input.force) return null;
+    if (existing.status === 'reviewing' || existing.status === 'completed') return currentReviewResponse(existing, nextReviewIndex(existing));
+    existing.status = 'open';
+    existing.updatedAt = new Date().toISOString();
+    await saveSession(sessionPath(outputDir, input.date), existing);
+    await saveReminderStatus(outputDir, existing, existing.status);
+    return {
+      text: `发现 ${existing.queue.length} 个组级治理问题，建议抽空看一下。`,
+      card: buildPromptCard(existing),
+    };
+  }
+  if (!input.force && existing && (existing.status === 'open' || existing.status === 'reviewing')) return null;
 
   const reminderState = await loadLinkRegistryReminderState(outputDir, 'governance');
-  if (reminderState?.signature === signature) return null;
+  if (!input.force && reminderState?.signature === signature) return null;
 
   const now = new Date().toISOString();
   const session: LinkRegistryGovernanceSession = {
@@ -347,9 +394,9 @@ export async function handleLinkRegistryGovernanceCardAction(
   outputDir: string,
   input: LinkRegistryGovernanceCardActionInput,
 ): Promise<LinkRegistryGovernanceResponse> {
-  const path = sessionPath(outputDir, input.date);
-  const session = await loadSession(outputDir, input.date);
-  if (!session) return { text: '还没有可用的组级治理会话，请等待下一次提醒。' };
+  const resolved = await resolveSessionForAction(outputDir, input.date);
+  if (!resolved) return { text: '还没有可用的组级治理会话，请等待下一次提醒。' };
+  const { path, session } = resolved;
 
   if (input.action === 'snooze') {
     session.status = 'snoozed';
@@ -378,10 +425,10 @@ export async function handleLinkRegistryGovernanceCardAction(
     session.updatedAt = new Date().toISOString();
     await saveSession(path, session);
     await saveReminderStatus(outputDir, session, session.status);
-    return currentReviewResponse(session, 1);
+    return currentReviewResponse(session, nextReviewIndex(session));
   }
 
-  const reviewIndex = input.reviewIndex && input.reviewIndex > 0 ? input.reviewIndex : 1;
+  const reviewIndex = input.reviewIndex && input.reviewIndex > 0 ? input.reviewIndex : nextReviewIndex(session);
   const item = session.queue[reviewIndex - 1];
   if (!item) return { text: '没有找到对应的治理条目，请从最新卡片继续。' };
 

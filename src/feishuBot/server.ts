@@ -222,6 +222,10 @@ function cardActionValue(payload: FeishuCardActionEvent): Record<string, unknown
     if (matched) return matched;
     if (expectedAction.endsWith('_cancel')) return fallbackCancelValue(expectedAction, candidates);
     if (expectedAction === 'id_lookup') return { action: 'id_lookup' };
+    if (
+      expectedAction.startsWith('link_registry_maintenance_')
+      || expectedAction.startsWith('link_registry_governance_')
+    ) return { action: expectedAction };
     return undefined;
   }
   if (candidates[0]) return candidates[0];
