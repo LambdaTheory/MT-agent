@@ -2605,6 +2605,79 @@ describe('handleBotIntent', () => {
     expect(cardText).not.toContain('"sourceProductId":"733"');
   });
 
+  it('locks numeric new-link keywords as explicit internal product ids', async () => {
+    const { outputDir, registryPaths } = await writeNewLinkWorkflowContext();
+    const planner: AgentPlannerProvider = {
+      async proposePlan() {
+        return JSON.stringify({
+          goal: 'copy from internal id 875',
+          selectedTool: 'rental.newLinkBatchPlan',
+          arguments: { keyword: '875', count: 3 },
+          confidence: 0.95,
+          reason: 'the user provided an explicit internal product id',
+          requiresConfirmation: true,
+        });
+      },
+    };
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run'); },
+      async execute() { throw new Error('execute should not run'); },
+      async copy() { throw new Error('copy should not run before workflow confirmation'); },
+      async delist() { throw new Error('delist should not run'); },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+
+    const response = await handleBotIntent({ type: 'unknown', text: '帮我铺五条 875' }, outputDir, {
+      agentPlannerProvider: planner,
+      rentalPriceClient,
+      closedOrderRegistryPaths: registryPaths,
+    });
+
+    const cardText = JSON.stringify(response.card);
+    expect(response.text).toContain('875');
+    expect(cardText).toContain('"sourceProductId":"875"');
+    expect(cardText).toContain('"requestedSourceProductId":"875"');
+    expect(cardText).not.toContain('"sourceProductId":"733"');
+  });
+
+  it('accepts planner new-link requests with sourceProductId and count but no keyword', async () => {
+    const { outputDir, registryPaths } = await writeNewLinkWorkflowContext();
+    const planner: AgentPlannerProvider = {
+      async proposePlan() {
+        return JSON.stringify({
+          goal: 'copy from internal id 875',
+          selectedTool: 'rental.newLinkBatchPlan',
+          arguments: { sourceProductId: '875', count: 3 },
+          confidence: 0.95,
+          reason: 'the user provided an explicit internal product id',
+          requiresConfirmation: true,
+        });
+      },
+    };
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run'); },
+      async execute() { throw new Error('execute should not run'); },
+      async copy() { throw new Error('copy should not run before workflow confirmation'); },
+      async delist() { throw new Error('delist should not run'); },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+
+    const response = await handleBotIntent({ type: 'unknown', text: '复制五条端内id875' }, outputDir, {
+      agentPlannerProvider: planner,
+      rentalPriceClient,
+      closedOrderRegistryPaths: registryPaths,
+    });
+
+    const cardText = JSON.stringify(response.card);
+    expect(response.text).not.toContain('参数无效');
+    expect(cardText).toContain('"sourceProductId":"875"');
+    expect(cardText).toContain('"requestedSourceProductId":"875"');
+  });
+
   it('turns a best-link follow-up copy command into a new-link confirmation card without executing', async () => {
     const { outputDir, registryPaths } = await writeNewLinkWorkflowContext();
     const planner: AgentPlannerProvider = {

@@ -227,11 +227,19 @@ describe('agent runtime planner proposal validation', () => {
     }))).toEqual({ ok: false, reason: 'invalid_arguments' });
 
     expect(validateAgentPlannerProposal(JSON.stringify({
-      goal: 'bad item shape',
+      goal: 'source id item shape',
       selectedTool: 'rental.newLinkBatchPlan',
       arguments: { items: [{ count: 5, sourceProductId: '900' }] },
       confidence: 0.9,
-      reason: 'missing keyword',
+      reason: 'explicit source id is enough for new-link copy planning',
+    }))).toMatchObject({ ok: true });
+
+    expect(validateAgentPlannerProposal(JSON.stringify({
+      goal: 'bad item shape',
+      selectedTool: 'rental.newLinkBatchPlan',
+      arguments: { items: [{ count: 5 }] },
+      confidence: 0.9,
+      reason: 'missing keyword and sourceProductId',
     }))).toEqual({ ok: false, reason: 'invalid_arguments' });
 
     expect(validateAgentPlannerProposal(JSON.stringify({

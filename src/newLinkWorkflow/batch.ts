@@ -87,6 +87,15 @@ function readProductId(value: unknown): string | null {
   return parsed ? String(parsed) : null;
 }
 
+function readExplicitProductIdText(value: string | null): string | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  return /^(\d+)$/.exec(trimmed)?.[1]
+    ?? /^id\s*(\d+)$/i.exec(trimmed)?.[1]
+    ?? /^\u7aef\u5185\s*(?:id)?\s*(\d+)$/i.exec(trimmed)?.[1]
+    ?? null;
+}
+
 function readProductIds(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return [...new Set(value.map(readProductId).filter((item): item is string => Boolean(item)))];
@@ -151,9 +160,10 @@ function readMultiConfirmRequestPayload(value: Record<string, unknown>): Record<
 }
 
 export function readNewLinkBatchWorkflowRequest(value: Record<string, unknown>): NewLinkBatchWorkflowRequest | null {
-  const keyword = readString(value.keyword);
+  const rawKeyword = readString(value.keyword);
   const count = readPositiveInteger(value.count);
-  const sourceProductId = readProductId(value.sourceProductId);
+  const sourceProductId = readProductId(value.sourceProductId) ?? readExplicitProductIdText(rawKeyword);
+  const keyword = rawKeyword ?? sourceProductId;
   const fallbackSourceProductIds = readProductIds(value.fallbackSourceProductIds).filter((item) => item !== sourceProductId);
   return keyword && count
     ? { keyword, count, ...(sourceProductId ? { sourceProductId } : {}), ...(fallbackSourceProductIds.length ? { fallbackSourceProductIds } : {}) }
@@ -287,7 +297,7 @@ export function buildNewLinkBatchPlan(
 ): NewLinkBatchPlan {
   const keyword = request.keyword.trim();
   const count = Math.trunc(request.count);
-  const sourceProductId = request.sourceProductId?.trim();
+  const sourceProductId = request.sourceProductId?.trim() ?? readExplicitProductIdText(keyword);
   const warnings: string[] = [];
 
   if (!keyword) warnings.push('缺少要铺新链的商品关键词。');
