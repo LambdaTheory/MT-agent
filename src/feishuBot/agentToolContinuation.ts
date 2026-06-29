@@ -10,6 +10,7 @@ import { findAgentTool } from '../agentRuntime/toolRegistry.js';
 import { executeAgentToolRequest, type AgentToolExecutionOptions } from './agentToolExecutor.js';
 import { inferPriceAdjustmentAmountFromText } from './priceAdjustment.js';
 import { inferPriceMultiplierFromText } from './priceMultiplier.js';
+import { parseRentPriceFieldsFromText } from './rentalPrice.js';
 import type { BotResponse } from './types.js';
 
 interface ContinuePlannerStepsInput {
@@ -22,6 +23,7 @@ interface ContinuePlannerStepsInput {
   textParts: string[];
   outputDir: string;
   options: AgentToolExecutionOptions;
+  sourceText?: string;
 }
 
 function cloneMetadataStore(store: AgentStepMetadataStore): AgentStepMetadataStore {
@@ -56,6 +58,13 @@ function completePricePreviewArguments(
   contextText: string,
 ): Record<string, unknown> {
   if (toolName !== 'rental.pricePreview' || args.discount !== undefined || args.fields !== undefined || args.adjustmentAmount !== undefined) return args;
+  const fields = parseRentPriceFieldsFromText(contextText);
+  if (Object.keys(fields).length > 0) {
+    return {
+      ...args,
+      fields,
+    };
+  }
   const adjustmentAmount = inferPriceAdjustmentAmountFromText(contextText);
   if (adjustmentAmount !== null) {
     return {
@@ -170,13 +179,13 @@ export async function continueAgentPlannerSteps(input: ContinuePlannerStepsInput
     const completedArguments = completePricePreviewArguments(
       step.toolName,
       resolvedArguments.value,
-      [input.goal, input.reason, step.reason].filter(Boolean).join('\n'),
+      [input.sourceText, input.goal, input.reason, step.reason].filter(Boolean).join('\n'),
     );
     const finalArguments = completeNewLinkBatchArguments(
       step.toolName,
       completedArguments,
       input.metadataStore,
-      [input.goal, input.reason, step.reason].filter(Boolean).join('\n'),
+      [input.sourceText, input.goal, input.reason, step.reason].filter(Boolean).join('\n'),
     );
     if (!validateAgentToolArguments(step.toolName, finalArguments)) {
       input.textParts.push('');

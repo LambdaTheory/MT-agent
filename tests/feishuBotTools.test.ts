@@ -3117,6 +3117,40 @@ describe('handleBotIntent', () => {
     expect(JSON.stringify(response.card)).not.toContain('agent_tool_confirm');
   });
 
+  it('recovers explicit rent fields from the original message when Agent plans pricePreview with only productIds', async () => {
+    const planner: AgentPlannerProvider = {
+      async proposePlan(request) {
+        expect(request.message).toBe('改价 954 1天88 10天999');
+        return JSON.stringify({
+          goal: '对商品 954 生成改价预览',
+          selectedTool: 'rental.pricePreview',
+          arguments: { productIds: ['954'] },
+          confidence: 0.92,
+          reason: '用户要求对 954 改价，需先生成确认卡',
+        });
+      },
+    };
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview(request) {
+        expect(request).toEqual({ mode: 'explicit_fields', productId: '954', fields: { rent1day: '88.00', rent10day: '999.00' } });
+        if (request.mode !== 'explicit_fields') throw new Error('expected explicit fields preview');
+        return { productId: '954', fields: request.fields, lines: ['rent1day -> 88.00', 'rent10day -> 999.00'], warnings: [] };
+      },
+      async execute() { throw new Error('execute should not run before price confirmation'); },
+      async copy() { throw new Error('copy should not run'); },
+      async delist() { throw new Error('delist should not run'); },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+
+    const response = await handleBotIntent({ type: 'unknown', text: '改价 954 1天88 10天999' }, 'output', { agentPlannerProvider: planner, rentalPriceClient });
+
+    expect(response.text).toContain('改价预览：1 个端内ID');
+    expect(JSON.stringify(response.card)).toContain('rent1day');
+    expect(JSON.stringify(response.card)).toContain('999.00');
+  });
+
   it('lets the Agent compose product resolution and atomic price preview before group discount execution', async () => {
     const outputDir = await writeContext();
     const registryRoot = await mkdtemp(join(tmpdir(), 'mt-agent-ace-price-registry-'));

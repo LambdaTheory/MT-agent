@@ -42,6 +42,7 @@ import {
   buildRentalOperationConfirmCard,
   buildRentalPricePreviewCard,
   createRentalPriceSkillClient,
+  parseRentPriceFieldsFromText,
   rentalPriceChangeRequestFromToolArguments,
   type RentalOperationConfirmRequest,
   type RentalPriceSkillClient,
@@ -58,6 +59,15 @@ const NEW_LINK_WRITE_INTENT_PLAN_FAILED =
   '这像是新链批量铺设写操作，但 Agent planner 没有生成有效的新链批量铺设计划。为避免误执行或误答只读新链接池，本次不执行；请换个说法或检查 LLM 输出。';
 const LEGACY_WORKFLOW_PLAN_REJECTED =
   'Agent planner 返回了 legacy workflow 格式（selectedWorkflow），但当前飞书路径只接受 registered tool 或 steps 多步骤计划。未执行任何操作；请让 LLM 改为 selectedTool 或 steps。';
+
+function completePlannerPriceArguments(toolName: string, args: Record<string, unknown>, contextText: string): Record<string, unknown> {
+  if ((toolName !== 'rental.pricePreview' && toolName !== 'rental.priceChange') || args.fields !== undefined || args.discount !== undefined || args.adjustmentAmount !== undefined) {
+    return args;
+  }
+  const fields = parseRentPriceFieldsFromText(contextText);
+  return Object.keys(fields).length > 0 ? { ...args, fields } : args;
+}
+
 const HELP_TEXT = `📋 查询与分析
   今日概况 — 查看最新公域日报概况
   看 2026-06-22 的日报 / 查昨天日报 — 查看指定日期公域日报
@@ -322,6 +332,7 @@ async function handleInventoryStatusIntent(
 
 async function executeAgentMultiStepPlannerResponse(
   rawProposal: string,
+  message: string,
   outputDir: string,
   options: HandleBotIntentOptions,
 ): Promise<BotResponse | null> {
@@ -342,6 +353,7 @@ async function executeAgentMultiStepPlannerResponse(
     metadataStore: {},
     textParts,
     outputDir,
+    sourceText: message,
     options: {
       rentalPriceClient: options.rentalPriceClient,
       closedOrderFetchImpl: options.closedOrderFetchImpl,
@@ -382,7 +394,7 @@ async function agentPlannerResponse(
   const parsed = validateAgentPlannerProposal(rawProposal);
   if (!parsed.ok) {
     if (/"selectedWorkflow"\s*:/.test(rawProposal)) return { text: LEGACY_WORKFLOW_PLAN_REJECTED };
-    const multiStepResponse = await executeAgentMultiStepPlannerResponse(rawProposal, outputDir, options);
+    const multiStepResponse = await executeAgentMultiStepPlannerResponse(rawProposal, message, outputDir, options);
     if (multiStepResponse) return multiStepResponse;
     const clarificationParsed = validateAgentPlannerClarificationProposal(rawProposal);
     return clarificationParsed.ok
@@ -390,13 +402,18 @@ async function agentPlannerResponse(
       : null;
   }
 
+  const completedArguments = completePlannerPriceArguments(
+    parsed.proposal.selectedTool,
+    parsed.proposal.arguments,
+    [message, parsed.proposal.reason].filter(Boolean).join('\n'),
+  );
   const request = {
     toolName: parsed.proposal.selectedTool,
-    arguments: parsed.proposal.arguments,
+    arguments: completedArguments,
     reason: parsed.proposal.reason,
   };
   if (parsed.proposal.selectedTool === 'rental.priceChange') {
-    const rentalRequest = rentalPriceChangeRequestFromToolArguments(parsed.proposal.arguments);
+    const rentalRequest = rentalPriceChangeRequestFromToolArguments(completedArguments);
     if (!rentalRequest) return { text: '租赁商品改价参数无效：需要 productId，并提供 fields 或 discount。' };
     const rentalPriceClient = options.rentalPriceClient ?? createRentalPriceSkillClient();
     const preview = await rentalPriceClient.preview(rentalRequest);

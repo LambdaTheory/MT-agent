@@ -64,6 +64,8 @@ function fakeClient(): RentalPriceSkillClient & { previews: unknown[]; execution
 describe('rental price Feishu integration', () => {
   it('parses explicit rental price change commands', () => {
     expect(parseBotIntent('改价 商品761 1天22 10天55')).toEqual({ type: 'rental_price_change', productId: '761', request: { mode: 'explicit_fields', productId: '761', fields: { rent1day: '22.00', rent10day: '55.00' } } });
+    expect(parseBotIntent('改价 954 1天88 10天999')).toEqual({ type: 'rental_price_change', productId: '954', request: { mode: 'explicit_fields', productId: '954', fields: { rent1day: '88.00', rent10day: '999.00' } } });
+    expect(parseBotIntent('改价 954 1天租金改成88 10天改为999')).toEqual({ type: 'rental_price_change', productId: '954', request: { mode: 'explicit_fields', productId: '954', fields: { rent1day: '88.00', rent10day: '999.00' } } });
   });
 
   it('parses global discount commands', () => {

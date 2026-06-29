@@ -181,7 +181,7 @@ interface RentalPriceSkillClientOptions {
   daemonToken?: string;
 }
 
-const RENT_FIELD_PATTERN = /(1|2|3|4|5|7|10|15|30|60|90|180)\s*天(?:租金)?\s*([0-9]+(?:\.[0-9]+)?)/g;
+const RENT_FIELD_PATTERN = /(1|2|3|4|5|7|10|15|30|60|90|180)\s*(?:天|日)(?:租金|租价|价格)?\s*(?:改(?:成|为|到)?|设(?:成|为)?|调(?:成|为|到)?|=|:|：)?\s*([0-9]+(?:\.[0-9]+)?)/g;
 const PRICE_FIELD_NAMES = new Set(['rent1day', 'rent2day', 'rent3day', 'rent4day', 'rent5day', 'rent7day', 'rent10day', 'rent15day', 'rent30day', 'rent60day', 'rent90day', 'rent180day', 'marketPrice', 'deposit', 'purchasePrice', 'costPrice', 'finalPayment']);
 const AUDIT_TASK_ID_PATTERN = /^task_\d+_[a-f0-9]+$/i;
 const SPEC_REMOVE_CONFIRM_DISPLAY_LIMIT = 30;
@@ -224,11 +224,19 @@ export function parseRentalPriceChange(text: string): RentalPriceChangeRequest |
   const allPriceDiscount = /所有价格\s*\*\s*([0-9]+(?:\.[0-9]+)?)/.exec(body);
   if (allPriceDiscount) return { mode: 'global_discount', productId, discount: Number(allPriceDiscount[1]), scope: 'rent_fields' };
 
-  const fields: Record<string, string> = {};
-  for (const match of body.matchAll(RENT_FIELD_PATTERN)) {
-    fields[`rent${match[1]}day`] = money(match[2]);
-  }
+  const fields = parseRentPriceFieldsFromText(body);
   return Object.keys(fields).length ? { mode: 'explicit_fields', productId, fields } : null;
+}
+
+export function parseRentPriceFieldsFromText(text: string): Record<string, string> {
+  const normalized = text.replace(/\s+/g, ' ').trim();
+  const fields: Record<string, string> = {};
+  for (const match of normalized.matchAll(RENT_FIELD_PATTERN)) {
+    const day = match[1];
+    const value = match[2];
+    if (day && value) fields[`rent${day}day`] = money(value);
+  }
+  return fields;
 }
 
 export function compactAuditReference(audit: RentalPriceAuditReference | undefined): RentalPriceAuditReference | undefined {
