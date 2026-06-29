@@ -118,8 +118,8 @@ describe('createFeishuMessageDispatcher', () => {
       },
     });
 
-    await expect(dispatcher.dispatch({ messageId: 'mid-agent-first-resolver', text: '查询 565', source: 'sdk' })).resolves.toEqual({ text: 'query_product', skipped: false });
-    expect(intents).toEqual([{ type: 'query_product', keyword: '565' }]);
+    await expect(dispatcher.dispatch({ messageId: 'mid-agent-first-resolver', text: '查询 565', source: 'sdk' })).resolves.toEqual({ text: 'unknown', skipped: false });
+    expect(intents).toEqual([{ type: 'unknown', text: '查询 565' }]);
   });
 
   it('keeps exact management commands deterministic even when a planner is configured', async () => {

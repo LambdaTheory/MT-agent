@@ -12,6 +12,7 @@ import {
   loadLinkRegistryReminderState,
   saveLinkRegistryReminderState,
 } from './reminderState.js';
+import type { LinkRegistryRefreshSummary } from './promptRefresh.js';
 import type { LinkRegistryEntry } from './types.js';
 
 export type LinkRegistryMaintenanceSessionStatus = 'open' | 'reviewing' | 'snoozed' | 'ignored' | 'completed';
@@ -62,6 +63,7 @@ interface LinkRegistryMaintenanceSession {
   productTypeOptions: string[];
   reviewRecords: LinkRegistryMaintenanceReviewRecord[];
   overridesPath: string;
+  promptSummary?: LinkRegistryRefreshSummary;
 }
 
 export interface OpenLinkRegistryMaintenancePromptInput {
@@ -70,6 +72,7 @@ export interface OpenLinkRegistryMaintenancePromptInput {
   referenceDate?: string;
   overridesPath: string;
   force?: boolean;
+  promptSummary?: LinkRegistryRefreshSummary;
 }
 
 export interface LinkRegistryMaintenanceCardActionInput {
@@ -306,22 +309,55 @@ function metricSummary(session: LinkRegistryMaintenanceSession): string {
   return `今日发现 ${session.queue.length} 条待维护链接，其中 P0 ${p0Count} 条。`;
 }
 
+function refreshHeadline(summary: LinkRegistryRefreshSummary | undefined, fallbackMetric: string): string {
+  if (!summary) return `**${fallbackMetric}**\n我已经把问题链接排好优先级了，你可以现在开始逐条维护。`;
+  const sourceBits = [
+    `商品总表 ${summary.goodsExportRefreshed ? '已刷新' : '沿用旧快照'}`,
+    `daemon ${summary.daemonRefreshed ? '已刷新' : '沿用旧快照'}`,
+  ];
+  const warningLine = summary.warnings.length > 0 ? `\n${summary.warnings.map((warning) => `- ${warning}`).join('\n')}` : '';
+  return [
+    `**本次刷新结果**`,
+    `${sourceBits.join('｜')}`,
+    `新增链接 ${summary.newLinkCount} 条｜已自动归档 ${summary.autoReadyCount} 条｜待人工维护 ${summary.pendingCount} 条`,
+    warningLine,
+  ].join('\n').trim();
+}
+
+function refreshGroupSummary(summary: LinkRegistryRefreshSummary | undefined): string | null {
+  if (!summary || summary.grouped.length === 0) return null;
+  const lines = summary.grouped.map((group) => {
+    const tail = [
+      group.pendingCount > 0 ? `待人工 ${group.pendingCount}` : '',
+      group.autoReadyCount > 0 ? `已归档 ${group.autoReadyCount}` : '',
+    ].filter(Boolean).join('，');
+    return `${group.label} ${group.totalCount} 条${tail ? `（${tail}）` : ''}`;
+  });
+  return `**本次新增概览**\n${lines.join('\n')}`;
+}
+
 function buildPromptCard(session: LinkRegistryMaintenanceSession): FeishuCardPayload {
   const previewLines = session.queue
     .slice(0, 3)
     .map((item, index) => `${index + 1}. ${compactName(item)}（${item.internalProductId}）\n${item.reasonLabels.join('、')}`);
+  const headline = refreshHeadline(session.promptSummary, metricSummary(session));
+  const groupSummary = refreshGroupSummary(session.promptSummary);
+  const hasPendingQueue = session.queue.length > 0;
   return {
     schema: '2.0',
     config: { update_multi: true, wide_screen_mode: true },
     header: {
       title: plainText('链接维护提醒'),
-      template: session.queue.some((item) => item.reasonCodes.includes('recent_new_link')) ? 'orange' : 'blue',
+      template: hasPendingQueue
+        ? (session.queue.some((item) => item.reasonCodes.includes('recent_new_link')) ? 'orange' : 'blue')
+        : 'green',
     },
     body: {
       elements: [
-        markdown(`**${metricSummary(session)}**\n我已经把问题链接排好优先级了，你可以现在开始逐条维护。`),
-        markdown(`**优先处理**\n${previewLines.join('\n')}`),
-        {
+        markdown(headline),
+        ...(groupSummary ? [markdown(groupSummary)] : []),
+        ...(hasPendingQueue ? [markdown(`**优先处理**\n${previewLines.join('\n')}`)] : [markdown('**人工维护**\n这次新增链接都已经自动纳入档案，本轮不需要人工补录。')]),
+        ...(hasPendingQueue ? [{
           tag: 'form',
           name: 'link_registry_maintenance_start_form',
           elements: [{
@@ -332,8 +368,8 @@ function buildPromptCard(session: LinkRegistryMaintenanceSession): FeishuCardPay
             name: 'link_registry_maintenance_start_submit',
             behaviors: [{ type: 'callback', value: { action: 'link_registry_maintenance_start', date: session.date } }],
           }],
-        },
-        {
+        }] : []),
+        ...(hasPendingQueue ? [{
           tag: 'form',
           name: 'link_registry_maintenance_snooze_form',
           elements: [{
@@ -344,8 +380,8 @@ function buildPromptCard(session: LinkRegistryMaintenanceSession): FeishuCardPay
             name: 'link_registry_maintenance_snooze_submit',
             behaviors: [{ type: 'callback', value: { action: 'link_registry_maintenance_snooze', date: session.date } }],
           }],
-        },
-        {
+        }] : []),
+        ...(hasPendingQueue ? [{
           tag: 'form',
           name: 'link_registry_maintenance_ignore_form',
           elements: [{
@@ -356,7 +392,7 @@ function buildPromptCard(session: LinkRegistryMaintenanceSession): FeishuCardPay
             name: 'link_registry_maintenance_ignore_submit',
             behaviors: [{ type: 'callback', value: { action: 'link_registry_maintenance_ignore', date: session.date } }],
           }],
-        },
+        }] : []),
       ],
     },
   };
@@ -546,7 +582,7 @@ export async function openLinkRegistryMaintenancePrompt(
   input: OpenLinkRegistryMaintenancePromptInput,
 ): Promise<LinkRegistryMaintenanceResponse | null> {
   const queue = buildSessionQueue(input.registry, input.referenceDate ?? input.date);
-  if (queue.length === 0) return null;
+  if (queue.length === 0 && !input.promptSummary?.newLinkCount) return null;
 
   const signature = buildSessionSignature(queue);
   const existing = await loadSession(outputDir, input.date);
@@ -555,10 +591,13 @@ export async function openLinkRegistryMaintenancePrompt(
     if (existing.status === 'reviewing' || existing.status === 'completed') return currentReviewResponse(existing);
     existing.status = 'open';
     existing.updatedAt = new Date().toISOString();
+    if (input.promptSummary) existing.promptSummary = input.promptSummary;
     await saveSession(sessionPath(outputDir, input.date), existing);
     await saveReminderStatus(outputDir, existing, existing.status);
     return {
-      text: `发现 ${existing.queue.length} 条待维护链接，请确认是否开始维护。`,
+      text: existing.queue.length > 0
+        ? `发现 ${existing.queue.length} 条待维护链接，请确认是否开始维护。`
+        : `本次新增 ${existing.promptSummary?.newLinkCount ?? 0} 条链接，已自动归档，无需人工维护。`,
       card: buildPromptCard(existing),
     };
   }
@@ -579,11 +618,14 @@ export async function openLinkRegistryMaintenancePrompt(
     productTypeOptions: productTypeOptions(input.registry),
     reviewRecords: [],
     overridesPath: input.overridesPath,
+    ...(input.promptSummary ? { promptSummary: input.promptSummary } : {}),
   };
   await saveSession(sessionPath(outputDir, input.date), session);
   await saveReminderStatus(outputDir, session, session.status);
   return {
-    text: `发现 ${queue.length} 条待维护链接，请确认是否开始维护。`,
+    text: queue.length > 0
+      ? `发现 ${queue.length} 条待维护链接，请确认是否开始维护。`
+      : `本次新增 ${input.promptSummary?.newLinkCount ?? 0} 条链接，已自动归档，无需人工维护。`,
     card: buildPromptCard(session),
   };
 }

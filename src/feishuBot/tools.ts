@@ -10,6 +10,7 @@ import { queryInventoryStatus } from '../inventoryStatus/query.js';
 import { readInventorySameSkuSnapshot } from '../inventoryStatus/store.js';
 import { openLinkRegistryGovernancePrompt } from '../linkRegistry/governanceSession.js';
 import { openLinkRegistryMaintenancePrompt } from '../linkRegistry/maintenanceSession.js';
+import { refreshLinkRegistryForPrompt } from '../linkRegistry/promptRefresh.js';
 import { createLinkRegistry } from '../linkRegistry/store.js';
 import type { LinkRegistryEntry } from '../linkRegistry/types.js';
 import { startOperationsLearningSession, summarizeOperationsLearningHistory, summarizeOperationsLearningSession } from '../operationsLearningLoop/session.js';
@@ -175,14 +176,27 @@ async function handleLinkRegistryPromptIntent(
   outputDir: string,
   options: HandleBotIntentOptions,
 ): Promise<BotResponse> {
-  const registryContext = await loadClosedOrderRegistryContext(options.closedOrderRegistryPaths);
   const date = currentLocalDate();
+  let registryContext = await loadClosedOrderRegistryContext(options.closedOrderRegistryPaths);
+  let promptSummary: Awaited<ReturnType<typeof refreshLinkRegistryForPrompt>>['summary'] | undefined;
+
+  if (!options.closedOrderRegistryPaths && (mode === 'maintenance' || mode === 'hub')) {
+    try {
+      const refreshed = await refreshLinkRegistryForPrompt(outputDir, date);
+      registryContext = refreshed.registryContext;
+      promptSummary = refreshed.summary;
+    } catch {
+      // Fall back to the current local registry when on-demand refresh is unavailable.
+    }
+  }
+
   const maintenance = async () => openLinkRegistryMaintenancePrompt(outputDir, {
     date,
     registry: registryContext.registry,
     referenceDate: date,
     overridesPath: registryContext.resolvedPaths.overridesPath,
     force: true,
+    ...(promptSummary ? { promptSummary } : {}),
   });
   const governance = async () => openLinkRegistryGovernancePrompt(outputDir, {
     date,

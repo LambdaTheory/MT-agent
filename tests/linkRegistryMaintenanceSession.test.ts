@@ -87,6 +87,68 @@ describe('link registry maintenance session', () => {
     expect(saved.queue.map((item) => item.internalProductId)).toEqual(['702', '703']);
   });
 
+  it('shows refresh summary before manual maintenance when prompt summary is provided', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-link-maintenance-summary-'));
+
+    const response = await openLinkRegistryMaintenancePrompt(outputDir, {
+      date: '2026-06-24',
+      registry: registryEntries,
+      referenceDate: '2026-06-24',
+      overridesPath: join(outputDir, 'config', 'link-registry-overrides.json'),
+      promptSummary: {
+        referenceDate: '2026-06-24',
+        goodsExportRefreshed: true,
+        daemonRefreshed: true,
+        newLinkCount: 5,
+        autoReadyCount: 3,
+        pendingCount: 2,
+        grouped: [
+          { label: 'Action 5 Pro', totalCount: 2, pendingCount: 1, autoReadyCount: 1 },
+          { label: 'Pocket 3', totalCount: 3, pendingCount: 1, autoReadyCount: 2 },
+        ],
+        warnings: [],
+      },
+    });
+
+    const cardText = JSON.stringify(response?.card);
+    expect(cardText).toContain('本次刷新结果');
+    expect(cardText).toContain('新增链接 5 条');
+    expect(cardText).toContain('Action 5 Pro 2 条');
+    expect(cardText).toContain('Pocket 3 3 条');
+    expect(cardText).toContain('开始维护');
+  });
+
+  it('can show a summary-only card when new links are auto-archived and no manual queue remains', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-link-maintenance-auto-ready-'));
+
+    const response = await openLinkRegistryMaintenancePrompt(outputDir, {
+      date: '2026-06-24',
+      registry: [registryEntries[0]!, registryEntries[3]!],
+      referenceDate: '2026-06-24',
+      overridesPath: join(outputDir, 'config', 'link-registry-overrides.json'),
+      promptSummary: {
+        referenceDate: '2026-06-24',
+        goodsExportRefreshed: true,
+        daemonRefreshed: false,
+        newLinkCount: 2,
+        autoReadyCount: 2,
+        pendingCount: 0,
+        grouped: [
+          { label: 'Pocket 3', totalCount: 1, pendingCount: 0, autoReadyCount: 1 },
+          { label: 'Wide300', totalCount: 1, pendingCount: 0, autoReadyCount: 1 },
+        ],
+        warnings: ['daemon 链接目录刷新失败：network timeout'],
+      },
+    });
+
+    expect(response?.text).toContain('已自动归档');
+    const cardText = JSON.stringify(response?.card);
+    expect(cardText).toContain('本次刷新结果');
+    expect(cardText).toContain('新增链接 2 条');
+    expect(cardText).toContain('不需要人工补录');
+    expect(cardText).not.toContain('link_registry_maintenance_start_submit');
+  });
+
   it('starts review from the reminder and writes accepted edits into overrides', async () => {
     const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-link-maintenance-review-'));
     const overridesPath = join(outputDir, 'config', 'link-registry-overrides.json');
