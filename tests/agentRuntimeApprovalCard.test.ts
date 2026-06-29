@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildAgentToolConfirmCard, parseAgentToolConfirmRequest } from '../src/agentRuntime/approvalCard.js';
+import { buildAgentToolConfirmCard, parseAgentToolConfirmReference, parseAgentToolConfirmRequest } from '../src/agentRuntime/approvalCard.js';
 import { buildAgentClarificationCard, buildClarifiedMessage, parseAgentClarificationCustomSelection, parseAgentClarificationSelection } from '../src/agentRuntime/clarificationCard.js';
 
 function readAgentToolConfirmValue(card: unknown): unknown {
@@ -57,6 +57,27 @@ describe('agent runtime approval card', () => {
     expect(parseAgentToolConfirmRequest(readAgentToolConfirmValue(card))).toMatchObject(request);
     expect(parseAgentToolConfirmRequest({ request })).toBeNull();
     expect(parseAgentToolConfirmRequest({ request, confirmationKey: '000000000000000000000000' })).toBeNull();
+  });
+
+  it('can build compact referenced confirmation payloads without embedding the request', () => {
+    const request = {
+      toolName: 'rental.priceApply',
+      arguments: {
+        items: [
+          { productId: '653', fields: { rent1day: '21.89', rent10day: '54.89' } },
+        ],
+      },
+      reason: 'confirmed price preview',
+    };
+    const card = buildAgentToolConfirmCard(request, { requestRef: 'agent_tool_1782700000000_abcd1234abcd1234' });
+    const value = readAgentToolConfirmValue(card);
+
+    expect(parseAgentToolConfirmRequest(value)).toBeNull();
+    expect(parseAgentToolConfirmReference(value)).toEqual({
+      requestRef: 'agent_tool_1782700000000_abcd1234abcd1234',
+      confirmationKey: expect.stringMatching(/^[a-f0-9]{24}$/),
+    });
+    expect(JSON.stringify(value)).not.toContain('rent10day');
   });
 
   it('parses only registered tools with schema-valid arguments', () => {

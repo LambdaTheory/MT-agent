@@ -2,7 +2,7 @@ import * as lark from '@larksuiteoapi/node-sdk';
 import { createHash } from 'node:crypto';
 import { createActivityCancellationAssistant, type ActivityCancellationAssistant } from '../activityAutomation/cancelAssistance.js';
 import { updateActivitySubmitSessionStatus } from '../activityAutomation/submitSession.js';
-import { parseAgentToolConfirmRequest, type AgentToolConfirmRequest } from '../agentRuntime/approvalCard.js';
+import type { AgentToolConfirmRequest } from '../agentRuntime/approvalCard.js';
 import { buildClarifiedMessage, parseAgentClarificationCustomSelection, parseAgentClarificationSelection } from '../agentRuntime/clarificationCard.js';
 import type { AgentPlannerProvider } from '../agentRuntime/planner.js';
 import { recordAgentLearningEvent, type AgentLearningEventInput } from '../agentLearning/store.js';
@@ -14,6 +14,7 @@ import { formatRuntimeLog, summarizeError, textPreview } from '../observability/
 import { findLatestReportContext } from './reportStore.js';
 import { createFeishuMessageDispatcher } from './dispatcher.js';
 import { continueAgentPlannerStepsAfterResponse, executeAgentToolRequestWithContinuation } from './agentToolContinuation.js';
+import { loadAgentToolConfirmRequestFromValue } from './agentToolConfirmStore.js';
 import {
   agentRequestFromNewLinkBatchConfirm,
   agentRequestFromNewLinkBatchMultiConfirm,
@@ -782,7 +783,7 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
         }
 
         if (actionName === 'agent_tool_confirm') {
-          const request = parseAgentToolConfirmRequest(value);
+          const request = await loadAgentToolConfirmRequestFromValue(config.outputDir ?? 'output', value);
           if (!request) {
             await replyText(client, messageId, 'Agent 操作确认参数无效，请重新发起。');
             return;

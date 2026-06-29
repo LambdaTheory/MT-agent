@@ -13,6 +13,7 @@ import {
   type ActivityAutomationSkillClient,
   type ActivityPriceCallbackConfirmRequest,
 } from '../src/feishuBot/activityAutomation.js';
+import { saveAgentToolConfirmRequest } from '../src/feishuBot/agentToolConfirmStore.js';
 import { openLinkRegistryGovernancePrompt } from '../src/linkRegistry/governanceSession.js';
 import { openLinkRegistryMaintenancePrompt } from '../src/linkRegistry/maintenanceSession.js';
 import type { LinkRegistryOverrideRisk } from '../src/linkRegistry/overrides.js';
@@ -1163,6 +1164,78 @@ describe('startFeishuBotServer', () => {
       expect(rentalPriceClient.calls).toEqual(['875']);
       expect(replies).toHaveLength(1);
       expect(JSON.stringify(await second.json())).toContain('已经执行完成');
+    } finally {
+      server.close();
+    }
+  });
+
+  it('executes a referenced Agent price apply confirmation from the HTTP callback', async () => {
+    const replies: Array<{ messageId: string; text: string }> = [];
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-http-agent-tool-ref-'));
+    const calls: Array<{ productId: string; fields: Record<string, string> }> = [];
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run'); },
+      async execute(request) {
+        calls.push({ productId: request.productId, fields: request.fields });
+        return { productId: request.productId, ok: true, lines: ['apply: ok'] };
+      },
+      async copy() { throw new Error('copy should not run'); },
+      async delist() { throw new Error('delist should not run'); },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+    const server = startFeishuBotServer({
+      port: 0,
+      appId: 'app',
+      appSecret: 'secret',
+      outputDir,
+      rentalPriceClient,
+      replyText: async ({ messageId }, text) => {
+        replies.push({ messageId, text });
+        return { sent: true, channel: 'app' };
+      },
+    });
+    try {
+      await new Promise<void>((resolve) => server.once('listening', resolve));
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+      const request = {
+        toolName: 'rental.priceApply',
+        arguments: {
+          items: [
+            {
+              productId: '653',
+              fields: { rent1day: '29.85', rent10day: '74.85' },
+              audit: { taskId: 'task_653_ref', rollbackFile: 'rollback-653.json' },
+            },
+          ],
+        },
+        reason: 'confirmed preview',
+      };
+      const requestRef = await saveAgentToolConfirmRequest(outputDir, request);
+      const confirmValue = readAgentToolConfirmValue(buildAgentToolConfirmCard(request, { requestRef }));
+      expect(JSON.stringify(confirmValue)).not.toContain('rent10day');
+
+      const response = await fetch(`http://127.0.0.1:${address.port}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          header: { event_type: 'card.action.trigger' },
+          event: {
+            context: { open_message_id: 'mid-http-agent-tool-ref-price' },
+            action: {
+              value: confirmValue,
+            },
+          },
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(calls).toEqual([{ productId: '653', fields: { rent1day: '29.85', rent10day: '74.85' } }]);
+      expect(replies).toHaveLength(1);
+      expect(replies[0].text).toContain('改价执行完成');
+      expect(replies[0].text).toContain('apply: ok');
     } finally {
       server.close();
     }

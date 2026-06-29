@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { createActivityCancellationAssistant, type ActivityCancellationAssistant } from '../activityAutomation/cancelAssistance.js';
 import { updateActivitySubmitSessionStatus } from '../activityAutomation/submitSession.js';
-import { parseAgentToolConfirmRequest, type AgentToolConfirmRequest } from '../agentRuntime/approvalCard.js';
+import type { AgentToolConfirmRequest } from '../agentRuntime/approvalCard.js';
 import { buildClarifiedMessage, parseAgentClarificationCustomSelection, parseAgentClarificationSelection } from '../agentRuntime/clarificationCard.js';
 import type { AgentPlannerProvider } from '../agentRuntime/planner.js';
 import { recordAgentLearningEvent } from '../agentLearning/store.js';
@@ -30,6 +30,7 @@ import {
   type ActivityAutomationSkillClient,
 } from './activityAutomation.js';
 import { continueAgentPlannerStepsAfterResponse, executeAgentToolRequestWithContinuation } from './agentToolContinuation.js';
+import { loadAgentToolConfirmRequestFromValue } from './agentToolConfirmStore.js';
 import {
   agentRequestFromNewLinkBatchConfirm,
   agentRequestFromNewLinkBatchMultiConfirm,
@@ -512,7 +513,7 @@ async function handleCardActionTrigger(
   }
 
   if (actionName === 'agent_tool_confirm') {
-    const request = parseAgentToolConfirmRequest(value);
+    const request = await loadAgentToolConfirmRequestFromValue(config.outputDir ?? 'output', value);
     if (!request) {
       await replyText(replyConfig, 'Agent 操作确认参数无效，请重新发起。');
       return;

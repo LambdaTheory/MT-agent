@@ -77,6 +77,7 @@ import { findReadOnlyTool } from './readOnlyToolRegistry.js';
 import { inferPriceMultiplierFromText, readPriceMultiplierArgument } from './priceMultiplier.js';
 import { runPublicTrafficReportDateComparison, runPublicTrafficReportQuery, type PublicTrafficReportQueryArguments } from './reportQuery.js';
 import { findLatestReportContext, findReportContextByDate, formatConversionSummary, formatLatestSummary, formatProductRows, parseNumericProductIdList, queryProductRows } from './reportStore.js';
+import { saveAgentToolConfirmRequest } from './agentToolConfirmStore.js';
 
 export interface AgentToolExecutionOptions {
   rentalPriceClient?: RentalPriceSkillClient;
@@ -581,6 +582,7 @@ async function rentalPricePreviewResponse(
   args: Record<string, unknown>,
   reason: string,
   client: RentalPriceSkillClient,
+  outputDir: string,
   continuation?: AgentToolConfirmRequest['continuation'],
 ): Promise<BotResponse> {
   const productIds = readProductIdArray(args.productIds, RENTAL_PRICE_PREVIEW_MAX_PRODUCTS);
@@ -634,14 +636,16 @@ async function rentalPricePreviewResponse(
     };
   }
 
+  const confirmRequest: AgentToolConfirmRequest = {
+    toolName: 'rental.priceApply',
+    arguments: { items: readyItems },
+    reason,
+    ...(continuation ? { continuation } : {}),
+  };
+  const requestRef = await saveAgentToolConfirmRequest(outputDir, confirmRequest);
   return {
     text,
-    card: buildAgentToolConfirmCard({
-      toolName: 'rental.priceApply',
-      arguments: { items: readyItems },
-      reason,
-      ...(continuation ? { continuation } : {}),
-    }),
+    card: buildAgentToolConfirmCard(confirmRequest, { requestRef }),
     metadata: {
       toolName: 'rental.pricePreview',
       ok: true,
@@ -1606,7 +1610,7 @@ export async function executeAgentToolRequest(
       return { text: `请确认商品 ${rentalRequest.productId} 改价`, card: buildRentalPricePreviewCard(preview, { reason: request.reason, continuation: request.continuation }) };
     }
     case 'rental.pricePreview':
-      return rentalPricePreviewResponse(request.arguments, request.reason, options.rentalPriceClient ?? createRentalPriceSkillClient(), request.continuation);
+      return rentalPricePreviewResponse(request.arguments, request.reason, options.rentalPriceClient ?? createRentalPriceSkillClient(), outputDir, request.continuation);
     case 'rental.priceApply':
       return rentalPriceApplyResponse(request.arguments, options.rentalPriceClient ?? createRentalPriceSkillClient());
     case 'rental.priceSnapshot': {

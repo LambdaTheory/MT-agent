@@ -10,6 +10,7 @@ import type { RentalPriceSkillClient } from '../src/feishuBot/rentalPrice.js';
 import { recordAgentLearningEvent } from '../src/agentLearning/store.js';
 import { executeAgentToolRequestWithContinuation } from '../src/feishuBot/agentToolContinuation.js';
 import { executeAgentToolRequest } from '../src/feishuBot/agentToolExecutor.js';
+import { loadAgentToolConfirmRequestFromValue } from '../src/feishuBot/agentToolConfirmStore.js';
 import { handleBotIntent } from '../src/feishuBot/tools.js';
 
 const summary = {
@@ -51,12 +52,22 @@ interface TestRegistryPaths {
   artifactsDir: string;
 }
 
-function readAgentToolConfirmRequestFromCard(card: unknown) {
+function readAgentToolConfirmValueFromCard(card: unknown): unknown {
   const body = (card as { body?: { elements?: Array<{ elements?: Array<{ name?: string; behaviors?: Array<{ value?: unknown }> }> }> } }).body;
   const form = body?.elements?.find((element) => Array.isArray(element.elements));
   const button = form?.elements?.find((element) => element.name === 'agent_tool_confirm_submit');
-  const value = button?.behaviors?.[0]?.value;
+  return button?.behaviors?.[0]?.value;
+}
+
+function readAgentToolConfirmRequestFromCard(card: unknown) {
+  const value = readAgentToolConfirmValueFromCard(card);
   const request = parseAgentToolConfirmRequest(value);
+  if (!request) throw new Error('agent tool confirmation request not found');
+  return request;
+}
+
+async function loadAgentToolConfirmRequestFromCard(outputDir: string, card: unknown) {
+  const request = await loadAgentToolConfirmRequestFromValue(outputDir, readAgentToolConfirmValueFromCard(card));
   if (!request) throw new Error('agent tool confirmation request not found');
   return request;
 }
@@ -3131,7 +3142,7 @@ describe('handleBotIntent', () => {
     expect(response.text).toContain('端内ID：841、842');
     expect(JSON.stringify(response.card)).toContain('agent_tool_confirm');
     expect(JSON.stringify(response.card)).toContain('rental.priceApply');
-    const confirmRequest = readAgentToolConfirmRequestFromCard(response.card);
+    const confirmRequest = await loadAgentToolConfirmRequestFromCard(outputDir, response.card);
     expect(confirmRequest.toolName).toBe('rental.priceApply');
     expect((confirmRequest.arguments.items as Array<{ productId: string }>).map((item) => item.productId)).toEqual(['841', '842']);
   });
@@ -3186,7 +3197,7 @@ describe('handleBotIntent', () => {
     expect(response.text).toContain('914');
     expect(response.text).not.toContain('915');
     expect(response.text).not.toContain('916');
-    const confirmRequest = readAgentToolConfirmRequestFromCard(response.card);
+    const confirmRequest = await loadAgentToolConfirmRequestFromCard(outputDir, response.card);
     expect(confirmRequest.toolName).toBe('rental.priceApply');
     expect((confirmRequest.arguments.items as Array<{ productId: string }>).map((item) => item.productId)).toEqual(['914']);
   });

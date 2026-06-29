@@ -14,6 +14,7 @@ import {
 } from '../src/feishuBot/activityAutomation.js';
 import { buildRentalOperationConfirmCard, buildRentalPricePreviewCard, type RentalPriceSkillClient } from '../src/feishuBot/rentalPrice.js';
 import { buildNewLinkBatchConfirmCard, type NewLinkBatchPlan } from '../src/newLinkWorkflow/batch.js';
+import { saveAgentToolConfirmRequest } from '../src/feishuBot/agentToolConfirmStore.js';
 import { openLinkRegistryGovernancePrompt } from '../src/linkRegistry/governanceSession.js';
 import type { LinkRegistryEntry } from '../src/linkRegistry/types.js';
 import { openLinkRegistryMaintenancePrompt } from '../src/linkRegistry/maintenanceSession.js';
@@ -513,6 +514,70 @@ describe('createFeishuSdkBot card.action.trigger', () => {
     }
 
     expect(calls).toEqual(['copy:761', 'delist:762']);
+  });
+
+  it('executes a referenced Agent price apply confirmation from the SDK callback', async () => {
+    const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
+    const sent: unknown[] = [];
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-sdk-agent-tool-ref-'));
+    const calls: Array<{ productId: string; fields: Record<string, string> }> = [];
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run'); },
+      async execute(request) {
+        calls.push({ productId: request.productId, fields: request.fields });
+        return { productId: request.productId, ok: true, lines: ['apply: ok'] };
+      },
+      async copy() { throw new Error('copy should not run'); },
+      async delist() { throw new Error('delist should not run'); },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+    const bot = createFeishuSdkBot({
+      appId: 'app',
+      appSecret: 'x',
+      outputDir,
+      rentalPriceClient,
+      sdk: fakeSdk(sent, registered),
+    });
+
+    bot.start();
+    const request = {
+      toolName: 'rental.priceApply',
+      arguments: {
+        items: [
+          {
+            productId: '653',
+            fields: { rent1day: '29.85', rent10day: '74.85' },
+            audit: { taskId: 'task_653_ref', rollbackFile: 'rollback-653.json' },
+          },
+        ],
+      },
+      reason: 'confirmed preview',
+    };
+    const requestRef = await saveAgentToolConfirmRequest(outputDir, request);
+    const card = buildAgentToolConfirmCard(request, { requestRef });
+    const value = agentToolConfirmActionValue(card);
+    expect(JSON.stringify(value)).not.toContain('rent10day');
+
+    await registered['card.action.trigger']({
+      event: {
+        context: { open_message_id: 'om-agent-tool-ref-price' },
+        operator: { open_id: 'ou_agent' },
+        action: {
+          tag: 'button',
+          name: 'agent_tool_confirm_submit',
+          behaviors: [{ type: 'callback', value }],
+        },
+      },
+    });
+
+    for (let attempt = 0; attempt < 100 && calls.length < 1; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    expect(calls).toEqual([{ productId: '653', fields: { rent1day: '29.85', rent10day: '74.85' } }]);
+    expect(JSON.stringify(sent)).toContain('rental.priceApply');
   });
 
   it('passes registry paths into SDK Agent continuation steps after a confirmed write', async () => {

@@ -22,6 +22,15 @@ export interface AgentToolConfirmContinuation {
   metadataStore: Record<string, unknown>;
 }
 
+export interface AgentToolConfirmCardOptions {
+  requestRef?: string;
+}
+
+export interface AgentToolConfirmReference {
+  requestRef: string;
+  confirmationKey: string;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -109,6 +118,12 @@ function readConfirmationKey(value: unknown): string | null {
   return /^[a-f0-9]{24}$/i.test(trimmed) ? trimmed.toLowerCase() : null;
 }
 
+function readRequestRef(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return /^[A-Za-z0-9_-]{12,96}$/.test(trimmed) ? trimmed : null;
+}
+
 function hasValidConfirmationKey(value: Record<string, unknown>, request: AgentToolConfirmRequest): boolean {
   const suppliedKey = readConfirmationKey(value.confirmationKey);
   if (!suppliedKey) return false;
@@ -119,10 +134,13 @@ function requiresConfirmationKey(tool: AgentToolDefinition): boolean {
   return tool.plannerVisible === false;
 }
 
-export function buildAgentToolConfirmCard(request: AgentToolConfirmRequest): FeishuCardPayload {
+export function buildAgentToolConfirmCard(request: AgentToolConfirmRequest, options: AgentToolConfirmCardOptions = {}): FeishuCardPayload {
   const tool = findAgentTool(request.toolName);
   const title = tool?.description ?? request.toolName;
   const key = confirmationKey(request);
+  const confirmValue = options.requestRef
+    ? { action: 'agent_tool_confirm', requestRef: options.requestRef, confirmationKey: key }
+    : { action: 'agent_tool_confirm', request, confirmationKey: key };
   return {
     schema: '2.0',
     config: { wide_screen_mode: true },
@@ -149,7 +167,7 @@ export function buildAgentToolConfirmCard(request: AgentToolConfirmRequest): Fei
               type: 'primary',
               form_action_type: 'submit',
               name: 'agent_tool_confirm_submit',
-              behaviors: [{ type: 'callback', value: { action: 'agent_tool_confirm', request, confirmationKey: key } }],
+              behaviors: [{ type: 'callback', value: confirmValue }],
             },
             {
               tag: 'button',
@@ -164,6 +182,14 @@ export function buildAgentToolConfirmCard(request: AgentToolConfirmRequest): Fei
       ],
     },
   };
+}
+
+export function parseAgentToolConfirmReference(value: unknown): AgentToolConfirmReference | null {
+  if (!isRecord(value)) return null;
+  const requestRef = readRequestRef(value.requestRef);
+  const key = readConfirmationKey(value.confirmationKey);
+  if (!requestRef || !key) return null;
+  return { requestRef, confirmationKey: key };
 }
 
 export function parseAgentToolConfirmRequest(value: unknown): AgentToolConfirmRequest | null {
