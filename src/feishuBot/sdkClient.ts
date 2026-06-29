@@ -10,6 +10,7 @@ import type { ClosedOrderRegistryPathsInput } from '../closedOrderFeedback/runti
 import { handleLinkRegistryGovernanceCardAction } from '../linkRegistry/governanceSession.js';
 import { handleLinkRegistryMaintenanceCardAction } from '../linkRegistry/maintenanceSession.js';
 import { handleOperationsLearningFeedback, handleOperationsLearningStop } from '../operationsLearningLoop/session.js';
+import { formatRuntimeLog, summarizeError, textPreview } from '../observability/runtimeLogger.js';
 import { findLatestReportContext } from './reportStore.js';
 import { createFeishuMessageDispatcher } from './dispatcher.js';
 import { continueAgentPlannerStepsAfterResponse, executeAgentToolRequestWithContinuation } from './agentToolContinuation.js';
@@ -464,7 +465,14 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
     closedOrderFetchImpl: config.closedOrderFetchImpl,
     closedOrderRegistryPaths: config.closedOrderRegistryPaths,
   }).dispatch;
-  const logError = config.logError ?? ((error: unknown, context: { messageId: string; phase: 'reply' | 'dispatch' }) => console.error(`飞书SDK消息处理失败 ${context.phase} ${context.messageId}:`, error));
+  const logError = config.logError ?? ((error: unknown, context: { messageId: string; phase: 'reply' | 'dispatch' }) => console.error(formatRuntimeLog({
+    level: 'error',
+    component: 'feishu-bot',
+    event: 'message.error',
+    messageId: context.messageId,
+    phase: context.phase,
+    error: summarizeError(error),
+  })));
   const logInfo = config.logInfo ?? ((message: string) => console.log(message));
   const rentalPriceClient = config.rentalPriceClient ?? createRentalPriceSkillClient();
   const activityAutomationClient = config.activityAutomationClient ?? createActivityAutomationSkillClient();
@@ -495,11 +503,6 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
     void recordAgentLearningEvent(outputDir, input).catch((error) => logError(error, { messageId: contextMessageId, phase: 'reply' }));
   }
 
-  function messagePreview(text: string): string {
-    const compact = text.replace(/\s+/g, ' ').trim();
-    return compact.length > 120 ? `${compact.slice(0, 117)}...` : compact;
-  }
-
   function formatErrorMessage(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
   }
@@ -510,7 +513,15 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
       if (!message) return;
 
       const startedAt = Date.now();
-      logInfo(`飞书SDK收到消息 ${message.messageId}: chat=${message.chatType ?? 'unknown'} text="${messagePreview(message.text)}"`);
+      logInfo(formatRuntimeLog({
+        level: 'info',
+        component: 'feishu-bot',
+        event: 'message.received',
+        messageId: message.messageId,
+        chatType: message.chatType ?? 'unknown',
+        textPreview: textPreview(message.text),
+        textLength: message.text.length,
+      }));
 
       let response: FeishuBotDispatchResult;
       try {
@@ -520,22 +531,50 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
         await replyText(client, message.messageId, `处理失败：${formatErrorMessage(error)}`).catch((replyError) => {
           logError(replyError, { messageId: message.messageId, phase: 'reply' });
         });
-        logInfo(`飞书SDK消息dispatch失败 ${message.messageId}: elapsedMs=${Date.now() - startedAt}`);
+        logInfo(formatRuntimeLog({
+          level: 'warn',
+          component: 'feishu-bot',
+          event: 'message.dispatch.failed',
+          messageId: message.messageId,
+          elapsedMs: Date.now() - startedAt,
+        }));
         return;
       }
 
-      logInfo(`飞书SDK消息dispatch完成 ${message.messageId}: skipped=${response.skipped ? 'true' : 'false'} hasCard=${response.card ? 'true' : 'false'} elapsedMs=${Date.now() - startedAt}`);
+      logInfo(formatRuntimeLog({
+        level: 'info',
+        component: 'feishu-bot',
+        event: 'message.dispatch.completed',
+        messageId: message.messageId,
+        skipped: Boolean(response.skipped),
+        hasCard: Boolean(response.card),
+        elapsedMs: Date.now() - startedAt,
+      }));
       if (response.skipped) return;
 
       try {
         if (response.card) await replyCard(client, message.messageId, response.card);
         else await replyText(client, message.messageId, response.text);
-        logInfo(`飞书SDK消息回复成功 ${message.messageId}: type=${response.card ? 'card' : 'text'} elapsedMs=${Date.now() - startedAt}`);
+        logInfo(formatRuntimeLog({
+          level: 'info',
+          component: 'feishu-bot',
+          event: 'message.reply.completed',
+          messageId: message.messageId,
+          replyType: response.card ? 'card' : 'text',
+          elapsedMs: Date.now() - startedAt,
+        }));
       } catch (error) {
         logError(error, { messageId: message.messageId, phase: 'reply' });
         if (response.card) {
           await replyText(client, message.messageId, response.text)
-            .then(() => logInfo(`飞书SDK消息卡片失败后文本兜底成功 ${message.messageId}: elapsedMs=${Date.now() - startedAt}`))
+            .then(() => logInfo(formatRuntimeLog({
+              level: 'warn',
+              component: 'feishu-bot',
+              event: 'message.reply.fallback_completed',
+              messageId: message.messageId,
+              fallbackType: 'text',
+              elapsedMs: Date.now() - startedAt,
+            })))
             .catch((fallbackError) => {
               logError(fallbackError, { messageId: message.messageId, phase: 'reply' });
             });
@@ -548,6 +587,14 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
       const value = cardActionValue(data);
       const actionName = readString(value?.action);
       if (!messageId || !actionName || !value) return;
+      const actionStartedAt = Date.now();
+      logInfo(formatRuntimeLog({
+        level: 'info',
+        component: 'feishu-bot',
+        event: 'card_action.received',
+        messageId,
+        actionName,
+      }));
 
       try {
         if (actionName === 'operations_learning_feedback') {
@@ -1194,6 +1241,14 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
         }
       } catch (error) {
         logError(error, { messageId, phase: 'reply' });
+        logInfo(formatRuntimeLog({
+          level: 'warn',
+          component: 'feishu-bot',
+          event: 'card_action.failed',
+          messageId,
+          actionName,
+          elapsedMs: Date.now() - actionStartedAt,
+        }));
       }
     },
   });

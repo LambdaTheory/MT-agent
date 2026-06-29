@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -115,10 +115,10 @@ describe('createFeishuSdkBot', () => {
     expect(sent).toEqual([
       { path: { message_id: 'mid-sdk-reply' }, data: { content: JSON.stringify({ text: 'reply:帮助' }), msg_type: 'text' } },
     ]);
-    expect(logs).toEqual([
-      '飞书SDK收到消息 mid-sdk-reply: chat=unknown text="帮助"',
-      expect.stringMatching(/^飞书SDK消息dispatch完成 mid-sdk-reply: skipped=false hasCard=false elapsedMs=\d+$/),
-      expect.stringMatching(/^飞书SDK消息回复成功 mid-sdk-reply: type=text elapsedMs=\d+$/),
+    expect(logs.map((item) => JSON.parse(item))).toEqual([
+      expect.objectContaining({ level: 'info', component: 'feishu-bot', event: 'message.received', messageId: 'mid-sdk-reply', chatType: 'unknown', textPreview: '帮助', textLength: 2 }),
+      expect.objectContaining({ level: 'info', component: 'feishu-bot', event: 'message.dispatch.completed', messageId: 'mid-sdk-reply', skipped: false, hasCard: false, elapsedMs: expect.any(Number) }),
+      expect.objectContaining({ level: 'info', component: 'feishu-bot', event: 'message.reply.completed', messageId: 'mid-sdk-reply', replyType: 'text', elapsedMs: expect.any(Number) }),
     ]);
   });
 
@@ -196,6 +196,74 @@ describe('createFeishuSdkBot', () => {
     ).resolves.toBeUndefined();
 
     expect(logged).toEqual([{ error: replyError, context: { messageId: 'mid-sdk-reply-fails', phase: 'reply' } }]);
+  });
+
+  it('redacts default SDK reply error logs', async () => {
+    const registered: Record<string, (data: unknown) => Promise<void>> = {};
+    const replyError = new Error('Request failed with status code 400') as Error & {
+      response: { status: number; data: unknown };
+      config: { method: string; url: string; headers: unknown; data: string };
+    };
+    replyError.response = { status: 400, data: { code: 230099, msg: 'bad card' } };
+    replyError.config = {
+      method: 'post',
+      url: 'https://open.feishu.cn/open-apis/im/v1/messages/mid-sdk-redact/reply',
+      headers: { Authorization: 'Bearer secret-token' },
+      data: '{"content":"large card payload"}',
+    };
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    class FakeClient {
+      im = { v1: { message: { reply: async () => Promise.reject(replyError) } } };
+    }
+
+    class FakeWSClient {
+      start() {
+        return undefined;
+      }
+    }
+
+    class FakeEventDispatcher {
+      register(handlers: Record<string, (data: unknown) => Promise<void>>) {
+        Object.assign(registered, handlers);
+        return this;
+      }
+    }
+
+    try {
+      const bot = createFeishuSdkBot({
+        appId: 'app',
+        appSecret: 'secret',
+        dispatchMessage: async () => ({ text: 'fallback text', skipped: false }),
+        sdk: { Client: FakeClient, WSClient: FakeWSClient, EventDispatcher: FakeEventDispatcher },
+      });
+
+      bot.start();
+      await registered['im.message.receive_v1']({
+        message: { message_id: 'mid-sdk-redact', message_type: 'text', content: JSON.stringify({ text: '帮助' }) },
+      });
+
+      const lines = logged.mock.calls.map((call) => String(call[0]));
+      expect(lines.length).toBeGreaterThan(0);
+      expect(JSON.parse(lines[0])).toMatchObject({
+        level: 'error',
+        component: 'feishu-bot',
+        event: 'message.error',
+        messageId: 'mid-sdk-redact',
+        phase: 'reply',
+        error: {
+          name: 'Error',
+          message: 'Request failed with status code 400',
+          httpStatus: 400,
+          method: 'post',
+        },
+      });
+      expect(lines.join('\n')).not.toContain('secret-token');
+      expect(lines.join('\n')).not.toContain('large card payload');
+      expect(lines.join('\n')).not.toContain('Authorization');
+    } finally {
+      logged.mockRestore();
+    }
   });
 
   it('uses configured LLM selector through the default SDK dispatcher for read-only replies', async () => {
