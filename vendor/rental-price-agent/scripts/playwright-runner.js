@@ -2352,6 +2352,48 @@ async function actionTenancySet(daysStr) {
 }
 
 // --- Shared: find product on list page via search + large page size ---
+async function copyButtonForProductRow(row, productId) {
+  if (!row || typeof row.$ !== "function") {
+    return await page.$(`a[data-toggle="ajaxModal"][href*="copyGoods"][href*="id=${productId}"]`).catch(() => null);
+  }
+  return await row.$(`a[data-toggle="ajaxModal"][href*="copyGoods"][href*="id=${productId}"]`).catch(() => null)
+    || await row.$(`a[href*="copyGoods"][href*="id=${productId}"]`).catch(() => null)
+    || await row.$(`a[data-toggle="ajaxModal"][href*="copyGoods"]`).catch(() => null)
+    || await row.$(`a[href*="copyGoods"]`).catch(() => null);
+}
+
+async function textForProductRow(row) {
+  if (!row || typeof row.evaluate !== "function") return "";
+  return await row.evaluate(el => (el.textContent || "").replace(/\s+/g, " ").trim().substring(0, 300)).catch(() => "");
+}
+
+async function findProductRowOnCurrentPage(productId) {
+  const targetId = String(productId);
+  const editLinks = typeof page.$$ === "function"
+    ? await page.$$("a[href*='goods.edit'][href*='id=']").catch(() => [])
+    : [];
+  for (const link of editLinks) {
+    const isTarget = await link.evaluate((el, expectedId) => {
+      const rawHref = el.getAttribute("href") || el.href || "";
+      const match = rawHref.match(/[?&]id=(\d+)/);
+      return match ? match[1] === expectedId : false;
+    }, targetId).catch(() => false);
+    if (!isTarget) continue;
+    const row = await link.evaluateHandle(el => el.closest("tr"));
+    const copyBtn = await copyButtonForProductRow(row, productId);
+    const rowText = await textForProductRow(row);
+    return { found: true, row, copyBtn, rowText };
+  }
+  const exactLink = await page.$(`a[href*="goods.edit&id=${productId}"]`).catch(() => null);
+  if (exactLink) {
+    const row = await exactLink.evaluateHandle(el => el.closest("tr"));
+    const copyBtn = await copyButtonForProductRow(row, productId);
+    const rowText = await textForProductRow(row);
+    return { found: true, row, copyBtn, rowText };
+  }
+  return { found: false };
+}
+
 async function findProductOnList(productId) {
   const channels = getProductSearchChannels();
   for (const channel of channels) {
@@ -2376,11 +2418,9 @@ async function findProductOnList(productId) {
       if (!searchPage.ok) return { status: "error", message: "Product list search navigation failed canonical validation", channelKey: channel.key, channelLabel: channel.label, ...searchPage };
     }
 
-    const editLink = await page.$(`a[href*="goods.edit&id=${productId}"]`);
-    if (editLink) {
-      const row = await editLink.evaluateHandle(el => el.closest("tr"));
-      const copyBtn = await page.$(`a[data-toggle="ajaxModal"][href*="copyGoods"][href*="id=${productId}"]`);
-      return { found: true, row, copyBtn, channelKey: channel.key, channelLabel: channel.label, channelUrl: channel.url };
+    const searched = await findProductRowOnCurrentPage(productId);
+    if (searched.found) {
+      return { ...searched, channelKey: channel.key, channelLabel: channel.label, channelUrl: channel.url, searchStrategy: "keyword" };
     }
 
     for (let pg = 2; pg <= 5; pg++) {
@@ -2388,11 +2428,9 @@ async function findProductOnList(productId) {
       const pageCheck = checkConfiguredPage(page.url(), channel.url);
       if (!pageCheck.ok) return { status: "error", message: "Product list pagination failed canonical validation", channelKey: channel.key, channelLabel: channel.label, ...pageCheck };
       await page.waitForTimeout(1000);
-      const link = await page.$(`a[href*="goods.edit&id=${productId}"]`);
-      if (link) {
-        const row = await link.evaluateHandle(el => el.closest("tr"));
-        const copyBtn = await page.$(`a[data-toggle="ajaxModal"][href*="copyGoods"][href*="id=${productId}"]`);
-        return { found: true, row, copyBtn, channelKey: channel.key, channelLabel: channel.label, channelUrl: channel.url };
+      const current = await findProductRowOnCurrentPage(productId);
+      if (current.found) {
+        return { ...current, channelKey: channel.key, channelLabel: channel.label, channelUrl: channel.url, searchStrategy: "pagination", pagesScanned: pg };
       }
     }
   }
