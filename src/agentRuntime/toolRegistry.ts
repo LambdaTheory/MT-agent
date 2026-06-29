@@ -363,6 +363,7 @@ const newLinkBatchPlanArgumentsSchema = {
     keyword: { type: 'string' },
     count: positiveIntegerLikeSchema,
     sourceProductId: { type: 'string' },
+    fallbackSourceProductIds: { type: 'array', items: { type: 'string' } },
     items: {
       type: 'array',
       minItems: 1,

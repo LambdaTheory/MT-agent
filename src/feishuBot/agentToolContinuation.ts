@@ -123,7 +123,6 @@ function completeNewLinkBatchArguments(
   contextText: string,
 ): Record<string, unknown> {
   if (toolName !== 'rental.newLinkBatchPlan' || Array.isArray(args.items)) return args;
-  if (args.keyword !== undefined && args.count !== undefined && args.sourceProductId !== undefined) return args;
 
   const rank = rankMetadataFromStore(metadataStore);
   if (!rank) return args;
@@ -132,12 +131,19 @@ function completeNewLinkBatchArguments(
   const sourceProductId = readString(args.sourceProductId) ?? readString(rank.bestProductId);
   const count = args.count ?? inferPositiveCountFromText(contextText);
   if (!keyword || !sourceProductId || count === undefined) return args;
+  const fallbackSourceProductIds = Array.isArray(rank.ranking)
+    ? rank.ranking
+      .map((item) => isRecord(item) ? readString(item.internalProductId) : null)
+      .filter((item): item is string => Boolean(item && item !== sourceProductId))
+      .slice(0, 8)
+    : [];
 
   return {
     ...args,
     keyword,
     count,
     sourceProductId,
+    ...(fallbackSourceProductIds.length ? { fallbackSourceProductIds } : {}),
   };
 }
 

@@ -611,6 +611,19 @@ async function actionTenancySet(daysStr) {
 }
 
 // --- Shared: find product on list page via search + large page size ---
+async function copyButtonForProductRow(row, productId) {
+  if (!row) return null;
+  return await row.$(`a[data-toggle="ajaxModal"][href*="copyGoods"][href*="id=${productId}"]`).catch(() => null)
+    || await row.$(`a[href*="copyGoods"][href*="id=${productId}"]`).catch(() => null)
+    || await row.$(`a[data-toggle="ajaxModal"][href*="copyGoods"]`).catch(() => null)
+    || await row.$(`a[href*="copyGoods"]`).catch(() => null);
+}
+
+async function textForProductRow(row) {
+  if (!row) return "";
+  return await row.evaluate(el => (el.textContent || "").replace(/\s+/g, " ").trim().substring(0, 300)).catch(() => "");
+}
+
 async function findProductOnList(productId) {
   // Navigate to list with 100 per page
   await page.goto(config.saas.productListUrl + "&pagesize=100", { waitUntil: "networkidle" });
@@ -627,22 +640,24 @@ async function findProductOnList(productId) {
   }
 
   // Find the product row
-  const editLink = await page.$(`a[href*="goods.edit&id=${productId}"]`);
+  const editLink = await page.$(`a[href*="goods.edit&id=${productId}"], a[href*="goods.edit"][href*="id=${productId}"]`);
   if (editLink) {
     const row = await editLink.evaluateHandle(el => el.closest("tr"));
-    const copyBtn = await page.$(`a[data-toggle="ajaxModal"][href*="copyGoods"][href*="id=${productId}"]`);
-    return { found: true, row, copyBtn };
+    const copyBtn = await copyButtonForProductRow(row, productId);
+    const rowText = await textForProductRow(row);
+    return { found: true, row, copyBtn, rowText };
   }
 
   // Fallback: scan pages (with 100 per page, fewer pages needed)
   for (let pg = 2; pg <= 5; pg++) {
     await page.goto(config.saas.productListUrl + "&pagesize=100&page=" + pg, { waitUntil: "networkidle" });
     await page.waitForTimeout(1000);
-    const link = await page.$(`a[href*="goods.edit&id=${productId}"]`);
+    const link = await page.$(`a[href*="goods.edit&id=${productId}"], a[href*="goods.edit"][href*="id=${productId}"]`);
     if (link) {
       const row = await link.evaluateHandle(el => el.closest("tr"));
-      const copyBtn = await page.$(`a[data-toggle="ajaxModal"][href*="copyGoods"][href*="id=${productId}"]`);
-      return { found: true, row, copyBtn };
+      const copyBtn = await copyButtonForProductRow(row, productId);
+      const rowText = await textForProductRow(row);
+      return { found: true, row, copyBtn, rowText };
     }
   }
 
@@ -745,8 +760,9 @@ async function actionDelist(productId) {
 
 // --- Copy product ---
 async function actionCopyProduct(productId) {
-  const { found, copyBtn } = await findProductOnList(productId);
-  if (!found || !copyBtn) return { status: "error", message: "Product not found: " + productId };
+  const { found, copyBtn, rowText } = await findProductOnList(productId);
+  if (!found) return { status: "error", message: "Product not found: " + productId };
+  if (!copyBtn) return { status: "error", message: "Copy button not found for product: " + productId, productFound: true, rowText };
   await copyBtn.click();
   await page.waitForTimeout(1500);
 
