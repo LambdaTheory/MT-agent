@@ -106,6 +106,12 @@ describe('link registry maintenance session', () => {
     expect(JSON.stringify(started.card)).toContain('Pocket3');
     expect(JSON.stringify(started.card)).toContain('link_registry_maintenance_submit');
 
+    const startedFormButtons = ((((started.card as { body?: { elements?: Array<{ tag?: string; elements?: Array<Record<string, unknown>> }> } }).body?.elements ?? [])
+      .find((element) => element.tag === 'form'))?.elements ?? [])
+      .filter((element) => element.tag === 'button');
+    expect(startedFormButtons).toHaveLength(1);
+    expect(startedFormButtons[0]?.form_action_type).toBe('submit');
+
     const advanced = await handleLinkRegistryMaintenanceCardAction(outputDir, {
       date: '2026-06-24',
       action: 'submit',

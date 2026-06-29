@@ -443,7 +443,7 @@ function buildReviewCard(
               tag: 'button',
               text: plainText('提交并继续'),
               type: 'primary',
-              action_type: 'form_submit',
+              form_action_type: 'submit',
               name: 'link_registry_maintenance_submit',
               behaviors: [{
                 type: 'callback',
