@@ -609,6 +609,7 @@ describe('createFeishuSdkBot card.action.trigger', () => {
       buildNewLinkBatchConfirmCard(newLinkPlan(), 'test reason', query565Continuation('newLinks', 0)),
       'new_link_batch_confirm_submit',
     );
+    const { request: _request, ...flatConfirmValue } = confirmValue;
 
     bot.start();
     await registered['card.action.trigger']({
@@ -618,7 +619,7 @@ describe('createFeishuSdkBot card.action.trigger', () => {
         action: {
           tag: 'button',
           name: 'new_link_batch_confirm_submit',
-          value: confirmValue,
+          value: flatConfirmValue,
         },
       },
     });
@@ -631,6 +632,29 @@ describe('createFeishuSdkBot card.action.trigger', () => {
     const finalPatch = sent.map(patchedCard).find((card) => JSON.stringify(card).includes('步骤 2/2：product.query'));
     expect(JSON.stringify(finalPatch)).toContain('新链批量复制完成');
     expect(JSON.stringify(finalPatch)).toContain('端内ID 565');
+  });
+
+  it('returns a replacement status card for malformed new-link confirmations without text replies', async () => {
+    const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
+    const sent: unknown[] = [];
+    const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', outputDir: 'output', sdk: fakeSdk(sent, registered) });
+
+    bot.start();
+    const result = await registered['card.action.trigger']({
+      event: {
+        context: { open_message_id: 'om-new-link-malformed' },
+        operator: { open_id: 'ou_agent' },
+        action: {
+          tag: 'button',
+          name: 'new_link_batch_confirm_submit',
+          value: { action: 'new_link_batch_confirm' },
+        },
+      },
+    });
+
+    expect(sent).toEqual([]);
+    expect(result).toMatchObject({ card: { type: 'raw', data: { schema: '2.0' } } });
+    expect(JSON.stringify((result as any).card.data)).toContain('新链批量复制确认异常');
   });
 
   it('continues a planner sequence after a dedicated price confirmation succeeds', async () => {

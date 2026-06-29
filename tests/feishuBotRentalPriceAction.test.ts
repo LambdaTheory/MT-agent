@@ -40,9 +40,9 @@ async function waitFor(predicate: () => boolean | Promise<boolean>, timeoutMs = 
 }
 
 function readButtonValue(card: unknown, buttonName: string): Record<string, unknown> {
-  const body = (card as { body?: { elements?: Array<{ elements?: Array<{ name?: string; behaviors?: Array<{ value?: unknown }> }> }> } }).body;
+  const body = (card as { body?: { elements?: Array<{ elements?: Array<{ name?: string; behaviors?: Array<{ value?: unknown }> }>; actions?: Array<{ name?: string; behaviors?: Array<{ value?: unknown }> }> }> } }).body;
   for (const element of body?.elements ?? []) {
-    for (const item of element.elements ?? []) {
+    for (const item of [...(element.elements ?? []), ...(element.actions ?? [])]) {
       if (item.name === buttonName) {
         const value = item.behaviors?.[0]?.value;
         if (value && typeof value === 'object' && !Array.isArray(value)) return value as Record<string, unknown>;

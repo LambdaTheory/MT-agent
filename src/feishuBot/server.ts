@@ -568,8 +568,7 @@ async function handleCardActionTrigger(
   if (actionName === 'new_link_batch_confirm') {
     const request = parseNewLinkBatchConfirmRequest(value);
     if (!request) {
-      await replyText(replyConfig, '新链批量复制确认参数无效，请重新发起。');
-      return;
+      return statusCard('新链批量复制确认异常', '确认卡参数不完整，未执行任何复制。请重新发起新链复制。', 'red');
     }
     const claim = claimServerCardAction(messageId, cardActionClaimFamily('new_link_batch', value), actionName);
     if (!claim.claimed) {
@@ -606,8 +605,7 @@ async function handleCardActionTrigger(
   if (actionName === 'new_link_batch_multi_confirm') {
     const request = parseNewLinkBatchMultiConfirmRequest(value);
     if (!request) {
-      await replyText(replyConfig, '多商品新链批量复制确认参数无效，请重新发起。');
-      return;
+      return statusCard('多商品新链批量复制确认异常', '确认卡参数不完整，未执行任何复制。请重新发起新链复制。', 'red');
     }
     const claim = claimServerCardAction(messageId, cardActionClaimFamily('new_link_batch', value), actionName);
     if (!claim.claimed) {

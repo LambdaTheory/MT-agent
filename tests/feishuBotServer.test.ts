@@ -573,6 +573,47 @@ describe('startFeishuBotServer', () => {
     }
   });
 
+  it('returns a replacement card for malformed HTTP new-link confirmations without text replies', async () => {
+    const replies: Array<{ messageId: string; text: string }> = [];
+    const server = startFeishuBotServer({
+      port: 0,
+      appId: 'app',
+      appSecret: 'secret',
+      outputDir: await mkdtemp(join(tmpdir(), 'mt-agent-bot-http-new-link-malformed-')),
+      replyText: async ({ messageId }, text) => {
+        replies.push({ messageId, text });
+        return { sent: true, channel: 'app' };
+      },
+    });
+    try {
+      await new Promise<void>((resolve) => server.once('listening', resolve));
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+
+      const response = await fetch(`http://127.0.0.1:${address.port}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          header: { event_type: 'card.action.trigger' },
+          event: {
+            context: { open_message_id: 'mid-http-new-link-malformed' },
+            action: {
+              tag: 'button',
+              name: 'new_link_batch_confirm_submit',
+              value: { action: 'new_link_batch_confirm' },
+            },
+          },
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(JSON.stringify(await response.json())).toContain('新链批量复制确认异常');
+      expect(replies).toEqual([]);
+    } finally {
+      server.close();
+    }
+  });
+
   it('returns replacement cards for HTTP Agent clarification cancellation and duplicate clicks', async () => {
     const replies: Array<{ messageId: string; text: string }> = [];
     const server = startFeishuBotServer({

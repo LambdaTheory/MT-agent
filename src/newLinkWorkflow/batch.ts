@@ -98,6 +98,49 @@ function hasValidConfirmationKey(value: Record<string, unknown>, request: Record
   return readConfirmationKey(value.confirmationKey) === confirmationKey(request);
 }
 
+const NEW_LINK_BATCH_CONFIRM_REQUEST_KEYS = [
+  'safetyVersion',
+  'workflowName',
+  'keyword',
+  'count',
+  'sourceProductId',
+  'requestedSourceProductId',
+  'sourceProductName',
+  'dataDate',
+  'reason',
+  'continuation',
+] as const;
+
+const NEW_LINK_BATCH_MULTI_CONFIRM_REQUEST_KEYS = [
+  'safetyVersion',
+  'workflowName',
+  'mode',
+  'items',
+  'dataDate',
+  'reason',
+  'continuation',
+] as const;
+
+function pickDefinedFields(value: Record<string, unknown>, keys: readonly string[]): Record<string, unknown> {
+  const picked: Record<string, unknown> = {};
+  for (const key of keys) {
+    if (value[key] !== undefined) picked[key] = value[key];
+  }
+  return picked;
+}
+
+function readConfirmRequestPayload(value: Record<string, unknown>): Record<string, unknown> {
+  return isRecord(value.request)
+    ? value.request
+    : pickDefinedFields(value, NEW_LINK_BATCH_CONFIRM_REQUEST_KEYS);
+}
+
+function readMultiConfirmRequestPayload(value: Record<string, unknown>): Record<string, unknown> {
+  return isRecord(value.request)
+    ? value.request
+    : pickDefinedFields(value, NEW_LINK_BATCH_MULTI_CONFIRM_REQUEST_KEYS);
+}
+
 export function readNewLinkBatchWorkflowRequest(value: Record<string, unknown>): NewLinkBatchWorkflowRequest | null {
   const keyword = readString(value.keyword);
   const count = readPositiveInteger(value.count);
@@ -338,6 +381,7 @@ export function buildNewLinkBatchConfirmCard(plan: NewLinkBatchPlan, reason: str
   const request = buildNewLinkBatchConfirmRequest(plan, reason, continuation);
   if (!request || !plan.selectedSource) return undefined;
   const key = confirmationKey(request as unknown as Record<string, unknown>);
+  const confirmValue = { action: 'new_link_batch_confirm', ...request, request, confirmationKey: key };
   return {
     schema: '2.0',
     config: { wide_screen_mode: true },
@@ -356,28 +400,24 @@ export function buildNewLinkBatchConfirmCard(plan: NewLinkBatchPlan, reason: str
           ].join('\n'),
         },
         {
-          tag: 'form',
-          name: 'new_link_batch_confirm_form',
-          elements: [
+          tag: 'action',
+          actions: [
             {
               tag: 'button',
               text: { tag: 'plain_text', content: '确认复制' },
               type: 'primary',
-              form_action_type: 'submit',
               name: 'new_link_batch_confirm_submit',
-              behaviors: [{ type: 'callback', value: { action: 'new_link_batch_confirm', request, confirmationKey: key } }],
+              behaviors: [{ type: 'callback', value: confirmValue }],
             },
           ],
         },
         {
-          tag: 'form',
-          name: 'new_link_batch_cancel_form',
-          elements: [
+          tag: 'action',
+          actions: [
             {
               tag: 'button',
               text: { tag: 'plain_text', content: '取消' },
               type: 'default',
-              form_action_type: 'submit',
               name: 'new_link_batch_cancel_submit',
               behaviors: [{
                 type: 'callback',
@@ -402,6 +442,7 @@ export function buildNewLinkBatchMultiConfirmCard(plans: NewLinkBatchPlan[], rea
   if (!request) return undefined;
   const totalCount = request.items.reduce((sum, item) => sum + item.count, 0);
   const key = confirmationKey(request as unknown as Record<string, unknown>);
+  const confirmValue = { action: 'new_link_batch_multi_confirm', ...request, request, confirmationKey: key };
   return {
     schema: '2.0',
     config: { wide_screen_mode: true },
@@ -424,28 +465,24 @@ export function buildNewLinkBatchMultiConfirmCard(plans: NewLinkBatchPlan[], rea
           ].join('\n'),
         },
         {
-          tag: 'form',
-          name: 'new_link_batch_multi_confirm_form',
-          elements: [
+          tag: 'action',
+          actions: [
             {
               tag: 'button',
               text: { tag: 'plain_text', content: '确认分别复制' },
               type: 'primary',
-              form_action_type: 'submit',
               name: 'new_link_batch_multi_confirm_submit',
-              behaviors: [{ type: 'callback', value: { action: 'new_link_batch_multi_confirm', request, confirmationKey: key } }],
+              behaviors: [{ type: 'callback', value: confirmValue }],
             },
           ],
         },
         {
-          tag: 'form',
-          name: 'new_link_batch_cancel_form',
-          elements: [
+          tag: 'action',
+          actions: [
             {
               tag: 'button',
               text: { tag: 'plain_text', content: '取消' },
               type: 'default',
-              form_action_type: 'submit',
               name: 'new_link_batch_cancel_submit',
               behaviors: [{
                 type: 'callback',
@@ -508,14 +545,15 @@ function readNewLinkBatchConfirmRequestRecord(request: Record<string, unknown>):
 }
 
 export function parseNewLinkBatchConfirmRequest(value: unknown): NewLinkBatchConfirmRequest | null {
-  if (!isRecord(value) || !isRecord(value.request)) return null;
-  if (!hasValidConfirmationKey(value, value.request)) return null;
-  return readNewLinkBatchConfirmRequestRecord(value.request);
+  if (!isRecord(value)) return null;
+  const request = readConfirmRequestPayload(value);
+  if (!hasValidConfirmationKey(value, request)) return null;
+  return readNewLinkBatchConfirmRequestRecord(request);
 }
 
 export function parseNewLinkBatchMultiConfirmRequest(value: unknown): NewLinkBatchMultiConfirmRequest | null {
-  if (!isRecord(value) || !isRecord(value.request)) return null;
-  const request = value.request;
+  if (!isRecord(value)) return null;
+  const request = readMultiConfirmRequestPayload(value);
   if (!hasValidConfirmationKey(value, request)) return null;
   const safetyVersion = readPositiveInteger(request.safetyVersion);
   const workflowName = readString(request.workflowName);
