@@ -609,7 +609,6 @@ describe('createFeishuSdkBot card.action.trigger', () => {
       buildNewLinkBatchConfirmCard(newLinkPlan(), 'test reason', query565Continuation('newLinks', 0)),
       'new_link_batch_confirm_submit',
     );
-    const { request: _request, ...flatConfirmValue } = confirmValue;
 
     bot.start();
     await registered['card.action.trigger']({
@@ -619,7 +618,7 @@ describe('createFeishuSdkBot card.action.trigger', () => {
         action: {
           tag: 'button',
           name: 'new_link_batch_confirm_submit',
-          value: flatConfirmValue,
+          value: confirmValue,
         },
       },
     });
