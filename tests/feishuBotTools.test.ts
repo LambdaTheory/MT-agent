@@ -286,20 +286,25 @@ async function writeX200RankingRegistryFixtures(rootDir: string, artifactsDir: s
   };
 }
 
-async function writeX200PriceSnapshotRegistryFixtures(rootDir: string): Promise<TestRegistryPaths> {
+async function writeX200PriceSnapshotRegistryFixtures(rootDir: string, productCount = 2): Promise<TestRegistryPaths> {
   const configDir = join(rootDir, 'config');
   const outputDir = join(rootDir, 'output');
   const stateDir = join(outputDir, 'state');
   await mkdir(configDir, { recursive: true });
   await mkdir(stateDir, { recursive: true });
-  await writeFile(join(configDir, 'product-id-map.json'), JSON.stringify({ p362: '362', p363: '363' }), 'utf8');
-  await writeFile(join(configDir, 'product-name-map.json'), JSON.stringify({ '362': 'vivo X200 Ultra 黑色', '363': 'vivo X200 Ultra 蓝色' }), 'utf8');
+  const productIds = Array.from({ length: productCount }, (_, index) => String(362 + index));
+  await writeFile(join(configDir, 'product-id-map.json'), JSON.stringify(Object.fromEntries(productIds.map((id) => [`p${id}`, id]))), 'utf8');
+  await writeFile(join(configDir, 'product-name-map.json'), JSON.stringify(Object.fromEntries(productIds.map((id) => [id, `vivo X200 Ultra ${id}`]))), 'utf8');
   await writeFile(join(configDir, 'link-registry-overrides.json'), JSON.stringify({
     version: 1,
-    entries: [
-      { internalProductId: '362', productName: 'vivo X200 Ultra 黑色', shortName: 'vivo X200 Ultra', aliases: ['x200u', 'X200U'], sameSkuGroupId: 'vivo-x200-ultra', updatedAt: '2026-06-26' },
-      { internalProductId: '363', productName: 'vivo X200 Ultra 蓝色', shortName: 'vivo X200 Ultra', aliases: ['x200u', 'X200U'], sameSkuGroupId: 'vivo-x200-ultra', updatedAt: '2026-06-26' },
-    ],
+    entries: productIds.map((id) => ({
+      internalProductId: id,
+      productName: `vivo X200 Ultra ${id}`,
+      shortName: 'vivo X200 Ultra',
+      aliases: ['x200u', 'X200U'],
+      sameSkuGroupId: 'vivo-x200-ultra',
+      updatedAt: '2026-06-26',
+    })),
     sameSkuGroupAliasRules: [{ sameSkuGroupId: 'vivo-x200-ultra', aliases: ['x200u', 'X200U'] }],
   }), 'utf8');
   return {
@@ -2005,6 +2010,55 @@ describe('handleBotIntent', () => {
     expect(response.text).toContain('7天 ¥65');
     expect(response.text).toContain('黑色 128G：1天 ¥15');
     expect(response.text).toContain('读取商品：成功 2/2');
+  });
+
+  it('allows read-only rental price snapshots for same-sku groups above twenty products', async () => {
+    const outputDir = await writeContext();
+    const registryRoot = await mkdtemp(join(tmpdir(), 'mt-agent-x200-price-large-registry-'));
+    const registryPaths = await writeX200PriceSnapshotRegistryFixtures(registryRoot, 23);
+    const planner: AgentPlannerProvider = {
+      async proposePlan() {
+        return JSON.stringify({
+          goal: '查询 x200u 大同款组 SKU 定价情况',
+          selectedTool: 'rental.priceSnapshot',
+          arguments: { query: 'x200u' },
+          confidence: 0.92,
+          reason: '用户询问定价情况，是只读价格快照，不是改价',
+        });
+      },
+    };
+    const readProductIds: string[] = [];
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async read(productId) {
+        readProductIds.push(productId);
+        return {
+          productId,
+          ok: true,
+          specs: [{ specId: 'sku-standard', title: '标准版' }],
+          values: { 'sku-standard': { rent1day: '10', rent7day: '60' } },
+          lines: ['read: ok', '1 spec'],
+        };
+      },
+      async preview() { throw new Error('preview should not run for price snapshot'); },
+      async execute() { throw new Error('execute should not run for price snapshot'); },
+      async copy() { throw new Error('copy should not run for price snapshot'); },
+      async delist() { throw new Error('delist should not run for price snapshot'); },
+      async tenancySet() { throw new Error('tenancySet should not run for price snapshot'); },
+      async specDiscover() { throw new Error('specDiscover should not run for price snapshot'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run for price snapshot'); },
+    };
+
+    const response = await handleBotIntent({ type: 'unknown', text: 'x200u 价格情况' }, outputDir, {
+      agentPlannerProvider: planner,
+      rentalPriceClient,
+      closedOrderRegistryPaths: registryPaths,
+    });
+
+    expect(readProductIds).toHaveLength(23);
+    expect(response.text).toContain('定价情况：x200u');
+    expect(response.text).toContain('读取商品：成功 23/23');
+    expect(response.text).toContain('覆盖商品 23 个');
+    expect(response.text).not.toContain('超过单次定价快照上限');
   });
 
   it('turns Agent-planned same-sku spec removal into a dedicated confirmation card', async () => {
