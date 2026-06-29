@@ -14,6 +14,7 @@ export interface NewLinkBatchWorkflowRequest {
   keyword: string;
   count: number;
   sourceProductId?: string;
+  fallbackSourceProductIds?: string[];
 }
 
 export interface NewLinkBatchCandidate {
@@ -43,6 +44,7 @@ export interface NewLinkBatchConfirmRequest {
   count: number;
   sourceProductId: string;
   requestedSourceProductId?: string;
+  fallbackSourceProductIds?: string[];
   sourceProductName: string;
   dataDate: string;
   reason: string;
@@ -85,6 +87,11 @@ function readProductId(value: unknown): string | null {
   return parsed ? String(parsed) : null;
 }
 
+function readProductIds(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.map(readProductId).filter((item): item is string => Boolean(item)))];
+}
+
 function confirmationKey(value: Record<string, unknown>): string {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex').slice(0, 24);
 }
@@ -106,6 +113,7 @@ const NEW_LINK_BATCH_CONFIRM_REQUEST_KEYS = [
   'count',
   'sourceProductId',
   'requestedSourceProductId',
+  'fallbackSourceProductIds',
   'sourceProductName',
   'dataDate',
   'reason',
@@ -146,7 +154,10 @@ export function readNewLinkBatchWorkflowRequest(value: Record<string, unknown>):
   const keyword = readString(value.keyword);
   const count = readPositiveInteger(value.count);
   const sourceProductId = readProductId(value.sourceProductId);
-  return keyword && count ? { keyword, count, ...(sourceProductId ? { sourceProductId } : {}) } : null;
+  const fallbackSourceProductIds = readProductIds(value.fallbackSourceProductIds).filter((item) => item !== sourceProductId);
+  return keyword && count
+    ? { keyword, count, ...(sourceProductId ? { sourceProductId } : {}), ...(fallbackSourceProductIds.length ? { fallbackSourceProductIds } : {}) }
+    : null;
 }
 
 export function readNewLinkBatchWorkflowRequests(value: Record<string, unknown>): NewLinkBatchWorkflowRequest[] | null {
@@ -217,6 +228,25 @@ function findRegistryEntryByInternalProductId(entries: LinkRegistryEntry[], inte
   return entries.find((entry) => entry.internalProductId.trim() === internalProductId);
 }
 
+function fallbackCandidatesForSourceIds(
+  sourceIds: string[] | undefined,
+  context: PublicTrafficDataReportContext,
+  registryEntries: LinkRegistryEntry[],
+  selectedSourceProductId: string,
+): NewLinkBatchCandidate[] {
+  if (!sourceIds?.length) return [];
+  const seen = new Set([selectedSourceProductId]);
+  return sourceIds.flatMap((sourceId) => {
+    const id = sourceId.trim();
+    if (!/^\d+$/.test(id) || seen.has(id)) return [];
+    seen.add(id);
+    const sourceRow = findRowByInternalProductId(context, id);
+    const sourceRegistryEntry = findRegistryEntryByInternalProductId(registryEntries, id);
+    if (!sourceRow || sourceRegistryEntry?.status === 'removed') return [];
+    return [candidateFrom(sourceRow, sourceRegistryEntry)];
+  });
+}
+
 function rowScore(row: PublicTrafficProductDataRow): { score: number; reasons: string[] } {
   const one = row.periods['1d'];
   const seven = row.periods['7d'];
@@ -270,14 +300,17 @@ export function buildNewLinkBatchPlan(
     if (sourceRegistryEntry?.status === 'removed') warnings.push(`端内ID ${sourceProductId} 在链接档案中已下架，不能复制。`);
 
     const selectedSource = sourceRow ? candidateFrom(sourceRow, sourceRegistryEntry) : undefined;
+    const fallbackCandidates = selectedSource
+      ? fallbackCandidatesForSourceIds(request.fallbackSourceProductIds, context, registryEntries, selectedSource.productId)
+      : [];
     const ready = Boolean(selectedSource && count >= 1 && count <= MAX_NEW_LINK_BATCH_COUNT && warnings.length === 0);
     return {
       status: ready ? 'ready' : 'needs_review',
-      request: { keyword, count, sourceProductId },
+      request: { keyword, count, sourceProductId, ...(request.fallbackSourceProductIds?.length ? { fallbackSourceProductIds: request.fallbackSourceProductIds } : {}) },
       dataDate: context.date,
       requestedSourceProductId: sourceProductId,
       ...(selectedSource ? { selectedSource } : {}),
-      candidates: selectedSource ? [selectedSource] : [],
+      candidates: selectedSource ? [selectedSource, ...fallbackCandidates].slice(0, 5) : [],
       warnings,
     };
   }
@@ -328,6 +361,10 @@ export function formatNewLinkBatchPlan(plan: NewLinkBatchPlan): string {
 export function buildNewLinkBatchConfirmRequest(plan: NewLinkBatchPlan, reason: string, continuation?: AgentToolConfirmContinuation): NewLinkBatchConfirmRequest | null {
   if (plan.status !== 'ready' || !plan.selectedSource) return null;
   if (plan.requestedSourceProductId && plan.selectedSource.productId !== plan.requestedSourceProductId) return null;
+  const fallbackSourceProductIds = plan.candidates
+    .map((candidate) => candidate.productId)
+    .filter((productId) => productId !== plan.selectedSource?.productId)
+    .slice(0, 4);
   return {
     safetyVersion: NEW_LINK_BATCH_CONFIRMATION_VERSION,
     workflowName: NEW_LINK_BATCH_WORKFLOW_NAME,
@@ -335,6 +372,7 @@ export function buildNewLinkBatchConfirmRequest(plan: NewLinkBatchPlan, reason: 
     count: plan.request.count,
     sourceProductId: plan.selectedSource.productId,
     ...(plan.requestedSourceProductId ? { requestedSourceProductId: plan.requestedSourceProductId } : {}),
+    ...(fallbackSourceProductIds.length ? { fallbackSourceProductIds } : {}),
     sourceProductName: plan.selectedSource.productName,
     dataDate: plan.dataDate,
     reason,
@@ -524,6 +562,7 @@ function readNewLinkBatchConfirmRequestRecord(request: Record<string, unknown>):
   const count = readPositiveInteger(request.count);
   const sourceProductId = readString(request.sourceProductId);
   const requestedSourceProductId = readString(request.requestedSourceProductId);
+  const fallbackSourceProductIds = readProductIds(request.fallbackSourceProductIds).filter((item) => item !== sourceProductId);
   const sourceProductName = readString(request.sourceProductName);
   const dataDate = readString(request.dataDate);
   const reason = readString(request.reason);
@@ -553,6 +592,7 @@ function readNewLinkBatchConfirmRequestRecord(request: Record<string, unknown>):
     count,
     sourceProductId,
     ...(requestedSourceProductId ? { requestedSourceProductId } : {}),
+    ...(fallbackSourceProductIds.length ? { fallbackSourceProductIds } : {}),
     sourceProductName,
     dataDate,
     reason,
@@ -607,20 +647,36 @@ export function parseNewLinkBatchMultiConfirmRequest(value: unknown): NewLinkBat
   return parsedRequest;
 }
 
+function isSafeMissingSourceCopyResult(result: Awaited<ReturnType<RentalPriceSkillClient['copy']>>): boolean {
+  if (result.ok || result.sideEffectPossible === true || result.retrySafe === false) return false;
+  return /Product not found/i.test(result.message ?? result.lines.join('\n'));
+}
+
 export async function executeNewLinkBatchConfirmRequest(
   client: RentalPriceSkillClient,
   request: NewLinkBatchConfirmRequest,
 ): Promise<NewLinkBatchExecutionResult> {
   const newProductIds: string[] = [];
   const lines: string[] = [];
+  const sourceIds = [request.sourceProductId, ...(request.fallbackSourceProductIds ?? [])]
+    .filter((value, index, array) => array.indexOf(value) === index);
+  let sourceIndex = 0;
 
-  for (let index = 1; index <= request.count; index += 1) {
+  for (let index = 1; index <= request.count;) {
+    const sourceProductId = sourceIds[sourceIndex] ?? request.sourceProductId;
     try {
-      const result = await client.copy(request.sourceProductId);
+      const result = await client.copy(sourceProductId);
       const isUnknownCopy = result.status === 'unknown' || result.sideEffectPossible === true;
       const copyStatusLabel = result.ok ? '成功' : isUnknownCopy ? '状态未知' : '失败';
       lines.push(`${index}. ${copyStatusLabel}${result.newProductId ? `：新商品 ${result.newProductId}` : ''}`);
       if (!result.ok) {
+        const nextSourceId = sourceIds[sourceIndex + 1];
+        if (nextSourceId && isSafeMissingSourceCopyResult(result)) {
+          lines.push(`源商品 ${sourceProductId} 未找到，已切换候选源 ${nextSourceId} 继续复制。`);
+          sourceIndex += 1;
+          request.sourceProductId = nextSourceId;
+          continue;
+        }
         const safetyNote = isUnknownCopy
           ? '\n注意：本次复制可能已经提交但未拿到新商品ID；为避免重复铺链，请先到后台核对，确认后再决定是否继续，当前确认卡不要直接重试。'
           : '';
@@ -632,6 +688,7 @@ export async function executeNewLinkBatchConfirmRequest(
         };
       }
       newProductIds.push(result.newProductId ?? 'unknown');
+      index += 1;
     } catch (error) {
       return {
         ok: false,

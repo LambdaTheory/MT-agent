@@ -193,6 +193,17 @@ describe('new link batch workflow', () => {
     expect(JSON.stringify(buildNewLinkBatchConfirmCard(plan, '从端内ID 848 复制'))).toContain('"requestedSourceProductId":"848"');
   });
 
+  it('carries signed fallback source candidates for agent-ranked new-link plans', () => {
+    const plan = buildNewLinkBatchPlan({ keyword: 'pocket3', count: 3, sourceProductId: '733', fallbackSourceProductIds: ['875'] }, context(), registry());
+    const card = buildNewLinkBatchConfirmCard(plan, 'agent ranked source');
+    const value = readButtonValue(card, 'new_link_batch_confirm_submit');
+    const parsed = parseNewLinkBatchConfirmRequest(value);
+
+    expect(plan.candidates.map((candidate) => candidate.productId)).toEqual(['733', '875']);
+    expect(parsed).toMatchObject({ sourceProductId: '733', fallbackSourceProductIds: ['875'] });
+    expect(JSON.stringify(card)).toContain('"fallbackSourceProductIds":["875"]');
+  });
+
   it('requires review when registry classification misses the keyword', () => {
     const plan = buildNewLinkBatchPlan({ keyword: 'pocket3', count: 2 }, context(), []);
 
@@ -388,6 +399,48 @@ describe('new link batch workflow', () => {
     expect(calls).toEqual(['733', '733', '733']);
     expect(result).toMatchObject({ ok: true, completedCount: 3, newProductIds: ['new-1', 'new-2', 'new-3'] });
     expect(result.text).toContain('成功 3 条');
+  });
+
+  it('switches to a fallback source when the selected source is missing before any side effect', async () => {
+    const calls: string[] = [];
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run'); },
+      async execute() { throw new Error('execute should not run'); },
+      async copy(productId) {
+        calls.push(productId);
+        if (productId === '823') {
+          return {
+            productId,
+            ok: false,
+            status: 'error',
+            newProductId: null,
+            message: 'Product not found: 823',
+            lines: ['copy: error', 'newProductId: unknown', 'message: Product not found: 823'],
+          };
+        }
+        return { productId, ok: true, newProductId: `new-${calls.length}`, lines: ['copy: ok'] };
+      },
+      async delist() { throw new Error('delist should not run'); },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+
+    const result = await executeNewLinkBatchConfirmRequest(rentalPriceClient, {
+      safetyVersion: 2,
+      workflowName: 'rental.newLinkBatch',
+      keyword: 'sx70',
+      count: 3,
+      sourceProductId: '823',
+      fallbackSourceProductIds: ['825', '826'],
+      sourceProductName: 'Canon SX70',
+      dataDate: '2026-06-28',
+      reason: 'Agent ranked source with fallback candidates',
+    });
+
+    expect(calls).toEqual(['823', '825', '825', '825']);
+    expect(result).toMatchObject({ ok: true, completedCount: 3, newProductIds: ['new-2', 'new-3', 'new-4'] });
+    expect(result.text).toContain('源商品 825');
   });
 
   it('stops with an explicit no-retry warning when copy status is unknown after a possible side effect', async () => {
