@@ -94,6 +94,8 @@ const RENTAL_SPEC_REMOVE_PLAN_BULK_WARNING_PRODUCTS = 12;
 const RENTAL_SPEC_REMOVE_PLAN_MAX_PRODUCTS = 60;
 const RENTAL_SPEC_REMOVE_PLAN_MAX_ITEMS = 50;
 const REFRESH_ACTIVITY_DEFAULT_MAX_CANDIDATES = 20;
+const REFRESH_ACTIVITY_MIN_ONLINE_DAYS = 30;
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const NON_RENT_PRICE_FIELD_LABELS: Record<string, string[]> = {
   marketPrice: ['marketPrice', '市场价', '市场价格'],
   deposit: ['deposit', '押金'],
@@ -926,6 +928,30 @@ function readMaxCandidates(value: unknown): number {
   return Math.min(Math.floor(numeric), 100);
 }
 
+function parseDateToUtcDay(value: string | undefined): number | null {
+  if (!value) return null;
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value.trim());
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return null;
+  const utc = Date.UTC(year, month - 1, day);
+  const parsed = new Date(utc);
+  if (parsed.getUTCFullYear() !== year || parsed.getUTCMonth() !== month - 1 || parsed.getUTCDate() !== day) return null;
+  return utc;
+}
+
+function estimateOnlineDays(row: PublicTrafficProductDataRow, entry: LinkRegistryEntry, reportDate: string): number | null {
+  if (typeof row.custodyDays === 'number' && Number.isFinite(row.custodyDays) && row.custodyDays >= 0) {
+    return Math.floor(row.custodyDays);
+  }
+  const reportDay = parseDateToUtcDay(reportDate);
+  const firstSeenDay = parseDateToUtcDay(entry.firstSeenDate);
+  if (reportDay === null || firstSeenDay === null || firstSeenDay > reportDay) return null;
+  return Math.floor((reportDay - firstSeenDay) / MS_PER_DAY) + 1;
+}
+
 function groupRefreshActivityCandidates(candidates: Array<{ entry: LinkRegistryEntry; row: PublicTrafficProductDataRow }>) {
   const groups = new Map<string, { label: string; category: string; sameSkuGroupId: string; items: Array<{ entry: LinkRegistryEntry; row: PublicTrafficProductDataRow }> }>();
   for (const candidate of candidates) {
@@ -1106,7 +1132,7 @@ async function refreshActivityPlanResponse(
   const maxCandidates = readMaxCandidates(args.maxCandidates);
 
   const candidates: Array<{ entry: LinkRegistryEntry; row: PublicTrafficProductDataRow }> = [];
-  const skipped = { missingRow: 0, missing30dDashboard: 0, inactive: 0 };
+  const skipped = { missingRow: 0, missing30dDashboard: 0, inactive: 0, onlineLessThan30d: 0, onlineDaysUnknown: 0 };
   for (const entry of registryContext.registry) {
     if (entry.status !== 'active') {
       skipped.inactive += 1;
@@ -1120,6 +1146,15 @@ async function refreshActivityPlanResponse(
     const thirty = row.periods['30d'];
     if (!thirty.hasDashboardData) {
       skipped.missing30dDashboard += 1;
+      continue;
+    }
+    const onlineDays = estimateOnlineDays(row, entry, report.context.date);
+    if (onlineDays === null) {
+      skipped.onlineDaysUnknown += 1;
+      continue;
+    }
+    if (onlineDays < REFRESH_ACTIVITY_MIN_ONLINE_DAYS) {
+      skipped.onlineLessThan30d += 1;
       continue;
     }
     if (thirty.createdOrders === 0) candidates.push({ entry, row });
@@ -1155,13 +1190,13 @@ async function refreshActivityPlanResponse(
   return {
     text: [
       `活跃度刷新计划：${report.context.date}`,
-      '筛选口径：active 链接，30日访问页数据已抓取，近 30 天创单为 0。',
+      `筛选口径：active 链接，30日访问页数据已抓取，上线满 ${REFRESH_ACTIVITY_MIN_ONLINE_DAYS} 天，近 30 天创单为 0。`,
       `待下架候选：${candidates.length} 条；涉及种类/同款组 ${groups.length} 个。`,
       `本次展示：${shownCandidates.length}/${candidates.length} 条。`,
       '',
       ...(groupLines.length ? groupLines : ['没有找到符合条件的零创单 active 链接。']),
       '',
-      `跳过：非 active ${skipped.inactive} 条，无日报行 ${skipped.missingRow} 条，30日访问页缺失 ${skipped.missing30dDashboard} 条。`,
+      `跳过：非 active ${skipped.inactive} 条，无日报行 ${skipped.missingRow} 条，30日访问页缺失 ${skipped.missing30dDashboard} 条，上线不足 ${REFRESH_ACTIVITY_MIN_ONLINE_DAYS} 天 ${skipped.onlineLessThan30d} 条，上线天数未知 ${skipped.onlineDaysUnknown} 条。`,
       execution.request ? '已生成执行确认卡；确认前不会下架或补链。' : '未生成执行确认卡；请先处理以下阻断项。',
       ...(!execution.request && execution.blockers.length ? ['', ...execution.blockers.map((blocker) => `- ${blocker}`)] : []),
     ].join('\n'),
@@ -1171,6 +1206,7 @@ async function refreshActivityPlanResponse(
       date: report.context.date,
       candidateCount: candidates.length,
       shownCandidateCount: shownCandidates.length,
+      skipped,
       executeRequest: execution.request ?? null,
       blockers: execution.blockers,
     },

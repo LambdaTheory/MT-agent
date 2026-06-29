@@ -485,6 +485,8 @@ async function writeRefreshActivityFixtures(): Promise<{
       { productName: 'Pocket3 零创单 B', platformProductId: 'p902', displayProductId: '端内ID 902', custodyDays: 40, periods: { '1d': metric, '7d': metric, '30d': zero30d } },
       { productName: 'SQ1 有创单', platformProductId: 'p903', displayProductId: '端内ID 903', custodyDays: 40, periods: { '1d': metric, '7d': metric, '30d': active30d } },
       { productName: 'Wide 300 缺访问页', platformProductId: 'p904', displayProductId: '端内ID 904', custodyDays: 40, periods: { '1d': metric, '7d': metric, '30d': missing30d } },
+      { productName: 'Pocket3 新链零创单', platformProductId: 'p906', displayProductId: '端内ID 906', custodyDays: 12, periods: { '1d': metric, '7d': metric, '30d': zero30d } },
+      { productName: 'Pocket3 上线天数未知', platformProductId: 'p907', displayProductId: '端内ID 907', custodyDays: null, periods: { '1d': metric, '7d': metric, '30d': zero30d } },
     ],
     lowExposure: [],
     weakClick: [],
@@ -495,13 +497,15 @@ async function writeRefreshActivityFixtures(): Promise<{
     recommendedActions: [],
     emptySectionNotes: {},
   }), 'utf8');
-  await writeFile(join(configDir, 'product-id-map.json'), JSON.stringify({ p900: '900', p901: '901', p902: '902', p903: '903', p904: '904' }), 'utf8');
+  await writeFile(join(configDir, 'product-id-map.json'), JSON.stringify({ p900: '900', p901: '901', p902: '902', p903: '903', p904: '904', p906: '906', p907: '907' }), 'utf8');
   await writeFile(join(configDir, 'product-name-map.json'), JSON.stringify({
     '900': 'Pocket3 健康源',
     '901': 'Pocket3 零创单 A',
     '902': 'Pocket3 零创单 B',
     '903': 'SQ1 有创单',
     '904': 'Wide 300 缺访问页',
+    '906': 'Pocket3 新链零创单',
+    '907': 'Pocket3 上线天数未知',
   }), 'utf8');
   await writeFile(join(configDir, 'link-registry-overrides.json'), JSON.stringify({
     version: 1,
@@ -512,6 +516,8 @@ async function writeRefreshActivityFixtures(): Promise<{
       { internalProductId: '903', shortName: 'SQ1', sameSkuGroupId: 'instax-sq1', categoryName: '拍立得', status: 'active' },
       { internalProductId: '904', shortName: 'Wide 300', sameSkuGroupId: 'instax-wide300', categoryName: '拍立得', status: 'active' },
       { internalProductId: '905', shortName: 'Removed item', sameSkuGroupId: 'removed-group', categoryName: '其他', status: 'removed' },
+      { internalProductId: '906', shortName: 'DJI Pocket 3', sameSkuGroupId: 'dji-pocket-3', categoryName: '云台相机', status: 'active' },
+      { internalProductId: '907', shortName: 'DJI Pocket 3', sameSkuGroupId: 'dji-pocket-3', categoryName: '云台相机', status: 'active' },
     ],
   }), 'utf8');
 
@@ -2396,6 +2402,8 @@ describe('handleBotIntent', () => {
     expect(response.text).toContain('补链源 900 Pocket3 健康源');
     expect(response.text).toContain('端内ID 901、902');
     expect(response.text).toContain('30日访问页缺失 1 条');
+    expect(response.text).toContain('上线不足 30 天 1 条');
+    expect(response.text).toContain('上线天数未知 1 条');
     expect(response.text).toContain('已生成执行确认卡；确认前不会下架或补链');
     expect(response.card).toBeDefined();
     const request = readAgentToolConfirmRequestFromCard(response.card);
@@ -2405,6 +2413,30 @@ describe('handleBotIntent', () => {
       delistProductIds: ['901', '902'],
       newLinkItems: [{ keyword: 'DJI Pocket 3', count: 2, sourceProductId: '900', sourceProductName: 'Pocket3 健康源', sameSkuGroupId: 'dji-pocket-3' }],
     });
+    expect(request.arguments.delistProductIds).not.toContain('906');
+    expect(request.arguments.delistProductIds).not.toContain('907');
+  });
+
+  it('uses first seen date as a fallback before treating zero 30-day orders as inactive', async () => {
+    const { outputDir, registryPaths } = await writeRefreshActivityFixtures();
+    await writeFile(registryPaths.firstSeenPath, JSON.stringify({
+      '907': { firstSeenDate: '2026-05-01', platformProductId: 'p907', productName: 'Pocket3 上线天数未知' },
+    }), 'utf8');
+
+    const response = await executeAgentToolRequest(
+      { toolName: 'operations.refreshActivityPlan', arguments: {}, reason: '测试 firstSeenDate 满 30 天后才允许进入候选' },
+      outputDir,
+      { closedOrderRegistryPaths: registryPaths },
+    );
+
+    expect(response.text).toContain('待下架候选：3 条');
+    expect(response.text).toContain('上线天数未知 0 条');
+    const request = readAgentToolConfirmRequestFromCard(response.card);
+    expect(request.arguments).toMatchObject({
+      delistProductIds: ['901', '902', '907'],
+      newLinkItems: [{ keyword: 'DJI Pocket 3', count: 3, sourceProductId: '900' }],
+    });
+    expect(request.arguments.delistProductIds).not.toContain('906');
   });
 
   it('executes a confirmed activity refresh plan with audit output', async () => {
