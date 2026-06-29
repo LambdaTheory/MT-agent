@@ -1,11 +1,15 @@
+import { mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { handleBotIntent } from '../src/feishuBot/tools.js';
 
 describe('Agent planner JSON failure handling', () => {
   it('returns a controlled failed response without exposing raw JSON parser details', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-planner-json-failure-'));
     const response = await handleBotIntent(
       { type: 'unknown', text: 'RX10M4整体价格 -1' },
-      'output',
+      outputDir,
       {
         agentPlannerProvider: {
           async proposePlan() {

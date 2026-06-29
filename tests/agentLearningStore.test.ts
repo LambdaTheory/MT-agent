@@ -1,4 +1,4 @@
-import { mkdtemp, readFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -81,5 +81,13 @@ describe('agent learning store', () => {
 
     await expect(summarizeAgentLearning(outputDir)).resolves.toBe('还没有 Agent 学习记录。');
     await expect(buildAgentLearningPlannerHints(outputDir, '帮我处理一下 pocket3')).resolves.toEqual([]);
+  });
+  it('treats a corrupt learning store as empty instead of blocking Agent planning', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-learning-corrupt-'));
+    await mkdir(join(outputDir, 'state'), { recursive: true });
+    await writeFile(join(outputDir, 'state', 'agent-learning.json'), '{"version":1}\n{"broken":true}\n', 'utf8');
+
+    await expect(loadAgentLearningStore(outputDir)).resolves.toMatchObject({ version: 1, events: [] });
+    await expect(buildAgentLearningPlannerHints(outputDir, 'RX10M4整体价格 -1')).resolves.toEqual([]);
   });
 });

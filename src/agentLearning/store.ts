@@ -72,6 +72,10 @@ function isEnoent(error: unknown): boolean {
   return Boolean(error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT');
 }
 
+function isJsonParseError(error: unknown): boolean {
+  return error instanceof SyntaxError;
+}
+
 async function withStoreLock<T>(outputDir: string, run: () => Promise<T>): Promise<T> {
   const key = storePath(outputDir);
   const previous = storeLocks.get(key) ?? Promise.resolve();
@@ -98,6 +102,7 @@ export async function loadAgentLearningStore(outputDir: string): Promise<AgentLe
     return JSON.parse(await readFile(storePath(outputDir), 'utf8')) as AgentLearningStore;
   } catch (error) {
     if (isEnoent(error)) return emptyStore();
+    if (isJsonParseError(error)) return emptyStore();
     throw error;
   }
 }
