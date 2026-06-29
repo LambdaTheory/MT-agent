@@ -76,8 +76,10 @@ const reportQuerySortFieldSchema = {
 const publicTrafficReportQueryArgumentsSchema = {
   type: 'object',
   properties: {
-    target: { type: 'string', enum: ['summary', 'comparison', 'products', 'productDetail', 'productAggregation', 'sourceCoverage', 'section', 'sectionCounts', 'orders', 'orderDerived', 'dataQuality', 'conclusions'] },
+    target: { type: 'string', enum: ['summary', 'comparison', 'dateComparison', 'products', 'productDetail', 'productAggregation', 'sourceCoverage', 'section', 'sectionCounts', 'orders', 'orderDerived', 'dataQuality', 'conclusions'] },
     date: reportDateSchema,
+    compareDate: reportDateSchema,
+    compareWith: { type: 'string', enum: ['previousDay', 'previousPeriod'] },
     period: reportPeriodSchema,
     periods: { type: 'array', minItems: 1, maxItems: 3, items: reportPeriodSchema },
     metrics: { type: 'array', minItems: 1, maxItems: 16, items: reportMetricSchema },

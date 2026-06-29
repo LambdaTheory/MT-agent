@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { runPublicTrafficReportQuery } from '../src/feishuBot/reportQuery.js';
+import { runPublicTrafficReportDateComparison, runPublicTrafficReportQuery } from '../src/feishuBot/reportQuery.js';
 import type { PublicTrafficDataReportContext, PublicTrafficPeriodMetrics, PublicTrafficProductDataRow } from '../src/publicTraffic/types.js';
 
 function period(overrides: Partial<PublicTrafficPeriodMetrics> = {}): PublicTrafficPeriodMetrics {
@@ -119,6 +119,38 @@ describe('public traffic report freeform query', () => {
     expect(text).toContain('公域日报较前日变化 2026-06-22');
     expect(text).toContain('曝光：当前 1000，前日 800，变化 +200（+25.00%）');
     expect(text).toContain('曝光到访问率：当前 5.00%，前日 4.00%，变化 +1.00 个百分点（+25.00%）');
+  });
+
+  it('compares saved report contexts by period', () => {
+    const previousContext: PublicTrafficDataReportContext = {
+      ...reportContext,
+      date: '2026-06-15',
+      summary: {
+        ...reportContext.summary,
+        '7d': {
+          ...reportContext.summary['7d'],
+          exposure: 8000,
+          publicVisits: 240,
+          exposureVisitRate: 0.03,
+          visitCreatedOrderRate: 0.05,
+          visitShipmentRate: 0.02,
+        },
+      },
+    };
+
+    const text = runPublicTrafficReportDateComparison(reportContext, previousContext, {
+      target: 'dateComparison',
+      period: '7d',
+      metrics: ['exposureVisitRate', 'publicVisits'],
+    });
+
+    expect(text).toContain('2026-06-22 7d');
+    expect(text).toContain('2026-06-15 7d');
+    expect(text).toContain('4.00%');
+    expect(text).toContain('3.00%');
+    expect(text).toContain('+1.00');
+    expect(text).toContain('300');
+    expect(text).toContain('240');
   });
 
   it('sorts product rows by selected period metric', () => {

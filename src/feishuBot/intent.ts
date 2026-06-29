@@ -30,6 +30,18 @@ function looksLikeNewLinkWriteIntent(text: string): boolean {
   return /(新链|新链接)/.test(compact) && /(链|铺设|新建|创建|生成|新增|复制|批量)/.test(compact);
 }
 
+function looksLikeReportComparisonQuestion(text: string): boolean {
+  const compact = text.toLowerCase().replace(/\s+/g, '');
+  const hasMetric = /(转化率|转化数据|曝光|访问|发货|订单|金额|创建率|发货率|关单率|客单价)/.test(compact);
+  if (!hasMetric) return false;
+
+  const hasCompareWord = /(对比|比较|相比|环比|同比|较|比|变化|涨跌|差异|提升|下降|上升|vs)/i.test(compact);
+  const hasRangeWord = /(上周|本周|这周|本星期|上星期|上月|本月|这个月|近\d+天|过去\d+天|前一段|上一段|昨天|前日|前一天|上一天)/.test(compact);
+  const datePattern = String.raw`(?:20\d{2}[-./]\d{1,2}[-./]\d{1,2}|\d{1,2}月\d{1,2}日?|\d{1,2}[-./]\d{1,2})`;
+  const hasTwoDates = new RegExp(`${datePattern}.*(?:和|与|跟|比|vs).*${datePattern}`, 'i').test(compact);
+  return hasCompareWord && (hasRangeWord || hasTwoDates);
+}
+
 function parseShortMultiProductQuery(text: string): string | null {
   const match = /^查\s*(.+)$/.exec(text);
   if (!match) return null;
@@ -164,6 +176,7 @@ export function parseExactBotIntent(input: string): BotIntent {
   if (/^重发.*(公域)?日报/.test(canonicalText)) return resendLatestReportIntentWithDate(canonicalText);
   if (/^(同步|拉取|更新).*(关单|关单反馈)/.test(canonicalText)) return { type: 'sync_closed_order_feedback' };
   if (/^(跑|生成|执行).*(关单观察|关单报告|关单反馈观察)/.test(canonicalText)) return { type: 'run_closed_order_observation_report' };
+  if (looksLikeReportComparisonQuestion(canonicalText)) return { type: 'unknown', text };
   const datedReadIntent = parseDatedReadIntent(canonicalText);
   if (datedReadIntent) return datedReadIntent;
   if (/(今日|今天|现在).*(咋样|怎么样|概况|数据|日报|看下|看看)/.test(canonicalText)) return { type: 'latest_summary' };

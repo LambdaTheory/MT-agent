@@ -86,6 +86,17 @@ describe('parseBotIntent', () => {
     expect(parseBotIntent('昨天转化数据')).toEqual({ type: 'conversion_summary', date: '2026-06-25' });
   });
 
+  it('leaves temporal comparison questions for the Agent planner', () => {
+    expect(parseBotIntent('\u4e0a\u5468\u8f6c\u5316\u7387\u4e0e\u672c\u5468\u6bd4')).toEqual({
+      type: 'unknown',
+      text: '\u4e0a\u5468\u8f6c\u5316\u7387\u4e0e\u672c\u5468\u6bd4',
+    });
+    expect(parseAgentFirstBotIntent('\u672c\u5468\u548c\u4e0a\u5468\u8f6c\u5316\u7387\u5bf9\u6bd4')).toEqual({
+      type: 'unknown',
+      text: '\u672c\u5468\u548c\u4e0a\u5468\u8f6c\u5316\u7387\u5bf9\u6bd4',
+    });
+  });
+
   it('parses natural read-only summary questions without triggering actions', () => {
     expect(parseBotIntent('今天咋样')).toEqual({ type: 'latest_summary' });
     expect(parseBotIntent('现在公域怎么样')).toEqual({ type: 'latest_summary' });

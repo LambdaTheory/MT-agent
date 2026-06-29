@@ -75,7 +75,7 @@ import {
 } from './rentalPrice.js';
 import { findReadOnlyTool } from './readOnlyToolRegistry.js';
 import { inferPriceMultiplierFromText, readPriceMultiplierArgument } from './priceMultiplier.js';
-import { runPublicTrafficReportQuery, type PublicTrafficReportQueryArguments } from './reportQuery.js';
+import { runPublicTrafficReportDateComparison, runPublicTrafficReportQuery, type PublicTrafficReportQueryArguments } from './reportQuery.js';
 import { findLatestReportContext, findReportContextByDate, formatConversionSummary, formatLatestSummary, formatProductRows, parseNumericProductIdList, queryProductRows } from './reportStore.js';
 
 export interface AgentToolExecutionOptions {
@@ -1328,6 +1328,28 @@ async function findReportContextForTool(outputDir: string, date?: string) {
   return date ? findReportContextByDate(outputDir, date) : findLatestReportContext(outputDir);
 }
 
+function reportPeriodDays(period: unknown): number {
+  if (period === '30d') return 30;
+  if (period === '7d') return 7;
+  return 1;
+}
+
+function shiftReportDate(date: string, days: number): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  if (!match?.[1] || !match[2] || !match[3]) return date;
+  const value = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+  value.setUTCDate(value.getUTCDate() + days);
+  return value.toISOString().slice(0, 10);
+}
+
+function comparisonReportDate(currentDate: string, args: Record<string, unknown>): string {
+  const explicit = readOptionalDate(args.compareDate);
+  if (explicit) return explicit;
+  const compareWith = readString(args.compareWith) ?? 'previousPeriod';
+  const offsetDays = compareWith === 'previousDay' ? 1 : reportPeriodDays(args.period);
+  return shiftReportDate(currentDate, -offsetDays);
+}
+
 function missingReportContextText(date?: string): string {
   return date ? `没有找到 ${date} 的公域日报上下文。` : '还没有找到公域日报上下文。';
 }
@@ -1405,6 +1427,16 @@ export async function executeAgentToolRequest(
     case 'publicTraffic.reportQuery': {
       const date = readOptionalDate(request.arguments.date);
       const report = await findReportContextForTool(outputDir, date);
+      if (request.arguments.target === 'dateComparison') {
+        if (!report) return { text: missingReportContextText(date) };
+        const compareDate = comparisonReportDate(report.context.date, request.arguments);
+        const compareReport = await findReportContextForTool(outputDir, compareDate);
+        return {
+          text: compareReport
+            ? runPublicTrafficReportDateComparison(report.context, compareReport.context, { ...request.arguments, ...(date ? { date } : {}), compareDate } as PublicTrafficReportQueryArguments)
+            : missingReportContextText(compareDate),
+        };
+      }
       return {
         text: report
           ? runPublicTrafficReportQuery(report.context, { ...request.arguments, ...(date ? { date } : {}) } as PublicTrafficReportQueryArguments)

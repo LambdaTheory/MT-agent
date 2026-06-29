@@ -58,7 +58,7 @@ export const reportSectionNames = [
 
 export type ReportSectionName = typeof reportSectionNames[number];
 
-export type ReportQueryTarget = 'summary' | 'comparison' | 'products' | 'productDetail' | 'productAggregation' | 'sourceCoverage' | 'section' | 'sectionCounts' | 'orders' | 'orderDerived' | 'dataQuality' | 'conclusions';
+export type ReportQueryTarget = 'summary' | 'comparison' | 'dateComparison' | 'products' | 'productDetail' | 'productAggregation' | 'sourceCoverage' | 'section' | 'sectionCounts' | 'orders' | 'orderDerived' | 'dataQuality' | 'conclusions';
 
 export interface ReportQueryFilter {
   field: ReportMetricName | 'productName' | 'productId' | 'platformProductId' | 'action' | 'reason' | 'priority' | 'maintenanceStatus' | 'stock' | 'skuCount';
@@ -69,6 +69,8 @@ export interface ReportQueryFilter {
 export interface PublicTrafficReportQueryArguments {
   target: ReportQueryTarget;
   date?: string;
+  compareDate?: string;
+  compareWith?: 'previousDay' | 'previousPeriod';
   period?: PeriodKey;
   periods?: PeriodKey[];
   metrics?: ReportMetricName[];
@@ -240,6 +242,21 @@ function formatComparisonValue(metric: ReportMetricName, current: unknown, previ
   return `${definition.label}：当前 ${formatValue(current, definition)}，前日 ${formatValue(previous, definition)}，变化 ${formatSignedNumber(current - previous, definition)}（${formatRelativeChange(current, previous)}）`;
 }
 
+function formatLabeledComparisonValue(metric: ReportMetricName, current: unknown, previous: unknown, currentLabel: string, previousLabel: string): string {
+  const definition = metricDefinitions[metric];
+  if (typeof current !== 'number' || typeof previous !== 'number') {
+    return `${definition.label}：${currentLabel} ${formatValue(current, definition)}，${previousLabel} ${formatValue(previous, definition)}`;
+  }
+
+  if (definition.format === 'percent') {
+    const pointDiff = (current - previous) * 100;
+    const pointPrefix = pointDiff > 0 ? '+' : '';
+    return `${definition.label}：${currentLabel} ${formatValue(current, definition)}，${previousLabel} ${formatValue(previous, definition)}，变化 ${pointPrefix}${pointDiff.toFixed(2)} 个百分点（${formatRelativeChange(current, previous)}）`;
+  }
+
+  return `${definition.label}：${currentLabel} ${formatValue(current, definition)}，${previousLabel} ${formatValue(previous, definition)}，变化 ${formatSignedNumber(current - previous, definition)}（${formatRelativeChange(current, previous)}）`;
+}
+
 function productMetricValue(row: PublicTrafficProductDataRow, metric: ReportMetricName, period: PeriodKey): unknown {
   return metricDefinitions[metric]?.product?.(row, period);
 }
@@ -375,6 +392,33 @@ function numericProductMetricValue(row: PublicTrafficProductDataRow, metric: Rep
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+export function runPublicTrafficReportDateComparison(
+  currentContext: PublicTrafficDataReportContext,
+  previousContext: PublicTrafficDataReportContext,
+  args: PublicTrafficReportQueryArguments,
+): string {
+  const period = periodsFromArgs(args)[0] ?? '1d';
+  const current = currentContext.summary[period];
+  const previous = previousContext.summary[period];
+  if (!current || !previous) {
+    return `公域日报区间对比 ${currentContext.date} vs ${previousContext.date}\n缺少 ${period} 汇总数据，无法计算。`;
+  }
+
+  const metrics = metricList(args, 'summary').filter((metric) => metricDefinitions[metric].summary);
+  const currentLabel = `${currentContext.date} ${period}`;
+  const previousLabel = `${previousContext.date} ${period}`;
+  return [
+    `公域日报区间对比 ${currentLabel} vs ${previousLabel}`,
+    ...metrics.map((metric) => formatLabeledComparisonValue(
+      metric,
+      metricDefinitions[metric].summary?.(current),
+      metricDefinitions[metric].summary?.(previous),
+      currentLabel,
+      previousLabel,
+    )),
+  ].join('\n');
 }
 
 function formatProductAggregation(context: PublicTrafficDataReportContext, args: PublicTrafficReportQueryArguments): string {
@@ -685,6 +729,8 @@ export function runPublicTrafficReportQuery(context: PublicTrafficDataReportCont
       return formatSummary(context, args);
     case 'comparison':
       return formatComparison(context, args);
+    case 'dateComparison':
+      return '公域日报区间对比需要同时提供两份日报上下文。';
     case 'products':
       return formatProducts(context, args);
     case 'productDetail':

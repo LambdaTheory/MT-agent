@@ -60,6 +60,26 @@ describe('agent runtime planner proposal validation', () => {
     }))).toEqual({ ok: false, reason: 'invalid_arguments' });
 
     expect(validateAgentPlannerProposal(JSON.stringify({
+      goal: 'compare weekly conversion rate',
+      selectedTool: 'publicTraffic.reportQuery',
+      arguments: {
+        target: 'dateComparison',
+        period: '7d',
+        compareWith: 'previousPeriod',
+        metrics: ['exposureVisitRate', 'visitCreatedOrderRate', 'visitShipmentRate'],
+      },
+      confidence: 0.9,
+      reason: 'user asks to compare this week with last week',
+    }))).toMatchObject({
+      ok: true,
+      proposal: {
+        selectedTool: 'publicTraffic.reportQuery',
+        arguments: { target: 'dateComparison', period: '7d', compareWith: 'previousPeriod' },
+      },
+      policy: { decision: 'allow', toolName: 'publicTraffic.reportQuery', risk: 'read' },
+    });
+
+    expect(validateAgentPlannerProposal(JSON.stringify({
       goal: '查询商品全量日报数据',
       selectedTool: 'publicTraffic.reportQuery',
       arguments: { target: 'productDetail', productQuery: '733' },
