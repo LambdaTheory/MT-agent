@@ -1556,7 +1556,7 @@ describe('handleBotIntent', () => {
     expect(response.card).toBeUndefined();
   });
 
-  it('blocks pre-parsed exact intents from bypassing planner-first handling', async () => {
+  it('keeps pre-parsed exact intents on deterministic confirmations when a planner is configured', async () => {
     let plannerCalled = false;
     const planner: AgentPlannerProvider = {
       async proposePlan() {
@@ -1575,12 +1575,10 @@ describe('handleBotIntent', () => {
     const copyResponse = await handleBotIntent({ type: 'rental_copy', productId: '761' }, 'output', { agentPlannerProvider: planner });
 
     expect(plannerCalled).toBe(false);
-    expect(reportResponse.text).toContain('Agent planner 已配置');
-    expect(reportResponse.text).toContain('intent.type=run_public_traffic_report');
-    expect(reportResponse.text).toContain('本次未执行旧路由');
-    expect(reportResponse.card).toBeUndefined();
-    expect(copyResponse.text).toContain('intent.type=rental_copy');
-    expect(copyResponse.card).toBeUndefined();
+    expect(reportResponse.text).toContain('请确认');
+    expect(JSON.stringify(reportResponse.card)).toContain('publicTraffic.runReport');
+    expect(copyResponse.text).toContain('请确认租赁商品操作：761');
+    expect(JSON.stringify(copyResponse.card)).toContain('copy');
   });
 
   it('allows exact operations learning quiz to open locally in planner-first mode', async () => {

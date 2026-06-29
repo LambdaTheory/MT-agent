@@ -121,6 +121,29 @@ describe('@-mention boundary — group-message filtering', () => {
     expect(handleIntent).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps link maintenance routing stable when mention text has trailing punctuation', async () => {
+    const intents: BotIntent[] = [];
+    const dispatcher = createFeishuMessageDispatcher({
+      botMentionName: '公域数据日报',
+      resolveIntent: (text) => parseBotIntent(text),
+      handleIntent: vi.fn(async (intent) => {
+        intents.push(intent);
+        return { text: 'handled' };
+      }),
+    });
+
+    const result = await dispatcher.dispatch({
+      messageId: 'mid-group-link-maintenance-semicolon',
+      text: '@_bot 链接维护;',
+      source: 'sdk',
+      chatType: 'group',
+      mentions: [{ key: '@_bot', name: '公域数据日报' }],
+    });
+
+    expect(result).toEqual({ text: 'handled', skipped: false });
+    expect(intents).toEqual([{ type: 'link_registry_maintenance_prompt' }]);
+  });
+
   it('calls handler when group message mentions the configured bot by open_id', async () => {
     const texts: string[] = [];
     const handleIntent = vi.fn(async () => ({ text: 'handled' }));
@@ -266,6 +289,15 @@ describe('explicit commands — current parser behavior', () => {
   it('parses inventory status overview and query intents', () => {
     expect(parseBotIntent('库存情况')).toEqual({ type: 'inventory_status_overview' });
     expect(parseBotIntent('库存情况 pocket3')).toEqual({ type: 'inventory_status_query', query: 'pocket3' });
+    expect(parseBotIntent('库存情况；')).toEqual({ type: 'inventory_status_overview' });
+    expect(parseBotIntent('库存情况 pocket3;')).toEqual({ type: 'inventory_status_query', query: 'pocket3' });
+  });
+
+  it('parses link registry exact commands with trailing punctuation', () => {
+    expect(parseBotIntent('链接维护;')).toEqual({ type: 'link_registry_maintenance_prompt' });
+    expect(parseBotIntent('链接维护；')).toEqual({ type: 'link_registry_maintenance_prompt' });
+    expect(parseBotIntent('组级治理;')).toEqual({ type: 'link_registry_governance_prompt' });
+    expect(parseBotIntent('链接档案维护；')).toEqual({ type: 'link_registry_maintenance_hub' });
   });
 
   it('parses rental copy command', () => {

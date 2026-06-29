@@ -14,6 +14,10 @@ function normalize(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
 }
 
+function stripTrailingHarmlessPunctuation(text: string): string {
+  return normalize(text.replace(/[;；。!！?？,，、]+$/gu, ''));
+}
+
 function sendTo(text: string): FeishuSendTo | undefined {
   if (/(发全部|发两边|both)/i.test(text)) return 'both';
   if (/(发群|群里|group)/i.test(text)) return 'group';
@@ -112,66 +116,67 @@ function resendLatestReportIntentWithDate(text: string): BotIntent {
 
 export function parseExactBotIntent(input: string): BotIntent {
   const text = normalize(input);
-  if (!text) return { type: 'help' };
-  if (/^(帮助|help|\/help)$/i.test(text)) return { type: 'help' };
-  if (/^(跑|生成|执行).*(公域)?日报/.test(text)) return { type: 'run_public_traffic_report', sendTo: sendTo(text) };
-  if (/^(抓取|补抓|刷新|更新).*(访问页|后链路|访问数据)/.test(text)) return { type: 'refresh_public_traffic_dashboard', sendTo: sendTo(text) };
-  if (/^(推送)?(公域)?日报到群$/.test(text) || /^(推送|发送).*(公域)?日报.*(到群|群里)$/.test(text)) return pushLatestReportIntentWithDate(text);
-  if (/^重发.*(公域)?日报/.test(text)) return resendLatestReportIntentWithDate(text);
-  if (/^(同步|拉取|更新).*(关单|关单反馈)/.test(text)) return { type: 'sync_closed_order_feedback' };
-  if (/^(跑|生成|执行).*(关单观察|关单报告|关单反馈观察)/.test(text)) return { type: 'run_closed_order_observation_report' };
-  const datedReadIntent = parseDatedReadIntent(text);
+  const canonicalText = stripTrailingHarmlessPunctuation(text);
+  if (!canonicalText) return { type: 'help' };
+  if (/^(帮助|help|\/help)$/i.test(canonicalText)) return { type: 'help' };
+  if (/^(跑|生成|执行).*(公域)?日报/.test(canonicalText)) return { type: 'run_public_traffic_report', sendTo: sendTo(canonicalText) };
+  if (/^(抓取|补抓|刷新|更新).*(访问页|后链路|访问数据)/.test(canonicalText)) return { type: 'refresh_public_traffic_dashboard', sendTo: sendTo(canonicalText) };
+  if (/^(推送)?(公域)?日报到群$/.test(canonicalText) || /^(推送|发送).*(公域)?日报.*(到群|群里)$/.test(canonicalText)) return pushLatestReportIntentWithDate(canonicalText);
+  if (/^重发.*(公域)?日报/.test(canonicalText)) return resendLatestReportIntentWithDate(canonicalText);
+  if (/^(同步|拉取|更新).*(关单|关单反馈)/.test(canonicalText)) return { type: 'sync_closed_order_feedback' };
+  if (/^(跑|生成|执行).*(关单观察|关单报告|关单反馈观察)/.test(canonicalText)) return { type: 'run_closed_order_observation_report' };
+  const datedReadIntent = parseDatedReadIntent(canonicalText);
   if (datedReadIntent) return datedReadIntent;
-  if (/(今日|今天|现在).*(咋样|怎么样|概况|数据|日报|看下|看看)/.test(text)) return { type: 'latest_summary' };
-  if (/转化率|转化数据/.test(text)) return { type: 'conversion_summary' };
-  if (/^(?:Agent|agent|智能体语义|语义)(?:学习|迭代).*(?:汇总|总结|历史|统计)$|^(?:Agent|agent|智能体语义|语义)(?:学习|迭代)$/.test(text)) {
+  if (/(今日|今天|现在).*(咋样|怎么样|概况|数据|日报|看下|看看)/.test(canonicalText)) return { type: 'latest_summary' };
+  if (/转化率|转化数据/.test(canonicalText)) return { type: 'conversion_summary' };
+  if (/^(?:Agent|agent|智能体语义|语义)(?:学习|迭代).*(?:汇总|总结|历史|统计)$|^(?:Agent|agent|智能体语义|语义)(?:学习|迭代)$/.test(canonicalText)) {
     return { type: 'agent_learning_summary' };
   }
-  if (/^(运营学习|学习反馈).*(历史|统计)$/.test(text)) return { type: 'operations_learning_history' };
-  if (/^(运营学习|学习反馈).*(汇总|总结)$/.test(text)) return { type: 'operations_learning_summary' };
-  if (/^(运营学习|学习测验|今日测验|loop测验|运营测验|测验)$|学习\s*loop|运营学习\s*loop/i.test(text)) return { type: 'operations_learning_quiz' };
-  if (/^(差异化定价|配置差异化定价)$/.test(text)) return { type: 'differential_pricing_card' };
-  if (/^取消差异化定价$/.test(text)) return { type: 'cancel_differential_pricing_card' };
-  if (/^库存情况$/.test(text)) return { type: 'inventory_status_overview' };
-  const inventoryQuery = /^库存情况\s+(.+)$/.exec(text);
+  if (/^(运营学习|学习反馈).*(历史|统计)$/.test(canonicalText)) return { type: 'operations_learning_history' };
+  if (/^(运营学习|学习反馈).*(汇总|总结)$/.test(canonicalText)) return { type: 'operations_learning_summary' };
+  if (/^(运营学习|学习测验|今日测验|loop测验|运营测验|测验)$|学习\s*loop|运营学习\s*loop/i.test(canonicalText)) return { type: 'operations_learning_quiz' };
+  if (/^(差异化定价|配置差异化定价)$/.test(canonicalText)) return { type: 'differential_pricing_card' };
+  if (/^取消差异化定价$/.test(canonicalText)) return { type: 'cancel_differential_pricing_card' };
+  if (/^库存情况$/.test(canonicalText)) return { type: 'inventory_status_overview' };
+  const inventoryQuery = /^库存情况\s+(.+)$/.exec(canonicalText);
   const matchedInventoryQuery = inventoryQuery?.[1];
   if (matchedInventoryQuery) return { type: 'inventory_status_query', query: matchedInventoryQuery!.trim() };
-  if (/^(链接档案概览|链接概览)$/.test(text)) return { type: 'link_registry_overview' };
-  if (/^(链接维护|开始链接维护|打开链接维护|呼出链接维护卡)$/.test(text)) return { type: 'link_registry_maintenance_prompt' };
-  if (/^(组级治理|链接治理|开始组级治理|打开组级治理|呼出组级治理卡)$/.test(text)) return { type: 'link_registry_governance_prompt' };
-  if (/^(链接档案维护|维护链接档案|链接维护卡|链接档案治理)$/.test(text)) return { type: 'link_registry_maintenance_hub' };
-  if (/^(?:商品)?ID(?:查询|互查|转换|换算)$|^打开(?:商品)?ID(?:查询|互查|转换|换算)$|^查ID$/i.test(text)) return { type: 'lookup_product_id_card' };
+  if (/^(链接档案概览|链接概览)$/.test(canonicalText)) return { type: 'link_registry_overview' };
+  if (/^(链接维护|开始链接维护|打开链接维护|呼出链接维护卡)$/.test(canonicalText)) return { type: 'link_registry_maintenance_prompt' };
+  if (/^(组级治理|链接治理|开始组级治理|打开组级治理|呼出组级治理卡)$/.test(canonicalText)) return { type: 'link_registry_governance_prompt' };
+  if (/^(链接档案维护|维护链接档案|链接维护卡|链接档案治理)$/.test(canonicalText)) return { type: 'link_registry_maintenance_hub' };
+  if (/^(?:商品)?ID(?:查询|互查|转换|换算)$|^打开(?:商品)?ID(?:查询|互查|转换|换算)$|^查ID$/i.test(canonicalText)) return { type: 'lookup_product_id_card' };
 
-  const shortMultiProductQuery = parseShortMultiProductQuery(text);
+  const shortMultiProductQuery = parseShortMultiProductQuery(canonicalText);
   if (shortMultiProductQuery) return { type: 'query_product', keyword: shortMultiProductQuery };
 
-  const rentalPriceChange = parseRentalPriceChange(text);
+  const rentalPriceChange = parseRentalPriceChange(canonicalText);
   if (rentalPriceChange) return { type: 'rental_price_change', productId: rentalPriceChange.productId, request: rentalPriceChange };
 
-  const rentalCopy = parseRentalCopyCommand(text);
+  const rentalCopy = parseRentalCopyCommand(canonicalText);
   if (rentalCopy) return { type: 'rental_copy', productId: rentalCopy };
 
-  const delist = parseDelistCommand(text);
+  const delist = parseDelistCommand(canonicalText);
   if (delist) return { type: 'rental_delist', productId: delist };
 
-  const tenancySet = parseTenancySetCommand(text);
+  const tenancySet = parseTenancySetCommand(canonicalText);
   if (tenancySet) return { type: 'rental_tenancy_set', productId: tenancySet.productId, days: tenancySet.days };
 
-  const specDiscover = parseSpecDiscoverCommand(text);
+  const specDiscover = parseSpecDiscoverCommand(canonicalText);
   if (specDiscover) return { type: 'rental_spec_discover', productId: specDiscover };
 
-  const specAdd = parseSpecAddCommand(text);
+  const specAdd = parseSpecAddCommand(canonicalText);
   if (specAdd) return { type: 'rental_spec_add', productId: specAdd.productId, itemTitle: specAdd.itemTitle };
 
-  const idLookup = /^(?:查ID|ID查询)\s*(\d+)$/.exec(text)
-    ?? /^(端内(?:ID)?\s*\d+)(?:对应平台|的平台ID)?$/.exec(text)
-    ?? /^(平台(?:商品)?ID\s*(?:转端内\s*)?\d+)$/.exec(text)
-    ?? /^(\d+)\s*的平台ID$/.exec(text)
-    ?? /^(20\d{18,})\s*的端内ID$/.exec(text);
+  const idLookup = /^(?:查ID|ID查询)\s*(\d+)$/.exec(canonicalText)
+    ?? /^(端内(?:ID)?\s*\d+)(?:对应平台|的平台ID)?$/.exec(canonicalText)
+    ?? /^(平台(?:商品)?ID\s*(?:转端内\s*)?\d+)$/.exec(canonicalText)
+    ?? /^(\d+)\s*的平台ID$/.exec(canonicalText)
+    ?? /^(20\d{18,})\s*的端内ID$/.exec(canonicalText);
   if (idLookup) return { type: 'lookup_product_id', query: idLookup[1].trim() };
 
-  const query = /^(?:查询商品|查商品查询|查商品|查询|商品)\s+(.+)$/.exec(text)
-    ?? /^这个商品\s+(.+?)\s*(?:数据如何|怎么样|如何)?$/.exec(text);
+  const query = /^(?:查询商品|查商品查询|查商品|查询|商品)\s+(.+)$/.exec(canonicalText)
+    ?? /^这个商品\s+(.+?)\s*(?:数据如何|怎么样|如何)?$/.exec(canonicalText);
   if (query) return { type: 'query_product', keyword: query[1].trim() };
 
   return { type: 'unknown', text };
@@ -194,18 +199,12 @@ export function parseBotIntent(input: string): BotIntent {
   return { type: 'unknown', text };
 }
 
-export function allowsPlannerFirstExactIntent(intent: BotIntent): boolean {
-  return intent.type === 'operations_learning_quiz'
-    || intent.type === 'operations_learning_summary'
-    || intent.type === 'operations_learning_history';
-}
-
 export function parseAgentFirstBotIntent(input: string): BotIntent {
   const text = normalize(input);
   if (!text) return { type: 'help' };
 
   const exact = parseExactBotIntent(text);
-  if (allowsPlannerFirstExactIntent(exact)) return exact;
+  if (exact.type !== 'unknown') return exact;
 
   return { type: 'unknown', text };
 }

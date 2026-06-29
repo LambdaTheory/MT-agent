@@ -118,8 +118,22 @@ describe('createFeishuMessageDispatcher', () => {
       },
     });
 
-    await expect(dispatcher.dispatch({ messageId: 'mid-agent-first-resolver', text: '查询 565', source: 'sdk' })).resolves.toEqual({ text: 'unknown', skipped: false });
-    expect(intents).toEqual([{ type: 'unknown', text: '查询 565' }]);
+    await expect(dispatcher.dispatch({ messageId: 'mid-agent-first-resolver', text: '查询 565', source: 'sdk' })).resolves.toEqual({ text: 'query_product', skipped: false });
+    expect(intents).toEqual([{ type: 'query_product', keyword: '565' }]);
+  });
+
+  it('keeps exact management commands deterministic even when a planner is configured', async () => {
+    const intents: BotIntent[] = [];
+    const dispatcher = createFeishuMessageDispatcher({
+      agentPlannerProvider: { async proposePlan() { return '{}'; } },
+      handleIntent: async (intent) => {
+        intents.push(intent);
+        return { text: intent.type };
+      },
+    });
+
+    await expect(dispatcher.dispatch({ messageId: 'mid-agent-first-exact-link-maintenance', text: '链接维护', source: 'sdk' })).resolves.toEqual({ text: 'link_registry_maintenance_prompt', skipped: false });
+    expect(intents).toEqual([{ type: 'link_registry_maintenance_prompt' }]);
   });
 
   it('skips group messages that do not mention the bot', async () => {
