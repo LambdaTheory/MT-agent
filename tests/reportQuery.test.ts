@@ -200,6 +200,31 @@ describe('public traffic report freeform query', () => {
     expect(text).toContain('访问到发货率');
   });
 
+  it('does not substring-match short numeric product queries against platform product ids', () => {
+    const platformId = '2026062922000000000914';
+    const context: PublicTrafficDataReportContext = {
+      ...reportContext,
+      rows: [
+        { ...row('914', 'Internal 914 product', { exposure: 100, publicVisits: 10 }), platformProductId: 'platform-internal-914', displayProductId: '端内ID 914' },
+        { ...row('777', 'Platform id contains 914', { exposure: 200, publicVisits: 20 }), platformProductId: platformId, displayProductId: '端内ID 777' },
+      ],
+    };
+
+    const shortNumeric = runPublicTrafficReportQuery(context, {
+      target: 'productDetail',
+      productQuery: '914',
+    });
+    expect(shortNumeric).toContain('Internal 914 product');
+    expect(shortNumeric).not.toContain('Platform id contains 914');
+
+    const fullPlatform = runPublicTrafficReportQuery(context, {
+      target: 'productDetail',
+      productQuery: platformId,
+    });
+    expect(fullPlatform).toContain('Platform id contains 914');
+    expect(fullPlatform).not.toContain('Internal 914 product');
+  });
+
   it('reports product-level source coverage and missing rows', () => {
     const dashboardMissing = runPublicTrafficReportQuery(reportContext, {
       target: 'sourceCoverage',

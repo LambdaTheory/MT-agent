@@ -121,6 +121,11 @@ function readString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
+function readLinkRegistryResolutionMode(value: unknown): 'single' | 'sameSkuGroup' | null {
+  if (value === 'single' || value === 'sameSkuGroup') return value;
+  return null;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
@@ -205,6 +210,65 @@ function parseInternalProductIdsQuery(query: string): string[] | null {
   return Array.from(new Set(ids));
 }
 
+function parseExplicitInternalProductIdQuery(query: string): string | null {
+  const match = /(?:端内\s*id|internal\s*id|^id)\s*[:：#-]?\s*(\d{1,8})$/iu.exec(query.trim());
+  return match?.[1] ?? null;
+}
+
+function parseExplicitPlatformProductIdQuery(query: string): string | null {
+  const match = /(?:平台商品\s*id|平台\s*id|商品\s*id|product\s*id)\s*[:：#-]?\s*([a-z0-9_-]{8,})$/iu.exec(query.trim());
+  return match?.[1] ?? null;
+}
+
+function isLikelyPlatformProductId(value: string): boolean {
+  return /^20\d{10,}$/.test(value.trim());
+}
+
+function uniqueRegexGroup(query: string, pattern: RegExp, groupIndex = 1): string | null {
+  const values = Array.from(query.matchAll(pattern))
+    .map((match) => match[groupIndex]?.trim())
+    .filter((value): value is string => Boolean(value));
+  const unique = Array.from(new Set(values));
+  return unique.length === 1 ? unique[0] : null;
+}
+
+function parseExplicitInternalProductIdInText(query: string): string | null {
+  return uniqueRegexGroup(query.trim(), /(?:\u7aef\u5185\s*id|internal\s*id|(?:^|[\s#\uFF1A:,-])id)\s*[:\uFF1A#-]?\s*(\d{1,8})(?!\d)/giu);
+}
+
+function parseLeadingInternalProductIdActionQuery(query: string): string | null {
+  const match = new RegExp('^\\s*(\\d{1,8})(?![\\d.])(?=\\s*(?:$|\\u6574\\u4f53|\\u5168\\u5c40|\\u6539\\u4ef7|\\u8c03\\u4ef7|\\u4ef7\\u683c|\\u79df\\u91d1|\\u94fa|\\u590d\\u5236|\\u8865|\\u67e5|\\u67e5\\u8be2|\\u4e0b\\u67b6|\\u5220\\u9664|\\u89c4\\u683c|\\u540c\\u6b3e|\\u540c\\u7ec4|\\u6574\\u7ec4|\\u6240\\u6709))', 'u').exec(query);
+  return match?.[1] ?? null;
+}
+
+function parseExplicitPlatformProductIdInText(query: string): string | null {
+  return uniqueRegexGroup(query.trim(), /(?:\u5e73\u53f0\u5546\u54c1\s*id|\u5e73\u53f0\s*id|\u5546\u54c1\s*id|product\s*id)\s*[:\uFF1A#-]?\s*([a-z0-9_-]{8,})(?![a-z0-9_-])/giu);
+}
+
+function parseLikelyPlatformProductIdInText(query: string): string | null {
+  const normalized = query.trim();
+  if (isLikelyPlatformProductId(normalized)) return normalized;
+  return uniqueRegexGroup(normalized, /(?:^|[^\d])((?:20)\d{10,})(?!\d)/g);
+}
+
+function resolveEntriesForSingleEntry(
+  entry: LinkRegistryEntry,
+  registry: ReturnType<typeof createLinkRegistry>,
+  matchText: string,
+  expandSingleInternalIdToSameSkuGroup: boolean,
+): { ok: true; sameSkuGroupId: string | null; entries: LinkRegistryEntry[]; matchText: string } {
+  const sameSkuGroupId = entry.sameSkuGroupId?.trim() ?? null;
+  const entries = expandSingleInternalIdToSameSkuGroup && sameSkuGroupId
+    ? queryableEntries(registry.listBySameSkuGroup(sameSkuGroupId, { includeUnknown: true }))
+    : queryableEntries([entry]);
+  return {
+    ok: true,
+    sameSkuGroupId: expandSingleInternalIdToSameSkuGroup ? sameSkuGroupId : null,
+    entries: entries.length ? entries : [entry],
+    matchText,
+  };
+}
+
 function resolveRentalPriceSnapshotEntries(
   query: string,
   registry: ReturnType<typeof createLinkRegistry>,
@@ -213,8 +277,34 @@ function resolveRentalPriceSnapshotEntries(
   const normalized = query.trim();
   if (!normalized) return { ok: false, text: '请提供要定位的商品、端内ID或同款组。' };
 
-  const explicitIds = parseInternalProductIdsQuery(normalized);
   const expandSingleInternalIdToSameSkuGroup = options.expandSingleInternalIdToSameSkuGroup !== false;
+  const platformProductId = parseExplicitPlatformProductIdInText(normalized) ?? parseLikelyPlatformProductIdInText(normalized);
+  if (platformProductId) {
+    const entry = registry.byPlatformProductId(platformProductId);
+    if (!entry) return { ok: false, text: `链接维护档案未找到平台商品ID ${platformProductId}，无法安全定位商品。` };
+    return resolveEntriesForSingleEntry(
+      entry,
+      registry,
+      `按平台商品ID ${platformProductId} 精确映射端内ID ${entry.internalProductId}`,
+      expandSingleInternalIdToSameSkuGroup,
+    );
+  }
+
+  const explicitInternalProductId = parseExplicitInternalProductIdInText(normalized) ?? parseLeadingInternalProductIdActionQuery(normalized);
+  if (explicitInternalProductId) {
+    const entry = registry.getByInternalId(explicitInternalProductId);
+    if (!entry) return { ok: false, text: `链接维护档案未找到端内ID ${explicitInternalProductId}，无法安全定位商品。` };
+    return resolveEntriesForSingleEntry(
+      entry,
+      registry,
+      expandSingleInternalIdToSameSkuGroup && entry.sameSkuGroupId?.trim()
+        ? `按端内ID ${explicitInternalProductId} 命中同款组 ${entry.sameSkuGroupId.trim()}`
+        : `按端内ID ${explicitInternalProductId} 查询指定商品`,
+      expandSingleInternalIdToSameSkuGroup,
+    );
+  }
+
+  const explicitIds = parseInternalProductIdsQuery(normalized);
   if (explicitIds && (options.allowMultipleInternalIds || explicitIds.length === 1) && (explicitIds.length > 1 || !expandSingleInternalIdToSameSkuGroup)) {
     const missing: string[] = [];
     const entries = explicitIds
@@ -236,10 +326,17 @@ function resolveRentalPriceSnapshotEntries(
 
   if (/^\d+$/.test(normalized)) {
     const entry = registry.getByInternalId(normalized);
+    if (entry) {
+      return resolveEntriesForSingleEntry(
+        entry,
+        registry,
+        expandSingleInternalIdToSameSkuGroup && entry.sameSkuGroupId?.trim()
+          ? `按端内ID ${normalized} 命中同款组 ${entry.sameSkuGroupId.trim()}`
+          : `按端内ID ${normalized} 查询指定商品`,
+        expandSingleInternalIdToSameSkuGroup,
+      );
+    }
     if (!entry) return { ok: false, text: `链接维护档案未找到端内ID ${normalized}，无法定位商品组。` };
-    const sameSkuGroupId = entry.sameSkuGroupId?.trim() ?? null;
-    const entries = sameSkuGroupId ? queryableEntries(registry.listBySameSkuGroup(sameSkuGroupId, { includeUnknown: true })) : queryableEntries([entry]);
-    return { ok: true, sameSkuGroupId, entries: entries.length ? entries : [entry], matchText: sameSkuGroupId ? `按端内ID ${normalized} 命中同款组 ${sameSkuGroupId}` : `按端内ID ${normalized} 查询单商品` };
   }
 
   const directGroupEntries = queryableEntries(registry.listBySameSkuGroup(normalized, { includeUnknown: true }));
@@ -268,9 +365,22 @@ async function linkRegistryResolveProductsResponse(
 ): Promise<BotResponse> {
   const query = requireString(args.query, 'query');
   const includeUnknown = args.includeUnknown !== false;
+  const requestedResolutionMode = readLinkRegistryResolutionMode(args.resolutionMode);
+  const explicitIds = parseInternalProductIdsQuery(query);
+  const explicitProductIdentifier = Boolean(
+    explicitIds ||
+    parseExplicitInternalProductIdInText(query) ||
+    parseExplicitPlatformProductIdInText(query) ||
+    parseLeadingInternalProductIdActionQuery(query) ||
+    parseLikelyPlatformProductIdInText(query),
+  );
+  const effectiveResolutionMode = requestedResolutionMode ?? (explicitProductIdentifier ? 'single' : 'sameSkuGroup');
   const registryContext = await loadClosedOrderRegistryContext(options.closedOrderRegistryPaths);
   const registry = createLinkRegistry(registryContext.registry);
-  const resolution = resolveRentalPriceSnapshotEntries(query, registry);
+  const resolution = resolveRentalPriceSnapshotEntries(query, registry, {
+    expandSingleInternalIdToSameSkuGroup: effectiveResolutionMode === 'sameSkuGroup',
+    allowMultipleInternalIds: true,
+  });
   if (!resolution.ok) return { text: resolution.text, metadata: { toolName: 'linkRegistry.resolveProducts', status: 'not_found', query, productIds: [], count: 0 } };
 
   const entries = includeUnknown ? resolution.entries : resolution.entries.filter((entry) => entry.status === 'active');
@@ -295,6 +405,7 @@ async function linkRegistryResolveProductsResponse(
       toolName: 'linkRegistry.resolveProducts',
       status: productIds.length ? 'ok' : 'empty',
       query,
+      resolutionMode: effectiveResolutionMode,
       sameSkuGroupId: resolution.sameSkuGroupId,
       productIds,
       count: productIds.length,

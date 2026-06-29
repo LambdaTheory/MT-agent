@@ -189,7 +189,8 @@ function normalizeText(value: unknown): string {
 }
 
 function internalProductId(row: PublicTrafficProductDataRow): string {
-  return /^端内id\s*(\d+)$/i.exec(row.displayProductId.trim())?.[1] ?? row.displayProductId;
+  const displayProductId = row.displayProductId.trim();
+  return /^(?:端内\s*id|绔唴id)\s*(\d+)$/i.exec(displayProductId)?.[1] ?? displayProductId;
 }
 
 function periodsFromArgs(args: PublicTrafficReportQueryArguments): PeriodKey[] {
@@ -279,6 +280,11 @@ function productMatchesFilters(row: PublicTrafficProductDataRow, filters: Report
 function productMatchesQuery(row: PublicTrafficProductDataRow, query: string | undefined): boolean {
   if (!query?.trim()) return true;
   const normalized = normalizeText(query);
+  if (/^\d+$/.test(normalized)) {
+    return normalizeText(internalProductId(row)) === normalized ||
+      normalizeText(row.displayProductId) === normalized ||
+      normalizeText(row.platformProductId) === normalized;
+  }
   return normalizeText(row.productName).includes(normalized) ||
     normalizeText(row.displayProductId).includes(normalized) ||
     normalizeText(internalProductId(row)) === normalized ||

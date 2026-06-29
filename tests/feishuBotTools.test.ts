@@ -351,6 +351,44 @@ async function writeAceProPriceRegistryFixtures(rootDir: string): Promise<TestRe
   };
 }
 
+async function writePocket4PriceRegistryFixtures(rootDir: string): Promise<TestRegistryPaths> {
+  const configDir = join(rootDir, 'config');
+  const outputDir = join(rootDir, 'output');
+  const stateDir = join(outputDir, 'state');
+  await mkdir(configDir, { recursive: true });
+  await mkdir(stateDir, { recursive: true });
+  await mkdir(join(outputDir, '2026-06-27'), { recursive: true });
+  await writeFile(join(configDir, 'product-id-map.json'), JSON.stringify({
+    '2026062922000000000914': '914',
+    '2026062922000000001915': '915',
+    '2026062922000000002916': '916',
+  }), 'utf8');
+  await writeFile(join(configDir, 'product-name-map.json'), JSON.stringify({
+    '914': 'Pocket 4 Pro A',
+    '915': 'Pocket 4 Pro B',
+    '916': 'Pocket 4 Pro C',
+  }), 'utf8');
+  await writeFile(join(configDir, 'link-registry-overrides.json'), JSON.stringify({
+    version: 1,
+    entries: [
+      { internalProductId: '914', productName: 'Pocket 4 Pro A', shortName: 'Pocket 4 Pro', sameSkuGroupId: 'dji-pocket-4-pro', status: 'active', updatedAt: '2026-06-27' },
+      { internalProductId: '915', productName: 'Pocket 4 Pro B', shortName: 'Pocket 4 Pro', sameSkuGroupId: 'dji-pocket-4-pro', status: 'active', updatedAt: '2026-06-27' },
+      { internalProductId: '916', productName: 'Pocket 4 Pro C', shortName: 'Pocket 4 Pro', sameSkuGroupId: 'dji-pocket-4-pro', status: 'active', updatedAt: '2026-06-27' },
+    ],
+    sameSkuGroupAliasRules: [{ sameSkuGroupId: 'dji-pocket-4-pro', aliases: ['pocket4pro', 'Pocket 4 Pro'] }],
+  }), 'utf8');
+  return {
+    productIdMapPath: join(configDir, 'product-id-map.json'),
+    productNameMapPath: join(configDir, 'product-name-map.json'),
+    goodsSnapshotPath: join(stateDir, 'goods-current-snapshot.json'),
+    firstSeenPath: join(stateDir, 'goods-first-seen.json'),
+    lifecyclePath: join(stateDir, 'goods-link-lifecycle.json'),
+    daemonCatalogPath: join(stateDir, 'link-registry-daemon-catalog.json'),
+    overridesPath: join(configDir, 'link-registry-overrides.json'),
+    artifactsDir: outputDir,
+  };
+}
+
 async function writeX300SpecRemoveRegistryFixtures(rootDir: string): Promise<TestRegistryPaths> {
   const configDir = join(rootDir, 'config');
   const outputDir = join(rootDir, 'output');
@@ -1461,6 +1499,67 @@ describe('handleBotIntent', () => {
     expect(response.text).toContain('链接数量：2 条');
     expect(response.text).toContain('可用端内ID：841、842');
     expect(response.card).toBeUndefined();
+  });
+
+  it('keeps explicit product identifiers separate from same-sku group expansion', async () => {
+    const registryRoot = await mkdtemp(join(tmpdir(), 'mt-agent-identifier-boundary-registry-'));
+    const registryPaths = await writePocket4PriceRegistryFixtures(registryRoot);
+
+    const internalId = await executeAgentToolRequest(
+      { toolName: 'linkRegistry.resolveProducts', arguments: { query: '914' }, reason: 'short numeric ids default to one internal product' },
+      'output',
+      { closedOrderRegistryPaths: registryPaths },
+    );
+    expect(internalId.metadata).toMatchObject({ productIds: ['914'], count: 1, resolutionMode: 'single' });
+    expect(internalId.text).not.toContain('915');
+    expect(internalId.text).not.toContain('916');
+
+    const labelledInternalId = await executeAgentToolRequest(
+      { toolName: 'linkRegistry.resolveProducts', arguments: { query: '端内ID 914' }, reason: 'labelled internal ids also mean one product' },
+      'output',
+      { closedOrderRegistryPaths: registryPaths },
+    );
+    expect(labelledInternalId.metadata).toMatchObject({ productIds: ['914'], count: 1, resolutionMode: 'single' });
+    expect(labelledInternalId.text).not.toContain('915');
+
+    const labelledInternalIdSentence = await executeAgentToolRequest(
+      { toolName: 'linkRegistry.resolveProducts', arguments: { query: '\u7aef\u5185ID 914 \u6574\u4f53\u6539\u4ef7 0.99' }, reason: 'planner may pass the whole sentence as query' },
+      'output',
+      { closedOrderRegistryPaths: registryPaths },
+    );
+    expect(labelledInternalIdSentence.metadata).toMatchObject({ productIds: ['914'], count: 1, resolutionMode: 'single' });
+    expect(labelledInternalIdSentence.text).not.toContain('915');
+
+    const leadingInternalIdSentence = await executeAgentToolRequest(
+      { toolName: 'linkRegistry.resolveProducts', arguments: { query: '914\u6574\u4f53\u6539\u4ef7 0.99' }, reason: 'a leading short id in an action sentence is one internal product' },
+      'output',
+      { closedOrderRegistryPaths: registryPaths },
+    );
+    expect(leadingInternalIdSentence.metadata).toMatchObject({ productIds: ['914'], count: 1, resolutionMode: 'single' });
+    expect(leadingInternalIdSentence.text).not.toContain('915');
+
+    const platformId = await executeAgentToolRequest(
+      { toolName: 'linkRegistry.resolveProducts', arguments: { query: '商品ID 2026062922000000000914' }, reason: 'platform product ids must match exactly' },
+      'output',
+      { closedOrderRegistryPaths: registryPaths },
+    );
+    expect(platformId.metadata).toMatchObject({ productIds: ['914'], count: 1, resolutionMode: 'single' });
+    expect(platformId.text).not.toContain('915');
+
+    const platformIdSentence = await executeAgentToolRequest(
+      { toolName: 'linkRegistry.resolveProducts', arguments: { query: '\u5546\u54c1ID 2026062922000000000914 \u6574\u4f53\u6539\u4ef7' }, reason: 'platform ids embedded in action sentences must be exact matches' },
+      'output',
+      { closedOrderRegistryPaths: registryPaths },
+    );
+    expect(platformIdSentence.metadata).toMatchObject({ productIds: ['914'], count: 1, resolutionMode: 'single' });
+    expect(platformIdSentence.text).not.toContain('915');
+
+    const sameSkuGroup = await executeAgentToolRequest(
+      { toolName: 'linkRegistry.resolveProducts', arguments: { query: '914', resolutionMode: 'sameSkuGroup' }, reason: 'user explicitly asks for the same-sku group' },
+      'output',
+      { closedOrderRegistryPaths: registryPaths },
+    );
+    expect(sameSkuGroup.metadata).toMatchObject({ productIds: ['914', '915', '916'], count: 3, resolutionMode: 'sameSkuGroup' });
   });
 
   it('lets the Agent planner answer report source coverage questions through publicTraffic.reportQuery', async () => {
@@ -3035,6 +3134,61 @@ describe('handleBotIntent', () => {
     const confirmRequest = readAgentToolConfirmRequestFromCard(response.card);
     expect(confirmRequest.toolName).toBe('rental.priceApply');
     expect((confirmRequest.arguments.items as Array<{ productId: string }>).map((item) => item.productId)).toEqual(['841', '842']);
+  });
+
+  it('keeps explicit internal-id price changes scoped to that single product', async () => {
+    const outputDir = await writeContext();
+    const registryRoot = await mkdtemp(join(tmpdir(), 'mt-agent-explicit-price-registry-'));
+    const registryPaths = await writePocket4PriceRegistryFixtures(registryRoot);
+    const planner: AgentPlannerProvider = {
+      async proposePlan() {
+        return JSON.stringify({
+          goal: '对端内ID 914 整体改价 0.99',
+          steps: [
+            { id: 'resolve', toolName: 'linkRegistry.resolveProducts', arguments: { query: '914' }, reason: '先解析用户给出的端内ID' },
+            { toolName: 'rental.pricePreview', arguments: { productIds: '${resolve.productIds}', discount: 0.99, scope: 'all_price_fields' }, reason: '对指定端内ID生成所有价格字段改价预览' },
+          ],
+          confidence: 0.94,
+          reason: '用户给出的是明确端内ID，整体改价只表示该商品所有价格字段',
+        });
+      },
+    };
+    const previewCalls: unknown[] = [];
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview(request) {
+        previewCalls.push(request);
+        if (request.mode !== 'global_discount') throw new Error('expected global discount preview');
+        return {
+          productId: request.productId,
+          fields: { rent1day: '99.00', marketPrice: '999.00' },
+          lines: ['preview: ok'],
+          warnings: [],
+          audit: { taskId: `task_${request.productId}_preview`, rollbackFile: `rollback-${request.productId}.json`, hasErrors: false },
+        };
+      },
+      async execute() { throw new Error('execute should not run before confirmation'); },
+      async copy() { throw new Error('copy should not run'); },
+      async delist() { throw new Error('delist should not run'); },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+
+    const response = await handleBotIntent({ type: 'unknown', text: '914整体改价 0.99' }, outputDir, {
+      agentPlannerProvider: planner,
+      rentalPriceClient,
+      closedOrderRegistryPaths: registryPaths,
+    });
+
+    expect(previewCalls).toEqual([
+      { mode: 'global_discount', productId: '914', discount: 0.99, scope: 'all_price_fields' },
+    ]);
+    expect(response.text).toContain('914');
+    expect(response.text).not.toContain('915');
+    expect(response.text).not.toContain('916');
+    const confirmRequest = readAgentToolConfirmRequestFromCard(response.card);
+    expect(confirmRequest.toolName).toBe('rental.priceApply');
+    expect((confirmRequest.arguments.items as Array<{ productId: string }>).map((item) => item.productId)).toEqual(['914']);
   });
 
   it('executes atomic rental.priceApply after confirmation and returns audit references', async () => {

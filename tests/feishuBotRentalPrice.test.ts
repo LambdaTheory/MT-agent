@@ -280,6 +280,21 @@ describe('rental price skill client copy diagnostics', () => {
     expect(result.lines).toContain('currentUrl: https://example.test/goods/list');
   });
 
+  it('surfaces daemon read errors during price preview instead of treating them as empty fields', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      status: 'error',
+      productId: '914',
+      message: 'no specs found; product may not exist or page structure changed',
+      url: 'https://example.test/web/index.php?c=user&a=login',
+    }))));
+    const client = createRentalPriceSkillClient({ daemonUrl: 'http://127.0.0.1:9223', daemonToken: 'test-token' });
+
+    await expect(client.preview({ mode: 'global_discount', productId: '914', discount: 0.99, scope: 'all_price_fields' }))
+      .rejects.toThrow('read failed: no specs found');
+    await expect(client.preview({ mode: 'global_discount', productId: '914', discount: 0.99, scope: 'all_price_fields' }))
+      .rejects.toThrow('c=user');
+  });
+
   it('marks unknown copy results as possible side effects and unsafe to retry automatically', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
       status: 'unknown',

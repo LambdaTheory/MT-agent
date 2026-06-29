@@ -766,6 +766,12 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
     },
     async preview(request) {
       const current = await send({ action: 'read', productId: request.productId });
+      const readStatus = commandStatus(current);
+      if (readStatus !== 'ok' && readStatus !== 'partial') {
+        const message = optionalString(current, 'message') ?? 'unknown read error';
+        const url = optionalString(current, 'url');
+        throw new Error(`read failed: ${message}${url ? `; url=${url}` : ''}`);
+      }
       const values = isRecord(current.values) ? current.values : {};
       const fields = selectedFields(values, request);
       const lines = Object.entries(fields).map(([field, value]) => `${field} -> ${value}`);

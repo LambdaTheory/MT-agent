@@ -119,6 +119,7 @@ const linkRegistryResolveProductsArgumentsSchema = {
   properties: {
     query: { type: 'string' },
     includeUnknown: { type: 'boolean' },
+    resolutionMode: { type: 'string', enum: ['single', 'sameSkuGroup'] },
   },
   required: ['query'],
   additionalProperties: false,
@@ -129,6 +130,7 @@ const linkRegistryResolveProductsResultMetadataSchema = {
   properties: {
     status: { type: 'string' },
     query: { type: 'string' },
+    resolutionMode: { type: 'string' },
     sameSkuGroupId: { type: 'string' },
     productIds: { type: 'array', items: { type: 'string' }, description: 'Internal product ids resolved for follow-up tools such as rental.pricePreview.productIds.' },
     count: { type: 'integer' },
@@ -501,7 +503,7 @@ const agentTools: AgentToolDefinition[] = [
   },
   {
     name: 'linkRegistry.resolveProducts',
-    description: '按商品名、别名、端内ID或同款组解析链接档案，返回可供后续工具使用的端内ID列表和数量；适合“某商品有多少条链接/有哪些端内ID/链接总数”这类链接档案问题；只做解析，不执行运营动作',
+    description: '按商品名、别名、端内ID、平台商品ID或同款组解析链接档案，返回可供后续工具使用的端内ID列表和数量。短纯数字、端内ID914、ID914 默认按单个端内ID解析；商品ID/平台商品ID/2026... 长ID按平台商品ID精确解析；只有用户明确说同款组/整组/所有该组，或需要按商品名/别名解析整组时，才传 resolutionMode=sameSkuGroup。只做解析，不执行运营动作。',
     risk: 'read',
     requiresConfirmation: false,
     inputSchema: linkRegistryResolveProductsArgumentsSchema,

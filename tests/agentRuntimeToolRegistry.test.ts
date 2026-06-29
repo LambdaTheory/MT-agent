@@ -371,6 +371,7 @@ describe('agent runtime tool registry', () => {
       properties: {
         query: { type: 'string' },
         includeUnknown: { type: 'boolean' },
+        resolutionMode: { type: 'string' },
       },
       required: ['query'],
       additionalProperties: false,

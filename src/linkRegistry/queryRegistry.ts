@@ -22,6 +22,8 @@ export interface LinkRegistryQuery {
   byInternalId(internalProductId: string): LinkRegistryEntry | null;
   /** Alias of byInternalId for the archive-layer API. */
   getByInternalId(internalProductId: string): LinkRegistryEntry | null;
+  /** Trims the platform product ID and returns the first matching registry entry, or null when absent. */
+  byPlatformProductId(platformProductId: string): LinkRegistryEntry | null;
   /**
    * Trims the group ID and returns a structured result for downstream confidence handling.
    * Missing groups return an empty result with confidence='none'; groups with 1-2 entries
@@ -52,11 +54,15 @@ function includedByStatus(entry: LinkRegistryEntry, options: ListBySameSkuGroupO
 
 export function createLinkRegistryQuery(entries: LinkRegistryEntry[]): LinkRegistryQuery {
   const byInternalIdIndex = new Map<string, LinkRegistryEntry>();
+  const byPlatformProductIdIndex = new Map<string, LinkRegistryEntry>();
   const bySameSkuGroupIndex = new Map<string, LinkRegistryEntry[]>();
 
   for (const entry of entries) {
     const internalProductId = trimKey(entry.internalProductId);
     if (internalProductId && !byInternalIdIndex.has(internalProductId)) byInternalIdIndex.set(internalProductId, entry);
+
+    const platformProductId = entry.platformProductId?.trim();
+    if (platformProductId && !byPlatformProductIdIndex.has(platformProductId)) byPlatformProductIdIndex.set(platformProductId, entry);
 
     const sameSkuGroupId = entry.sameSkuGroupId?.trim();
     if (!sameSkuGroupId) continue;
@@ -72,6 +78,9 @@ export function createLinkRegistryQuery(entries: LinkRegistryEntry[]): LinkRegis
     },
     getByInternalId(internalProductId: string): LinkRegistryEntry | null {
       return byInternalIdIndex.get(trimKey(internalProductId)) ?? null;
+    },
+    byPlatformProductId(platformProductId: string): LinkRegistryEntry | null {
+      return byPlatformProductIdIndex.get(trimKey(platformProductId)) ?? null;
     },
     bySameSkuGroup(sameSkuGroupId: string): SameSkuGroupQueryResult {
       const trimmed = trimKey(sameSkuGroupId);

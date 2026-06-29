@@ -129,6 +129,10 @@ function getCurrentProductIdFromUrl() {
   return match ? match[1] : null;
 }
 
+function isLoginUrl(url) {
+  return url.includes("login") || url.includes("c=user");
+}
+
 function assertCurrentProduct(expectedProductId) {
   if (!expectedProductId) return { ok: true, currentProductId: getCurrentProductIdFromUrl(), url: page.url() };
   const currentProductId = getCurrentProductIdFromUrl();
@@ -200,7 +204,7 @@ async function actionLogin() {
 // --- Ensure logged in ---
 async function ensureLogin() {
   const url = page.url();
-  if (url.includes("login") || url.includes("c=user")) {
+  if (isLoginUrl(url)) {
     return await actionLogin();
   }
   return { status: "ok", alreadyLoggedIn: true };
@@ -229,13 +233,29 @@ async function discoverSpecs() {
 
 // --- Read ---
 async function actionRead(productId, fields) {
+  let login = await ensureLogin();
+  if (login.status === "error") {
+    return { status: "error", productId, message: login.message || "login failed before read", url: login.url || page.url() };
+  }
+
   await actionNavigate(productId);
-  await ensureLogin();
-  // Re-navigate: login may have redirected away from product page
-  if (page.url().includes("c=site") && !page.url().includes("goods.edit")) {
+  if (isLoginUrl(page.url())) {
+    login = await ensureLogin();
+    if (login.status === "error") {
+      return { status: "error", productId, message: login.message || "login failed before read", url: login.url || page.url() };
+    }
     await actionNavigate(productId);
   }
   await page.waitForTimeout(1500);
+
+  const currentUrl = page.url();
+  if (isLoginUrl(currentUrl)) {
+    return { status: "error", productId, message: "redirected to login while reading product", url: currentUrl };
+  }
+  const currentProductId = getCurrentProductIdFromUrl();
+  if (!currentUrl.includes("goods.edit") || String(currentProductId || "") !== String(productId)) {
+    return { status: "error", productId, message: "unexpected product page while reading product", currentProductId, url: currentUrl };
+  }
 
   const sel = config.selectors.product;
   const specs = await discoverSpecs();
