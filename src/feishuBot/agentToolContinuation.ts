@@ -8,6 +8,7 @@ import type { AgentStepMetadataStore } from '../agentRuntime/stepResolution.js';
 import { rememberStepMetadata, resolvePlannerArguments } from '../agentRuntime/stepResolution.js';
 import { findAgentTool } from '../agentRuntime/toolRegistry.js';
 import { executeAgentToolRequest, type AgentToolExecutionOptions } from './agentToolExecutor.js';
+import { inferPriceAdjustmentAmountFromText } from './priceAdjustment.js';
 import { inferPriceMultiplierFromText } from './priceMultiplier.js';
 import type { BotResponse } from './types.js';
 
@@ -54,7 +55,15 @@ function completePricePreviewArguments(
   args: Record<string, unknown>,
   contextText: string,
 ): Record<string, unknown> {
-  if (toolName !== 'rental.pricePreview' || args.discount !== undefined || args.fields !== undefined) return args;
+  if (toolName !== 'rental.pricePreview' || args.discount !== undefined || args.fields !== undefined || args.adjustmentAmount !== undefined) return args;
+  const adjustmentAmount = inferPriceAdjustmentAmountFromText(contextText);
+  if (adjustmentAmount !== null) {
+    return {
+      ...args,
+      adjustmentAmount,
+      scope: 'rent_fields',
+    };
+  }
   const inferred = inferPriceMultiplierFromText(contextText);
   if (inferred === null) return args;
   return {

@@ -74,6 +74,7 @@ import {
   type RentalPriceSkillClient,
 } from './rentalPrice.js';
 import { findReadOnlyTool } from './readOnlyToolRegistry.js';
+import { inferPriceAdjustmentAmountFromText, readPriceAdjustmentAmountArgument } from './priceAdjustment.js';
 import { inferPriceMultiplierFromText, readPriceMultiplierArgument } from './priceMultiplier.js';
 import { runPublicTrafficReportDateComparison, runPublicTrafficReportQuery, type PublicTrafficReportQueryArguments } from './reportQuery.js';
 import { findLatestReportContext, findReportContextByDate, formatConversionSummary, formatLatestSummary, formatProductRows, parseNumericProductIdList, queryProductRows } from './reportStore.js';
@@ -566,6 +567,11 @@ function formatDiscountText(discount: number): string {
   return Number.isInteger(discount * 100) ? `${discount * 100}%` : `${(discount * 100).toFixed(2)}%`;
 }
 
+function formatAdjustmentAmountText(adjustmentAmount: number): string {
+  const prefix = adjustmentAmount > 0 ? '+' : '';
+  return `${prefix}${adjustmentAmount.toFixed(2)}`;
+}
+
 function compactPreviewLine(productId: string, fields: Record<string, string>): string {
   const fieldCount = Object.keys(fields).length;
   const samples = Object.entries(fields)
@@ -578,6 +584,7 @@ function compactPreviewLine(productId: string, fields: Record<string, string>): 
 function formatPricePreviewText(input: {
   productIds: string[];
   discount?: number;
+  adjustmentAmount?: number;
   scope?: 'rent_fields' | 'all_price_fields';
   readyItems: Array<{ productId: string; fields: Record<string, string>; audit?: RentalPriceAuditReference }>;
   blocked: string[];
@@ -586,6 +593,7 @@ function formatPricePreviewText(input: {
   return [
     `改价预览：${input.productIds.length} 个端内ID`,
     input.discount !== undefined ? `折扣：${formatDiscountText(input.discount)}` : undefined,
+    input.adjustmentAmount !== undefined ? `金额调整：${formatAdjustmentAmountText(input.adjustmentAmount)}` : undefined,
     input.scope ? '范围：租金字段' : undefined,
     `端内ID：${input.productIds.join('、')}`,
     '',
@@ -616,9 +624,14 @@ async function rentalPricePreviewResponse(
 
   const priceArgs = isRecord(args.fields) ? { ...args, fields: sanitizeExplicitPriceFields(args.fields, reason) } : args;
   const hasExplicitFields = isRecord(priceArgs.fields);
-  const discount = hasExplicitFields ? undefined : (readPriceMultiplierArgument(priceArgs.discount) ?? inferPriceMultiplierFromText(reason));
-  if (!hasExplicitFields && discount === null) {
-    return { text: '改价预览参数无效：需要提供 fields，或提供 discount 折扣倍数，例如九折传 0.9。', metadata: { toolName: 'rental.pricePreview', ok: false, productIds } };
+  const adjustmentAmount = hasExplicitFields
+    ? undefined
+    : (readPriceAdjustmentAmountArgument(priceArgs.adjustmentAmount) ?? inferPriceAdjustmentAmountFromText(reason));
+  const discount = hasExplicitFields || adjustmentAmount !== null
+    ? undefined
+    : (readPriceMultiplierArgument(priceArgs.discount) ?? inferPriceMultiplierFromText(reason));
+  if (!hasExplicitFields && adjustmentAmount === null && discount === null) {
+    return { text: '改价预览参数无效：需要提供 fields、discount 折扣倍数，或 adjustmentAmount 金额增减（例如 -1 表示每个租金字段减 1 元）。', metadata: { toolName: 'rental.pricePreview', ok: false, productIds } };
   }
   const scope = hasExplicitFields ? undefined : readPriceChangeScope(priceArgs.scope);
 
@@ -627,7 +640,9 @@ async function rentalPricePreviewResponse(
   for (const productId of productIds) {
     const requestArgs: Record<string, unknown> = hasExplicitFields
       ? { productId, fields: priceArgs.fields }
-      : { productId, discount, scope };
+      : adjustmentAmount !== null
+        ? { productId, adjustmentAmount, scope }
+        : { productId, discount, scope };
     const rentalRequest = rentalPriceChangeRequestFromToolArguments(requestArgs);
     if (!rentalRequest) {
       blocked.push(`商品 ${productId}：改价参数无效`);
@@ -654,7 +669,14 @@ async function rentalPricePreviewResponse(
     }
   }
 
-  const text = formatPricePreviewText({ productIds, ...(discount !== undefined && discount !== null ? { discount } : {}), ...(scope ? { scope } : {}), readyItems, blocked });
+  const text = formatPricePreviewText({
+    productIds,
+    ...(discount !== undefined && discount !== null ? { discount } : {}),
+    ...(adjustmentAmount !== undefined && adjustmentAmount !== null ? { adjustmentAmount } : {}),
+    ...(scope ? { scope } : {}),
+    readyItems,
+    blocked,
+  });
   if (blocked.length > 0 || readyItems.length !== productIds.length) {
     return {
       text,

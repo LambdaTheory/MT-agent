@@ -315,6 +315,35 @@ describe('rental price skill client copy diagnostics', () => {
     expect(preview.fields).not.toHaveProperty('finalPayment');
   });
 
+  it('keeps amount adjustment previews scoped to rent fields', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      status: 'ok',
+      productId: '851',
+      specs: [{ specId: '3862', title: '默认' }],
+      values: {
+        '3862': {
+          rent1day: '20.00',
+          rent10day: '50.00',
+          rent30day: '80.00',
+          marketPrice: '300.00',
+          deposit: '300.00',
+        },
+      },
+    }))));
+    const rootDir = await mkdtemp(join(tmpdir(), 'mt-agent-rent-adjustment-'));
+    const client = createRentalPriceSkillClient({ rootDir, daemonUrl: 'http://127.0.0.1:9223', daemonToken: 'test-token' });
+
+    const preview = await client.preview({ mode: 'global_adjustment', productId: '851', adjustmentAmount: -1, scope: 'rent_fields' });
+
+    expect(preview.fields).toEqual({
+      rent1day: '19.00',
+      rent10day: '49.00',
+      rent30day: '79.00',
+    });
+    expect(preview.fields).not.toHaveProperty('marketPrice');
+    expect(preview.fields).not.toHaveProperty('deposit');
+  });
+
   it('surfaces daemon read errors during price preview instead of treating them as empty fields', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
       status: 'error',

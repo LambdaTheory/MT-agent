@@ -347,6 +347,11 @@ async function executeAgentMultiStepPlannerResponse(
   });
 }
 
+function isAgentPlannerJsonFailure(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return /^(Invalid LLM JSON output|LLM output is empty|LLM output must be a bare JSON object|LLM JSON output must be an object)/.test(error.message);
+}
+
 async function agentPlannerResponse(
   message: string,
   outputDir: string,
@@ -354,12 +359,23 @@ async function agentPlannerResponse(
 ): Promise<BotResponse | null> {
   if (!options.agentPlannerProvider) return null;
   const learningHints = await buildAgentLearningPlannerHints(outputDir, message);
-  const rawProposal = await options.agentPlannerProvider.proposePlan({
-    message,
-    tools: listAgentPlannerTools(),
-    workflows: [],
-    ...(learningHints.length ? { learningHints } : {}),
-  });
+  let rawProposal: string;
+  try {
+    rawProposal = await options.agentPlannerProvider.proposePlan({
+      message,
+      tools: listAgentPlannerTools(),
+      workflows: [],
+      ...(learningHints.length ? { learningHints } : {}),
+    });
+  } catch (error) {
+    if (isAgentPlannerJsonFailure(error)) {
+      return {
+        text: 'Agent 暂时没有把这次指令或补充解析成可执行计划。请换一种说法，直接说明：商品/同款组、动作、金额或比例；本次没有执行任何写操作。',
+        metadata: { toolName: 'agentPlanner', ok: false, errorType: 'llm_json_parse_failed' },
+      };
+    }
+    throw error;
+  }
   const parsed = validateAgentPlannerProposal(rawProposal);
   if (!parsed.ok) {
     if (/"selectedWorkflow"\s*:/.test(rawProposal)) return { text: LEGACY_WORKFLOW_PLAN_REJECTED };

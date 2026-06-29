@@ -53,6 +53,50 @@ describe('agent rental price preview multiplier handling', () => {
     expect(response.card).toBeDefined();
   });
 
+  it('accepts amount based price preview adjustments and keeps them rent-field scoped', async () => {
+    const { client, preview } = fakeRentalPriceClient();
+
+    const response = await executeAgentToolRequest(
+      {
+        toolName: 'rental.pricePreview',
+        arguments: { productIds: ['851'], adjustmentAmount: -1, scope: 'all_price_fields' },
+        reason: 'rx10m4 同款组整体价格按金额减 1',
+      },
+      'output',
+      { rentalPriceClient: client },
+    );
+
+    expect(preview).toHaveBeenCalledWith({ mode: 'global_adjustment', productId: '851', adjustmentAmount: -1, scope: 'rent_fields' });
+    expect(response.text).toContain('金额调整');
+    expect(response.card).toBeDefined();
+  });
+
+  it('infers a missing amount adjustment from multi-step price wording', async () => {
+    const { client, preview } = fakeRentalPriceClient();
+
+    const response = await continueAgentPlannerSteps({
+      goal: '为 RX10M4 同款组执行整体按金额减 1 的租赁改价预览',
+      reason: '用户明确补充 -1 是金额，RX10M4 是同款组',
+      steps: [
+        {
+          toolName: 'rental.pricePreview',
+          arguments: { productIds: ['851', '929'] },
+          reason: '对解析出的商品生成按金额减 1 的确认预览',
+        },
+      ],
+      baseIndex: 0,
+      totalSteps: 1,
+      metadataStore: {},
+      textParts: ['Agent 多步骤计划：为 RX10M4 同款组执行整体按金额减 1 的租赁改价预览'],
+      outputDir: 'output',
+      options: { rentalPriceClient: client },
+    });
+
+    expect(preview).toHaveBeenCalledWith({ mode: 'global_adjustment', productId: '851', adjustmentAmount: -1, scope: 'rent_fields' });
+    expect(preview).toHaveBeenCalledWith({ mode: 'global_adjustment', productId: '929', adjustmentAmount: -1, scope: 'rent_fields' });
+    expect(response?.card).toBeDefined();
+  });
+
   it('fills missing pricePreview discount from a multi-step goal with an explicit multiplier', async () => {
     const { client, preview } = fakeRentalPriceClient();
 
