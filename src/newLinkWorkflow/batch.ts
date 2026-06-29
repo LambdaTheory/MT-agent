@@ -401,7 +401,7 @@ export function buildNewLinkBatchConfirmCard(plan: NewLinkBatchPlan, reason: str
   const request = buildNewLinkBatchConfirmRequest(plan, reason, continuation);
   if (!request || !plan.selectedSource) return undefined;
   const key = confirmationKey(request as unknown as Record<string, unknown>);
-  const confirmValue = { action: 'new_link_batch_confirm', ...request, request, confirmationKey: key };
+  const confirmValue = { action: 'new_link_batch_confirm', request, confirmationKey: key };
   return {
     schema: '2.0',
     config: { wide_screen_mode: true },
@@ -460,7 +460,7 @@ export function buildNewLinkBatchMultiConfirmCard(plans: NewLinkBatchPlan[], rea
   if (!request) return undefined;
   const totalCount = request.items.reduce((sum, item) => sum + item.count, 0);
   const key = confirmationKey(request as unknown as Record<string, unknown>);
-  const confirmValue = { action: 'new_link_batch_multi_confirm', ...request, request, confirmationKey: key };
+  const confirmValue = { action: 'new_link_batch_multi_confirm', request, confirmationKey: key };
   return {
     schema: '2.0',
     config: { wide_screen_mode: true },
@@ -563,14 +563,15 @@ function readNewLinkBatchConfirmRequestRecord(request: Record<string, unknown>):
 export function parseNewLinkBatchConfirmRequest(value: unknown): NewLinkBatchConfirmRequest | null {
   if (!isRecord(value)) return null;
   const request = readConfirmRequestPayload(value);
-  if (!hasValidConfirmationKey(value, request)) return null;
-  return readNewLinkBatchConfirmRequestRecord(request);
+  const parsed = readNewLinkBatchConfirmRequestRecord(request);
+  if (!parsed) return null;
+  if (!hasValidConfirmationKey(value, parsed as unknown as Record<string, unknown>)) return null;
+  return parsed;
 }
 
 export function parseNewLinkBatchMultiConfirmRequest(value: unknown): NewLinkBatchMultiConfirmRequest | null {
   if (!isRecord(value)) return null;
   const request = readMultiConfirmRequestPayload(value);
-  if (!hasValidConfirmationKey(value, request)) return null;
   const safetyVersion = readPositiveInteger(request.safetyVersion);
   const workflowName = readString(request.workflowName);
   const mode = readString(request.mode);
@@ -593,15 +594,17 @@ export function parseNewLinkBatchMultiConfirmRequest(value: unknown): NewLinkBat
   if (parsedItems.some((item) => item.dataDate !== dataDate || item.reason !== reason)) return null;
   const totalCount = parsedItems.reduce((sum, item) => sum + item.count, 0);
   if (totalCount > MAX_NEW_LINK_BATCH_MULTI_TOTAL_COUNT) return null;
-  return {
+  const parsedRequest: NewLinkBatchMultiConfirmRequest = {
     safetyVersion: NEW_LINK_BATCH_CONFIRMATION_VERSION,
-    workflowName,
+    workflowName: NEW_LINK_BATCH_WORKFLOW_NAME,
     mode: 'multi-source',
     items: parsedItems,
     dataDate,
     reason,
     ...(continuation ? { continuation } : {}),
   };
+  if (!hasValidConfirmationKey(value, parsedRequest as unknown as Record<string, unknown>)) return null;
+  return parsedRequest;
 }
 
 export async function executeNewLinkBatchConfirmRequest(

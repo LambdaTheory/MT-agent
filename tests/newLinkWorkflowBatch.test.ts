@@ -75,6 +75,15 @@ function readButtonValue(card: unknown, buttonName: string): Record<string, unkn
   throw new Error(`${buttonName} value not found`);
 }
 
+function stringifyNumbers(value: unknown): unknown {
+  if (typeof value === 'number') return String(value);
+  if (Array.isArray(value)) return value.map((item) => stringifyNumbers(item));
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, item]) => [key, stringifyNumbers(item)]));
+  }
+  return value;
+}
+
 function context(): PublicTrafficDataReportContext {
   return {
     date: '2026-06-22',
@@ -205,13 +214,16 @@ describe('new link batch workflow', () => {
     const plan = buildNewLinkBatchPlan({ keyword: 'pocket3', count: 3, sourceProductId: '733' }, context(), registry());
     const card = buildNewLinkBatchConfirmCard(plan, 'user wants new links');
     const value = readButtonValue(card, 'new_link_batch_confirm_submit');
-    const { request: _request, ...flatValue } = value;
+    const legacyFlatValue = { action: value.action, ...(value.request as Record<string, unknown>), confirmationKey: value.confirmationKey };
 
     expect(JSON.stringify(card)).toContain('"tag":"form"');
     expect(JSON.stringify(card)).toContain('new_link_batch_confirm_form');
     expect(JSON.stringify(card)).not.toContain('"tag":"action"');
+    expect(value).toEqual({ action: 'new_link_batch_confirm', request: expect.any(Object), confirmationKey: expect.any(String) });
+    expect(value).not.toHaveProperty('count');
     expect(parseNewLinkBatchConfirmRequest(value)).toMatchObject({ count: 3, sourceProductId: '733' });
-    expect(parseNewLinkBatchConfirmRequest(flatValue)).toMatchObject({ count: 3, sourceProductId: '733' });
+    expect(parseNewLinkBatchConfirmRequest(legacyFlatValue)).toMatchObject({ count: 3, sourceProductId: '733' });
+    expect(parseNewLinkBatchConfirmRequest(stringifyNumbers(value))).toMatchObject({ count: 3, sourceProductId: '733' });
 
     expect(parseNewLinkBatchConfirmRequest({
       request: {
@@ -291,9 +303,12 @@ describe('new link batch workflow', () => {
     expect(JSON.stringify(multiCard)).toContain('new_link_batch_multi_confirm_form');
     expect(JSON.stringify(multiCard)).not.toContain('"tag":"action"');
     const confirmValue = readButtonValue(buildNewLinkBatchMultiConfirmCard([left, right], request!.reason), 'new_link_batch_multi_confirm_submit');
-    const { request: _multiRequest, ...flatConfirmValue } = confirmValue;
+    const flatConfirmValue = { action: confirmValue.action, ...(confirmValue.request as Record<string, unknown>), confirmationKey: confirmValue.confirmationKey };
+    expect(confirmValue).toEqual({ action: 'new_link_batch_multi_confirm', request: expect.any(Object), confirmationKey: expect.any(String) });
+    expect(confirmValue).not.toHaveProperty('items');
     expect(parseNewLinkBatchMultiConfirmRequest(confirmValue)).toEqual(request);
     expect(parseNewLinkBatchMultiConfirmRequest(flatConfirmValue)).toEqual(request);
+    expect(parseNewLinkBatchMultiConfirmRequest(stringifyNumbers(confirmValue))).toEqual(request);
     expect(parseNewLinkBatchMultiConfirmRequest({
       ...confirmValue,
       request: { ...(confirmValue.request as Record<string, unknown>), items: [{ ...request!.items[0], count: 6 }, request!.items[1]] },
