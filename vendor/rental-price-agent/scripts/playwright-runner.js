@@ -30,6 +30,7 @@ const OUTPUT_DIR = SKILL_DIR + "/tasks";
 const PID_FILE = SKILL_DIR + "/.daemon.pid";
 const PORT_FILE = SKILL_DIR + "/.daemon.port";
 const TOKEN_FILE = SKILL_DIR + "/.daemon.token";
+const REDACTED = "[redacted]";
 
 // ================================================================
 // Helpers
@@ -39,12 +40,61 @@ function ensureDir(dir) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
 
-function log(msg) {
-  process.stderr.write("[pw] " + msg + "\n");
+function safeText(value, maxLength = 240) {
+  const compact = String(value == null ? "" : value).replace(/\s+/g, " ").trim();
+  return (compact.length > maxLength ? compact.slice(0, maxLength - 3) + "..." : compact)
+    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, "Bearer " + REDACTED)
+    .replace(/(authorization[\"'\s:=]+)([^\"',\s}]+)/gi, "$1" + REDACTED)
+    .replace(/(api[_-]?key[\"'\s:=]+)([^\"',\s}]+)/gi, "$1" + REDACTED)
+    .replace(/(token[\"'\s:=]+)([^\"',\s}]+)/gi, "$1" + REDACTED)
+    .replace(/(cookie[\"'\s:=]+)([^\"',}]+)/gi, "$1" + REDACTED);
+}
+
+function safeValue(value, depth = 0) {
+  if (value == null) return value;
+  if (typeof value === "string") return safeText(value);
+  if (typeof value === "number" || typeof value === "boolean") return value;
+  if (depth >= 2) return "[object]";
+  if (Array.isArray(value)) return value.slice(0, 5).map(item => safeValue(item, depth + 1));
+  if (typeof value === "object") {
+    const result = {};
+    for (const [key, item] of Object.entries(value).slice(0, 20)) {
+      result[key] = /authorization|cookie|token|secret|api[_-]?key|password|headers/i.test(key)
+        ? REDACTED
+        : safeValue(item, depth + 1);
+    }
+    return result;
+  }
+  return String(value);
+}
+
+function summarizeError(err) {
+  if (err && typeof err === "object") {
+    return {
+      name: err.name || "Error",
+      message: safeText(err.message || String(err)),
+      ...(err.code ? { code: safeValue(err.code) } : {}),
+      ...(err.status ? { status: safeValue(err.status) } : {}),
+    };
+  }
+  return { message: safeValue(err) };
+}
+
+function runtimeLog(level, event, details = {}) {
+  process.stderr.write("[rental-daemon] " + JSON.stringify({
+    level,
+    component: "rental-price-agent",
+    event,
+    ...safeValue(details),
+  }) + "\n");
+}
+
+function log(msg, details = {}) {
+  runtimeLog("info", "daemon.log", { message: msg, ...details });
 }
 
 function die(msg) {
-  process.stderr.write("[pw] ERROR: " + msg + "\n");
+  runtimeLog("error", "daemon.error", { message: msg });
   process.exit(1);
 }
 
@@ -1103,6 +1153,7 @@ async function startDaemon(port) {
     res.setHeader("Content-Type", "application/json");
     if (req.method === "OPTIONS") { res.writeHead(204); res.end(); return; }
     if (req.headers["x-rental-agent-token"] !== daemonToken) {
+      runtimeLog("warn", "daemon.request.forbidden", { method: req.method, url: req.url });
       res.writeHead(403);
       res.end(JSON.stringify({ status: "error", message: "Forbidden" }));
       return;
@@ -1117,6 +1168,7 @@ async function startDaemon(port) {
         res.writeHead(200);
         res.end(JSON.stringify(result));
       } catch (err) {
+        runtimeLog("error", "daemon.request.failed", { error: summarizeError(err) });
         res.writeHead(500);
         res.end(JSON.stringify({ status: "error", message: err.message }));
       }
@@ -1124,7 +1176,7 @@ async function startDaemon(port) {
   });
 
   server.listen(port, "127.0.0.1", () => {
-    log("Daemon listening on http://127.0.0.1:" + port);
+    log("Daemon listening", { port });
     fs.writeFileSync(PID_FILE, String(process.pid));
     fs.writeFileSync(PORT_FILE, String(port));
   });
@@ -1153,7 +1205,49 @@ async function ensureBrowser() {
   try { await browserInitPromise; } finally { browserInitPromise = null; }
 }
 
+function commandLogDetails(cmd) {
+  if (!cmd || typeof cmd !== "object") return {};
+  return {
+    action: cmd.action || "unknown",
+    ...(cmd.productId ? { productId: String(cmd.productId) } : {}),
+    ...(Array.isArray(cmd.productIds) ? { productIdCount: cmd.productIds.length } : {}),
+    ...(cmd.fields ? { fields: cmd.fields } : {}),
+    ...(cmd.specDimId ? { specDimId: String(cmd.specDimId) } : {}),
+    ...(cmd.itemId ? { itemId: String(cmd.itemId) } : {}),
+    ...(cmd.days ? { days: cmd.days } : {}),
+    ...(cmd.expectedProductId ? { expectedProductId: String(cmd.expectedProductId) } : {}),
+  };
+}
+
+function resultLogDetails(result) {
+  if (!result || typeof result !== "object") return {};
+  return {
+    status: result.status,
+    ...(result.productId ? { productId: String(result.productId) } : {}),
+    ...(typeof result.count === "number" ? { count: result.count } : {}),
+    ...(typeof result.readCount === "number" ? { readCount: result.readCount } : {}),
+    ...(typeof result.appliedCount === "number" ? { appliedCount: result.appliedCount } : {}),
+    ...(Array.isArray(result.errors) ? { errorCount: result.errors.length } : {}),
+    ...(Array.isArray(result.warnings) ? { warningCount: result.warnings.length } : {}),
+  };
+}
+
 async function handleCommand(cmd) {
+  const commandId = crypto.randomBytes(6).toString("hex");
+  const startedAt = Date.now();
+  const details = commandLogDetails(cmd);
+  runtimeLog("info", "command.started", { commandId, ...details });
+  try {
+    const result = await executeCommand(cmd);
+    runtimeLog("info", "command.completed", { commandId, ...details, ...resultLogDetails(result), elapsedMs: Date.now() - startedAt });
+    return result;
+  } catch (err) {
+    runtimeLog("error", "command.failed", { commandId, ...details, elapsedMs: Date.now() - startedAt, error: summarizeError(err) });
+    throw err;
+  }
+}
+
+async function executeCommand(cmd) {
   const { action, productId, fields, changesFile, specDimId, itemId, itemTitle, days, allowCurrentPage, expectedProductId } = cmd;
 
   // Lazy init browser
