@@ -207,8 +207,9 @@ describe('new link batch workflow', () => {
     const value = readButtonValue(card, 'new_link_batch_confirm_submit');
     const { request: _request, ...flatValue } = value;
 
-    expect(JSON.stringify(card)).toContain('"tag":"action"');
-    expect(JSON.stringify(card)).not.toContain('new_link_batch_confirm_form');
+    expect(JSON.stringify(card)).toContain('"tag":"form"');
+    expect(JSON.stringify(card)).toContain('new_link_batch_confirm_form');
+    expect(JSON.stringify(card)).not.toContain('"tag":"action"');
     expect(parseNewLinkBatchConfirmRequest(value)).toMatchObject({ count: 3, sourceProductId: '733' });
     expect(parseNewLinkBatchConfirmRequest(flatValue)).toMatchObject({ count: 3, sourceProductId: '733' });
 
@@ -286,7 +287,9 @@ describe('new link batch workflow', () => {
     });
     const multiCard = buildNewLinkBatchMultiConfirmCard([left, right], '用户要求分别复制');
     expect(JSON.stringify(multiCard)).toContain('new_link_batch_multi_confirm');
-    expect(JSON.stringify(multiCard)).toContain('"tag":"action"');
+    expect(JSON.stringify(multiCard)).toContain('"tag":"form"');
+    expect(JSON.stringify(multiCard)).toContain('new_link_batch_multi_confirm_form');
+    expect(JSON.stringify(multiCard)).not.toContain('"tag":"action"');
     const confirmValue = readButtonValue(buildNewLinkBatchMultiConfirmCard([left, right], request!.reason), 'new_link_batch_multi_confirm_submit');
     const { request: _multiRequest, ...flatConfirmValue } = confirmValue;
     expect(parseNewLinkBatchMultiConfirmRequest(confirmValue)).toEqual(request);
@@ -329,6 +332,7 @@ describe('new link batch workflow', () => {
     expect(request?.items.reduce((sum, item) => sum + item.count, 0)).toBe(25);
     expect(card).toBeDefined();
     expect(JSON.stringify(card)).toContain('new_link_batch_multi_confirm');
+    expect(JSON.stringify(card)).not.toContain('"tag":"action"');
   });
 
   it('blocks multi-product new-link confirmations only when they exceed the multi-total cap', () => {
