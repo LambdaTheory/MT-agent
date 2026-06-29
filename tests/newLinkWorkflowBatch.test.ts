@@ -61,9 +61,9 @@ function row(productId: string, productName: string, platformProductId: string, 
 }
 
 function readButtonValue(card: unknown, buttonName: string): Record<string, unknown> {
-  const body = (card as { body?: { elements?: Array<{ elements?: Array<{ name?: string; behaviors?: Array<{ value?: unknown }> }> }> } }).body;
+  const body = (card as { body?: { elements?: Array<{ elements?: Array<{ name?: string; behaviors?: Array<{ value?: unknown }> }>; actions?: Array<{ name?: string; behaviors?: Array<{ value?: unknown }> }> }> } }).body;
   for (const element of body?.elements ?? []) {
-    for (const item of element.elements ?? []) {
+    for (const item of [...(element.elements ?? []), ...(element.actions ?? [])]) {
       if (item.name === buttonName) {
         const value = item.behaviors?.[0]?.value;
         if (value && typeof value === 'object' && !Array.isArray(value)) return value as Record<string, unknown>;
@@ -201,9 +201,14 @@ describe('new link batch workflow', () => {
 
   it('parses only valid confirmation requests', () => {
     const plan = buildNewLinkBatchPlan({ keyword: 'pocket3', count: 3, sourceProductId: '733' }, context(), registry());
-    const value = readButtonValue(buildNewLinkBatchConfirmCard(plan, 'user wants new links'), 'new_link_batch_confirm_submit');
+    const card = buildNewLinkBatchConfirmCard(plan, 'user wants new links');
+    const value = readButtonValue(card, 'new_link_batch_confirm_submit');
+    const { request: _request, ...flatValue } = value;
 
+    expect(JSON.stringify(card)).toContain('"tag":"action"');
+    expect(JSON.stringify(card)).not.toContain('new_link_batch_confirm_form');
     expect(parseNewLinkBatchConfirmRequest(value)).toMatchObject({ count: 3, sourceProductId: '733' });
+    expect(parseNewLinkBatchConfirmRequest(flatValue)).toMatchObject({ count: 3, sourceProductId: '733' });
 
     expect(parseNewLinkBatchConfirmRequest({
       request: {
@@ -277,9 +282,13 @@ describe('new link batch workflow', () => {
         expect.objectContaining({ keyword: 'wide 400', count: 5, sourceProductId: '841' }),
       ],
     });
-    expect(JSON.stringify(buildNewLinkBatchMultiConfirmCard([left, right], '用户要求分别复制'))).toContain('new_link_batch_multi_confirm');
+    const multiCard = buildNewLinkBatchMultiConfirmCard([left, right], '用户要求分别复制');
+    expect(JSON.stringify(multiCard)).toContain('new_link_batch_multi_confirm');
+    expect(JSON.stringify(multiCard)).toContain('"tag":"action"');
     const confirmValue = readButtonValue(buildNewLinkBatchMultiConfirmCard([left, right], request!.reason), 'new_link_batch_multi_confirm_submit');
+    const { request: _multiRequest, ...flatConfirmValue } = confirmValue;
     expect(parseNewLinkBatchMultiConfirmRequest(confirmValue)).toEqual(request);
+    expect(parseNewLinkBatchMultiConfirmRequest(flatConfirmValue)).toEqual(request);
     expect(parseNewLinkBatchMultiConfirmRequest({
       ...confirmValue,
       request: { ...(confirmValue.request as Record<string, unknown>), items: [{ ...request!.items[0], count: 6 }, request!.items[1]] },
