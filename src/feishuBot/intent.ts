@@ -255,8 +255,5 @@ export function parseAgentFirstBotIntent(input: string): BotIntent {
   const text = normalize(input);
   if (!text) return { type: 'help' };
 
-  const exact = parseExactBotIntent(text);
-  if (exact.type !== 'unknown') return exact;
-
   return { type: 'unknown', text };
 }
