@@ -199,18 +199,12 @@ export function parseBotIntent(input: string): BotIntent {
   return { type: 'unknown', text };
 }
 
-export function allowsPlannerFirstExactIntent(intent: BotIntent): boolean {
-  return intent.type === 'operations_learning_quiz'
-    || intent.type === 'operations_learning_summary'
-    || intent.type === 'operations_learning_history';
-}
-
 export function parseAgentFirstBotIntent(input: string): BotIntent {
   const text = normalize(input);
   if (!text) return { type: 'help' };
 
   const exact = parseExactBotIntent(text);
-  if (allowsPlannerFirstExactIntent(exact)) return exact;
+  if (exact.type !== 'unknown') return exact;
 
   return { type: 'unknown', text };
 }

@@ -146,19 +146,17 @@ describe('parseBotIntent', () => {
 describe('parseAgentFirstBotIntent', () => {
   it('keeps natural commands unknown so the Agent planner chooses tools', () => {
     expect(parseAgentFirstBotIntent('查 565')).toEqual({ type: 'unknown', text: '查 565' });
-    expect(parseAgentFirstBotIntent('跑日报')).toEqual({ type: 'unknown', text: '跑日报' });
     expect(parseAgentFirstBotIntent('发个日报')).toEqual({ type: 'unknown', text: '发个日报' });
     expect(parseAgentFirstBotIntent('s23最好的链接是哪条?')).toEqual({ type: 'unknown', text: 's23最好的链接是哪条?' });
   });
 
-  it('keeps local UI and management commands planner-first too', () => {
-    expect(parseAgentFirstBotIntent('帮助')).toEqual({ type: 'unknown', text: '帮助' });
-    expect(parseAgentFirstBotIntent('商品ID互查')).toEqual({ type: 'unknown', text: '商品ID互查' });
-    expect(parseAgentFirstBotIntent('库存情况')).toEqual({ type: 'unknown', text: '库存情况' });
-    expect(parseAgentFirstBotIntent('Agent学习汇总')).toEqual({ type: 'unknown', text: 'Agent学习汇总' });
-  });
-
-  it('preserves exact operations learning commands so the planner cannot confuse start with history', () => {
+  it('preserves exact deterministic commands ahead of planner routing', () => {
+    expect(parseAgentFirstBotIntent('帮助')).toEqual({ type: 'help' });
+    expect(parseAgentFirstBotIntent('跑日报')).toEqual({ type: 'run_public_traffic_report', sendTo: undefined });
+    expect(parseAgentFirstBotIntent('商品ID互查')).toEqual({ type: 'lookup_product_id_card' });
+    expect(parseAgentFirstBotIntent('库存情况')).toEqual({ type: 'inventory_status_overview' });
+    expect(parseAgentFirstBotIntent('链接维护')).toEqual({ type: 'link_registry_maintenance_prompt' });
+    expect(parseAgentFirstBotIntent('Agent学习汇总')).toEqual({ type: 'agent_learning_summary' });
     expect(parseAgentFirstBotIntent('运营学习')).toEqual({ type: 'operations_learning_quiz' });
     expect(parseAgentFirstBotIntent('运营学习汇总')).toEqual({ type: 'operations_learning_summary' });
     expect(parseAgentFirstBotIntent('运营学习历史')).toEqual({ type: 'operations_learning_history' });
