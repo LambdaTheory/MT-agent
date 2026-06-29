@@ -698,6 +698,23 @@ async function readOptionalText(path: string): Promise<string | null> {
   }
 }
 
+function compactErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    const cause = (error as Error & { cause?: unknown }).cause;
+    if (cause instanceof Error && cause.message) return `${error.message}; ${cause.message}`;
+    return error.message;
+  }
+  return String(error);
+}
+
+function daemonUnavailableError(daemonUrl: string, error: unknown): Error {
+  return new Error([
+    `rental-price-agent daemon 不可达：${daemonUrl}`,
+    '请确认 PM2 进程 mt-rental-price-agent 在线，或运行 npm run rental-price-skill:pm2:start。',
+    `原始错误：${compactErrorMessage(error)}`,
+  ].join('\n'));
+}
+
 export function createRentalPriceSkillClient(options: RentalPriceSkillClientOptions = {}): RentalPriceSkillClient {
   const rootDir = options.rootDir ?? process.env.RENTAL_PRICE_AGENT_DIR ?? resolve(process.cwd(), 'vendor', 'rental-price-agent');
   const configuredDaemonUrl = options.daemonUrl ?? process.env.RENTAL_PRICE_AGENT_DAEMON_URL;
@@ -719,7 +736,12 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
     const { daemonUrl, daemonToken } = await resolveDaemonConfig();
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (daemonToken) headers['x-rental-agent-token'] = daemonToken;
-    const response = await fetch(daemonUrl, { method: 'POST', headers, body: JSON.stringify(command) });
+    let response: Response;
+    try {
+      response = await fetch(daemonUrl, { method: 'POST', headers, body: JSON.stringify(command) });
+    } catch (error) {
+      throw daemonUnavailableError(daemonUrl, error);
+    }
     return (await response.json()) as Record<string, unknown>;
   }
 

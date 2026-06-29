@@ -251,6 +251,18 @@ describe('rental price Feishu integration', () => {
 });
 
 describe('rental price skill client copy diagnostics', () => {
+  it('reports a clear daemon unavailable error when the local service is down', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      const error = new TypeError('fetch failed') as TypeError & { cause?: Error };
+      error.cause = new Error('connect ECONNREFUSED 127.0.0.1:9223');
+      throw error;
+    }));
+    const client = createRentalPriceSkillClient({ daemonUrl: 'http://127.0.0.1:9223', daemonToken: 'test-token' });
+
+    await expect(client.read!('761')).rejects.toThrow('rental-price-agent daemon 不可达：http://127.0.0.1:9223');
+    await expect(client.read!('761')).rejects.toThrow('mt-rental-price-agent');
+  });
+
   it('keeps daemon copy error details in the bot-facing result', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
       status: 'error',
