@@ -62,6 +62,7 @@ import {
   compactAuditReference,
   createRentalPriceSkillClient,
   executeRentalOperationConfirmRequest,
+  parseRentPriceFieldsFromText,
   rentalOperationConfirmRequestFromToolArguments,
   rentalPriceChangeRequestFromToolArguments,
   rentalPriceRollbackRequestFromToolArguments,
@@ -624,7 +625,9 @@ async function rentalPricePreviewResponse(
   const productIds = readProductIdArray(args.productIds, RENTAL_PRICE_PREVIEW_MAX_PRODUCTS);
   if (!productIds) return { text: `改价预览参数无效：productIds 需要是 1 到 ${RENTAL_PRICE_PREVIEW_MAX_PRODUCTS} 个端内ID。`, metadata: { toolName: 'rental.pricePreview', ok: false } };
 
-  const priceArgs = isRecord(args.fields) ? { ...args, fields: sanitizeExplicitPriceFields(args.fields, reason) } : args;
+  const inferredFields = isRecord(args.fields) ? undefined : parseRentPriceFieldsFromText(reason);
+  const rawFields = isRecord(args.fields) ? args.fields : inferredFields && Object.keys(inferredFields).length ? inferredFields : undefined;
+  const priceArgs = rawFields ? { ...args, fields: sanitizeExplicitPriceFields(rawFields, reason) } : args;
   const hasExplicitFields = isRecord(priceArgs.fields);
   const adjustmentAmount = hasExplicitFields
     ? undefined
@@ -1687,8 +1690,14 @@ export async function executeAgentToolRequest(
       return { text: result.text };
     }
     case 'rental.priceChange': {
-      const priceArguments = isRecord(request.arguments.fields)
-        ? { ...request.arguments, fields: sanitizeExplicitPriceFields(request.arguments.fields, request.reason) }
+      const inferredFields = isRecord(request.arguments.fields) ? undefined : parseRentPriceFieldsFromText(request.reason);
+      const rawFields = isRecord(request.arguments.fields)
+        ? request.arguments.fields
+        : inferredFields && Object.keys(inferredFields).length
+          ? inferredFields
+          : undefined;
+      const priceArguments = rawFields
+        ? { ...request.arguments, fields: sanitizeExplicitPriceFields(rawFields, request.reason) }
         : request.arguments;
       const rentalRequest = rentalPriceChangeRequestFromToolArguments(priceArguments);
       if (!rentalRequest) throw new Error('租赁商品改价参数无效，请重新发起。');

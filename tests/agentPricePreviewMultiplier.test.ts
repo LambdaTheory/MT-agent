@@ -53,6 +53,24 @@ describe('agent rental price preview multiplier handling', () => {
     expect(response.card).toBeDefined();
   });
 
+  it('infers explicit rent fields from direct price preview wording when the planner omits fields', async () => {
+    const { client, preview } = fakeRentalPriceClient();
+
+    const response = await executeAgentToolRequest(
+      {
+        toolName: 'rental.pricePreview',
+        arguments: { productIds: ['954'] },
+        reason: '改价 954 1天88 10天999',
+      },
+      'output',
+      { rentalPriceClient: client },
+    );
+
+    expect(preview).toHaveBeenCalledWith({ mode: 'explicit_fields', productId: '954', fields: { rent1day: '88.00', rent10day: '999.00' } });
+    expect(response.text).toContain('改价预览：1 个端内ID');
+    expect(response.card).toBeDefined();
+  });
+
   it('accepts amount based price preview adjustments and keeps them rent-field scoped', async () => {
     const { client, preview } = fakeRentalPriceClient();
 
@@ -122,6 +140,33 @@ describe('agent rental price preview multiplier handling', () => {
     expect(preview).toHaveBeenCalledWith({ mode: 'global_discount', productId: '929', discount: 1.8, scope: 'rent_fields' });
     expect(response?.text).toContain('步骤 1/1：rental.pricePreview');
     expect(response?.text).toContain('折扣：180%');
+    expect(response?.card).toBeDefined();
+  });
+
+  it('fills missing pricePreview explicit rent fields from multi-step source text', async () => {
+    const { client, preview } = fakeRentalPriceClient();
+
+    const response = await continueAgentPlannerSteps({
+      goal: '对商品 954 生成改价预览',
+      reason: '用户要求改价，需先生成确认卡',
+      steps: [
+        {
+          toolName: 'rental.pricePreview',
+          arguments: { productIds: ['954'] },
+          reason: '对指定端内ID生成改价确认预览',
+        },
+      ],
+      baseIndex: 0,
+      totalSteps: 1,
+      metadataStore: {},
+      textParts: ['Agent 多步骤计划：对商品 954 生成改价预览'],
+      sourceText: '改价 954 1天88 10天999',
+      outputDir: 'output',
+      options: { rentalPriceClient: client },
+    });
+
+    expect(preview).toHaveBeenCalledWith({ mode: 'explicit_fields', productId: '954', fields: { rent1day: '88.00', rent10day: '999.00' } });
+    expect(response?.text).toContain('步骤 1/1：rental.pricePreview');
     expect(response?.card).toBeDefined();
   });
 

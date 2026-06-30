@@ -705,7 +705,7 @@ const agentTools: AgentToolDefinition[] = [
   },
   {
     name: 'rental.priceChange',
-    description: '生成租赁商品改价审计预览；倍数/折扣类默认且强制只改租金字段。非租金字段必须用 fields 精准点名。执行前必须展示专用改价确认卡',
+    description: '生成租赁商品改价审计预览；明确租期价格如“1天88 10天999”必须转成 fields { rent1day:"88", rent10day:"999" }。倍数/折扣类默认且强制只改租金字段。非租金字段必须用 fields 精准点名。执行前必须展示专用改价确认卡',
     risk: 'high',
     requiresConfirmation: true,
     inputSchema: rentalPriceChangeArgumentsSchema,
@@ -713,7 +713,7 @@ const agentTools: AgentToolDefinition[] = [
   },
   {
     name: 'rental.pricePreview',
-    description: '按明确端内ID列表生成租赁商品改价审计预览和确认卡；倍数/折扣类默认且强制只改租金字段。非租金字段必须用 fields 精准点名。不负责解析商品名或同款组，确认前不会改价',
+    description: '按明确端内ID列表生成租赁商品改价审计预览和确认卡；明确租期价格如“1天88 10天999”必须转成 fields { rent1day:"88", rent10day:"999" }。倍数/折扣类默认且强制只改租金字段。非租金字段必须用 fields 精准点名。不负责解析商品名或同款组，确认前不会改价',
     risk: 'high',
     requiresConfirmation: true,
     inputSchema: rentalPricePreviewArgumentsSchema,
