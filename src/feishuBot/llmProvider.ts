@@ -4,6 +4,7 @@ export type LlmReadOnlyToolName =
   | 'rank_best_same_sku_product'
   | 'get_new_link_pool'
   | 'get_problem_products'
+  | 'get_inactive_links'
   | 'get_removed_links'
   | 'get_order_fulfillment'
   | 'get_supported_questions'
@@ -36,6 +37,7 @@ const readOnlyToolNames = new Set<string>([
   'rank_best_same_sku_product',
   'get_new_link_pool',
   'get_problem_products',
+  'get_inactive_links',
   'get_removed_links',
   'get_order_fulfillment',
   'get_supported_questions',

@@ -53,7 +53,7 @@ import type { ReadOnlyToolRunOptions } from './readOnlyToolRegistry.js';
 import { findLatestReportContext, findReportContextByDate, formatConversionSummary, formatLatestSummary, formatProductRows, parseNumericProductIdList, queryProductRows } from './reportStore.js';
 import type { BotIntent, BotResponse } from './types.js';
 
-const UNKNOWN_GUIDANCE = '我现在可以查：今日概况、商品、新链接池、待处理任务、转化差、曝光低、高潜力、下架链接、订单情况。你可以问“新链接池怎么样”或“查一下721”。';
+const UNKNOWN_GUIDANCE = '我现在可以查：今日概况、商品、新链接池、待处理任务、转化差、曝光低、高潜力、失活链接、下架链接、订单情况。你可以问“新链接池怎么样”或“查一下721”。';
 const NEW_LINK_WRITE_INTENT_NEEDS_LLM =
   '这像是新链批量铺设写操作，需要 LLM Agent planner 先理解参数并生成飞书确认卡。当前没有可用计划，所以不会执行，也不会把它当作新链接池查询。请配置 MT_AGENT_LLM_BASE_URL / MT_AGENT_LLM_MODEL 后重启 PM2，或换成明确的只读问题。';
 const NEW_LINK_WRITE_INTENT_PLAN_FAILED =
@@ -155,7 +155,7 @@ const HELP_TEXT = `📋 查询与分析
   查ID 565 / 商品ID互查 — 端内ID与平台商品ID互查
   库存情况 / 库存情况 pocket3 — 查看库存与同款组状态
   链接维护 / 组级治理 / 链接档案维护 — 主动呼出链接维护或组级治理卡片
-  新链接池怎么样 / 待处理任务 / 下架链接 / 订单情况 — 查询运营数据池
+  新链接池怎么样 / 待处理任务 / 失活链接 / 下架链接 / 订单情况 — 查询运营数据池
 
 📊 报表与数据
   跑日报 — 生成公域流量日报

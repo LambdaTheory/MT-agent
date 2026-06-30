@@ -440,7 +440,7 @@ const agentTools: AgentToolDefinition[] = [
   },
   {
     name: 'publicTraffic.reportQuery',
-    description: '通用只读日报查询工具：查询已保存公域日报中的汇总、商品明细、问题池、订单分析、数据源状态和结论。适合“访问最高前20”“各问题池多少条”“托管异常有哪些”“订单签约发货率多少”等自然语言问题。不用于“某商品有多少条链接/有哪些端内ID”这类链接档案总数问题。',
+    description: '通用只读日报查询工具：查询已保存公域日报中的汇总、商品明细、问题池、订单分析、数据源状态和结论。适合“访问最高前20”“各问题池多少条”“托管异常有哪些”“失活/生命周期治理候选有哪些”“订单签约发货率多少”等自然语言问题。不用于“某商品有多少条链接/有哪些端内ID”这类链接档案总数问题。',
     risk: 'read',
     requiresConfirmation: false,
     inputSchema: publicTrafficReportQueryArgumentsSchema,
@@ -588,8 +588,15 @@ const agentTools: AgentToolDefinition[] = [
     inputSchema: problemProductsArgumentsSchema,
   },
   {
+    name: 'publicTraffic.inactiveLinks',
+    description: '查询疑似失活、低活跃、长期弱表现、生命周期治理候选链接的端内ID集合。不要用于已下架/已移除/已消失链接，后者应使用 publicTraffic.removedLinks。',
+    risk: 'read',
+    requiresConfirmation: false,
+    inputSchema: noArgumentsSchema,
+  },
+  {
     name: 'publicTraffic.removedLinks',
-    description: '查询最近下架、移除、消失的链接',
+    description: '查询最近已下架、已移除、已消失的链接。不要用于疑似失活/低活跃/生命周期治理候选，后者应使用 publicTraffic.inactiveLinks 或 publicTraffic.reportQuery section=lifecycleGovernance。',
     risk: 'read',
     requiresConfirmation: false,
     inputSchema: noArgumentsSchema,

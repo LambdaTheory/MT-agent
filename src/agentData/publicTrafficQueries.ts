@@ -4,6 +4,7 @@ import type {
   AgentNewProductPoolItem,
   AgentOverviewAnswer,
   AgentOverviewMetric,
+  AgentInactiveLinkItem,
   AgentProblemProduct,
   AgentProblemType,
   AgentProductAnswer,
@@ -28,6 +29,10 @@ function normalizeProductIdentifier(value: string): string {
 
 function extractInternalProductId(displayProductId: string): string | null {
   return /^端内id\s*(\d+)$/i.exec(displayProductId.trim())?.[1] ?? null;
+}
+
+function normalizeSectionProductId(identifier: string): string {
+  return extractInternalProductId(identifier) ?? identifier.trim();
 }
 
 export function getLatestOverview(context: PublicTrafficDataReportContext): AgentOverviewAnswer {
@@ -147,6 +152,16 @@ export function getRemovedLinks(context: PublicTrafficDataReportContext): AgentR
     removedDate: item.removedDate,
     reason: item.reason,
     source: item.source,
+  }));
+}
+
+export function getInactiveLinks(context: PublicTrafficDataReportContext): AgentInactiveLinkItem[] {
+  return context.lifecycleGovernance.map((item) => ({
+    productId: normalizeSectionProductId(item.identifier),
+    identifier: item.identifier,
+    action: item.action,
+    reason: item.reason,
+    ...(item.priority ? { priority: item.priority } : {}),
   }));
 }
 

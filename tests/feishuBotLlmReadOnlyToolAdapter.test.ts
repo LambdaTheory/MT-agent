@@ -35,7 +35,7 @@ const context = {
   weakConversion: [{ identifier: '端内ID 701', action: '提转化', reason: '访问多成交少' }],
   highPotential: [],
   newProductObservation: [],
-  lifecycleGovernance: [],
+  lifecycleGovernance: [{ identifier: '端内ID 706', action: '下架、替换或重做素材', reason: '已托管 45 天，30日曝光 60，访问 1，金额 0.00' }],
   recommendedActions: [],
   newProductPoolItems: [{ productId: '701', productName: '大疆 Pocket 3', shortTitle: '', submittedAt: '2026-06-15 09:00:00', merchant: '', alipaySyncStatus: '已同步', alipayCode: '', stock: 0, skuCount: 0, maintenanceStatus: '待维护', note: '' }],
   agentData: { removedLinks: [] },
@@ -91,6 +91,13 @@ describe('LLM read-only tool adapter', () => {
 
     expect(result).toMatchObject({ ok: true, intent: { type: 'best_product_by_same_sku', query: 'Pocket3' } });
     if (result.ok) expect(result.response.text).toContain('端内ID 702');
+  });
+
+  it('runs an inactive-link candidate selection from lifecycle governance', async () => {
+    const result = await runReadOnlyToolSelection(context, selection('get_inactive_links', {}));
+
+    expect(result).toMatchObject({ ok: true, intent: { type: 'inactive_links' } });
+    if (result.ok) expect(result.response.text).toContain('失活候选链接ID集合：706');
   });
 
   it('does not resolve unsupported LLM tools to registry tools', async () => {

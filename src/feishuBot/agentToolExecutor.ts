@@ -1604,6 +1604,8 @@ export async function executeAgentToolRequest(
       return runReadOnlyAgentIntent(outputDir, { type: 'tasks' }, options);
     case 'publicTraffic.problemProducts':
       return runReadOnlyAgentIntent(outputDir, { type: 'problem_products', problemType: readProblemType(request.arguments.problemType) }, options);
+    case 'publicTraffic.inactiveLinks':
+      return runReadOnlyAgentIntent(outputDir, { type: 'inactive_links' }, options);
     case 'publicTraffic.removedLinks':
       return runReadOnlyAgentIntent(outputDir, { type: 'removed_links' }, options);
     case 'publicTraffic.orderSummary':

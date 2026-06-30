@@ -51,6 +51,14 @@ export interface AgentRemovedLinkItem {
   source: 'goods_snapshot_diff';
 }
 
+export interface AgentInactiveLinkItem {
+  productId: string;
+  identifier: string;
+  action: string;
+  reason: string;
+  priority?: 'high' | 'medium' | 'low';
+}
+
 export interface AgentOrderSummary {
   text: string;
 }
@@ -72,6 +80,7 @@ export type AgentIntent =
   | { type: 'tasks' }
   | { type: 'problem_products'; problemType: AgentProblemType }
   | { type: 'new_product_pool' }
+  | { type: 'inactive_links' }
   | { type: 'removed_links' }
   | { type: 'order_summary' }
   | { type: 'unknown'; text: string };

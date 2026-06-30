@@ -10,6 +10,7 @@ describe('parseAgentDataIntent', () => {
     expect(parseAgentDataIntent('商品251')).toEqual({ type: 'product', keyword: '251' });
     expect(parseAgentDataIntent('今天要处理哪些')).toEqual({ type: 'tasks' });
     expect(parseAgentDataIntent('新品池有哪些')).toEqual({ type: 'new_product_pool' });
+    expect(parseAgentDataIntent('整理一下失活链接的id集合')).toEqual({ type: 'inactive_links' });
     expect(parseAgentDataIntent('下架链接有哪些')).toEqual({ type: 'removed_links' });
     expect(parseAgentDataIntent('转化差的有哪些')).toEqual({ type: 'problem_products', problemType: 'weak_conversion' });
     expect(parseAgentDataIntent('曝光低的有哪些')).toEqual({ type: 'problem_products', problemType: 'low_exposure' });
@@ -33,6 +34,8 @@ describe('parseAgentDataIntent', () => {
     expect(parseAgentDataIntent('有哪些要处理')).toEqual({ type: 'tasks' });
     expect(parseAgentDataIntent('今天优先处理什么')).toEqual({ type: 'tasks' });
     expect(parseAgentDataIntent('哪些链接不健康')).toEqual({ type: 'tasks' });
+    expect(parseAgentDataIntent('疑似失活链接有哪些')).toEqual({ type: 'inactive_links' });
+    expect(parseAgentDataIntent('低活跃商品id集合')).toEqual({ type: 'inactive_links' });
     expect(parseAgentDataIntent('成交少的有哪些')).toEqual({ type: 'problem_products', problemType: 'weak_conversion' });
     expect(parseAgentDataIntent('曝光低的链接')).toEqual({ type: 'problem_products', problemType: 'low_exposure' });
     expect(parseAgentDataIntent('哪些可以继续放量')).toEqual({ type: 'problem_products', problemType: 'high_potential' });
