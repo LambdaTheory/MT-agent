@@ -35,6 +35,7 @@ export function parseAgentDataIntent(input: string): AgentIntent {
   if (product) return { type: 'product', keyword: product[2].trim() };
   if (/(要处理|任务|优先|不健康)/.test(text)) return { type: 'tasks' };
   if (/新品池|新品维护|新链接池|新链|冷启动链接/.test(text)) return { type: 'new_product_pool' };
+  if (/失活|疑似失活|低活跃|活跃度低|长期弱表现|生命周期治理/.test(text)) return { type: 'inactive_links' };
   if (/下架链接|移除链接|消失链接|下架/.test(text)) return { type: 'removed_links' };
   if (/转化差|提转化|成交少/.test(text)) return { type: 'problem_products', problemType: 'weak_conversion' };
   if (/曝光低|补曝光/.test(text)) return { type: 'problem_products', problemType: 'low_exposure' };

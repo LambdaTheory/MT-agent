@@ -1,4 +1,4 @@
-import { getNewProductPool, getProblemProducts, getProductPerformance, getRemovedLinks } from '../agentData/publicTrafficQueries.js';
+import { getInactiveLinks, getNewProductPool, getProblemProducts, getProductPerformance, getRemovedLinks } from '../agentData/publicTrafficQueries.js';
 import { rankBestProductByRegistryQuery, type ProductRankingResult } from '../agentData/productRanking.js';
 import { buildAgentTaskPool } from '../agentData/taskPool.js';
 import type { AgentIntent, AgentProblemType } from '../agentData/types.js';
@@ -61,6 +61,19 @@ function formatProblemLines(items: Array<{ productId: string; action: string; re
 
 function formatRemovedLinkLines(items: Array<{ productId: string; productName: string; removedDate: string; reason: string }>): string {
   return items.length > 0 ? items.map((item, index) => `${index + 1}. ${item.productId}：${item.reason}。下架日期：${item.removedDate}。商品：${item.productName}`).join('\n') : '暂无近7天下架链接。';
+}
+
+function formatInactiveLinkLines(items: Array<{ productId: string; identifier: string; action: string; reason: string; priority?: string }>): string {
+  if (items.length === 0) return '暂无失活候选链接。';
+  const ids = Array.from(new Set(items.map((item) => item.productId))).join('、');
+  return [
+    `失活候选链接ID集合：${ids}`,
+    ...items.map((item, index) => {
+      const priority = item.priority ? `，优先级：${item.priority}` : '';
+      const identifier = item.identifier === item.productId ? item.productId : `${item.identifier}（ID ${item.productId}）`;
+      return `${index + 1}. ${identifier}：${item.action}${priority}。原因：${item.reason}`;
+    }),
+  ].join('\n');
 }
 
 function formatNewProductPoolLines(items: Array<{ productId: string; productName: string; maintenanceStatus: string }>): string {
@@ -219,6 +232,20 @@ export const readOnlyTools: ReadOnlyTool[] = [
     },
     async run(context, intent) {
       return { text: formatProblemLines(intent.type === 'problem_products' ? getProblemProducts(context, intent.problemType) : []) };
+    },
+  },
+  {
+    name: 'inactive_links',
+    description: '查询疑似失活或生命周期治理候选链接',
+    intentType: 'inactive_links',
+    llm: {
+      name: 'get_inactive_links',
+      description: '查询疑似失活、低活跃、长期弱表现、生命周期治理候选链接的端内ID集合。不要用于已下架/已移除/已消失链接，后者应使用 get_removed_links。',
+      argumentsSchema: noArgumentsSchema,
+      toIntent: () => ({ type: 'inactive_links' }),
+    },
+    async run(context) {
+      return { text: formatInactiveLinkLines(getInactiveLinks(context)) };
     },
   },
   {

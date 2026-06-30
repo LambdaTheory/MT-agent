@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getLatestOverview, getProductPerformance, getProblemProducts, getNewProductPool, getRemovedLinks } from '../src/agentData/publicTrafficQueries.js';
+import { getInactiveLinks, getLatestOverview, getProductPerformance, getProblemProducts, getNewProductPool, getRemovedLinks } from '../src/agentData/publicTrafficQueries.js';
 import type { PublicTrafficDataReportContext } from '../src/publicTraffic/types.js';
 
 type ExtendedContext = Omit<PublicTrafficDataReportContext, 'newProductPoolItems' | 'newProductPoolIds'> & {
@@ -27,7 +27,7 @@ const context: ExtendedContext = {
   weakConversion: [{ identifier: '251', action: '提转化', reason: '访问多成交少' }],
   highPotential: [],
   newProductObservation: [],
-  lifecycleGovernance: [],
+  lifecycleGovernance: [{ identifier: '端内ID 252', action: '下架、替换或重做素材', reason: '已托管 45 天，30日曝光 60，访问 1，金额 0.00', priority: 'medium' }],
   recommendedActions: [],
   emptySectionNotes: { lowExposure: '', weakClick: '', weakConversion: '', highPotential: '', newProductObservation: '', lifecycleGovernance: '', recommendedActions: '' },
 };
@@ -93,5 +93,17 @@ describe('agent public traffic queries', () => {
 
   it('returns an empty removed-link list when Agent data is absent', () => {
     expect(getRemovedLinks(publicContext)).toEqual([]);
+  });
+
+  it('returns inactive-link candidates from lifecycle governance instead of removed links', () => {
+    expect(getInactiveLinks(publicContext)).toEqual([
+      {
+        productId: '252',
+        identifier: '端内ID 252',
+        action: '下架、替换或重做素材',
+        reason: '已托管 45 天，30日曝光 60，访问 1，金额 0.00',
+        priority: 'medium',
+      },
+    ]);
   });
 });

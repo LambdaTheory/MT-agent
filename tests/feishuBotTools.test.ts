@@ -102,7 +102,7 @@ async function writeContext(): Promise<string> {
     weakConversion: [{ identifier: '端内ID 565', action: '提转化', reason: '访问多成交少' }],
     highPotential: [{ identifier: '端内ID 566', action: '继续放量', reason: '高潜力' }],
     newProductObservation: [],
-    lifecycleGovernance: [],
+    lifecycleGovernance: [{ identifier: '端内ID 706', action: '下架、替换或重做素材', reason: '已托管 45 天，30日曝光 60，访问 1，金额 0.00', priority: 'medium' }],
     recommendedActions: [
       { identifier: '端内ID 565', action: '补曝光', reason: '曝光不足', priority: 'high' },
       { identifier: '端内ID 701', action: '新品维护', reason: '新链接池维护', priority: 'medium' },
@@ -1226,6 +1226,7 @@ describe('handleBotIntent', () => {
     await expect(handleBotIntent({ type: 'unknown', text: '今天怎么样' }, outputDir)).resolves.toMatchObject({ text: expect.stringContaining('公域日报 2026-06-11') });
     await expect(handleBotIntent({ type: 'unknown', text: '查701' }, outputDir)).resolves.toMatchObject({ text: expect.stringContaining('端内ID 701') });
     await expect(handleBotIntent({ type: 'unknown', text: '新品池有哪些' }, outputDir)).resolves.toMatchObject({ text: expect.stringContaining('大疆 Pocket 3') });
+    await expect(handleBotIntent({ type: 'unknown', text: '整理一下失活链接的id集合' }, outputDir)).resolves.toMatchObject({ text: expect.stringContaining('失活候选链接ID集合：706') });
     await expect(handleBotIntent({ type: 'unknown', text: '订单情况' }, outputDir)).resolves.toMatchObject({ text: expect.stringContaining('发货订单：12') });
   });
 
@@ -1265,7 +1266,7 @@ describe('handleBotIntent', () => {
   it('returns read-only guidance for unsupported unknown questions', async () => {
     const outputDir = await writeContext();
     await expect(handleBotIntent({ type: 'unknown', text: '随便聊聊' }, outputDir)).resolves.toEqual({
-      text: '我现在可以查：今日概况、商品、新链接池、待处理任务、转化差、曝光低、高潜力、下架链接、订单情况。你可以问“新链接池怎么样”或“查一下721”。',
+      text: '我现在可以查：今日概况、商品、新链接池、待处理任务、转化差、曝光低、高潜力、失活链接、下架链接、订单情况。你可以问“新链接池怎么样”或“查一下721”。',
     });
   });
 

@@ -23,6 +23,7 @@ output/
 .worktrees/
 .agents/
 .codex/
+.claude/
 .omo/
 
 # OS/editor noise

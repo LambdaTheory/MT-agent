@@ -183,6 +183,55 @@ describe('executeAgentToolRequest public traffic report', () => {
     expect(response.text).toContain('访问 18');
   });
 
+  it('returns inactive-link id collection from lifecycle governance', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'mt-agent-inactive-links-'));
+    const runDir = join(dir, '2026-06-24');
+    await mkdir(runDir, { recursive: true });
+    const metric = {
+      exposure: 0,
+      publicVisits: 0,
+      dashboardVisits: 0,
+      createdOrders: 0,
+      signedOrders: 0,
+      reviewedOrders: 0,
+      shippedOrders: 0,
+      amount: 0,
+      exposureVisitRate: 0,
+      visitCreatedOrderRate: 0,
+      visitShipmentRate: 0,
+      hasExposureData: true,
+      hasDashboardData: true,
+    };
+    await writeFile(join(runDir, 'report-context.json'), JSON.stringify({
+      date: '2026-06-24',
+      summary: {
+        '1d': { exposure: 0, publicVisits: 0, dashboardVisits: 0, createdOrders: 0, shippedOrders: 0, amount: 0, exposureVisitRate: 0, visitCreatedOrderRate: 0, visitShipmentRate: 0 },
+        '7d': { exposure: 0, publicVisits: 0, dashboardVisits: 0, createdOrders: 0, shippedOrders: 0, amount: 0, exposureVisitRate: 0, visitCreatedOrderRate: 0, visitShipmentRate: 0 },
+        '30d': { exposure: 0, publicVisits: 0, dashboardVisits: 0, createdOrders: 0, shippedOrders: 0, amount: 0, exposureVisitRate: 0, visitCreatedOrderRate: 0, visitShipmentRate: 0 },
+      },
+      conclusions: [],
+      rows: [{ productName: '弱表现商品', platformProductId: 'p-706', displayProductId: '端内ID 706', custodyDays: 45, periods: { '1d': metric, '7d': metric, '30d': metric } }],
+      lowExposure: [],
+      weakClick: [],
+      weakConversion: [],
+      highPotential: [],
+      newProductObservation: [],
+      lifecycleGovernance: [{ identifier: '端内ID 706', action: '下架、替换或重做素材', reason: '已托管 45 天，30日曝光 60，访问 1，金额 0.00' }],
+      recommendedActions: [],
+      agentData: { removedLinks: [{ productId: '999', platformProductId: 'p999', productName: '已下架商品', removedDate: '2026-06-23', reason: '商品总表缺失', source: 'goods_snapshot_diff' }] },
+      emptySectionNotes: {},
+    }));
+
+    const response = await executeAgentToolRequest(
+      { toolName: 'publicTraffic.inactiveLinks', arguments: {}, reason: '整理失活链接 ID 集合' },
+      dir,
+    );
+
+    expect(response.text).toContain('失活候选链接ID集合：706');
+    expect(response.text).not.toContain('999');
+    expect(response.text).not.toContain('暂无近7天下架链接');
+  });
+
   it('does not expose the old crawlSources boundary through Feishu tool execution', async () => {
     await expect(executeAgentToolRequest(
       { toolName: 'publicTraffic.crawlSources', arguments: { goodsExportPath: 'output/goods.xlsx' }, reason: '旧抓源工具不应由飞书执行' },

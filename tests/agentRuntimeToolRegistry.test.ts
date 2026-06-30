@@ -33,6 +33,7 @@ describe('agent runtime tool registry', () => {
       'publicTraffic.newLinkPool',
       'publicTraffic.taskPool',
       'publicTraffic.problemProducts',
+      'publicTraffic.inactiveLinks',
       'publicTraffic.removedLinks',
       'publicTraffic.orderSummary',
       'publicTraffic.runReport',
@@ -68,7 +69,7 @@ describe('agent runtime tool registry', () => {
 
     const tools = listAgentTools();
     tools.pop();
-    expect(listAgentTools()).toHaveLength(47);
+    expect(listAgentTools()).toHaveLength(48);
   });
 
   it('returns defensive copies of tool metadata', () => {
@@ -148,6 +149,7 @@ describe('agent runtime tool registry', () => {
     expect(findAgentTool('publicTraffic.newLinkPool')).toMatchObject({ risk: 'read', requiresConfirmation: false });
     expect(findAgentTool('publicTraffic.taskPool')).toMatchObject({ risk: 'read', requiresConfirmation: false });
     expect(findAgentTool('publicTraffic.problemProducts')).toMatchObject({ risk: 'read', requiresConfirmation: false });
+    expect(findAgentTool('publicTraffic.inactiveLinks')).toMatchObject({ risk: 'read', requiresConfirmation: false });
     expect(findAgentTool('publicTraffic.removedLinks')).toMatchObject({ risk: 'read', requiresConfirmation: false });
     expect(findAgentTool('publicTraffic.orderSummary')).toMatchObject({ risk: 'read', requiresConfirmation: false });
     expect(findAgentTool('publicTraffic.runReport')).toMatchObject({ risk: 'write', requiresConfirmation: true });
@@ -261,6 +263,7 @@ describe('agent runtime tool registry', () => {
       'publicTraffic.newLinkPool',
       'publicTraffic.taskPool',
       'publicTraffic.problemProducts',
+      'publicTraffic.inactiveLinks',
       'publicTraffic.removedLinks',
       'publicTraffic.orderSummary',
       'publicTraffic.runReport',

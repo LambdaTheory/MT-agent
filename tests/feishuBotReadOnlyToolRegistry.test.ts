@@ -32,7 +32,7 @@ const context = {
   weakConversion: [{ identifier: '端内ID 703', action: '提转化', reason: '访问多成交少' }],
   highPotential: [{ identifier: '端内ID 704', action: '继续放量', reason: '高潜力' }],
   newProductObservation: [],
-  lifecycleGovernance: [],
+  lifecycleGovernance: [{ identifier: '端内ID 706', action: '下架、替换或重做素材', reason: '已托管 45 天，30日曝光 60，访问 1，金额 0.00', priority: 'medium' }],
   recommendedActions: [],
   newProductPoolItems: [{ productId: '701', productName: '大疆 Pocket 3', shortTitle: '', submittedAt: '2026-06-15 09:00:00', merchant: '', alipaySyncStatus: '已同步', alipayCode: '', stock: 0, skuCount: 0, maintenanceStatus: '待维护', note: '' }],
   agentData: { removedLinks: [{ productId: '705', platformProductId: 'p705', productName: '已下架链接', removedDate: '2026-06-14', reason: '商品总表缺失', source: 'goods_snapshot_diff' }] },
@@ -72,6 +72,7 @@ describe('readOnlyTools', () => {
       'new_product_pool',
       'tasks',
       'problem_products',
+      'inactive_links',
       'removed_links',
       'order_summary',
     ]);
@@ -93,6 +94,9 @@ describe('readOnlyTools', () => {
     await expect(findReadOnlyTool({ type: 'new_product_pool' })?.run(context, { type: 'new_product_pool' })).resolves.toMatchObject({ text: expect.stringContaining('大疆 Pocket 3') });
     await expect(findReadOnlyTool({ type: 'tasks' })?.run(context, { type: 'tasks' })).resolves.toMatchObject({ text: expect.stringContaining('端内ID 704') });
     await expect(findReadOnlyTool({ type: 'problem_products', problemType: 'weak_conversion' })?.run(context, { type: 'problem_products', problemType: 'weak_conversion' })).resolves.toMatchObject({ text: expect.stringContaining('访问多成交少') });
+    await expect(findReadOnlyTool({ type: 'inactive_links' })?.run(context, { type: 'inactive_links' })).resolves.toMatchObject({
+      text: expect.stringContaining('失活候选链接ID集合：706'),
+    });
     await expect(findReadOnlyTool({ type: 'removed_links' })?.run(context, { type: 'removed_links' })).resolves.toMatchObject({ text: expect.stringContaining('2026-06-14') });
     await expect(findReadOnlyTool({ type: 'order_summary' })?.run(context, { type: 'order_summary' })).resolves.toMatchObject({ text: expect.stringContaining('发货订单：12') });
   });
