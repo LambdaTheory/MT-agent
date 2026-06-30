@@ -8,6 +8,24 @@ function normalizeExplicitMultiplier(value: number): number | null {
   return value <= 5 ? value : null;
 }
 
+function inferRelativePercentMultiplier(compact: string): number | null {
+  const percent = /(\d+(?:\.\d+)?)[%％]/.exec(compact);
+  if (!percent?.[1]) return null;
+  const value = Number(percent[1]);
+  if (!Number.isFinite(value) || value <= 0 || value > 500) return null;
+
+  const hasDecreaseCue = /下调|下降|降低|降价|减少|调低/.test(compact);
+  if (hasDecreaseCue) {
+    const multiplier = 1 - value / 100;
+    return multiplier > 0 ? multiplier : null;
+  }
+
+  const hasIncreaseCue = /上调|上涨|提高|升高|加价|增加|调高/.test(compact);
+  if (hasIncreaseCue) return normalizeExplicitMultiplier(1 + value / 100);
+
+  return value / 100;
+}
+
 export function readPriceMultiplierArgument(value: unknown): number | null {
   const numeric = typeof value === 'number' ? value : typeof value === 'string' ? Number(value.trim()) : NaN;
   if (!Number.isFinite(numeric) || numeric <= 0) return null;
@@ -18,6 +36,9 @@ export function readPriceMultiplierArgument(value: unknown): number | null {
 
 export function inferPriceMultiplierFromText(text: string): number | null {
   const compact = text.replace(/\s+/g, '');
+  const relativePercent = inferRelativePercentMultiplier(compact);
+  if (relativePercent !== null) return relativePercent;
+
   const chineseDecimalFold = /([一二两三四五六七八九])点([一二两三四五六七八九])折/.exec(compact);
   if (chineseDecimalFold?.[1] && chineseDecimalFold[2]) {
     const integer = chineseDigitValue(chineseDecimalFold[1]);
@@ -35,12 +56,6 @@ export function inferPriceMultiplierFromText(text: string): number | null {
   if (numericFold?.[1]) {
     const value = Number(numericFold[1]);
     if (Number.isFinite(value) && value > 0 && value <= 10) return value / 10;
-  }
-
-  const percent = /(\d+(?:\.\d+)?)%/.exec(compact);
-  if (percent?.[1]) {
-    const value = Number(percent[1]);
-    if (Number.isFinite(value) && value > 0 && value <= 500) return value / 100;
   }
 
   const multiplier = /(\d+(?:\.\d+)?)(?:倍|x|X)/.exec(compact);

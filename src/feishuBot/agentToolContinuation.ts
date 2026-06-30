@@ -1,5 +1,6 @@
 import type { AgentToolConfirmRequest } from '../agentRuntime/approvalCard.js';
 import { buildAgentToolConfirmCard } from '../agentRuntime/approvalCard.js';
+import { buildAgentClarificationCard } from '../agentRuntime/clarificationCard.js';
 import { decideAgentPolicy } from '../agentRuntime/policy.js';
 import { isPreConfirmationPlanningTool } from '../agentRuntime/planningTools.js';
 import type { AgentPlannerStep } from '../agentRuntime/planner.js';
@@ -8,8 +9,8 @@ import type { AgentStepMetadataStore } from '../agentRuntime/stepResolution.js';
 import { rememberStepMetadata, resolvePlannerArguments } from '../agentRuntime/stepResolution.js';
 import { findAgentTool } from '../agentRuntime/toolRegistry.js';
 import { executeAgentToolRequest, type AgentToolExecutionOptions } from './agentToolExecutor.js';
-import { inferPriceAdjustmentAmountFromText } from './priceAdjustment.js';
-import { inferPriceMultiplierFromText } from './priceMultiplier.js';
+import { inferPriceAdjustmentAmountFromText, readPriceAdjustmentAmountArgument } from './priceAdjustment.js';
+import { inferPriceMultiplierFromText, readPriceMultiplierArgument } from './priceMultiplier.js';
 import { parseRentPriceFieldsFromText } from './rentalPrice.js';
 import type { BotResponse } from './types.js';
 
@@ -52,18 +53,41 @@ function shouldStopAfterConfirmedResponse(response: BotResponse): boolean {
   return response.metadata?.ok === false;
 }
 
-function completePricePreviewArguments(
+export function completePricePreviewArguments(
   toolName: string,
   args: Record<string, unknown>,
   contextText: string,
 ): Record<string, unknown> {
-  if (toolName !== 'rental.pricePreview' || args.discount !== undefined || args.fields !== undefined || args.adjustmentAmount !== undefined) return args;
+  if (toolName !== 'rental.pricePreview' || args.fields !== undefined) return args;
   const fields = parseRentPriceFieldsFromText(contextText);
   if (Object.keys(fields).length > 0) {
     return {
       ...args,
       fields,
     };
+  }
+  if (args.discount !== undefined) {
+    const normalized = readPriceMultiplierArgument(args.discount);
+    const inferred = normalized ?? inferPriceMultiplierFromText(contextText);
+    if (inferred !== null) {
+      return {
+        ...args,
+        discount: inferred,
+        scope: 'rent_fields',
+      };
+    }
+    return args;
+  }
+  if (args.adjustmentAmount !== undefined) {
+    const normalized = readPriceAdjustmentAmountArgument(args.adjustmentAmount);
+    if (normalized !== null) {
+      return {
+        ...args,
+        adjustmentAmount: normalized,
+        scope: 'rent_fields',
+      };
+    }
+    return args;
   }
   const adjustmentAmount = inferPriceAdjustmentAmountFromText(contextText);
   if (adjustmentAmount !== null) {
@@ -80,6 +104,95 @@ function completePricePreviewArguments(
     discount: inferred,
     scope: 'rent_fields',
   };
+}
+
+function nearlyEqual(left: number, right: number): boolean {
+  return Math.abs(left - right) < 0.000001;
+}
+
+function extractDirectionalPriceNumber(text: string): { direction: 'decrease' | 'increase'; value: number; hasPercent: boolean; hasAmountUnit: boolean } | null {
+  const compact = text.replace(/\s+/g, '');
+  const decrease = /(下调|下降|降低|降价|减少|调低)(\d+(?:\.\d+)?)([%％元块]?)/.exec(compact);
+  if (decrease?.[2]) {
+    return {
+      direction: 'decrease',
+      value: Number(decrease[2]),
+      hasPercent: decrease[3] === '%' || decrease[3] === '％',
+      hasAmountUnit: decrease[3] === '元' || decrease[3] === '块' || /金额|按金额/.test(compact),
+    };
+  }
+  const increase = /(上调|上涨|提高|升高|加价|增加|调高)(\d+(?:\.\d+)?)([%％元块]?)/.exec(compact);
+  if (increase?.[2]) {
+    return {
+      direction: 'increase',
+      value: Number(increase[2]),
+      hasPercent: increase[3] === '%' || increase[3] === '％',
+      hasAmountUnit: increase[3] === '元' || increase[3] === '块' || /金额|按金额/.test(compact),
+    };
+  }
+  return null;
+}
+
+function buildPriceSemanticsClarification(
+  sourceText: string,
+  reason: string,
+  parsed: { direction: 'decrease' | 'increase'; value: number },
+  inferredMultiplier?: number,
+): BotResponse {
+  const action = parsed.direction === 'decrease' ? '下调' : '上调';
+  const amountAction = parsed.direction === 'decrease' ? '减少' : '增加';
+  const multiplier = inferredMultiplier ?? (parsed.direction === 'decrease' ? 1 - parsed.value / 100 : 1 + parsed.value / 100);
+  return {
+    text: `价格调整语义需要确认：${action}${parsed.value} 是按比例还是按金额？`,
+    card: buildAgentClarificationCard({
+      originalMessage: sourceText,
+      question: `价格调整语义需要确认：${action}${parsed.value} 是按比例还是按金额？`,
+      reason,
+      options: [
+        {
+          label: '按比例',
+          message: `${sourceText}；按比例${action}${parsed.value}%，即租金乘以 ${multiplier.toFixed(4).replace(/0+$/u, '').replace(/\.$/u, '')}`,
+          description: `租金字段整体乘以 ${multiplier.toFixed(4).replace(/0+$/u, '').replace(/\.$/u, '')}`,
+        },
+        {
+          label: '按金额',
+          message: `${sourceText}；按金额${amountAction}${parsed.value}元`,
+          description: `每个租金字段${amountAction} ${parsed.value} 元`,
+        },
+      ],
+    }),
+    metadata: { toolName: 'rental.pricePreview', ok: false, needsClarification: true },
+  };
+}
+
+export function pricePreviewSemanticClarification(
+  toolName: string,
+  args: Record<string, unknown>,
+  contextText: string,
+  sourceText: string,
+): BotResponse | null {
+  if (toolName !== 'rental.pricePreview' || args.fields !== undefined) return null;
+  const directional = extractDirectionalPriceNumber(contextText);
+  if (!directional) return null;
+
+  const inferredMultiplier = inferPriceMultiplierFromText(contextText);
+  const parsedDiscount = args.discount !== undefined ? readPriceMultiplierArgument(args.discount) : null;
+  const parsedAdjustment = args.adjustmentAmount !== undefined ? readPriceAdjustmentAmountArgument(args.adjustmentAmount) : null;
+
+  if (!directional.hasPercent && !directional.hasAmountUnit && args.discount === undefined && args.adjustmentAmount === undefined) {
+    return buildPriceSemanticsClarification(sourceText, '价格调整数值缺少“%”或“元”等单位，无法安全判断是比例还是金额。', directional);
+  }
+
+  if (directional.hasPercent && inferredMultiplier !== null) {
+    if (parsedAdjustment !== null) {
+      return buildPriceSemanticsClarification(sourceText, '原始语义包含百分比，但工具参数被规划成金额调整；需要你确认后再继续。', directional, inferredMultiplier);
+    }
+    if (parsedDiscount !== null && !nearlyEqual(parsedDiscount, inferredMultiplier)) {
+      return buildPriceSemanticsClarification(sourceText, `原始语义推导的倍率是 ${inferredMultiplier}，但工具参数给的是 ${parsedDiscount}；需要你确认后再继续。`, directional, inferredMultiplier);
+    }
+  }
+
+  return null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -165,6 +278,93 @@ function completeNewLinkBatchArguments(
   };
 }
 
+function describeArgumentValue(value: unknown): string {
+  if (value === undefined) return '未提供';
+  if (typeof value === 'string') return value.length > 80 ? `${value.slice(0, 77)}...` : value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (Array.isArray(value)) return `数组 ${value.length} 项`;
+  if (isRecord(value)) return `对象 ${Object.keys(value).length} 项`;
+  return String(value);
+}
+
+function buildGenericArgumentClarification(input: {
+  toolName: string;
+  args: Record<string, unknown>;
+  sourceText: string;
+  reason: string;
+}): BotResponse {
+  const tool = findAgentTool(input.toolName);
+  const required = isRecord(tool?.inputSchema) && Array.isArray(tool.inputSchema.required)
+    ? tool.inputSchema.required.filter((item): item is string => typeof item === 'string')
+    : [];
+  const provided = Object.entries(input.args)
+    .slice(0, 8)
+    .map(([key, value]) => `${key}=${describeArgumentValue(value)}`)
+    .join('；') || '无';
+  const requirementText = required.length ? `必填参数：${required.join('、')}` : '该工具需要结构化参数。';
+  const question = `我已识别到工具 ${input.toolName}，但参数未通过安全校验。请补充或改写后再继续。`;
+  return {
+    text: question,
+    card: buildAgentClarificationCard({
+      originalMessage: input.sourceText,
+      question,
+      reason: `${input.reason}；${requirementText}；当前参数：${provided}`,
+      options: [
+        {
+          label: '补充参数',
+          message: `${input.sourceText}\n补充说明：请明确 ${input.toolName} 的缺失参数`,
+          description: requirementText,
+        },
+        {
+          label: '重新描述',
+          message: input.sourceText,
+          description: '用更完整的一句话重新发起，让 Agent 重新规划',
+        },
+      ],
+    }),
+    metadata: { toolName: input.toolName, ok: false, needsClarification: true },
+  };
+}
+
+export function reviewAgentToolArguments(input: {
+  toolName: string;
+  args: Record<string, unknown>;
+  metadataStore?: AgentStepMetadataStore;
+  contextText: string;
+  sourceText: string;
+  reason: string;
+}): { ok: true; args: Record<string, unknown> } | { ok: false; response: BotResponse } {
+  const semanticClarification = pricePreviewSemanticClarification(
+    input.toolName,
+    input.args,
+    input.contextText,
+    input.sourceText,
+  );
+  if (semanticClarification) return { ok: false, response: semanticClarification };
+
+  const priceCompleted = completePricePreviewArguments(input.toolName, input.args, input.contextText);
+  const completed = completeNewLinkBatchArguments(
+    input.toolName,
+    priceCompleted,
+    input.metadataStore ?? {},
+    input.contextText,
+  );
+
+  if (!validateAgentToolArguments(input.toolName, completed)) {
+    return {
+      ok: false,
+      response: buildGenericArgumentClarification({
+        toolName: input.toolName,
+        args: completed,
+        sourceText: input.sourceText,
+        reason: input.reason,
+      }),
+    };
+  }
+
+  return { ok: true, args: completed };
+}
+
 export async function continueAgentPlannerSteps(input: ContinuePlannerStepsInput): Promise<BotResponse | null> {
   for (const [localIndex, step] of input.steps.entries()) {
     const absoluteIndex = input.baseIndex + localIndex;
@@ -176,23 +376,25 @@ export async function continueAgentPlannerSteps(input: ContinuePlannerStepsInput
       input.textParts.push('已停止执行后续步骤，未触发任何未确认的写操作。');
       return { text: input.textParts.join('\n') };
     }
-    const completedArguments = completePricePreviewArguments(
-      step.toolName,
-      resolvedArguments.value,
-      [input.sourceText, input.goal, input.reason, step.reason].filter(Boolean).join('\n'),
-    );
-    const finalArguments = completeNewLinkBatchArguments(
-      step.toolName,
-      completedArguments,
-      input.metadataStore,
-      [input.sourceText, input.goal, input.reason, step.reason].filter(Boolean).join('\n'),
-    );
-    if (!validateAgentToolArguments(step.toolName, finalArguments)) {
+    const contextText = [input.sourceText, input.goal, input.reason, step.reason].filter(Boolean).join('\n');
+    const reviewed = reviewAgentToolArguments({
+      toolName: step.toolName,
+      args: resolvedArguments.value,
+      metadataStore: input.metadataStore,
+      contextText,
+      sourceText: input.sourceText ?? input.goal,
+      reason: step.reason || input.reason,
+    });
+    if (!reviewed.ok) {
       input.textParts.push('');
-      input.textParts.push(`步骤 ${absoluteIndex + 1}/${input.totalSteps} 参数校验失败：${step.toolName}`);
-      input.textParts.push('已停止执行后续步骤，未触发任何未确认的写操作。');
-      return { text: input.textParts.join('\n') };
+      input.textParts.push(reviewed.response.text);
+      return {
+        text: input.textParts.join('\n'),
+        ...(reviewed.response.card ? { card: reviewed.response.card } : {}),
+        ...(reviewed.response.metadata ? { metadata: reviewed.response.metadata } : {}),
+      };
     }
+    const finalArguments = reviewed.args;
 
     const tool = findAgentTool(step.toolName);
     if (!tool) return null;

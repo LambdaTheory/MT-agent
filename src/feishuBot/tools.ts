@@ -2,7 +2,8 @@ import { basename, dirname } from 'node:path';
 import { buildAgentToolConfirmCard } from '../agentRuntime/approvalCard.js';
 import { buildAgentClarificationCard } from '../agentRuntime/clarificationCard.js';
 import { isPreConfirmationPlanningTool } from '../agentRuntime/planningTools.js';
-import { listAgentPlannerTools, validateAgentMultiStepPlannerProposal, validateAgentPlannerClarificationProposal, validateAgentPlannerProposal, type AgentPlannerProvider } from '../agentRuntime/planner.js';
+import { listAgentPlannerTools, schemaAllowsArguments, validateAgentMultiStepPlannerProposal, validateAgentPlannerClarificationProposal, validateAgentPlannerProposal, type AgentPlannerProvider } from '../agentRuntime/planner.js';
+import { findAgentTool } from '../agentRuntime/toolRegistry.js';
 import { buildAgentLearningPlannerHints, summarizeAgentLearning } from '../agentLearning/store.js';
 import { parseAgentDataIntent } from '../agentData/intent.js';
 import { loadClosedOrderRegistryContext, type ClosedOrderRegistryPathsInput } from '../closedOrderFeedback/runtime.js';
@@ -20,7 +21,7 @@ import {
   buildCancelDifferentialPricingCardResult,
   type ActivityAutomationSkillClient,
 } from './activityAutomation.js';
-import { continueAgentPlannerSteps } from './agentToolContinuation.js';
+import { continueAgentPlannerSteps, reviewAgentToolArguments } from './agentToolContinuation.js';
 import { executeAgentToolRequest } from './agentToolExecutor.js';
 import {
   buildInventoryStatusDetailCard,
@@ -61,11 +62,83 @@ const LEGACY_WORKFLOW_PLAN_REJECTED =
   'Agent planner 返回了 legacy workflow 格式（selectedWorkflow），但当前飞书路径只接受 registered tool 或 steps 多步骤计划。未执行任何操作；请让 LLM 改为 selectedTool 或 steps。';
 
 function completePlannerPriceArguments(toolName: string, args: Record<string, unknown>, contextText: string): Record<string, unknown> {
-  if ((toolName !== 'rental.pricePreview' && toolName !== 'rental.priceChange') || args.fields !== undefined || args.discount !== undefined || args.adjustmentAmount !== undefined) {
+  if (toolName !== 'rental.priceChange' || args.fields !== undefined || args.discount !== undefined || args.adjustmentAmount !== undefined) {
     return args;
   }
   const fields = parseRentPriceFieldsFromText(contextText);
   return Object.keys(fields).length > 0 ? { ...args, fields } : args;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function readNonEmptyString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function requiredFieldsForTool(toolName: string): string[] {
+  const schema = findAgentTool(toolName)?.inputSchema;
+  if (!isRecord(schema) || !Array.isArray(schema.required)) return [];
+  return schema.required.filter((item): item is string => typeof item === 'string');
+}
+
+function invalidPlannerArgumentsClarification(rawProposal: string, message: string): BotResponse | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawProposal);
+  } catch {
+    return null;
+  }
+  if (!isRecord(parsed)) return null;
+
+  const goal = readNonEmptyString(parsed.goal) ?? '执行用户目标';
+  const reason = readNonEmptyString(parsed.reason) ?? 'LLM 返回的工具参数没有通过 schema 校验';
+  const selectedTool = readNonEmptyString(parsed.selectedTool);
+  const invalidStep = Array.isArray(parsed.steps)
+    ? parsed.steps.find((step) => {
+      if (!isRecord(step)) return false;
+      const toolName = readNonEmptyString(step.toolName);
+      const args = isRecord(step.arguments) ? step.arguments : null;
+      const tool = toolName ? findAgentTool(toolName) : undefined;
+      return Boolean(toolName && tool && (!args || !schemaAllowsArguments(tool.inputSchema, args, { allowPlaceholders: true })));
+    })
+    : null;
+  const fallbackStep = Array.isArray(parsed.steps)
+    ? parsed.steps.find((step) => isRecord(step) && readNonEmptyString(step.toolName))
+    : null;
+  const stepTool = isRecord(invalidStep)
+    ? readNonEmptyString(invalidStep.toolName)
+    : isRecord(fallbackStep) ? readNonEmptyString(fallbackStep.toolName) : null;
+  const toolName = selectedTool ?? stepTool;
+  if (!toolName) return null;
+
+  const required = requiredFieldsForTool(toolName);
+  const question = selectedTool
+    ? `我理解你要调用 ${toolName}，但工具参数不完整或格式不安全，需要你确认。`
+    : `我已生成多步骤计划，但 ${toolName} 的参数不完整或格式不安全，需要你确认。`;
+
+  return {
+    text: question,
+    card: buildAgentClarificationCard({
+      originalMessage: message,
+      question,
+      reason: `${goal}；${reason}${required.length ? `；必填参数：${required.join('、')}` : ''}`,
+      options: [
+        {
+          label: '补充参数',
+          message: `${message}\n补充说明：请补齐 ${toolName} 的必要参数`,
+          description: required.length ? `需要：${required.join('、')}` : '补充目标、对象、数量或日期等关键参数',
+        },
+        {
+          label: '重新规划',
+          message,
+          description: '让 Agent 重新理解并选择工具',
+        },
+      ],
+    }),
+    metadata: { toolName, ok: false, needsClarification: true },
+  };
 }
 
 const HELP_TEXT = `📋 查询与分析
@@ -397,16 +470,25 @@ async function agentPlannerResponse(
     const multiStepResponse = await executeAgentMultiStepPlannerResponse(rawProposal, message, outputDir, options);
     if (multiStepResponse) return multiStepResponse;
     const clarificationParsed = validateAgentPlannerClarificationProposal(rawProposal);
-    return clarificationParsed.ok
-      ? { text: clarificationParsed.proposal.question, card: buildAgentClarificationCard(clarificationParsed.proposal) }
-      : null;
+    if (clarificationParsed.ok) return { text: clarificationParsed.proposal.question, card: buildAgentClarificationCard(clarificationParsed.proposal) };
+    return invalidPlannerArgumentsClarification(rawProposal, message);
   }
 
-  const completedArguments = completePlannerPriceArguments(
+  const plannerContextText = [message, parsed.proposal.reason].filter(Boolean).join('\n');
+  const initialCompletedArguments = completePlannerPriceArguments(
     parsed.proposal.selectedTool,
     parsed.proposal.arguments,
-    [message, parsed.proposal.reason].filter(Boolean).join('\n'),
+    plannerContextText,
   );
+  const reviewed = reviewAgentToolArguments({
+    toolName: parsed.proposal.selectedTool,
+    args: initialCompletedArguments,
+    contextText: plannerContextText,
+    sourceText: message,
+    reason: parsed.proposal.reason,
+  });
+  if (!reviewed.ok) return reviewed.response;
+  const completedArguments = reviewed.args;
   const request = {
     toolName: parsed.proposal.selectedTool,
     arguments: completedArguments,
