@@ -279,7 +279,7 @@ node scripts/task-store.js <action> [args...]
 - **Verify mismatch**: Report expected vs actual per field. Let user decide. Missing readback values count as `verify_failed`; `verifyFailed` items must be handled manually or rolled back; delayed verify does not automatically promote them to success.
 - **Copy without new ID**: Treat as `unknown` with `sideEffectPossible: true` and `retrySafe: false`. Do not automatically retry because the copied product may already have been created.
 - **Batch-read missing selector**: If the caller explicitly requests fields and a selector is not configured, return `partial` with warnings/missingFields instead of silently omitting the field.
-- **Delist failure**: Treat missing confirmation or product still visible after delist as `error`. 下架 is high-risk and must not be considered successful unless the confirmation dialog was actually confirmed and post-check passes.
+- **Delist verification**: Delist must attempt confirmation and then re-check the active list. If the product is still visible, return `error`. If the product is absent but the confirmation signal was not observed, return `warn` with the verification evidence so callers do not retry blindly.
 - **Batch partial failure**: Failed products logged in state file. `resume` to retry. With `stopOnError`, state remains `stopped` instead of being overwritten to `partial`. Resume writes `resumedTo` on the original state and `resumeFrom` on the new state for audit chaining.
 
 ## Task States

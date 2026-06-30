@@ -749,7 +749,7 @@ async function clickVisibleConfirmIn(scopeHandle) {
   return { clicked, text };
 }
 
-async function maybeConfirmDialog() {
+async function legacyMaybeConfirmDialog() {
   const modal = await page.waitForSelector(".modal.show, .modal.in, .layui-layer-dialog, .layui-m-layer, .modal, .layui-layer", { timeout: 3000, state: "visible" }).catch(() => null);
   if (!modal) return { confirmed: false, text: "" };
   const result = await clickVisibleConfirmIn(modal);
@@ -758,6 +758,174 @@ async function maybeConfirmDialog() {
     await page.waitForLoadState("networkidle").catch(() => {});
   }
   return { confirmed: result.clicked, text: result.text };
+}
+
+const CONFIRM_DIALOG_SELECTOR = [
+  ".modal.show",
+  ".modal.in",
+  ".layui-layer-dialog",
+  ".layui-m-layer",
+  ".modal",
+  ".layui-layer",
+  ".ant-modal:not(.ant-modal-hidden)",
+  ".ant-popover:not(.ant-popover-hidden)",
+  ".ant-popconfirm",
+  "[role='dialog']",
+  ".bootbox",
+  ".swal2-container",
+].join(", ");
+
+function normalizeDialogLabel(value) {
+  return String(value == null ? "" : value).replace(/\s+/g, "").trim();
+}
+
+function scoreConfirmButtonCandidate(candidate) {
+  if (!candidate || !candidate.visible || candidate.disabled) return -1;
+  const label = normalizeDialogLabel(candidate.text || candidate.value || candidate.ariaLabel || candidate.title);
+  const lowerLabel = label.toLowerCase();
+  const lowerClass = String(candidate.className || "").toLowerCase();
+  const lowerRole = String(candidate.role || "").toLowerCase();
+  if (!label && !lowerClass) return -1;
+
+  const cancelLabels = ["\u53d6\u6d88", "\u5173\u95ed", "\u5426", "no", "cancel", "close"];
+  if (cancelLabels.some(text => lowerLabel === text || label.includes(text))) return -1;
+
+  let score = -1;
+  const exactConfirmLabels = [
+    "\u786e\u8ba4",
+    "\u786e\u5b9a",
+    "\u662f",
+    "ok",
+    "yes",
+    "\u4e0b\u67b6",
+    "\u7acb\u5373\u4e0b\u67b6",
+  ];
+  if (exactConfirmLabels.includes(lowerLabel)) score = Math.max(score, 120);
+  if (label.includes("\u786e\u8ba4") || label.includes("\u786e\u5b9a")) score = Math.max(score, 110);
+  if (label.includes("\u4e0b\u67b6")) score = Math.max(score, 105);
+  if (lowerLabel.includes("ok") || lowerLabel.includes("yes")) score = Math.max(score, 95);
+  if (lowerClass.includes("primary") || lowerClass.includes("danger") || lowerClass.includes("layui-layer-btn0") || lowerRole === "button") {
+    score = Math.max(score, 70);
+  }
+  if (String(candidate.type || "").toLowerCase() === "submit") score = Math.max(score, 65);
+  if (candidate.index === candidate.count - 1 && score > 0) score += 2;
+  return score;
+}
+
+function chooseConfirmButtonIndex(candidates) {
+  let best = null;
+  for (const candidate of candidates || []) {
+    const score = scoreConfirmButtonCandidate(candidate);
+    if (score < 0) continue;
+    if (!best || score > best.score || (score === best.score && candidate.index > best.index)) {
+      best = { index: candidate.index, score };
+    }
+  }
+  return best ? best.index : -1;
+}
+
+async function legacyClickVisibleConfirmIn(scopeHandle) {
+  if (!scopeHandle) return { clicked: false, text: "" };
+  const payload = await scopeHandle.evaluate(el => {
+    const text = (el.textContent || "").trim().substring(0, 500);
+    const nodes = Array.from(el.querySelectorAll("button, a, input[type='button'], input[type='submit']"));
+    const candidates = nodes.map((node, index) => {
+      const style = window.getComputedStyle(node);
+      const rect = node.getBoundingClientRect();
+      const visible = style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && rect.height > 0;
+      return {
+        index,
+        count: nodes.length,
+        text: (node.textContent || "").trim(),
+        value: node.value || "",
+        ariaLabel: node.getAttribute("aria-label") || "",
+        title: node.getAttribute("title") || "",
+        className: typeof node.className === "string" ? node.className : "",
+        role: node.getAttribute("role") || "",
+        type: node.getAttribute("type") || "",
+        disabled: Boolean(node.disabled) || node.getAttribute("aria-disabled") === "true",
+        visible,
+      };
+    });
+    return { text, candidates };
+  }).catch(() => ({ text: "", candidates: [] }));
+
+  const index = chooseConfirmButtonIndex(payload.candidates);
+  if (index < 0) return { clicked: false, text: payload.text, candidates: payload.candidates };
+
+  const clicked = await scopeHandle.evaluate((el, targetIndex) => {
+    const nodes = Array.from(el.querySelectorAll("button, a, input[type='button'], input[type='submit']"));
+    const btn = nodes[targetIndex];
+    if (!btn) return false;
+    btn.click();
+    return true;
+  }, index).catch(() => false);
+  const chosen = (payload.candidates || []).find(candidate => candidate.index === index);
+  return { clicked, text: payload.text, buttonText: chosen ? chosen.text || chosen.value || chosen.ariaLabel || chosen.title : "" };
+}
+
+async function maybeConfirmDialog(timeout = 5000) {
+  const modal = await page.waitForSelector(CONFIRM_DIALOG_SELECTOR, { timeout, state: "visible" }).catch(() => null);
+  if (!modal) return { confirmed: false, text: "", kind: "dom" };
+  const result = await legacyClickVisibleConfirmIn(modal);
+  if (result.clicked) {
+    await page.waitForTimeout(1000);
+    await page.waitForLoadState("networkidle").catch(() => {});
+  }
+  return { confirmed: result.clicked, text: result.text, buttonText: result.buttonText, kind: "dom" };
+}
+
+function watchAndAcceptNativeDialogs() {
+  const state = { result: null };
+  const handler = async (dialog) => {
+    const result = { confirmed: false, kind: "native", dialogType: dialog.type(), text: dialog.message() };
+    try {
+      await dialog.accept();
+      result.confirmed = true;
+    } catch (err) {
+      result.error = summarizeError(err);
+    }
+    state.result = result;
+  };
+  page.on("dialog", handler);
+  return {
+    result: () => state.result,
+    stop: () => page.off("dialog", handler),
+  };
+}
+
+async function clickWithDelistConfirmation(buttonHandle) {
+  const nativeWatcher = watchAndAcceptNativeDialogs();
+  try {
+    await buttonHandle.click();
+    await page.waitForTimeout(300);
+    const nativeBeforeDom = nativeWatcher.result();
+    if (nativeBeforeDom && nativeBeforeDom.confirmed) return nativeBeforeDom;
+    const dom = await maybeConfirmDialog(5000);
+    const nativeAfterDom = nativeWatcher.result();
+    if (nativeAfterDom && nativeAfterDom.confirmed) return nativeAfterDom;
+    return dom;
+  } finally {
+    nativeWatcher.stop();
+  }
+}
+
+async function verifyProductAbsentFromActiveList(productId) {
+  await page.goto(config.saas.productListUrl + "&pagesize=100", { waitUntil: "networkidle" }).catch(() => {});
+  await ensureLogin();
+  await page.waitForTimeout(800);
+  const kwInput = await page.$("input[name='keyword']");
+  if (kwInput) {
+    await kwInput.fill(String(productId));
+    await kwInput.press("Enter");
+    await page.waitForTimeout(1500);
+    await page.waitForLoadState("networkidle").catch(() => {});
+  }
+  const link = await page.$(`a[href*="goods.edit&id=${productId}"], a[href*="goods.edit"][href*="id=${productId}"]`);
+  const rowText = link
+    ? await link.evaluate(el => (el.closest("tr")?.textContent || "").replace(/\s+/g, " ").trim().substring(0, 300)).catch(() => "")
+    : "";
+  return { absent: !link, stillVisible: Boolean(link), rowText, url: page.url() };
 }
 
 function copyResultStatus(newProductId) {
@@ -806,26 +974,40 @@ async function actionDelist(productId) {
   // Click 下架 button
   const btn = await page.$("button[data-toggle='batch']:has(i.icow-xiajia3)");
   if (!btn) return { status: "error", message: "下架 button not found" };
-  await btn.click();
-  const confirm = await maybeConfirmDialog();
-  if (!confirm.confirmed) {
-    return { status: "error", action: "delist", productId, confirmed: false, confirmText: confirm.text, message: "Delist confirmation dialog was not confirmed" };
-  }
+  const confirm = await clickWithDelistConfirmation(btn);
   await page.waitForTimeout(2000);
   await page.waitForLoadState("networkidle").catch(() => {});
 
-  // Verify: re-search to confirm product no longer in active list
-  const kwInput = await page.$("input[name='keyword']");
-  if (kwInput) {
-    await kwInput.fill(String(productId));
-    await kwInput.press("Enter");
-    await page.waitForTimeout(1500);
-    await page.waitForLoadState("networkidle").catch(() => {});
+  // Verify against the active list even when the confirmation signal was missed.
+  const verify = await verifyProductAbsentFromActiveList(productId);
+  runtimeLog("info", "delist.verify", {
+    productId,
+    confirmed: Boolean(confirm.confirmed),
+    confirmKind: confirm.kind,
+    absent: verify.absent,
+    stillVisible: verify.stillVisible,
+    rowText: verify.rowText,
+  });
+  if (verify.absent) {
+    if (confirm.confirmed) {
+      return { status: "ok", action: "delist", productId, confirmed: true, confirmKind: confirm.kind, confirmText: confirm.text, verify };
+    }
+    return {
+      status: "warn",
+      action: "delist",
+      productId,
+      confirmed: false,
+      confirmKind: confirm.kind,
+      confirmText: confirm.text,
+      verify,
+      message: "Product is absent from active list after delist, but confirmation click was not observed",
+    };
   }
-  const stillVisible = await page.$(`a[href*="goods.edit&id=${productId}"]`);
-  if (stillVisible) return { status: "error", action: "delist", productId, confirmed: confirm.confirmed, confirmText: confirm.text, message: "Product still visible after delist" };
 
-  return { status: "ok", action: "delist", productId, confirmed: confirm.confirmed, confirmText: confirm.text };
+  if (!confirm.confirmed) {
+    return { status: "error", action: "delist", productId, confirmed: false, confirmKind: confirm.kind, confirmText: confirm.text, verify, message: "Delist confirmation dialog was not confirmed and product is still visible" };
+  }
+  return { status: "error", action: "delist", productId, confirmed: true, confirmKind: confirm.kind, confirmText: confirm.text, verify, message: "Product still visible after delist" };
 }
 
 // --- Copy product ---
@@ -1540,4 +1722,12 @@ async function main() {
   await legacyMode(args[0], args.slice(1));
 }
 
-main().catch(err => { die(err.message); });
+if (require.main === module) {
+  main().catch(err => { die(err.message); });
+}
+
+module.exports = {
+  normalizeDialogLabel,
+  scoreConfirmButtonCandidate,
+  chooseConfirmButtonIndex,
+};
