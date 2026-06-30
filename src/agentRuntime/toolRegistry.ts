@@ -324,7 +324,7 @@ const rentalPriceChangeArgumentsSchema = {
 const rentalPricePreviewArgumentsSchema = {
   type: 'object',
   properties: {
-    productIds: { type: 'array', minItems: 1, maxItems: 12, items: { type: 'string' } },
+    productIds: { type: 'array', minItems: 1, maxItems: 24, items: { type: 'string' } },
     fields: { type: 'object' },
     discount: { type: ['number', 'string'] },
     adjustmentAmount: { type: ['number', 'string'], description: 'Absolute amount to add to every rental price field. Use negative values such as -1 to subtract 1 yuan.' },

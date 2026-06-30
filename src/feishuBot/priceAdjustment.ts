@@ -6,6 +6,7 @@ export function readPriceAdjustmentAmountArgument(value: unknown): number | null
 
 export function inferPriceAdjustmentAmountFromText(text: string): number | null {
   const compact = text.replace(/\s+/g, '');
+  if (/%|％/.test(compact)) return null;
   const hasAmountCue = /金额|按金额|元|块|加价|减价|降价|涨价|上调|下调/.test(compact);
   if (!hasAmountCue) return null;
 
