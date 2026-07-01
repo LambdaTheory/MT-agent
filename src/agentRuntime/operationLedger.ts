@@ -1,6 +1,9 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import type { OperationPlan, OperationPlanJournalEntry } from './operationPlan.js';
+import { operationLedgerJsonlPath } from './dailyMissionArtifacts.js';
+
+export { operationLedgerJsonlPath } from './dailyMissionArtifacts.js';
 
 export interface OperationLedgerStore {
   version: 1;
@@ -125,4 +128,32 @@ export async function appendOperationPlanJournalEntry(
     await writeJson(dailyOperationJournalPath(outputDir, date), { ...daily, date, updatedAt: now, entries: [...daily.entries, entry] });
     return entry;
   });
+}
+
+export async function appendOperationLedgerJsonlEntry(
+  outputDir: string,
+  entry: OperationPlanJournalEntry,
+): Promise<OperationPlanJournalEntry> {
+  return withLedgerLock(outputDir, async () => {
+    const path = operationLedgerJsonlPath(outputDir, entry.at.slice(0, 10));
+    await mkdir(dirname(path), { recursive: true });
+    await appendFile(path, `${JSON.stringify(entry)}\n`, 'utf8');
+    return entry;
+  });
+}
+
+export async function loadOperationLedgerJsonlEntries(
+  outputDir: string,
+  date: string,
+): Promise<OperationPlanJournalEntry[]> {
+  try {
+    const raw = await readFile(operationLedgerJsonlPath(outputDir, date), 'utf8');
+    return raw
+      .split('\n')
+      .filter((line) => line.length > 0)
+      .map((line) => JSON.parse(line) as OperationPlanJournalEntry);
+  } catch (error) {
+    if (isRecord(error) && error.code === 'ENOENT') return [];
+    throw error;
+  }
 }

@@ -4,10 +4,13 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { OperationPlan, OperationPlanJournalEntry } from '../src/agentRuntime/operationPlan.js';
 import {
+  appendOperationLedgerJsonlEntry,
   appendOperationPlanJournalEntry,
   dailyOperationJournalPath,
+  loadOperationLedgerJsonlEntries,
   loadDailyOperationJournalStore,
   loadOperationLedgerStore,
+  operationLedgerJsonlPath,
   operationLedgerPath,
   recordOperationPlan,
 } from '../src/agentRuntime/operationLedger.js';
@@ -125,5 +128,32 @@ describe('operation ledger persistence', () => {
     expect(ledger.plans).toEqual([]);
     expect(ledger.journal).toEqual([]);
     expect(daily.entries).toEqual([]);
+  });
+
+  it('appends operation ledger JSONL entries under the roadmap contract path', async () => {
+    const outputDir = await tempOutputDir();
+    const entry = sampleEntry({ event: 'approved' });
+
+    await appendOperationLedgerJsonlEntry(outputDir, entry);
+
+    const raw = await readFile(operationLedgerJsonlPath(outputDir, '2026-07-01'), 'utf8');
+    expect(raw).toBe(`${JSON.stringify(entry)}\n`);
+  });
+
+  it('loads operation ledger JSONL entries in append order', async () => {
+    const outputDir = await tempOutputDir();
+    const created = sampleEntry({ event: 'created' });
+    const approved = sampleEntry({ at: '2026-07-01T08:01:00.000Z', event: 'approved' });
+
+    await appendOperationLedgerJsonlEntry(outputDir, created);
+    await appendOperationLedgerJsonlEntry(outputDir, approved);
+
+    await expect(loadOperationLedgerJsonlEntries(outputDir, '2026-07-01')).resolves.toEqual([created, approved]);
+  });
+
+  it('returns an empty JSONL entry list when the dated ledger file is missing', async () => {
+    const outputDir = await tempOutputDir();
+
+    await expect(loadOperationLedgerJsonlEntries(outputDir, '2026-07-01')).resolves.toEqual([]);
   });
 });
