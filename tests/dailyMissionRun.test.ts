@@ -1,11 +1,21 @@
+import { mkdir, mkdtemp, readFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   addDailyMissionArtifact,
   createDailyMissionRun,
   isDailyMissionTerminalStatus,
+  loadDailyMissionRun,
+  saveDailyMissionRun,
   transitionDailyMissionRun,
   type DailyMissionArtifactRef,
 } from '../src/agentRuntime/dailyMissionRun.js';
+import { dailyMissionArtifactPath } from '../src/agentRuntime/dailyMissionArtifacts.js';
+
+async function tempOutputDir(): Promise<string> {
+  return mkdtemp(join(tmpdir(), 'mt-agent-daily-mission-run-'));
+}
 
 describe('daily mission run state skeleton', () => {
   it('creates a collecting run with manual trigger defaults', () => {
@@ -119,5 +129,44 @@ describe('daily mission run state skeleton', () => {
 
     expect(run.artifactRefs).toEqual([]);
     expect(updated.artifactRefs).toEqual([artifact]);
+  });
+
+  it('saves mission-run JSON through the Daily Mission artifact contract path', async () => {
+    const outputDir = await tempOutputDir();
+    const run = createDailyMissionRun({
+      runId: 'run-2026-07-01',
+      date: '2026-07-01',
+      trigger: 'scheduled',
+      startedAt: '2026-07-01T08:00:00.000Z',
+    });
+
+    await saveDailyMissionRun(outputDir, run);
+
+    const raw = await readFile(dailyMissionArtifactPath(outputDir, run.date, 'missionRun'), 'utf8');
+    expect(raw).toBe(`${JSON.stringify(run, null, 2)}\n`);
+  });
+
+  it('loads a saved mission-run JSON file', async () => {
+    const outputDir = await tempOutputDir();
+    const run = addDailyMissionArtifact(
+      createDailyMissionRun({
+        runId: 'run-2026-07-01',
+        date: '2026-07-01',
+        trigger: 'manual',
+        startedAt: '2026-07-01T08:00:00.000Z',
+      }),
+      { type: 'collected-context', path: 'output/daily-mission/2026-07-01/collected-context.json' },
+    );
+
+    await saveDailyMissionRun(outputDir, run);
+
+    await expect(loadDailyMissionRun(outputDir, '2026-07-01')).resolves.toEqual(run);
+  });
+
+  it('returns null when the mission-run JSON file is missing', async () => {
+    const outputDir = await tempOutputDir();
+    await mkdir(join(outputDir, 'daily-mission'), { recursive: true });
+
+    await expect(loadDailyMissionRun(outputDir, '2026-07-01')).resolves.toBeNull();
   });
 });

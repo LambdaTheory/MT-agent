@@ -1,3 +1,7 @@
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { dirname } from 'node:path';
+import { dailyMissionArtifactPath } from './dailyMissionArtifacts.js';
+
 export type DailyMissionRunStatus =
   | 'collecting'
   | 'planning'
@@ -87,4 +91,24 @@ export function addDailyMissionArtifact(
     ...run,
     artifactRefs: [...run.artifactRefs, artifact],
   };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+export async function saveDailyMissionRun(outputDir: string, run: DailyMissionRun): Promise<DailyMissionRun> {
+  const path = dailyMissionArtifactPath(outputDir, run.date, 'missionRun');
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, `${JSON.stringify(run, null, 2)}\n`, 'utf8');
+  return run;
+}
+
+export async function loadDailyMissionRun(outputDir: string, date: string): Promise<DailyMissionRun | null> {
+  try {
+    return JSON.parse(await readFile(dailyMissionArtifactPath(outputDir, date, 'missionRun'), 'utf8')) as DailyMissionRun;
+  } catch (error) {
+    if (isRecord(error) && error.code === 'ENOENT') return null;
+    throw error;
+  }
 }
