@@ -119,6 +119,46 @@ const defaultMetricsByTarget: Record<'summary' | 'products', ReportMetricName[]>
   products: ['exposure', 'publicVisits', 'createdOrders', 'shippedOrders', 'amount', 'exposureVisitRate'],
 };
 
+const productRowFieldNames = new Set<string>([
+  'productName',
+  'productId',
+  'platformProductId',
+  ...reportMetricNames,
+]);
+
+function unsupportedProductRowFilterField(filters: ReportQueryFilter[] | undefined): string | null {
+  return filters?.find((filter) => !productRowFieldNames.has(filter.field))?.field ?? null;
+}
+
+function unsupportedProductRowSortField(sortBy: PublicTrafficReportQueryArguments['sortBy']): string | null {
+  if (!sortBy || productRowFieldNames.has(sortBy)) return null;
+  return sortBy;
+}
+
+function productRowFieldContractError(context: PublicTrafficDataReportContext, args: PublicTrafficReportQueryArguments, target: string): string | null {
+  const unsupportedFilter = unsupportedProductRowFilterField(args.filters);
+  if (unsupportedFilter) {
+    return [
+      `Unsupported reportQuery filter field "${unsupportedFilter}" for target=${target}.`,
+      `Supported product-row fields: ${Array.from(productRowFieldNames).join(', ')}.`,
+      'Use target=section for section-only fields such as action, reason, priority, maintenanceStatus, stock, and skuCount.',
+      `Report date: ${context.date}`,
+    ].join('\n');
+  }
+
+  const unsupportedSort = unsupportedProductRowSortField(args.sortBy);
+  if (unsupportedSort) {
+    return [
+      `Unsupported reportQuery sort field "${unsupportedSort}" for target=${target}.`,
+      `Supported product-row sort fields: ${Array.from(productRowFieldNames).join(', ')}.`,
+      'Use target=section for section-only fields such as priority, maintenanceStatus, stock, and skuCount.',
+      `Report date: ${context.date}`,
+    ].join('\n');
+  }
+
+  return null;
+}
+
 const productDetailMetrics: ReportMetricName[] = reportMetricNames.filter((metric) => metric !== 'custodyDays');
 
 const aggregationLabels: Record<ReportAggregationName, string> = {
@@ -362,6 +402,9 @@ function formatComparison(context: PublicTrafficDataReportContext, args: PublicT
 }
 
 function formatProducts(context: PublicTrafficDataReportContext, args: PublicTrafficReportQueryArguments): string {
+  const contractError = productRowFieldContractError(context, args, 'products');
+  if (contractError) return contractError;
+
   const period = periodsFromArgs(args)[0] ?? '1d';
   const metrics = metricList(args, 'products');
   const sortDirection = args.sortDirection ?? 'desc';
@@ -422,6 +465,9 @@ export function runPublicTrafficReportDateComparison(
 }
 
 function formatProductAggregation(context: PublicTrafficDataReportContext, args: PublicTrafficReportQueryArguments): string {
+  const contractError = productRowFieldContractError(context, args, 'productAggregation');
+  if (contractError) return contractError;
+
   const period = periodsFromArgs(args)[0] ?? '1d';
   const aggregation = args.aggregation && reportAggregationNames.includes(args.aggregation) ? args.aggregation : 'count';
   const rows = matchingProductRows(context, args, period);
@@ -528,6 +574,9 @@ function formatSourceCoverageLine(row: PublicTrafficProductDataRow, period: Peri
 }
 
 function formatSourceCoverage(context: PublicTrafficDataReportContext, args: PublicTrafficReportQueryArguments): string {
+  const contractError = productRowFieldContractError(context, args, 'sourceCoverage');
+  if (contractError) return contractError;
+
   const periods = args.period || args.periods?.length ? periodsFromArgs(args) : PERIODS;
   const source = args.source && reportSourceNames.includes(args.source) ? args.source : 'all';
   const status = args.coverageStatus && reportCoverageStatusNames.includes(args.coverageStatus) ? args.coverageStatus : 'all';
@@ -570,6 +619,9 @@ function formatProductDetailLine(row: PublicTrafficProductDataRow, periods: Peri
 }
 
 function formatProductDetail(context: PublicTrafficDataReportContext, args: PublicTrafficReportQueryArguments): string {
+  const contractError = productRowFieldContractError(context, args, 'productDetail');
+  if (contractError) return contractError;
+
   const periods = args.period || args.periods?.length ? periodsFromArgs(args) : PERIODS;
   const sortPeriod = periods[0] ?? '1d';
   const sortDirection = args.sortDirection ?? 'desc';

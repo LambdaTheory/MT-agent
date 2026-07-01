@@ -622,7 +622,7 @@ async function batchRollback(statePath) {
   const items = [];
   for (const entry of completed) {
     const reverse = {};
-    const priceFields = ["stock", "rent1day", "rent10day", "rent30day", "marketPrice", "deposit", "purchasePrice", "costPrice", "finalPayment"];
+    const priceFields = ["stock", "rent1day", "rent2day", "rent3day", "rent4day", "rent5day", "rent7day", "rent10day", "rent15day", "rent30day", "rent60day", "rent90day", "rent180day", "marketPrice", "deposit", "purchasePrice", "costPrice", "finalPayment"];
     if (entry.currentValues) {
       for (const [specId, sv] of Object.entries(entry.currentValues)) {
         reverse[specId] = {};
@@ -668,7 +668,7 @@ async function batchRollbackConfirm(statePath) {
   const items = [];
   for (const entry of completed) {
     const reverse = {};
-    const priceFields = ["stock", "rent1day", "rent10day", "rent30day", "marketPrice", "deposit", "purchasePrice", "costPrice", "finalPayment"];
+    const priceFields = ["stock", "rent1day", "rent2day", "rent3day", "rent4day", "rent5day", "rent7day", "rent10day", "rent15day", "rent30day", "rent60day", "rent90day", "rent180day", "marketPrice", "deposit", "purchasePrice", "costPrice", "finalPayment"];
     if (entry.currentValues) {
       for (const [specId, sv] of Object.entries(entry.currentValues)) {
         reverse[specId] = {};
