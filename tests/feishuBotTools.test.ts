@@ -2309,6 +2309,46 @@ describe('handleBotIntent', () => {
     expect(response.card).toBeUndefined();
   });
 
+  it('executes rental.platformSearchAll as a capped read-only agent tool', async () => {
+    const response = await executeAgentToolRequest(
+      { toolName: 'rental.platformSearchAll', arguments: { limit: 2 }, reason: 'search all rental platform products' },
+      'output',
+      {
+        rentalPriceClient: {
+          async platformSearchAll(limit) {
+            const rows = Array.from({ length: 12 }, (_, index) => ({
+              productId: String(761 + index),
+              title: `vivo X200 ${index + 1}`,
+            }));
+            return {
+              ok: true,
+              status: 'ok',
+              count: 12,
+              rows,
+              pagesScraped: 2,
+              excludedCount: 1,
+              truncated: limit === 2,
+              lines: ['platform-search-all: ok', '761 vivo X200 1', '772 vivo X200 12'],
+            };
+          },
+          async preview() { throw new Error('preview should not run'); },
+          async execute() { throw new Error('execute should not run'); },
+          async copy() { throw new Error('copy should not run'); },
+          async delist() { throw new Error('delist should not run'); },
+          async tenancySet() { throw new Error('tenancySet should not run'); },
+          async specDiscover() { throw new Error('specDiscover should not run'); },
+          async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+        },
+      },
+    );
+
+    expect(response.text).toContain('761');
+    expect(response.text).toContain('772');
+    expect(response.text).toContain('vivo X200 12');
+    expect(response.text).toContain('截断：是');
+    expect(response.card).toBeUndefined();
+  });
+
   it('executes rental.batchRead as a read-only agent tool', async () => {
     const readCalls: string[][] = [];
     const response = await executeAgentToolRequest(
@@ -2345,6 +2385,59 @@ describe('handleBotIntent', () => {
     expect(readCalls).toEqual([['761', '762']]);
     expect(response.text).toContain('761');
     expect(response.text).toContain('762');
+    expect(response.card).toBeUndefined();
+  });
+
+  it('executes rental.specDiscoverFull as a read-only agent tool', async () => {
+    const response = await executeAgentToolRequest(
+      { toolName: 'rental.specDiscoverFull', arguments: { productId: '761' }, reason: 'discover rental specs' },
+      'output',
+      {
+        rentalPriceClient: {
+          async specDiscoverFull(productId) {
+            return { productId, ok: true, status: 'ok', dimensions: [{ specId: '1355', title: '颜色', items: [{ id: '1', title: '黑色' }] }], lines: ['spec-discover: ok', '1 dimensions'] };
+          },
+          async preview() { throw new Error('preview should not run'); },
+          async execute() { throw new Error('execute should not run'); },
+          async copy() { throw new Error('copy should not run'); },
+          async delist() { throw new Error('delist should not run'); },
+          async tenancySet() { throw new Error('tenancySet should not run'); },
+          async specDiscover() { throw new Error('specDiscover should not run'); },
+          async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+        },
+      },
+    );
+
+    expect(response.text).toContain('761');
+    expect(response.text).toContain('颜色');
+    expect(response.text).toContain('1 黑色');
+    expect(response.card).toBeUndefined();
+  });
+
+  it('executes rental.readRaw as a read-only agent tool with optional fields', async () => {
+    const response = await executeAgentToolRequest(
+      { toolName: 'rental.readRaw', arguments: { productId: '761', fields: ['rent1day'] }, reason: 'read raw rental fields' },
+      'output',
+      {
+        rentalPriceClient: {
+          async readRaw(productId, fields) {
+            return { productId, ok: true, status: 'ok', specs: [{ specId: 's1', title: '黑色' }], values: { s1: { rent1day: '22.00' } }, warnings: [], missingFields: [], requestedCount: fields?.length ?? 0, readCount: 1, lines: ['read: ok', '1 specs'] };
+          },
+          async preview() { throw new Error('preview should not run'); },
+          async execute() { throw new Error('execute should not run'); },
+          async copy() { throw new Error('copy should not run'); },
+          async delist() { throw new Error('delist should not run'); },
+          async tenancySet() { throw new Error('tenancySet should not run'); },
+          async specDiscover() { throw new Error('specDiscover should not run'); },
+          async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+        },
+      },
+    );
+
+    expect(response.text).toContain('761');
+    expect(response.text).toContain('rent1day');
+    expect(response.text).toContain('22.00');
+    expect(response.text).toContain('s1 黑色：rent1day=22.00');
     expect(response.card).toBeUndefined();
   });
 
