@@ -21,21 +21,28 @@ describe('agent runtime policy', () => {
     });
   });
 
-  it('requires confirmation for write tools', () => {
-    expect(decideAgentPolicy({ tool: tool({ name: 'publicTraffic.runReport', risk: 'write', requiresConfirmation: true }), input: { sendTo: 'group' } })).toEqual({
-      decision: 'confirmation_required',
-      toolName: 'publicTraffic.runReport',
+  it('allows non-product write tools that do not require confirmation', () => {
+    expect(decideAgentPolicy({ tool: tool({ name: 'publicTraffic.resendLatestReport', risk: 'write', requiresConfirmation: false }), input: { sendTo: 'group' } })).toEqual({
+      decision: 'allow',
+      toolName: 'publicTraffic.resendLatestReport',
       risk: 'write',
-      proposal: { toolName: 'publicTraffic.runReport', input: { sendTo: 'group' }, reason: 'Tool publicTraffic.runReport requires confirmation before execution.' },
     });
   });
 
-  it('requires confirmation for high-risk tools even when metadata is misconfigured', () => {
-    expect(decideAgentPolicy({ tool: tool({ name: 'test.highRiskOperation', risk: 'high', requiresConfirmation: false }), input: { productId: '761' }, reason: 'high risk operation' })).toEqual({
+  it('requires confirmation when tool metadata marks the action as confirmable', () => {
+    expect(decideAgentPolicy({ tool: tool({ name: 'rental.copy', risk: 'high', requiresConfirmation: true }), input: { productId: '761' } })).toEqual({
       decision: 'confirmation_required',
+      toolName: 'rental.copy',
+      risk: 'high',
+      proposal: { toolName: 'rental.copy', input: { productId: '761' }, reason: 'Tool rental.copy requires confirmation before execution.' },
+    });
+  });
+
+  it('allows high-risk tools when metadata explicitly opts out of confirmation', () => {
+    expect(decideAgentPolicy({ tool: tool({ name: 'test.highRiskOperation', risk: 'high', requiresConfirmation: false }), input: { productId: '761' }, reason: 'high risk operation' })).toEqual({
+      decision: 'allow',
       toolName: 'test.highRiskOperation',
       risk: 'high',
-      proposal: { toolName: 'test.highRiskOperation', input: { productId: '761' }, reason: 'high risk operation' },
     });
   });
 });

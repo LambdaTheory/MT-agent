@@ -192,7 +192,9 @@ const HELP_TEXT = `📋 查询与分析
   添加规格 761 128G — 添加规格项
 
 🛡️ 安全规则
-  写操作会先弹确认卡；取消后不会执行
+  涉及商品修改的操作会先弹确认卡；取消后不会执行
+  跑日报、补抓访问页也会先弹确认卡
+  重发日报、推群、关单同步等非商品修改操作会直接执行
   商品ID、数量、规格层级不明确时会先澄清
   Agent学习汇总 — 查看 Agent 澄清与确认学习记录
   帮助 — 显示此帮助信息`;
@@ -234,6 +236,24 @@ function agentToolConfirmResponse(toolName: string, args: Record<string, unknown
     text: `请确认 Agent 操作：${toolName}`,
     card: buildAgentToolConfirmCard(request),
   };
+}
+
+function executeDirectAgentToolResponse(
+  toolName: string,
+  args: Record<string, unknown>,
+  reason: string,
+  outputDir: string,
+  options: HandleBotIntentOptions,
+): Promise<BotResponse> {
+  return executeAgentToolRequest(
+    { toolName, arguments: args, reason },
+    outputDir,
+    {
+      rentalPriceClient: options.rentalPriceClient,
+      closedOrderFetchImpl: options.closedOrderFetchImpl,
+      closedOrderRegistryPaths: options.closedOrderRegistryPaths,
+    },
+  );
 }
 
 async function findReportContextForIntent(outputDir: string, date?: string) {
@@ -538,11 +558,11 @@ export async function handleBotIntent(intent: BotIntent, outputDir = 'output', o
   }
 
   if (intent.type === 'sync_closed_order_feedback') {
-    return agentToolConfirmResponse('closedOrder.syncFeedback', {}, '明确飞书命令需要二次确认后才能同步关单反馈。');
+    return executeDirectAgentToolResponse('closedOrder.syncFeedback', {}, '明确飞书命令要求同步关单反馈；该操作不修改商品。', outputDir, options);
   }
 
   if (intent.type === 'run_closed_order_observation_report') {
-    return agentToolConfirmResponse('closedOrder.runObservationReport', {}, '明确飞书命令需要二次确认后才能生成关单观察报告。');
+    return executeDirectAgentToolResponse('closedOrder.runObservationReport', {}, '明确飞书命令要求生成关单观察报告；该操作不修改商品。', outputDir, options);
   }
 
   if (intent.type === 'latest_summary') {
@@ -668,21 +688,25 @@ export async function handleBotIntent(intent: BotIntent, outputDir = 'output', o
   }
 
   if (intent.type === 'push_latest_report_to_group') {
-    return agentToolConfirmResponse(
+    return executeDirectAgentToolResponse(
       'publicTraffic.pushLatestReportToGroup',
       intent.date ? { date: intent.date } : {},
-      '明确飞书命令需要二次确认后才能把日报推送到群。',
+      '明确飞书命令要求把日报推送到群；该操作不修改商品。',
+      outputDir,
+      options,
     );
   }
 
   if (intent.type === 'resend_latest_report') {
-    return agentToolConfirmResponse(
+    return executeDirectAgentToolResponse(
       'publicTraffic.resendLatestReport',
       {
         ...(intent.sendTo ? { sendTo: intent.sendTo } : {}),
         ...(intent.date ? { date: intent.date } : {}),
       },
-      '明确飞书命令需要二次确认后才能重发公域日报。',
+      '明确飞书命令要求重发公域日报；该操作不修改商品。',
+      outputDir,
+      options,
     );
   }
 

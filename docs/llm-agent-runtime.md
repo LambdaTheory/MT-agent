@@ -2,15 +2,15 @@
 
 This project uses an OpenAI-compatible `/chat/completions` provider for Feishu natural-language agent planning.
 
-The LLM selects registered tools, or composes a multi-step plan from registered tools, and extracts arguments. Local code still performs data lookup, approval card generation, and execution. Write or high-risk operations must pass through a Feishu confirmation card before any side effect.
+The LLM selects registered tools, or composes a multi-step plan from registered tools, and extracts arguments. Local code still performs data lookup, approval card generation, and execution. Product-modifying operations must pass through a Feishu confirmation card before any side effect. Public traffic report generation and dashboard refresh also require confirmation because they trigger heavier crawl/report workflows. Other non-product operational writes such as saved-report resend/push and closed-order sync/report may execute directly.
 
 Composite workflow definitions remain in code only as legacy reference/validation artifacts. Normal Feishu planner requests intentionally expose `workflows: []`, and the Feishu planner path rejects `selectedWorkflow` responses instead of executing them. New behavior must be expressed as one registered tool call or a `steps` plan.
 
-Multi-step plans may pass metadata from earlier steps into later steps with placeholders such as `${rank.bestProductId}`. Planner-visible tool metadata now includes `resultMetadataSchema` for tools that return reusable fields, so the LLM can see that `product.rankBestSameSku` returns `bestProductId`, `rental.copy` returns `newProductId`, and price-change tools return rollback audit handles. When a normal write/high-risk step is reached, the Agent confirmation card stores the remaining plan as a continuation. After the user confirms, the bot executes that one write step and then resumes the remaining steps. If another write/high-risk step appears later, it stops again and asks for a fresh confirmation.
+Multi-step plans may pass metadata from earlier steps into later steps with placeholders such as `${rank.bestProductId}`. Planner-visible tool metadata now includes `resultMetadataSchema` for tools that return reusable fields, so the LLM can see that `product.rankBestSameSku` returns `bestProductId`, `rental.copy` returns `newProductId`, and price-change tools return rollback audit handles. When a product-modifying step is reached, the Agent confirmation card stores the remaining plan as a continuation. After the user confirms, the bot executes that one product-modifying step and then resumes the remaining steps. If another product-modifying step appears later, it stops again and asks for a fresh confirmation.
 
 Plan tools can generate their own dedicated confirmation cards. Dedicated cards for `rental.priceChange`, `rental.newLinkBatchPlan`, `rental.specRemovePlan`, and `operations.refreshActivityPlan` also carry the remaining multi-step continuation. After the dedicated confirmation succeeds, the bot resumes the remaining steps; if the confirmed action fails, the remaining steps stop.
 
-Confirmation continuations preserve the same execution context used by the original planner run, including injected rental clients, closed-order fetch implementations, and link-registry path overrides. This matters for worktrees and tests because a confirmed write can be followed by a registry-backed read such as `product.rankBestSameSku` without falling back to the main workspace defaults.
+Confirmation continuations preserve the same execution context used by the original planner run, including injected rental clients, closed-order fetch implementations, and link-registry path overrides. This matters for worktrees and tests because a confirmed product-modifying action can be followed by a registry-backed read such as `product.rankBestSameSku` without falling back to the main workspace defaults.
 
 Read tools that return an interactive card, such as the product ID lookup card, inventory cards, learning quiz cards, and activity setup cards, pause remaining steps instead of continuing behind the card. This keeps the card result visible and prevents later text replies from covering the interaction. The LLM prompt tells the planner to place interactive card-opening tools last or ask for clarification.
 
@@ -61,7 +61,7 @@ The shared `handleBotIntent()` entry also rejects pre-parsed exact intents when 
 
 Planner validation checks the registered tool schemas recursively, including structured array items and quantity fields for multi-product new-link plans and hidden refresh-activity execution payloads. Malformed LLM output such as `items: ["wide 300"]`, `count: ["5"]`, or fractional hidden execution counts is rejected before any confirmation card or side effect path is reached.
 
-Write or high-risk selections from these old command phrases still stop at confirmation cards. The regression tests cover SDK and HTTP text events for those examples.
+Product-modifying selections from these old command phrases still stop at confirmation cards. Public traffic report generation and dashboard refresh also stop at confirmation cards; saved-report resend/push and closed-order sync/report are allowed to run directly. The regression tests cover SDK and HTTP text events for those examples.
 
 ## Smoke Test
 

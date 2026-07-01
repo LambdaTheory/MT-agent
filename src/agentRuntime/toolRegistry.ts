@@ -619,14 +619,14 @@ const agentTools: AgentToolDefinition[] = [
     name: 'publicTraffic.resendLatestReport',
     description: '重发最新或指定日期的公域流量日报卡片。指定日期时传 date=YYYY-MM-DD；不重新抓取或生成日报，只发送已有日报上下文。',
     risk: 'write',
-    requiresConfirmation: true,
+    requiresConfirmation: false,
     inputSchema: optionalSendToArgumentsSchema,
   },
   {
     name: 'publicTraffic.pushLatestReportToGroup',
     description: '把最新或指定日期的公域流量日报推送到群。指定日期时传 date=YYYY-MM-DD；不重新抓取或生成日报，只发送已有日报上下文。',
     risk: 'write',
-    requiresConfirmation: true,
+    requiresConfirmation: false,
     inputSchema: optionalReportDateArgumentsSchema,
   },
   {
@@ -657,14 +657,14 @@ const agentTools: AgentToolDefinition[] = [
     name: 'closedOrder.syncFeedback',
     description: '同步关单反馈到本地状态',
     risk: 'write',
-    requiresConfirmation: true,
+    requiresConfirmation: false,
     inputSchema: noArgumentsSchema,
   },
   {
     name: 'closedOrder.runObservationReport',
     description: '生成关单观察报告并写入产物',
     risk: 'write',
-    requiresConfirmation: true,
+    requiresConfirmation: false,
     inputSchema: noArgumentsSchema,
   },
   {
@@ -692,8 +692,8 @@ const agentTools: AgentToolDefinition[] = [
   {
     name: 'rental.specDiscover',
     description: '查看租赁商品规格前的确认请求',
-    risk: 'high',
-    requiresConfirmation: true,
+    risk: 'read',
+    requiresConfirmation: false,
     inputSchema: productIdArgumentsSchema,
   },
   {

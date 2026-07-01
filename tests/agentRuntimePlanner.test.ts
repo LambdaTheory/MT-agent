@@ -309,8 +309,8 @@ describe('agent runtime planner proposal validation', () => {
     })).toBe(false);
   });
 
-  it('gates dashboard refresh write proposals behind confirmation and does not execute tools', () => {
-    expect(validateAgentPlannerProposal('{"goal":"补抓访问页数据","selectedTool":"publicTraffic.refreshDashboard","arguments":{},"confidence":0.91,"reason":"用户要求抓取访问页数据","requiresConfirmation":false}')).toEqual({
+  it('requires confirmation for dashboard refresh', () => {
+    expect(validateAgentPlannerProposal('{"goal":"补抓访问页数据","selectedTool":"publicTraffic.refreshDashboard","arguments":{},"confidence":0.91,"reason":"用户要求抓取访问页数据","requiresConfirmation":true}')).toEqual({
       ok: true,
       proposal: {
         goal: '补抓访问页数据',
@@ -318,18 +318,22 @@ describe('agent runtime planner proposal validation', () => {
         arguments: {},
         confidence: 0.91,
         reason: '用户要求抓取访问页数据',
-        requiresConfirmation: false,
+        requiresConfirmation: true,
       },
       policy: {
         decision: 'confirmation_required',
         toolName: 'publicTraffic.refreshDashboard',
         risk: 'write',
-        proposal: { toolName: 'publicTraffic.refreshDashboard', input: {}, reason: '用户要求抓取访问页数据' },
+        proposal: {
+          toolName: 'publicTraffic.refreshDashboard',
+          input: {},
+          reason: '用户要求抓取访问页数据',
+        },
       },
     });
   });
 
-  it('validates multi-step plans and keeps write steps gated by policy', () => {
+  it('validates multi-step plans and allows non-product write steps', () => {
     expect(validateAgentMultiStepPlannerProposal(JSON.stringify({
       goal: '先看日报再推送到群',
       steps: [
@@ -351,12 +355,7 @@ describe('agent runtime planner proposal validation', () => {
       },
       policies: [
         { decision: 'allow', toolName: 'publicTraffic.latestSummary', risk: 'read' },
-        {
-          decision: 'confirmation_required',
-          toolName: 'publicTraffic.pushLatestReportToGroup',
-          risk: 'write',
-          proposal: { toolName: 'publicTraffic.pushLatestReportToGroup', input: {}, reason: '再推送日报到群' },
-        },
+        { decision: 'allow', toolName: 'publicTraffic.pushLatestReportToGroup', risk: 'write' },
       ],
     });
   });

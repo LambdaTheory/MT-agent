@@ -18,7 +18,7 @@ export interface AgentPolicyRequest {
 
 export function decideAgentPolicy(request: AgentPolicyRequest): AgentPolicyDecision {
   const { tool, input } = request;
-  if (tool.risk === 'read' && !tool.requiresConfirmation) {
+  if (!tool.requiresConfirmation) {
     return { decision: 'allow', toolName: tool.name, risk: tool.risk };
   }
 

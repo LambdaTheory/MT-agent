@@ -55,8 +55,11 @@ export async function runClosedOrderFeedbackPreviewCli(
   const outDir = readArg(argv, '--out-dir') ?? 'output/closed-order-feedback';
   const productIdMapPath = readArg(argv, '--product-id-map') ?? 'config/product-id-map.json';
   const productNameMapPath = readArg(argv, '--product-name-map') ?? 'config/product-name-map.json';
+  const goodsSnapshotPath = readArg(argv, '--goods-snapshot') ?? 'output/state/goods-current-snapshot.json';
   const firstSeenPath = readArg(argv, '--first-seen-state') ?? 'output/state/goods-first-seen.json';
   const lifecyclePath = readArg(argv, '--link-lifecycle-state') ?? 'output/state/goods-link-lifecycle.json';
+  const daemonCatalogPath = readArg(argv, '--daemon-catalog') ?? 'output/state/link-registry-daemon-catalog.json';
+  const overridesPath = readArg(argv, '--overrides') ?? 'config/link-registry-overrides.json';
   const ingestStatePath = readArg(argv, '--ingest-state') ?? 'output/state/closed-order-feedback-ingest.json';
   const artifactsDir = readArg(argv, '--artifacts-dir') ?? 'output';
 
@@ -69,8 +72,11 @@ export async function runClosedOrderFeedbackPreviewCli(
     loadClosedOrderRegistryContext({
       productIdMapPath,
       productNameMapPath,
+      goodsSnapshotPath,
       firstSeenPath,
       lifecyclePath,
+      daemonCatalogPath,
+      overridesPath,
       artifactsDir,
     }),
     provider.listRecentFeedback(limit),

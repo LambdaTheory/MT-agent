@@ -45,7 +45,7 @@ function crawlResult(goodsExportPath: string): PublicTrafficSourcesCrawlResult {
 }
 
 describe('public traffic crawl runtime tool', () => {
-  it('registers the scraping boundary as a confirmed write tool', () => {
+  it('registers the scraping boundary as a direct non-product write tool', () => {
     expect(listAgentTools().map((tool) => tool.name)).not.toContain('publicTraffic.crawlSources');
     expect(findAgentTool('publicTraffic.crawlSources')).toBeUndefined();
 
@@ -53,7 +53,7 @@ describe('public traffic crawl runtime tool', () => {
     expect(tool).toMatchObject({
       name: 'publicTraffic.crawlSources',
       risk: 'write',
-      requiresConfirmation: true,
+      requiresConfirmation: false,
       inputSchema: { type: 'object', properties: { goodsExportPath: { type: 'string' } }, required: ['goodsExportPath'], additionalProperties: false },
     });
   });

@@ -56,7 +56,8 @@ describe('public traffic CLI wiring', () => {
     expect(text).not.toContain('const hasReliableExposureHistory = previousProducts.length > 0;');
     expect(text).not.toContain("'7d': hasReliableExposureHistory ? sevenDaySummary : []");
     expect(text).not.toContain("'30d': hasReliableExposureHistory ? thirtyDaySummary : []");
-    expect(text).toContain('overview: crawlResult.overview');
+    expect(text).toContain('const exposureOverview = normalizeExposureOverview(crawlResult.overview)');
+    expect(text).toContain('overview: exposureOverview');
   });
 
   it('bases exposure new_product flags on goods table first-seen state', async () => {

@@ -148,7 +148,7 @@ function newLinkPlan(): NewLinkBatchPlan {
 
 function query565Continuation(currentStepId: string, currentStepIndex: number): AgentToolConfirmContinuation {
   return {
-    goal: 'continue after confirmed write',
+    goal: 'continue after confirmed product action',
     reason: 'continue with product query after confirmation',
     steps: [{ toolName: 'product.query', arguments: { keyword: '565' }, reason: 'query product 565' }],
     nextIndex: 1,
@@ -700,7 +700,7 @@ describe('createFeishuSdkBot card.action.trigger', () => {
     expect(JSON.stringify(duplicateCard)).toContain('已经执行失败');
   });
 
-  it('passes registry paths into SDK Agent continuation steps after a confirmed write', async () => {
+  it('passes registry paths into SDK Agent continuation steps after a confirmed product action', async () => {
     const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
     const sent: unknown[] = [];
     const fixtures = await writeRankingContinuationContext();

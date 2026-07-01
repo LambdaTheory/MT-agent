@@ -440,7 +440,7 @@ describe('startFeishuBotServer', () => {
     }
   });
 
-  it('keeps risky exact HTTP text commands planner-first but opens operations learning locally', async () => {
+  it('keeps product-modifying exact HTTP text commands planner-first but opens operations learning locally', async () => {
     const outputDir = await writeLearningContext();
     const cards: Array<{ messageId: string; card: Record<string, unknown> }> = [];
     const texts: Array<{ messageId: string; text: string }> = [];
@@ -456,15 +456,6 @@ describe('startFeishuBotServer', () => {
       async proposePlan(request) {
         plannerMessages.push(request.message);
         expect(request.workflows).toEqual([]);
-        if (request.message === '跑日报') {
-          return JSON.stringify({
-            goal: '生成公域日报',
-            selectedTool: 'publicTraffic.runReport',
-            arguments: {},
-            confidence: 0.95,
-            reason: '用户要求跑日报，写操作必须确认',
-          });
-        }
         if (request.message === '复制商品 761') {
           return JSON.stringify({
             goal: '复制商品 761',
@@ -485,7 +476,7 @@ describe('startFeishuBotServer', () => {
       agentPlannerProvider: planner,
       replyCard: async ({ messageId }, card) => {
         cards.push({ messageId, card });
-        if (cards.length === 3) resolveCardsSent();
+        if (cards.length === 2) resolveCardsSent();
         return { sent: true, channel: 'app' };
       },
       replyText: async ({ messageId }, text) => {
@@ -498,7 +489,7 @@ describe('startFeishuBotServer', () => {
       const address = server.address();
       if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
 
-      for (const [index, text] of ['跑日报', '运营学习', '复制商品 761'].entries()) {
+      for (const [index, text] of ['运营学习', '复制商品 761'].entries()) {
         const response = await fetch(`http://127.0.0.1:${address.port}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -508,15 +499,11 @@ describe('startFeishuBotServer', () => {
       }
 
       await cardsSent;
-      expect(plannerMessages).toEqual(['跑日报', '复制商品 761']);
+      expect(plannerMessages).toEqual(['复制商品 761']);
       expect(texts).toEqual([]);
       const cardByMessageId = new Map(cards.map((item) => [item.messageId, item.card]));
-      const runReportCard = JSON.stringify(cardByMessageId.get('mid-http-planner-first-0'));
-      const learningCard = JSON.stringify(cardByMessageId.get('mid-http-planner-first-1'));
-      const copyCard = JSON.stringify(cardByMessageId.get('mid-http-planner-first-2'));
-      expect(runReportCard).toContain('publicTraffic.runReport');
-      expect(runReportCard).toContain('agent_tool_confirm');
-      expect(runReportCard).not.toContain('公域日报已生成');
+      const learningCard = JSON.stringify(cardByMessageId.get('mid-http-planner-first-0'));
+      const copyCard = JSON.stringify(cardByMessageId.get('mid-http-planner-first-1'));
       expect(learningCard).toContain('运营学习 loop 测验');
       expect(copyCard).toContain('rental.copy');
       expect(copyCard).toContain('agent_tool_confirm');
@@ -1241,7 +1228,7 @@ describe('startFeishuBotServer', () => {
     }
   });
 
-  it('passes registry paths into HTTP Agent continuation steps after a confirmed write', async () => {
+  it('passes registry paths into HTTP Agent continuation steps after a confirmed product action', async () => {
     const replies: Array<{ messageId: string; text: string }> = [];
     const fixtures = await writeRankingContinuationContext();
     const rentalPriceClient = fakeRentalPriceClient();

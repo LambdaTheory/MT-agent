@@ -84,20 +84,18 @@ describe('push latest report to group', () => {
     mocks.sendFeishuCard.mockResolvedValue({ sent: true, channel: 'app' });
   });
 
-  it('returns a confirmation card before pushing the latest saved public traffic report to group', async () => {
+  it('pushes the latest saved public traffic report to group without a confirmation card', async () => {
     const outputDir = await writeContext();
 
     const response = await handleBotIntent({ type: 'push_latest_report_to_group' }, outputDir);
 
-    expect(response.text).toBe('请确认 Agent 操作：publicTraffic.pushLatestReportToGroup');
-    expect(response.card).toBeDefined();
-    expect(JSON.stringify(response.card)).toContain('agent_tool_confirm');
-    expect(JSON.stringify(response.card)).toContain('publicTraffic.pushLatestReportToGroup');
+    expect(response.text).toBe('最新公域日报已推送到群。');
+    expect(response.card).toBeUndefined();
     expect(mocks.runPublicTrafficReportCli).not.toHaveBeenCalled();
-    expect(mocks.sendFeishuCard).not.toHaveBeenCalled();
+    expect(mocks.sendFeishuCard).toHaveBeenCalledOnce();
   });
 
-  it('pushes the latest saved public traffic report to group only after confirmation', async () => {
+  it('pushes the latest saved public traffic report to group through the executor', async () => {
     const outputDir = await writeContext();
 
     const response = await executeAgentToolRequest({
@@ -112,7 +110,7 @@ describe('push latest report to group', () => {
     expect(mocks.sendFeishuCard.mock.calls[0][0]).toEqual(expect.objectContaining({ FEISHU_SEND_TO: 'group' }));
   });
 
-  it('pushes the requested dated public traffic report to group after confirmation', async () => {
+  it('pushes the requested dated public traffic report to group through the executor', async () => {
     const outputDir = await writeContext();
 
     const response = await executeAgentToolRequest({
@@ -130,7 +128,7 @@ describe('push latest report to group', () => {
     expect(mocks.sendFeishuCard.mock.calls[0][2]).not.toContain('2026-06-11');
   });
 
-  it('resends the requested dated public traffic report after confirmation', async () => {
+  it('resends the requested dated public traffic report through the executor', async () => {
     const outputDir = await writeContext();
 
     const response = await executeAgentToolRequest({

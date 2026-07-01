@@ -10,6 +10,9 @@ describe('closed order feedback preview CLI', () => {
     const dir = await mkdtemp(join(tmpdir(), 'mt-agent-closed-order-'));
     const productIdMapPath = join(dir, 'product-id-map.json');
     const productNameMapPath = join(dir, 'product-name-map.json');
+    const goodsSnapshotPath = join(dir, 'missing-goods-snapshot.json');
+    const daemonCatalogPath = join(dir, 'missing-daemon-catalog.json');
+    const overridesPath = join(dir, 'missing-link-registry-overrides.json');
     const artifactsDir = join(dir, 'output');
     const artifactDateDir = join(artifactsDir, '2026-06-21');
     const artifactPaths = buildPublicTrafficPaths(artifactsDir, '2026-06-21');
@@ -56,8 +59,11 @@ describe('closed order feedback preview CLI', () => {
       '--ingest-state', join(dir, 'state', 'closed-order-feedback-ingest.json'),
       '--product-id-map', productIdMapPath,
       '--product-name-map', productNameMapPath,
+      '--goods-snapshot', goodsSnapshotPath,
       '--first-seen-state', join(dir, 'missing-first-seen.json'),
       '--link-lifecycle-state', join(dir, 'missing-lifecycle.json'),
+      '--daemon-catalog', daemonCatalogPath,
+      '--overrides', overridesPath,
     ], env, fetchImpl);
 
     const json = JSON.parse(await readFile(join(dir, 'closed-order-feedback-2026-06-22.json'), 'utf8')) as {

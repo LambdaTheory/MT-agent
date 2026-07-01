@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseAgentToolConfirmRequest } from '../src/agentRuntime/approvalCard.js';
 import type { AgentPlannerProvider } from '../src/agentRuntime/planner.js';
 import type { LlmIntentProposalProvider } from '../src/feishuBot/llmIntentProposal.js';
@@ -12,6 +12,61 @@ import { executeAgentToolRequestWithContinuation } from '../src/feishuBot/agentT
 import { executeAgentToolRequest } from '../src/feishuBot/agentToolExecutor.js';
 import { loadAgentToolConfirmRequestFromValue } from '../src/feishuBot/agentToolConfirmStore.js';
 import { handleBotIntent } from '../src/feishuBot/tools.js';
+
+const mocks = vi.hoisted(() => ({
+  runPublicTrafficReportCli: vi.fn(),
+  sendFeishuCard: vi.fn(),
+  loadEnv: vi.fn(),
+  loadConfig: vi.fn(),
+  runDashboardRefresh: vi.fn(),
+}));
+
+vi.mock('../src/cli/publicTrafficReport.js', () => ({
+  runPublicTrafficReportCli: mocks.runPublicTrafficReportCli,
+}));
+
+vi.mock('../src/notify/feishu.js', () => ({
+  sendFeishuCard: mocks.sendFeishuCard,
+}));
+
+vi.mock('../src/config/loadEnv.js', () => ({
+  loadEnv: mocks.loadEnv,
+}));
+
+vi.mock('../src/config/loadConfig.js', () => ({
+  loadConfig: mocks.loadConfig,
+}));
+
+vi.mock('../src/publicTraffic/dashboardRefresh.js', () => ({
+  runDashboardRefresh: mocks.runDashboardRefresh,
+}));
+
+beforeEach(() => {
+  mocks.runPublicTrafficReportCli.mockReset();
+  mocks.runPublicTrafficReportCli.mockResolvedValue({
+    logPath: 'output/test-report.log',
+    dashboardCrawlSummary: '访问页抓取情况：测试通过',
+  });
+  mocks.sendFeishuCard.mockReset();
+  mocks.sendFeishuCard.mockResolvedValue({ sent: true, channel: 'app' });
+  mocks.loadEnv.mockReset();
+  mocks.loadEnv.mockResolvedValue(undefined);
+  mocks.loadConfig.mockReset();
+  mocks.loadConfig.mockResolvedValue({
+    targetUrl: 'https://example.test/dashboard',
+    periods: ['1d', '7d', '30d'],
+    preferredPageSize: 100,
+    outputDir: 'output',
+    browserProfileDir: 'profile',
+  });
+  mocks.runDashboardRefresh.mockReset();
+  mocks.runDashboardRefresh.mockResolvedValue({
+    decision: 'refreshed',
+    message: '已补抓访问页数据',
+    refreshQualityText: '访问页已抓取',
+    firstQualityText: '首版可用',
+  });
+});
 
 const summary = {
   exposure: 1000,
@@ -962,7 +1017,8 @@ describe('handleBotIntent', () => {
     expect(response.text).toContain('733 的所有日报数据');
     expect(response.text).toContain('各问题池分别多少条');
     expect(response.text).toContain('关单率 / 客单价');
-    expect(response.text).toContain('写操作会先弹确认卡');
+    expect(response.text).toContain('涉及商品修改的操作会先弹确认卡');
+    expect(response.text).toContain('非商品修改操作会直接执行');
   });
 
   it('returns the product ID lookup input card', async () => {
@@ -1673,7 +1729,7 @@ describe('handleBotIntent', () => {
     expect(response.card).toBeUndefined();
   });
 
-  it('keeps pre-parsed exact intents on deterministic confirmations when a planner is configured', async () => {
+  it('keeps pre-parsed exact intents local when a planner is configured', async () => {
     let plannerCalled = false;
     const planner: AgentPlannerProvider = {
       async proposePlan() {
@@ -1692,8 +1748,9 @@ describe('handleBotIntent', () => {
     const copyResponse = await handleBotIntent({ type: 'rental_copy', productId: '761' }, 'output', { agentPlannerProvider: planner });
 
     expect(plannerCalled).toBe(false);
-    expect(reportResponse.text).toContain('请确认');
-    expect(JSON.stringify(reportResponse.card)).toContain('publicTraffic.runReport');
+    expect(reportResponse.text).toContain('publicTraffic.runReport');
+    expect(JSON.stringify(reportResponse.card)).toContain('agent_tool_confirm');
+    expect(mocks.runPublicTrafficReportCli).not.toHaveBeenCalled();
     expect(copyResponse.text).toContain('请确认租赁商品操作：761');
     expect(JSON.stringify(copyResponse.card)).toContain('copy');
   });
@@ -1733,7 +1790,8 @@ describe('handleBotIntent', () => {
     const response = await handleBotIntent({ type: 'unknown', text: '帮助' }, 'output', { agentPlannerProvider: planner });
 
     expect(response.text).toContain('可用能力概览');
-    expect(response.text).toContain('写操作和高风险动作会先弹确认卡');
+    expect(response.text).toContain('涉及商品修改的动作会先弹确认卡');
+    expect(response.text).toContain('非商品修改动作会直接执行');
   });
 
   it('executes safe multi-step planner plans in sequence', async () => {
@@ -1790,7 +1848,7 @@ describe('handleBotIntent', () => {
     expect(JSON.stringify(response.card)).toContain('id_lookup_form');
   });
 
-  it('stops multi-step planner plans at the first write confirmation', async () => {
+  it('continues multi-step planner plans through non-product write steps', async () => {
     const outputDir = await writeContext();
     const planner: AgentPlannerProvider = {
       async proposePlan() {
@@ -1801,7 +1859,7 @@ describe('handleBotIntent', () => {
             { toolName: 'publicTraffic.pushLatestReportToGroup', arguments: {}, reason: '再把最新日报推送到群' },
           ],
           confidence: 0.9,
-          reason: '用户要求先读后写，写操作必须确认',
+          reason: '用户要求先读日报再推群，推群不修改商品',
         });
       },
     };
@@ -1809,11 +1867,13 @@ describe('handleBotIntent', () => {
     const response = await handleBotIntent({ type: 'unknown', text: '先看今天概况，再推送日报到群' }, outputDir, { agentPlannerProvider: planner });
 
     expect(response.text).toContain('步骤 1/2：publicTraffic.latestSummary');
-    expect(response.text).toContain('步骤 2/2 需要确认：publicTraffic.pushLatestReportToGroup');
-    expect(JSON.stringify(response.card)).toContain('agent_tool_confirm');
+    expect(response.text).toContain('步骤 2/2：publicTraffic.pushLatestReportToGroup');
+    expect(response.text).toContain('最新公域日报已推送到群');
+    expect(response.card).toBeUndefined();
+    expect(mocks.sendFeishuCard).toHaveBeenCalledOnce();
   });
 
-  it('continues a multi-step planner plan after a confirmed write step', async () => {
+  it('continues a multi-step planner plan after a confirmed product step', async () => {
     const outputDir = await writeContext();
     const planner: AgentPlannerProvider = {
       async proposePlan() {
@@ -1825,7 +1885,7 @@ describe('handleBotIntent', () => {
             { toolName: 'product.query', arguments: { keyword: '565' }, reason: '复制后查询 565 的表现' },
           ],
           confidence: 0.91,
-          reason: '用户要求先读后写再查，写操作必须确认后才能继续',
+          reason: '用户要求先读再复制商品后查询，商品修改必须确认后才能继续',
         });
       },
     };
@@ -1864,7 +1924,7 @@ describe('handleBotIntent', () => {
     expect(executed.card).toBeUndefined();
   });
 
-  it('asks for a second confirmation when a confirmed write is followed by another write step', async () => {
+  it('asks for a second confirmation when a confirmed product step is followed by another product step', async () => {
     const outputDir = await writeContext();
     const planner: AgentPlannerProvider = {
       async proposePlan() {
@@ -2649,27 +2709,31 @@ describe('handleBotIntent', () => {
     expect(JSON.stringify(response.card)).not.toContain('agent_tool_confirm');
   });
 
-  it('returns confirmation cards for exact report write operations', async () => {
-    const runReport = await handleBotIntent({ type: 'run_public_traffic_report' }, 'output');
-    expect(runReport.text).toContain('请确认 Agent 操作：publicTraffic.runReport');
+  it('keeps exact report generation and dashboard refresh behind confirmation cards', async () => {
+    const outputDir = await writeContext();
+
+    const runReport = await handleBotIntent({ type: 'run_public_traffic_report' }, outputDir);
+    expect(runReport.text).toContain('publicTraffic.runReport');
     expect(JSON.stringify(runReport.card)).toContain('agent_tool_confirm');
+    expect(mocks.runPublicTrafficReportCli).not.toHaveBeenCalled();
 
-    const refreshDashboard = await handleBotIntent({ type: 'refresh_public_traffic_dashboard', sendTo: 'group' }, 'output');
-    expect(refreshDashboard.text).toContain('请确认 Agent 操作：publicTraffic.refreshDashboard');
+    const refreshDashboard = await handleBotIntent({ type: 'refresh_public_traffic_dashboard', sendTo: 'group' }, outputDir);
+    expect(refreshDashboard.text).toContain('publicTraffic.refreshDashboard');
     expect(JSON.stringify(refreshDashboard.card)).toContain('agent_tool_confirm');
-    expect(JSON.stringify(refreshDashboard.card)).toContain('"sendTo":"group"');
+    expect(mocks.runDashboardRefresh).not.toHaveBeenCalled();
 
-    const resend = await handleBotIntent({ type: 'resend_latest_report', sendTo: 'both' }, 'output');
-    expect(resend.text).toContain('请确认 Agent 操作：publicTraffic.resendLatestReport');
-    expect(JSON.stringify(resend.card)).toContain('"sendTo":"both"');
+    const resend = await handleBotIntent({ type: 'resend_latest_report', sendTo: 'both' }, outputDir);
+    expect(resend.text).toContain('公域日报已重发');
+    expect(resend.card).toBeUndefined();
 
-    const datedResend = await handleBotIntent({ type: 'resend_latest_report', sendTo: 'group', date: '2026-06-10' }, 'output');
-    expect(JSON.stringify(datedResend.card)).toContain('"sendTo":"group"');
-    expect(JSON.stringify(datedResend.card)).toContain('"date":"2026-06-10"');
+    const datedResend = await handleBotIntent({ type: 'resend_latest_report', sendTo: 'group', date: '2026-06-11' }, outputDir);
+    expect(datedResend.text).toContain('2026-06-11 公域日报已重发');
+    expect(datedResend.card).toBeUndefined();
 
-    const datedPush = await handleBotIntent({ type: 'push_latest_report_to_group', date: '2026-06-10' }, 'output');
-    expect(datedPush.text).toContain('请确认 Agent 操作：publicTraffic.pushLatestReportToGroup');
-    expect(JSON.stringify(datedPush.card)).toContain('"date":"2026-06-10"');
+    const datedPush = await handleBotIntent({ type: 'push_latest_report_to_group', date: '2026-06-11' }, outputDir);
+    expect(datedPush.text).toContain('2026-06-11 公域日报已推送到群');
+    expect(datedPush.card).toBeUndefined();
+    expect(mocks.sendFeishuCard).toHaveBeenCalledTimes(3);
   });
 
   it('plans new-link batch tool calls through LLM without copying before confirmation', async () => {
@@ -3375,32 +3439,13 @@ describe('handleBotIntent', () => {
     process.env.CLOSED_ORDER_REMARKS_SOURCE_APP_CODE = 'order_dispatch';
 
     const response = await handleBotIntent({ type: 'sync_closed_order_feedback' }, outputDir, { closedOrderFetchImpl: fetchImpl as typeof fetch });
-    expect(response.text).toContain('请确认 Agent 操作：closedOrder.syncFeedback');
-    expect(response.card).toBeDefined();
-    expect(JSON.stringify(response.card)).toContain('agent_tool_confirm');
-    expect(JSON.stringify(response.card)).toContain('closedOrder.syncFeedback');
-
-    const executed = await executeAgentToolRequest(
-      { toolName: 'closedOrder.syncFeedback', arguments: {}, reason: '测试确认同步关单' },
-      outputDir,
-      { closedOrderFetchImpl: fetchImpl as typeof fetch },
-    );
-    expect(executed.text).toContain('关单同步完成');
-    expect(executed.text).toContain('新增 1 条');
+    expect(response.text).toContain('关单同步完成');
+    expect(response.text).toContain('新增 1 条');
+    expect(response.card).toBeUndefined();
     await expect(readFile(join(outputDir, 'state', 'closed-order-feedback-ingest.json'), 'utf8')).resolves.toContain('close:close-1');
   });
 
-  it('returns a confirmation card before running the closed-order observation report', async () => {
-    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-closed-order-bot-report-confirm-'));
-
-    const response = await handleBotIntent({ type: 'run_closed_order_observation_report' }, outputDir);
-    expect(response.text).toContain('请确认 Agent 操作：closedOrder.runObservationReport');
-    expect(response.card).toBeDefined();
-    expect(JSON.stringify(response.card)).toContain('agent_tool_confirm');
-    expect(JSON.stringify(response.card)).toContain('closedOrder.runObservationReport');
-  });
-
-  it('runs a closed-order observation report after Agent confirmation', async () => {
+  it('runs a closed-order observation report directly from exact intent', async () => {
     const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-closed-order-bot-report-'));
     const registryRoot = await mkdtemp(join(tmpdir(), 'mt-agent-closed-order-registry-'));
     const registryPaths = await writeClosedOrderRegistryFixtures(registryRoot);
@@ -3413,9 +3458,9 @@ describe('handleBotIntent', () => {
           closeId: 'close-1',
           internalProductId: '560',
           rawRemark: '价格太低，不接单',
-          closedAt: '2026-06-22T01:00:00.000Z',
-          firstIngestedAt: '2026-06-22T01:05:00.000Z',
-          lastIngestedAt: '2026-06-22T01:05:00.000Z',
+          closedAt: '2026-06-30T01:00:00.000Z',
+          firstIngestedAt: '2026-06-30T01:05:00.000Z',
+          lastIngestedAt: '2026-06-30T01:05:00.000Z',
           seenCount: 1,
         },
         {
@@ -3423,19 +3468,15 @@ describe('handleBotIntent', () => {
           closeId: 'close-2',
           internalProductId: '561',
           rawRemark: '库存不足',
-          closedAt: '2026-06-21T08:00:00.000Z',
-          firstIngestedAt: '2026-06-21T08:05:00.000Z',
-          lastIngestedAt: '2026-06-21T08:05:00.000Z',
+          closedAt: '2026-06-29T08:00:00.000Z',
+          firstIngestedAt: '2026-06-29T08:05:00.000Z',
+          lastIngestedAt: '2026-06-29T08:05:00.000Z',
           seenCount: 1,
         },
       ],
     }), 'utf8');
 
-    const response = await executeAgentToolRequest(
-      { toolName: 'closedOrder.runObservationReport', arguments: {}, reason: '测试确认生成关单观察' },
-      outputDir,
-      { closedOrderRegistryPaths: registryPaths },
-    );
+    const response = await handleBotIntent({ type: 'run_closed_order_observation_report' }, outputDir, { closedOrderRegistryPaths: registryPaths });
     expect(response.text).toContain('关单观察');
     expect(response.text).toContain('报告已写入');
     expect(response.card).toBeDefined();

@@ -310,7 +310,7 @@ describe('createFeishuSdkBot', () => {
     expect(JSON.stringify(sent)).toContain('端内ID 565 iPhone 15');
   });
 
-  it('keeps risky exact SDK text commands planner-first but opens operations learning locally', async () => {
+  it('keeps product-modifying exact SDK text commands planner-first but opens operations learning locally', async () => {
     const outputDir = await writeContext();
     const registered: Record<string, (data: unknown) => Promise<void>> = {};
     const sent: unknown[] = [];
@@ -319,15 +319,6 @@ describe('createFeishuSdkBot', () => {
       async proposePlan(request) {
         plannerMessages.push(request.message);
         expect(request.workflows).toEqual([]);
-        if (request.message === '跑日报') {
-          return JSON.stringify({
-            goal: '生成公域日报',
-            selectedTool: 'publicTraffic.runReport',
-            arguments: {},
-            confidence: 0.95,
-            reason: '用户要求跑日报，写操作必须确认',
-          });
-        }
         if (request.message === '复制商品 761') {
           return JSON.stringify({
             goal: '复制商品 761',
@@ -367,20 +358,17 @@ describe('createFeishuSdkBot', () => {
     });
 
     bot.start();
-    for (const [index, text] of ['跑日报', '运营学习', '复制商品 761'].entries()) {
+    for (const [index, text] of ['运营学习', '复制商品 761'].entries()) {
       await registered['im.message.receive_v1']({
         message: { message_id: `mid-sdk-planner-first-${index}`, message_type: 'text', content: JSON.stringify({ text }) },
       });
     }
 
     const contents = sent.map((item) => JSON.parse((item as { data: { content: string } }).data.content));
-    expect(plannerMessages).toEqual(['跑日报', '复制商品 761']);
-    expect(sent.map((item) => (item as { data: { msg_type: string } }).data.msg_type)).toEqual(['interactive', 'interactive', 'interactive']);
-    expect(JSON.stringify(contents[0])).toContain('publicTraffic.runReport');
-    expect(JSON.stringify(contents[0])).toContain('agent_tool_confirm');
-    expect(JSON.stringify(contents[0])).not.toContain('公域日报已生成');
-    expect(JSON.stringify(contents[1])).toContain('运营学习 loop 测验');
-    expect(JSON.stringify(contents[2])).toContain('rental.copy');
-    expect(JSON.stringify(contents[2])).toContain('agent_tool_confirm');
+    expect(plannerMessages).toEqual(['复制商品 761']);
+    expect(sent.map((item) => (item as { data: { msg_type: string } }).data.msg_type)).toEqual(['interactive', 'interactive']);
+    expect(JSON.stringify(contents[0])).toContain('运营学习 loop 测验');
+    expect(JSON.stringify(contents[1])).toContain('rental.copy');
+    expect(JSON.stringify(contents[1])).toContain('agent_tool_confirm');
   });
 });

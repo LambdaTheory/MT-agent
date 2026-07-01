@@ -39,7 +39,7 @@ export function createPublicTrafficSourcesCrawlTool(dependencies: PublicTrafficS
     name: 'publicTraffic.crawlSources',
     description: '抓取公域日报所需的商品总表、曝光、后链路与订单分析原始数据',
     risk: 'write',
-    requiresConfirmation: true,
+    requiresConfirmation: false,
     inputSchema,
     async execute(input, context) {
       const parsedInput = readInput(input);
