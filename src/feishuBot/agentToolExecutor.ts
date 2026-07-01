@@ -61,9 +61,7 @@ import {
   buildRentalPricePreviewCard,
   compactAuditReference,
   createRentalPriceSkillClient,
-  executeRentalOperationConfirmRequest,
   parseRentPriceFieldsFromText,
-  rentalOperationConfirmRequestFromToolArguments,
   rentalPriceChangeRequestFromToolArguments,
   rentalPriceRollbackRequestFromToolArguments,
   type RentalPriceAuditReference,
@@ -75,6 +73,7 @@ import {
   type RentalPriceSkillClient,
 } from './rentalPrice.js';
 import { executeRentalReadOnlyOperationHandler } from './rentalReadOnlyOperationHandlers.js';
+import { executeRentalWriteOperationHandler } from './rentalWriteOperationHandlers.js';
 import { findReadOnlyTool } from './readOnlyToolRegistry.js';
 import { inferPriceAdjustmentAmountFromText, readPriceAdjustmentAmountArgument } from './priceAdjustment.js';
 import {
@@ -1328,39 +1327,6 @@ async function runReadOnlyAgentIntent(
   return tool.run(latest.context, intent, { linkRegistryStore: createLinkRegistry(registryContext.registry) });
 }
 
-function requireTenancyDays(value: unknown, fieldName: string): string {
-  const parsed = requireString(value, fieldName);
-  if (!/^\d+(?:,\d+)*$/.test(parsed)) throw new Error(`${fieldName} must be comma-separated day numbers`);
-  return parsed;
-}
-
-function rentalAgentToolRequest(toolName: string, args: Record<string, unknown>): RentalOperationConfirmRequest | null {
-  switch (toolName) {
-    case 'rental.copy':
-      return { action: 'copy', productId: requireProductId(args.productId, 'productId') };
-    case 'rental.delist':
-      return { action: 'delist', productId: requireProductId(args.productId, 'productId') };
-    case 'rental.tenancySet':
-      return {
-        action: 'tenancy-set',
-        productId: requireProductId(args.productId, 'productId'),
-        days: requireTenancyDays(args.days, 'days'),
-      };
-    case 'rental.specDiscover':
-      return { action: 'spec-discover', productId: requireProductId(args.productId, 'productId') };
-    case 'rental.specAddAndRefresh':
-      return {
-        action: 'spec-add-and-refresh',
-        productId: requireProductId(args.productId, 'productId'),
-        itemTitle: requireString(args.itemTitle, 'itemTitle'),
-      };
-    case 'rental.specRemovePlan':
-      return null;
-    default:
-      return null;
-  }
-}
-
 function closedOrderIngestStatePath(outputDir: string): string {
   return join(outputDir, 'state', 'closed-order-feedback-ingest.json');
 }
@@ -1694,31 +1660,15 @@ export async function executeAgentToolRequest(
     case 'rental.delist':
     case 'rental.tenancySet':
     case 'rental.specDiscover':
-    case 'rental.specAddAndRefresh': {
-      const rentalRequest = rentalAgentToolRequest(request.toolName, request.arguments);
-      if (!rentalRequest) throw new Error('租赁商品操作参数无效，请重新发起。');
-      const result = await executeRentalOperationConfirmRequest(options.rentalPriceClient ?? createRentalPriceSkillClient(), rentalRequest);
-      return {
-        text: result.text,
-        metadata: {
-          ...(result.metadata ?? {}),
-          toolName: request.toolName,
-          ok: result.ok,
-          productId: rentalRequest.productId,
-        },
-      };
-    }
+    case 'rental.specAddAndRefresh':
+      return executeRentalWriteOperationHandler(request, options.rentalPriceClient ?? createRentalPriceSkillClient());
     case 'rental.specRemovePlan': {
       const query = requireString(request.arguments.query, 'query');
       const keyword = requireString(request.arguments.keyword, 'keyword');
       return rentalSpecRemovePlanResponse(query, keyword, request.reason, options.rentalPriceClient ?? createRentalPriceSkillClient(), options, request.continuation);
     }
-    case 'rental.operationConfirmRequest': {
-      const rentalRequest = rentalOperationConfirmRequestFromToolArguments(request.arguments);
-      if (!rentalRequest) throw new Error('租赁商品操作参数无效，请重新发起。');
-      const result = await executeRentalOperationConfirmRequest(options.rentalPriceClient ?? createRentalPriceSkillClient(), rentalRequest);
-      return { text: result.text };
-    }
+    case 'rental.operationConfirmRequest':
+      return executeRentalWriteOperationHandler(request, options.rentalPriceClient ?? createRentalPriceSkillClient());
     case 'rental.priceChange': {
       const inferredFields = isRecord(request.arguments.fields) ? undefined : parseRentPriceFieldsFromText(request.reason);
       const rawFields = isRecord(request.arguments.fields)
