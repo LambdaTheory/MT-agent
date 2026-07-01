@@ -10,6 +10,11 @@ import { rememberStepMetadata, resolvePlannerArguments } from '../agentRuntime/s
 import { findAgentTool } from '../agentRuntime/toolRegistry.js';
 import { executeAgentToolRequest, type AgentToolExecutionOptions } from './agentToolExecutor.js';
 import { inferPriceAdjustmentAmountFromText, readPriceAdjustmentAmountArgument } from './priceAdjustment.js';
+import {
+  hasPriceAdjustmentConflict,
+  INVALID_DISCOUNT_ARGUMENT_MESSAGE,
+  PRICE_ADJUSTMENT_CONFLICT_MESSAGE,
+} from './priceChangeContract.js';
 import { inferPriceMultiplierFromText, readPriceMultiplierArgument } from './priceMultiplier.js';
 import { parseRentPriceFieldsFromText } from './rentalPrice.js';
 import type { BotResponse } from './types.js';
@@ -326,6 +331,23 @@ function buildGenericArgumentClarification(input: {
   };
 }
 
+function pricePreviewContractViolation(toolName: string, args: Record<string, unknown>): BotResponse | null {
+  if (toolName !== 'rental.pricePreview') return null;
+  if (hasPriceAdjustmentConflict(args)) {
+    return {
+      text: PRICE_ADJUSTMENT_CONFLICT_MESSAGE,
+      metadata: { toolName, ok: false },
+    };
+  }
+  if (args.fields === undefined && args.discount !== undefined && readPriceMultiplierArgument(args.discount) === null) {
+    return {
+      text: INVALID_DISCOUNT_ARGUMENT_MESSAGE,
+      metadata: { toolName, ok: false },
+    };
+  }
+  return null;
+}
+
 export function reviewAgentToolArguments(input: {
   toolName: string;
   args: Record<string, unknown>;
@@ -334,6 +356,9 @@ export function reviewAgentToolArguments(input: {
   sourceText: string;
   reason: string;
 }): { ok: true; args: Record<string, unknown> } | { ok: false; response: BotResponse } {
+  const contractViolation = pricePreviewContractViolation(input.toolName, input.args);
+  if (contractViolation) return { ok: false, response: contractViolation };
+
   const semanticClarification = pricePreviewSemanticClarification(
     input.toolName,
     input.args,

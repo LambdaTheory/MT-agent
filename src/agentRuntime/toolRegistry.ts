@@ -314,7 +314,7 @@ const rentalPriceChangeArgumentsSchema = {
   properties: {
     productId: { type: 'string' },
     fields: { type: 'object' },
-    discount: { type: 'number' },
+    discount: { type: 'number', description: 'Explicit multiplier only. Use 0.8 for 8-fold, 1.8 for 180%; never use bare fold numbers such as 8.' },
     adjustmentAmount: { type: ['number', 'string'], description: 'Absolute amount to add to every rental price field. Use negative values such as -1 to subtract 1 yuan.' },
     scope: { type: 'string', enum: ['rent_fields', 'all_price_fields'], description: '兼容旧参数；倍数/折扣类改价会被强制限制为 rent_fields。非租金字段必须用 fields 精准点名。' },
   },
@@ -326,7 +326,7 @@ const rentalPricePreviewArgumentsSchema = {
   properties: {
     productIds: { type: 'array', minItems: 1, maxItems: 24, items: { type: 'string' } },
     fields: { type: 'object' },
-    discount: { type: ['number', 'string'] },
+    discount: { type: ['number', 'string'], description: 'Explicit multiplier only. Use 0.8 for 8-fold, 1.8 for 180%; never use bare fold numbers such as 8.' },
     adjustmentAmount: { type: ['number', 'string'], description: 'Absolute amount to add to every rental price field. Use negative values such as -1 to subtract 1 yuan.' },
     scope: { type: 'string', enum: ['rent_fields', 'all_price_fields'], description: '兼容旧参数；倍数/折扣类改价会被强制限制为 rent_fields。非租金字段必须用 fields 精准点名。' },
   },

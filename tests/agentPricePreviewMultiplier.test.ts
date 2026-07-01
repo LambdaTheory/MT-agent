@@ -35,6 +35,87 @@ describe('agent rental price preview multiplier handling', () => {
     expect(response.card).toBeDefined();
   });
 
+  it('rejects a bare numeric discount that cannot distinguish fold from multiplier semantics', async () => {
+    const { client, preview } = fakeRentalPriceClient();
+
+    const response = await executeAgentToolRequest(
+      {
+        toolName: 'rental.pricePreview',
+        arguments: { productIds: ['851'], discount: 8 },
+        reason: 'planner supplied a bare numeric discount without fold or multiplier wording',
+      },
+      'output',
+      { rentalPriceClient: client },
+    );
+
+    expect(preview).not.toHaveBeenCalled();
+    expect(response.metadata).toMatchObject({ toolName: 'rental.pricePreview', ok: false });
+    expect(response.text).toContain('discount');
+  });
+
+  it('still infers an 8-fold discount from explicit fold wording', async () => {
+    const { client, preview } = fakeRentalPriceClient();
+
+    const response = await executeAgentToolRequest(
+      {
+        toolName: 'rental.pricePreview',
+        arguments: { productIds: ['851'] },
+        reason: 'rx10m4 整体 8折',
+      },
+      'output',
+      { rentalPriceClient: client },
+    );
+
+    expect(preview).toHaveBeenCalledWith({ mode: 'global_discount', productId: '851', discount: 0.8, scope: 'rent_fields' });
+    expect(response.card).toBeDefined();
+  });
+
+  it('rejects price preview arguments that provide both discount and adjustment amount', async () => {
+    const { client, preview } = fakeRentalPriceClient();
+
+    const response = await executeAgentToolRequest(
+      {
+        toolName: 'rental.pricePreview',
+        arguments: { productIds: ['851'], discount: 0.8, adjustmentAmount: -1 },
+        reason: 'conflicting price adjustment arguments',
+      },
+      'output',
+      { rentalPriceClient: client },
+    );
+
+    expect(preview).not.toHaveBeenCalled();
+    expect(response.metadata).toMatchObject({ toolName: 'rental.pricePreview', ok: false });
+    expect(response.text).toContain('discount');
+    expect(response.text).toContain('adjustmentAmount');
+  });
+
+  it('rejects multi-step price preview arguments that provide both discount and adjustment amount', async () => {
+    const { client, preview } = fakeRentalPriceClient();
+
+    const response = await continueAgentPlannerSteps({
+      goal: 'Generate a price preview with conflicting adjustment parameters',
+      reason: 'planner produced both factor and amount',
+      steps: [
+        {
+          toolName: 'rental.pricePreview',
+          arguments: { productIds: ['851'], discount: 0.8, adjustmentAmount: -1 },
+          reason: 'conflicting price adjustment arguments',
+        },
+      ],
+      baseIndex: 0,
+      totalSteps: 1,
+      metadataStore: {},
+      textParts: ['Agent plan'],
+      outputDir: 'output',
+      options: { rentalPriceClient: client },
+    });
+
+    expect(preview).not.toHaveBeenCalled();
+    expect(response?.metadata).toMatchObject({ toolName: 'rental.pricePreview', ok: false });
+    expect(response?.text).toContain('discount');
+    expect(response?.text).toContain('adjustmentAmount');
+  });
+
   it('infers a missing direct price preview multiplier and keeps the scope to rent fields', async () => {
     const { client, preview } = fakeRentalPriceClient();
 

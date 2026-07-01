@@ -315,6 +315,41 @@ describe('public traffic report freeform query', () => {
     expect(text).toContain('SKU数 3');
   });
 
+  it('reports unsupported product-row filter fields instead of returning an empty match set', () => {
+    const text = runPublicTrafficReportQuery(reportContext, {
+      target: 'products',
+      period: '7d',
+      filters: [{ field: 'stock', operator: 'gt', value: 0 }],
+    });
+
+    expect(text).toContain('Unsupported');
+    expect(text).toContain('target=products');
+    expect(text).toContain('stock');
+  });
+
+  it('reports unsupported product-row sort fields instead of claiming a no-op sort', () => {
+    const text = runPublicTrafficReportQuery(reportContext, {
+      target: 'products',
+      period: '7d',
+      sortBy: 'stock',
+    });
+
+    expect(text).toContain('Unsupported');
+    expect(text).toContain('target=products');
+    expect(text).toContain('stock');
+  });
+
+  it('still allows new-product-pool section filters on stock', () => {
+    const text = runPublicTrafficReportQuery(reportContext, {
+      target: 'section',
+      section: 'newProductPool',
+      filters: [{ field: 'stock', operator: 'gte', value: 5 }],
+    });
+
+    expect(text).toContain('Pocket 3');
+    expect(text).toContain('5');
+  });
+
   it('filters order analysis indicators by user wording', () => {
     const text = runPublicTrafficReportQuery(reportContext, {
       target: 'orders',

@@ -30,7 +30,6 @@ export function readPriceMultiplierArgument(value: unknown): number | null {
   const numeric = typeof value === 'number' ? value : typeof value === 'string' ? Number(value.trim()) : NaN;
   if (!Number.isFinite(numeric) || numeric <= 0) return null;
   if (numeric <= 5) return numeric;
-  if (numeric <= 10) return numeric / 10;
   return null;
 }
 

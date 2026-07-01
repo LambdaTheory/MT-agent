@@ -76,6 +76,11 @@ import {
 } from './rentalPrice.js';
 import { findReadOnlyTool } from './readOnlyToolRegistry.js';
 import { inferPriceAdjustmentAmountFromText, readPriceAdjustmentAmountArgument } from './priceAdjustment.js';
+import {
+  hasPriceAdjustmentConflict,
+  INVALID_DISCOUNT_ARGUMENT_MESSAGE,
+  PRICE_ADJUSTMENT_CONFLICT_MESSAGE,
+} from './priceChangeContract.js';
 import { inferPriceMultiplierFromText, readPriceMultiplierArgument } from './priceMultiplier.js';
 import { runPublicTrafficReportDateComparison, runPublicTrafficReportQuery, type PublicTrafficReportQueryArguments } from './reportQuery.js';
 import { findLatestReportContext, findReportContextByDate, formatConversionSummary, formatLatestSummary, formatProductRows, parseNumericProductIdList, queryProductRows } from './reportStore.js';
@@ -625,16 +630,31 @@ async function rentalPricePreviewResponse(
   const productIds = readProductIdArray(args.productIds, RENTAL_PRICE_PREVIEW_MAX_PRODUCTS);
   if (!productIds) return { text: `改价预览参数无效：productIds 需要是 1 到 ${RENTAL_PRICE_PREVIEW_MAX_PRODUCTS} 个端内ID。`, metadata: { toolName: 'rental.pricePreview', ok: false } };
 
+  if (hasPriceAdjustmentConflict(args)) {
+    return {
+      text: PRICE_ADJUSTMENT_CONFLICT_MESSAGE,
+      metadata: { toolName: 'rental.pricePreview', ok: false, productIds },
+    };
+  }
+
   const inferredFields = isRecord(args.fields) ? undefined : parseRentPriceFieldsFromText(reason);
   const rawFields = isRecord(args.fields) ? args.fields : inferredFields && Object.keys(inferredFields).length ? inferredFields : undefined;
   const priceArgs = rawFields ? { ...args, fields: sanitizeExplicitPriceFields(rawFields, reason) } : args;
   const hasExplicitFields = isRecord(priceArgs.fields);
+  const explicitDiscount = !hasExplicitFields && priceArgs.discount !== undefined;
+  const parsedDiscount = explicitDiscount ? readPriceMultiplierArgument(priceArgs.discount) : null;
+  if (explicitDiscount && parsedDiscount === null) {
+    return {
+      text: INVALID_DISCOUNT_ARGUMENT_MESSAGE,
+      metadata: { toolName: 'rental.pricePreview', ok: false, productIds },
+    };
+  }
   const adjustmentAmount = hasExplicitFields
     ? undefined
     : (readPriceAdjustmentAmountArgument(priceArgs.adjustmentAmount) ?? inferPriceAdjustmentAmountFromText(reason));
   const discount = hasExplicitFields || adjustmentAmount !== null
     ? undefined
-    : (readPriceMultiplierArgument(priceArgs.discount) ?? inferPriceMultiplierFromText(reason));
+    : (explicitDiscount ? parsedDiscount : inferPriceMultiplierFromText(reason));
   if (!hasExplicitFields && adjustmentAmount === null && discount === null) {
     return { text: '改价预览参数无效：需要提供 fields、discount 折扣倍数，或 adjustmentAmount 金额增减（例如 -1 表示每个租金字段减 1 元）。', metadata: { toolName: 'rental.pricePreview', ok: false, productIds } };
   }

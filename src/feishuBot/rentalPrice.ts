@@ -5,6 +5,8 @@ import { dirname, resolve, sep, join, isAbsolute } from 'node:path';
 import { promisify } from 'node:util';
 import { parseAgentToolConfirmContinuation, type AgentToolConfirmContinuation } from '../agentRuntime/approvalCard.js';
 import { validateAgentToolArguments } from '../agentRuntime/planner.js';
+import { hasPriceAdjustmentConflict } from './priceChangeContract.js';
+import { readPriceMultiplierArgument } from './priceMultiplier.js';
 import type { FeishuCardPayload } from '../notify/feishuApp.js';
 
 const execFileAsync = promisify(execFile);
@@ -1199,13 +1201,13 @@ function parseRentalOperationMetadata(request: Record<string, unknown>): RentalO
 export function rentalPriceChangeRequestFromToolArguments(args: Record<string, unknown>): RentalPriceChangeRequest | null {
   const productId = readProductId(args.productId);
   if (!productId) return null;
+  if (hasPriceAdjustmentConflict(args)) return null;
 
   const fields = normalizePriceFields(args.fields);
   if (fields) return { mode: 'explicit_fields', productId, fields };
 
-  const rawDiscount = args.discount;
-  const discount = typeof rawDiscount === 'number' ? rawDiscount : typeof rawDiscount === 'string' ? Number(rawDiscount) : NaN;
-  if (Number.isFinite(discount) && discount > 0) {
+  const discount = readPriceMultiplierArgument(args.discount);
+  if (discount !== null) {
     return { mode: 'global_discount', productId, discount, scope: 'rent_fields' };
   }
 
