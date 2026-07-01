@@ -150,6 +150,17 @@ export interface RentalPlatformSearchResult {
   lines: string[];
 }
 
+export interface RentalPlatformSearchAllResult {
+  ok: boolean;
+  status: string;
+  count: number;
+  rows: unknown[];
+  pagesScraped?: number;
+  excludedCount?: number;
+  truncated: boolean;
+  lines: string[];
+}
+
 export interface RentalBatchReadResult {
   ok: boolean;
   status: string;
@@ -158,6 +169,16 @@ export interface RentalBatchReadResult {
   errors: unknown[];
   warnings: unknown[];
   lines: string[];
+}
+
+export interface RentalRawReadResult extends RentalPriceReadResult {
+  status: string;
+  requestedCount?: number;
+  readCount?: number;
+}
+
+export interface RentalSpecDiscoverFullResult extends RentalPriceSpecDiscoverResult {
+  status: string;
 }
 
 interface RentalOperationConfirmMetadata {
@@ -176,7 +197,10 @@ export interface RentalOperationExecutionResult {
 export interface RentalPriceSkillClient {
   daemonStatus?(): Promise<RentalDaemonStatusResult>;
   platformSearch?(keyword: string): Promise<RentalPlatformSearchResult>;
+  platformSearchAll?(limit?: number): Promise<RentalPlatformSearchAllResult>;
   batchRead?(productIds: string[]): Promise<RentalBatchReadResult>;
+  specDiscoverFull?(productId: string): Promise<RentalSpecDiscoverFullResult>;
+  readRaw?(productId: string, fields?: string[]): Promise<RentalRawReadResult>;
   preview(request: RentalPriceChangeRequest): Promise<RentalPricePreview>;
   execute(request: Extract<RentalPriceChangeRequest, { mode: 'explicit_fields' }>): Promise<RentalPriceExecutionResult>;
   rollback?(request: RentalPriceRollbackRequest): Promise<RentalPriceRollbackResult>;
@@ -219,6 +243,8 @@ const AUDIT_TASK_ID_PATTERN = /^task_\d+_[a-f0-9]+$/i;
 const SPEC_REMOVE_CONFIRM_DISPLAY_LIMIT = 30;
 const SPEC_REMOVE_CONFIRM_MAX_ITEMS = 50;
 const SPEC_REMOVE_BULK_WARNING_ITEMS = 12;
+const PLATFORM_SEARCH_ALL_DEFAULT_LIMIT = 100;
+const PLATFORM_SEARCH_ALL_MAX_LIMIT = 200;
 
 function money(value: string | number): string {
   return Number(value).toFixed(2);
@@ -857,6 +883,35 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
         lines: [`platform-search: ${status}`, `keyword: ${keyword}`, `count: ${count}`, ...summarizeRows(rows)],
       };
     },
+    async platformSearchAll(limit = PLATFORM_SEARCH_ALL_DEFAULT_LIMIT) {
+      const cappedLimit = Math.max(1, Math.min(Math.trunc(limit), PLATFORM_SEARCH_ALL_MAX_LIMIT));
+      const result = await send({ action: 'platform-search-all' });
+      const status = commandStatus(result);
+      const allRows = Array.isArray(result.products)
+        ? result.products
+        : Array.isArray(result.rows)
+          ? result.rows
+          : Array.isArray(result.results)
+            ? result.results
+            : Array.isArray(result.items)
+              ? result.items
+              : [];
+      const rows = allRows.slice(0, cappedLimit);
+      const count = optionalNumber(result, 'count') ?? allRows.length;
+      const pagesScraped = optionalNumber(result, 'pagesScraped');
+      const excludedCount = optionalNumber(result, 'excludedCount');
+      const truncated = allRows.length > rows.length;
+      return {
+        ok: status === 'ok' || status === 'partial',
+        status,
+        count,
+        rows,
+        ...(pagesScraped !== undefined ? { pagesScraped } : {}),
+        ...(excludedCount !== undefined ? { excludedCount } : {}),
+        truncated,
+        lines: [`platform-search-all: ${status}`, `count: ${count}`, `returned: ${rows.length}`, ...(pagesScraped !== undefined ? [`pagesScraped: ${pagesScraped}`] : []), ...summarizeRows(rows)],
+      };
+    },
     async batchRead(productIds) {
       const result = await send({ action: 'batch-read', productIds });
       const status = commandStatus(result);
@@ -872,6 +927,35 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
         errors,
         warnings,
         lines: [`batch-read: ${status}`, `count: ${count}`, ...summarizeBatchReadResults(results)],
+      };
+    },
+    async specDiscoverFull(productId) {
+      const result = await send({ action: 'spec-discover', productId });
+      const status = commandStatus(result);
+      const dimensions = Array.isArray(result.dimensions) ? result.dimensions as RentalPriceSpecDiscoverResult['dimensions'] : [];
+      return { productId, ok: status === 'ok', status, dimensions, lines: [`spec-discover: ${status}`, `${dimensions.length} dimensions`] };
+    },
+    async readRaw(productId, fields) {
+      const result = await send({ action: 'read', productId, ...(fields && fields.length > 0 ? { fields } : {}) });
+      const status = commandStatus(result);
+      const specs = normalizeReadSpecs(result.specs);
+      const values = normalizeReadValues(result.values);
+      const warnings = normalizeReadDiagnostics(result.warnings);
+      const missingFields = normalizeReadDiagnostics(result.missingFields);
+      const requestedCount = optionalNumber(result, 'requestedCount');
+      const readCount = optionalNumber(result, 'readCount');
+      const message = optionalString(result, 'message');
+      return {
+        productId,
+        ok: status === 'ok' || status === 'partial',
+        status,
+        specs,
+        values,
+        lines: [`read: ${status}`, `${specs.length} specs`, ...(requestedCount !== undefined ? [`requestedCount: ${requestedCount}`] : []), ...(readCount !== undefined ? [`readCount: ${readCount}`] : []), ...(message ? [message] : [])],
+        ...(warnings ? { warnings } : {}),
+        ...(missingFields ? { missingFields } : {}),
+        ...(requestedCount !== undefined ? { requestedCount } : {}),
+        ...(readCount !== undefined ? { readCount } : {}),
       };
     },
     async read(productId) {

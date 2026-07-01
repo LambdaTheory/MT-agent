@@ -46,7 +46,10 @@ describe('agent runtime tool registry', () => {
       'closedOrder.runObservationReport',
       'rental.daemonStatus',
       'rental.platformSearch',
+      'rental.platformSearchAll',
       'rental.batchRead',
+      'rental.specDiscoverFull',
+      'rental.readRaw',
       'rental.copy',
       'rental.delist',
       'rental.tenancySet',
@@ -72,7 +75,7 @@ describe('agent runtime tool registry', () => {
 
     const tools = listAgentTools();
     tools.pop();
-    expect(listAgentTools()).toHaveLength(51);
+    expect(listAgentTools()).toHaveLength(54);
   });
 
   it('returns defensive copies of tool metadata', () => {
@@ -281,7 +284,10 @@ describe('agent runtime tool registry', () => {
       'closedOrder.runObservationReport',
       'rental.daemonStatus',
       'rental.platformSearch',
+      'rental.platformSearchAll',
       'rental.batchRead',
+      'rental.specDiscoverFull',
+      'rental.readRaw',
       'rental.copy',
       'rental.delist',
       'rental.tenancySet',
@@ -408,6 +414,12 @@ describe('agent runtime tool registry', () => {
       required: ['keyword'],
       additionalProperties: false,
     });
+    expect(findAgentTool('rental.platformSearchAll')?.inputSchema).toMatchObject({
+      properties: {
+        limit: { type: ['integer', 'string'], minimum: 1, maximum: 200 },
+      },
+      additionalProperties: false,
+    });
     expect(findAgentTool('rental.batchRead')?.inputSchema).toMatchObject({
       properties: {
         productIds: {
@@ -418,6 +430,21 @@ describe('agent runtime tool registry', () => {
         },
       },
       required: ['productIds'],
+      additionalProperties: false,
+    });
+    expect(findAgentTool('rental.specDiscoverFull')?.inputSchema).toMatchObject({
+      properties: {
+        productId: { type: 'string' },
+      },
+      required: ['productId'],
+      additionalProperties: false,
+    });
+    expect(findAgentTool('rental.readRaw')?.inputSchema).toMatchObject({
+      properties: {
+        productId: { type: 'string' },
+        fields: { type: 'array', maxItems: 32, items: { type: 'string' } },
+      },
+      required: ['productId'],
       additionalProperties: false,
     });
     expect(findAgentTool('rental.priceChange')?.inputSchema).toMatchObject({

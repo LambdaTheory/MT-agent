@@ -284,12 +284,28 @@ const rentalPlatformSearchArgumentsSchema = {
   required: ['keyword'],
   additionalProperties: false,
 };
+const rentalPlatformSearchAllArgumentsSchema = {
+  type: 'object',
+  properties: {
+    limit: { type: ['integer', 'string'], pattern: '^[1-9]\\d*$', minimum: 1, maximum: 200 },
+  },
+  additionalProperties: false,
+};
 const rentalBatchReadArgumentsSchema = {
   type: 'object',
   properties: {
     productIds: { type: 'array', minItems: 1, maxItems: 60, items: { type: 'string' } },
   },
   required: ['productIds'],
+  additionalProperties: false,
+};
+const rentalReadRawArgumentsSchema = {
+  type: 'object',
+  properties: {
+    productId: { type: 'string' },
+    fields: { type: 'array', maxItems: 32, items: { type: 'string' } },
+  },
+  required: ['productId'],
   additionalProperties: false,
 };
 const refreshActivityPlanArgumentsSchema = {
@@ -698,11 +714,32 @@ const agentTools: AgentToolDefinition[] = [
     inputSchema: rentalPlatformSearchArgumentsSchema,
   },
   {
+    name: 'rental.platformSearchAll',
+    description: '只读调用 rental-price-agent 遍历租赁后台商品列表，返回受限数量的候选商品；不会复制、下架或改价。',
+    risk: 'read',
+    requiresConfirmation: false,
+    inputSchema: rentalPlatformSearchAllArgumentsSchema,
+  },
+  {
     name: 'rental.batchRead',
     description: '只读批量读取多个端内ID的租赁后台当前规格和价格，单次最多 60 个商品；不会执行商品写操作。',
     risk: 'read',
     requiresConfirmation: false,
     inputSchema: rentalBatchReadArgumentsSchema,
+  },
+  {
+    name: 'rental.specDiscoverFull',
+    description: '只读读取租赁商品完整规格维度和规格项；不会新增、删除或刷新规格。',
+    risk: 'read',
+    requiresConfirmation: false,
+    inputSchema: productIdArgumentsSchema,
+  },
+  {
+    name: 'rental.readRaw',
+    description: '只读读取租赁商品原始规格和字段值，可选 fields 限定字段；不会执行商品写操作。',
+    risk: 'read',
+    requiresConfirmation: false,
+    inputSchema: rentalReadRawArgumentsSchema,
   },
   {
     name: 'rental.copy',

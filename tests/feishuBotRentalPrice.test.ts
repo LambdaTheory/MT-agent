@@ -294,6 +294,38 @@ describe('rental price skill client copy diagnostics', () => {
     expect(result.lines.join('\n')).toContain('761');
   });
 
+  it('exposes full platform search through a read-only platform-search-all action with local truncation', async () => {
+    const calls: unknown[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (_input, init) => {
+      calls.push(JSON.parse(String(init?.body ?? '{}')));
+      return new Response(JSON.stringify({
+        status: 'ok',
+        count: 3,
+        pagesScraped: 2,
+        products: [
+          { productId: '761', title: 'vivo X200 Ultra' },
+          { productId: '762', title: 'vivo X200 Pro' },
+          { productId: '763', title: 'vivo X200' },
+        ],
+        excluded: [{ productId: 'mq-1' }],
+        excludedCount: 1,
+      }));
+    }));
+    const client = createRentalPriceSkillClient({ daemonUrl: 'http://127.0.0.1:9223', daemonToken: 'test-token' });
+
+    const result = await client.platformSearchAll!(2);
+
+    expect(calls).toEqual([{ action: 'platform-search-all' }]);
+    expect(result.ok).toBe(true);
+    expect(result.count).toBe(3);
+    expect(result.rows).toHaveLength(2);
+    expect(result.pagesScraped).toBe(2);
+    expect(result.excludedCount).toBe(1);
+    expect(result.truncated).toBe(true);
+    expect(result.lines.join('\n')).toContain('platform-search-all: ok');
+    expect(result.lines.join('\n')).toContain('761');
+  });
+
   it('exposes batch read through a read-only batch-read action', async () => {
     const calls: unknown[] = [];
     vi.stubGlobal('fetch', vi.fn(async (_input, init) => {
@@ -322,6 +354,55 @@ describe('rental price skill client copy diagnostics', () => {
     });
     expect(result.lines.join('\n')).toContain('761');
     expect(result.lines.join('\n')).toContain('762');
+  });
+
+  it('exposes full spec discovery through the read-only spec-discover action', async () => {
+    const calls: unknown[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (_input, init) => {
+      calls.push(JSON.parse(String(init?.body ?? '{}')));
+      return new Response(JSON.stringify({
+        status: 'ok',
+        dimensions: [{ specId: '1355', title: '颜色', items: [{ id: '1', title: '黑色' }] }],
+      }));
+    }));
+    const client = createRentalPriceSkillClient({ daemonUrl: 'http://127.0.0.1:9223', daemonToken: 'test-token' });
+
+    const result = await client.specDiscoverFull!('761');
+
+    expect(calls).toEqual([{ action: 'spec-discover', productId: '761' }]);
+    expect(result.ok).toBe(true);
+    expect(result.productId).toBe('761');
+    expect(result.dimensions).toEqual([{ specId: '1355', title: '颜色', items: [{ id: '1', title: '黑色' }] }]);
+    expect(result.lines.join('\n')).toContain('spec-discover: ok');
+  });
+
+  it('exposes raw read through a read-only read action with optional fields', async () => {
+    const calls: unknown[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (_input, init) => {
+      calls.push(JSON.parse(String(init?.body ?? '{}')));
+      return new Response(JSON.stringify({
+        status: 'partial',
+        productId: '761',
+        specs: [{ specId: 's1', title: '黑色' }],
+        values: { s1: { rent1day: '22.00' } },
+        requestedCount: 1,
+        readCount: 1,
+        warnings: [],
+        missingFields: [],
+      }));
+    }));
+    const client = createRentalPriceSkillClient({ daemonUrl: 'http://127.0.0.1:9223', daemonToken: 'test-token' });
+
+    const result = await client.readRaw!('761', ['rent1day']);
+
+    expect(calls).toEqual([{ action: 'read', productId: '761', fields: ['rent1day'] }]);
+    expect(result.ok).toBe(true);
+    expect(result.status).toBe('partial');
+    expect(result.productId).toBe('761');
+    expect(result.specs).toEqual([{ specId: 's1', title: '黑色' }]);
+    expect(result.values).toEqual({ s1: { rent1day: '22.00' } });
+    expect(result.requestedCount).toBe(1);
+    expect(result.readCount).toBe(1);
   });
 
   it('reports a clear daemon unavailable error when the local service is down', async () => {
