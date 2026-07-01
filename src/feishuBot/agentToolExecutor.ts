@@ -70,7 +70,10 @@ import {
   type RentalOperationConfirmRequest,
   type RentalSpecRemoveItemConfirmRequest,
   type RentalPriceChangeRequest,
+  type RentalBatchReadResult,
+  type RentalDaemonStatusResult,
   type RentalPriceExecutionResult,
+  type RentalPlatformSearchResult,
   type RentalPriceReadResult,
   type RentalPriceSkillClient,
 } from './rentalPrice.js';
@@ -96,6 +99,7 @@ let publicTrafficReportRunning = false;
 
 const RENTAL_PRICE_SNAPSHOT_MAX_PRODUCTS = 60;
 const RENTAL_PRICE_PREVIEW_MAX_PRODUCTS = 24;
+const RENTAL_BATCH_READ_MAX_PRODUCTS = 60;
 const RENTAL_SPEC_REMOVE_PLAN_BULK_WARNING_PRODUCTS = 12;
 const RENTAL_SPEC_REMOVE_PLAN_MAX_PRODUCTS = 60;
 const RENTAL_SPEC_REMOVE_PLAN_MAX_ITEMS = 50;
@@ -618,6 +622,45 @@ function readProductIdArray(value: unknown, maxItems: number): string[] | null {
   const ids = value.map((item) => typeof item === 'string' ? item.trim() : '').filter(Boolean);
   if (ids.length !== value.length || ids.some((id) => !/^\d+$/.test(id))) return null;
   return [...new Set(ids)];
+}
+
+function readRentalBatchReadProductIds(value: unknown): string[] {
+  if (!Array.isArray(value) || value.length === 0) throw new Error(`批量读取参数无效：productIds 需要是 1 到 ${RENTAL_BATCH_READ_MAX_PRODUCTS} 个端内ID。`);
+  if (value.length > RENTAL_BATCH_READ_MAX_PRODUCTS) throw new Error(`批量读取参数无效：单次最多 ${RENTAL_BATCH_READ_MAX_PRODUCTS} 个端内ID。`);
+  const ids = value.map((item) => typeof item === 'string' ? item.trim() : '').filter(Boolean);
+  if (ids.length !== value.length || ids.some((id) => !/^\d+$/.test(id))) throw new Error('批量读取参数无效：productIds 只能包含数字端内ID。');
+  return [...new Set(ids)];
+}
+
+function firstStringField(value: unknown, keys: string[]): string | null {
+  if (!isRecord(value)) return null;
+  for (const key of keys) {
+    const item = value[key];
+    if (typeof item === 'string' && item.trim()) return item.trim();
+  }
+  return null;
+}
+
+function formatRentalDaemonStatus(result: RentalDaemonStatusResult): string {
+  return [`租赁 daemon 状态：${result.status}`, ...result.lines].join('\n');
+}
+
+function formatRentalPlatformSearch(result: RentalPlatformSearchResult): string {
+  const rows = result.rows.slice(0, 10).map((row, index) => {
+    const id = firstStringField(row, ['productId', 'internalProductId', 'id']) ?? 'unknown';
+    const title = firstStringField(row, ['title', 'name', 'productName']) ?? '';
+    return `${index + 1}. ${id}${title ? ` ${title}` : ''}`;
+  });
+  return [`租赁后台搜索：${result.keyword}`, `状态：${result.status}，命中 ${result.count} 条`, ...rows].join('\n');
+}
+
+function formatRentalBatchRead(result: RentalBatchReadResult, productIds: string[]): string {
+  const rows = productIds.slice(0, 20).map((productId) => {
+    const item = result.results[productId];
+    const status = isRecord(item) && typeof item.status === 'string' ? item.status : 'unknown';
+    return `- ${productId}: ${status}`;
+  });
+  return [`租赁批量读取：${productIds.length} 个端内ID`, `状态：${result.status}，成功/返回 ${result.count} 条`, ...rows].join('\n');
 }
 
 async function rentalPricePreviewResponse(
@@ -1682,6 +1725,26 @@ export async function executeAgentToolRequest(
       return refreshActivityPlanResponse(outputDir, request.arguments, options, request.continuation);
     case 'operations.refreshActivityExecute':
       return refreshActivityExecuteResponse(outputDir, request.arguments, options.rentalPriceClient ?? createRentalPriceSkillClient());
+    case 'rental.daemonStatus': {
+      const client = options.rentalPriceClient ?? createRentalPriceSkillClient();
+      if (!client.daemonStatus) return { text: '当前租赁客户端还没有接入 daemon 状态查询能力。', metadata: { toolName: 'rental.daemonStatus', ok: false } };
+      const result = await client.daemonStatus();
+      return { text: formatRentalDaemonStatus(result), metadata: { toolName: 'rental.daemonStatus', ok: result.ok, status: result.status } };
+    }
+    case 'rental.platformSearch': {
+      const keyword = requireString(request.arguments.keyword, 'keyword');
+      const client = options.rentalPriceClient ?? createRentalPriceSkillClient();
+      if (!client.platformSearch) return { text: '当前租赁客户端还没有接入后台搜索能力。', metadata: { toolName: 'rental.platformSearch', ok: false, keyword } };
+      const result = await client.platformSearch(keyword);
+      return { text: formatRentalPlatformSearch(result), metadata: { toolName: 'rental.platformSearch', ok: result.ok, keyword, count: result.count } };
+    }
+    case 'rental.batchRead': {
+      const productIds = readRentalBatchReadProductIds(request.arguments.productIds);
+      const client = options.rentalPriceClient ?? createRentalPriceSkillClient();
+      if (!client.batchRead) return { text: '当前租赁客户端还没有接入批量读取能力。', metadata: { toolName: 'rental.batchRead', ok: false, productIds } };
+      const result = await client.batchRead(productIds);
+      return { text: formatRentalBatchRead(result, productIds), metadata: { toolName: 'rental.batchRead', ok: result.ok, productIds, count: result.count } };
+    }
     case 'rental.copy':
     case 'rental.delist':
     case 'rental.tenancySet':

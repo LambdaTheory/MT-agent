@@ -2253,6 +2253,128 @@ describe('handleBotIntent', () => {
     expect(response.text).not.toContain('超过单次定价快照上限');
   });
 
+  it('executes rental.daemonStatus as a read-only agent tool', async () => {
+    const response = await executeAgentToolRequest(
+      { toolName: 'rental.daemonStatus', arguments: {}, reason: 'check daemon status' },
+      'output',
+      {
+        rentalPriceClient: {
+          async daemonStatus() {
+            return { ok: true, status: 'ok', pong: true, lines: ['ping: ok'] };
+          },
+          async preview() { throw new Error('preview should not run'); },
+          async execute() { throw new Error('execute should not run'); },
+          async copy() { throw new Error('copy should not run'); },
+          async delist() { throw new Error('delist should not run'); },
+          async tenancySet() { throw new Error('tenancySet should not run'); },
+          async specDiscover() { throw new Error('specDiscover should not run'); },
+          async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+        },
+      },
+    );
+
+    expect(response.text).toContain('ok');
+    expect(response.card).toBeUndefined();
+  });
+
+  it('executes rental.platformSearch as a read-only agent tool without calling write methods', async () => {
+    const response = await executeAgentToolRequest(
+      { toolName: 'rental.platformSearch', arguments: { keyword: 'x200u' }, reason: 'search rental platform' },
+      'output',
+      {
+        rentalPriceClient: {
+          async platformSearch(keyword) {
+            return {
+              ok: true,
+              status: 'ok',
+              keyword,
+              count: 1,
+              rows: [{ productId: '761', title: 'vivo X200 Ultra' }],
+              lines: ['platform-search: ok', 'keyword: x200u', '761 vivo X200 Ultra'],
+            };
+          },
+          async preview() { throw new Error('preview should not run'); },
+          async execute() { throw new Error('execute should not run'); },
+          async copy() { throw new Error('copy should not run'); },
+          async delist() { throw new Error('delist should not run'); },
+          async tenancySet() { throw new Error('tenancySet should not run'); },
+          async specDiscover() { throw new Error('specDiscover should not run'); },
+          async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+        },
+      },
+    );
+
+    expect(response.text).toContain('x200u');
+    expect(response.text).toContain('761');
+    expect(response.card).toBeUndefined();
+  });
+
+  it('executes rental.batchRead as a read-only agent tool', async () => {
+    const readCalls: string[][] = [];
+    const response = await executeAgentToolRequest(
+      { toolName: 'rental.batchRead', arguments: { productIds: ['761', '762'] }, reason: 'batch read rental prices' },
+      'output',
+      {
+        rentalPriceClient: {
+          async batchRead(productIds) {
+            readCalls.push(productIds);
+            return {
+              ok: true,
+              status: 'ok',
+              count: 2,
+              results: {
+                '761': { status: 'ok', productId: '761', specs: [], values: {} },
+                '762': { status: 'ok', productId: '762', specs: [], values: {} },
+              },
+              errors: [],
+              warnings: [],
+              lines: ['batch-read: ok', '761 ok', '762 ok'],
+            };
+          },
+          async preview() { throw new Error('preview should not run'); },
+          async execute() { throw new Error('execute should not run'); },
+          async copy() { throw new Error('copy should not run'); },
+          async delist() { throw new Error('delist should not run'); },
+          async tenancySet() { throw new Error('tenancySet should not run'); },
+          async specDiscover() { throw new Error('specDiscover should not run'); },
+          async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+        },
+      },
+    );
+
+    expect(readCalls).toEqual([['761', '762']]);
+    expect(response.text).toContain('761');
+    expect(response.text).toContain('762');
+    expect(response.card).toBeUndefined();
+  });
+
+  it('blocks oversized rental.batchRead requests before daemon calls', async () => {
+    const productIds = Array.from({ length: 61 }, (_, index) => String(1000 + index));
+    let called = false;
+
+    await expect(executeAgentToolRequest(
+      { toolName: 'rental.batchRead', arguments: { productIds }, reason: 'too many reads' },
+      'output',
+      {
+        rentalPriceClient: {
+          async batchRead() {
+            called = true;
+            throw new Error('batchRead should not run');
+          },
+          async preview() { throw new Error('preview should not run'); },
+          async execute() { throw new Error('execute should not run'); },
+          async copy() { throw new Error('copy should not run'); },
+          async delist() { throw new Error('delist should not run'); },
+          async tenancySet() { throw new Error('tenancySet should not run'); },
+          async specDiscover() { throw new Error('specDiscover should not run'); },
+          async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+        },
+      },
+    )).rejects.toThrow('60');
+
+    expect(called).toBe(false);
+  });
+
   it('turns Agent-planned same-sku spec removal into a dedicated confirmation card', async () => {
     const outputDir = await writeContext();
     const registryRoot = await mkdtemp(join(tmpdir(), 'mt-agent-x300-spec-remove-'));
