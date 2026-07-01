@@ -1,4 +1,5 @@
 import type { AgentToolConfirmRequest } from '../agentRuntime/approvalCard.js';
+import { recordOperationEvent } from '../agentRuntime/operationLedger.js';
 import type { BotResponse } from './types.js';
 import {
   executeRentalOperationConfirmRequest,
@@ -6,6 +7,14 @@ import {
   type RentalOperationConfirmRequest,
   type RentalPriceSkillClient,
 } from './rentalPrice.js';
+
+export interface RentalWriteLedgerContext {
+  outputDir: string;
+  runId?: string;
+  decisionId?: string;
+}
+
+type RentalWriteEvent = 'execution_started' | 'execution_succeeded' | 'execution_failed';
 
 function readString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
@@ -54,27 +63,72 @@ function rentalAgentToolRequest(toolName: string, args: Record<string, unknown>)
   }
 }
 
+async function recordWriteEvent(
+  context: RentalWriteLedgerContext | undefined,
+  event: RentalWriteEvent,
+  toolName: string,
+  productId: string,
+): Promise<void> {
+  if (!context) return;
+  await recordOperationEvent(context.outputDir, {
+    planId: context.decisionId ?? context.runId ?? 'ad-hoc',
+    at: new Date().toISOString(),
+    event,
+    toolName,
+    ...(context.runId ? { runId: context.runId } : {}),
+    ...(context.decisionId ? { decisionId: context.decisionId } : {}),
+    subject: { kind: 'product', id: productId },
+  });
+}
+
+async function recordFailedWriteEvent(
+  context: RentalWriteLedgerContext | undefined,
+  toolName: string,
+  productId: string,
+): Promise<void> {
+  try {
+    await recordWriteEvent(context, 'execution_failed', toolName, productId);
+  } catch (ledgerError) {
+    console.warn('Failed to record rental write failure event.', ledgerError);
+  }
+}
+
 export async function executeRentalWriteOperationHandler(
   request: AgentToolConfirmRequest,
   client: RentalPriceSkillClient,
+  ledgerContext?: RentalWriteLedgerContext,
 ): Promise<BotResponse> {
   if (request.toolName === 'rental.operationConfirmRequest') {
     const rentalRequest = rentalOperationConfirmRequestFromToolArguments(request.arguments);
     if (!rentalRequest) throw new Error('租赁商品操作参数无效，请重新发起。');
-    const result = await executeRentalOperationConfirmRequest(client, rentalRequest);
-    return { text: result.text };
+    await recordWriteEvent(ledgerContext, 'execution_started', request.toolName, rentalRequest.productId);
+    try {
+      const result = await executeRentalOperationConfirmRequest(client, rentalRequest);
+      await recordWriteEvent(ledgerContext, result.ok ? 'execution_succeeded' : 'execution_failed', request.toolName, rentalRequest.productId);
+      return { text: result.text };
+    } catch (error) {
+      await recordFailedWriteEvent(ledgerContext, request.toolName, rentalRequest.productId);
+      throw error;
+    }
   }
 
   const rentalRequest = rentalAgentToolRequest(request.toolName, request.arguments);
   if (!rentalRequest) throw new Error('租赁商品操作参数无效，请重新发起。');
-  const result = await executeRentalOperationConfirmRequest(client, rentalRequest);
-  return {
-    text: result.text,
-    metadata: {
-      ...(result.metadata ?? {}),
-      toolName: request.toolName,
-      ok: result.ok,
-      productId: rentalRequest.productId,
-    },
-  };
+  await recordWriteEvent(ledgerContext, 'execution_started', request.toolName, rentalRequest.productId);
+  try {
+    const result = await executeRentalOperationConfirmRequest(client, rentalRequest);
+    await recordWriteEvent(ledgerContext, result.ok ? 'execution_succeeded' : 'execution_failed', request.toolName, rentalRequest.productId);
+    return {
+      text: result.text,
+      metadata: {
+        ...(result.metadata ?? {}),
+        toolName: request.toolName,
+        ok: result.ok,
+        productId: rentalRequest.productId,
+      },
+    };
+  } catch (error) {
+    await recordFailedWriteEvent(ledgerContext, request.toolName, rentalRequest.productId);
+    throw error;
+  }
 }
