@@ -253,6 +253,77 @@ describe('rental price Feishu integration', () => {
 });
 
 describe('rental price skill client copy diagnostics', () => {
+  it('exposes daemon status through a read-only ping action', async () => {
+    const calls: unknown[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (_input, init) => {
+      calls.push(JSON.parse(String(init?.body ?? '{}')));
+      return new Response(JSON.stringify({ status: 'ok', pong: true }));
+    }));
+    const client = createRentalPriceSkillClient({ daemonUrl: 'http://127.0.0.1:9223', daemonToken: 'test-token' });
+
+    const result = await client.daemonStatus!();
+
+    expect(calls).toEqual([{ action: 'ping' }]);
+    expect(result.ok).toBe(true);
+    expect(result.status).toBe('ok');
+    expect(result.pong).toBe(true);
+    expect(result.lines.join('\n')).toContain('ping: ok');
+  });
+
+  it('exposes platform search through a read-only platform-search action', async () => {
+    const calls: unknown[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (_input, init) => {
+      calls.push(JSON.parse(String(init?.body ?? '{}')));
+      return new Response(JSON.stringify({
+        status: 'ok',
+        keyword: 'x200u',
+        count: 1,
+        products: [{ productId: '761', title: 'vivo X200 Ultra' }],
+      }));
+    }));
+    const client = createRentalPriceSkillClient({ daemonUrl: 'http://127.0.0.1:9223', daemonToken: 'test-token' });
+
+    const result = await client.platformSearch!('x200u');
+
+    expect(calls).toEqual([{ action: 'platform-search', keyword: 'x200u' }]);
+    expect(result.ok).toBe(true);
+    expect(result.keyword).toBe('x200u');
+    expect(result.count).toBe(1);
+    expect(result.rows).toEqual([{ productId: '761', title: 'vivo X200 Ultra' }]);
+    expect(result.lines.join('\n')).toContain('x200u');
+    expect(result.lines.join('\n')).toContain('761');
+  });
+
+  it('exposes batch read through a read-only batch-read action', async () => {
+    const calls: unknown[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (_input, init) => {
+      calls.push(JSON.parse(String(init?.body ?? '{}')));
+      return new Response(JSON.stringify({
+        status: 'ok',
+        count: 2,
+        results: {
+          '761': { status: 'ok', productId: '761', specs: [], values: {} },
+          '762': { status: 'ok', productId: '762', specs: [], values: {} },
+        },
+        errors: [],
+        warnings: [],
+      }));
+    }));
+    const client = createRentalPriceSkillClient({ daemonUrl: 'http://127.0.0.1:9223', daemonToken: 'test-token' });
+
+    const result = await client.batchRead!(['761', '762']);
+
+    expect(calls).toEqual([{ action: 'batch-read', productIds: ['761', '762'] }]);
+    expect(result.ok).toBe(true);
+    expect(result.count).toBe(2);
+    expect(result.results).toMatchObject({
+      '761': { status: 'ok', productId: '761' },
+      '762': { status: 'ok', productId: '762' },
+    });
+    expect(result.lines.join('\n')).toContain('761');
+    expect(result.lines.join('\n')).toContain('762');
+  });
+
   it('reports a clear daemon unavailable error when the local service is down', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => {
       const error = new TypeError('fetch failed') as TypeError & { cause?: Error };

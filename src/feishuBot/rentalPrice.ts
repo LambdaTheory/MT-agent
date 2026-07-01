@@ -133,6 +133,33 @@ export interface RentalPriceSpecRemoveResult {
   audit?: { resultFile?: string };
 }
 
+export interface RentalDaemonStatusResult {
+  ok: boolean;
+  status: string;
+  pong?: boolean;
+  message?: string;
+  lines: string[];
+}
+
+export interface RentalPlatformSearchResult {
+  ok: boolean;
+  status: string;
+  keyword: string;
+  count: number;
+  rows: unknown[];
+  lines: string[];
+}
+
+export interface RentalBatchReadResult {
+  ok: boolean;
+  status: string;
+  count: number;
+  results: Record<string, unknown>;
+  errors: unknown[];
+  warnings: unknown[];
+  lines: string[];
+}
+
 interface RentalOperationConfirmMetadata {
   continuation?: AgentToolConfirmContinuation;
   plannerToolName?: 'rental.copy' | 'rental.delist' | 'rental.tenancySet' | 'rental.specDiscover' | 'rental.specAddAndRefresh' | 'rental.specRemovePlan' | 'rental.operationConfirmRequest';
@@ -147,6 +174,9 @@ export interface RentalOperationExecutionResult {
 }
 
 export interface RentalPriceSkillClient {
+  daemonStatus?(): Promise<RentalDaemonStatusResult>;
+  platformSearch?(keyword: string): Promise<RentalPlatformSearchResult>;
+  batchRead?(productIds: string[]): Promise<RentalBatchReadResult>;
   preview(request: RentalPriceChangeRequest): Promise<RentalPricePreview>;
   execute(request: Extract<RentalPriceChangeRequest, { mode: 'explicit_fields' }>): Promise<RentalPriceExecutionResult>;
   rollback?(request: RentalPriceRollbackRequest): Promise<RentalPriceRollbackResult>;
@@ -441,6 +471,35 @@ function optionalString(response: Record<string, unknown>, key: string): string 
 function optionalBoolean(response: Record<string, unknown>, key: string): boolean | undefined {
   const value = response[key];
   return typeof value === 'boolean' ? value : undefined;
+}
+
+function optionalNumber(response: Record<string, unknown>, key: string): number | undefined {
+  const value = response[key];
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function firstStringField(value: unknown, keys: string[]): string | null {
+  if (!isRecord(value)) return null;
+  for (const key of keys) {
+    const item = value[key];
+    if (typeof item === 'string' && item.trim()) return item.trim();
+  }
+  return null;
+}
+
+function summarizeRows(rows: unknown[]): string[] {
+  return rows.slice(0, 5).map((row) => {
+    const id = firstStringField(row, ['productId', 'internalProductId', 'id']) ?? 'unknown';
+    const title = firstStringField(row, ['title', 'name', 'productName']) ?? '';
+    return title ? `${id} ${title}` : id;
+  });
+}
+
+function summarizeBatchReadResults(results: Record<string, unknown>): string[] {
+  return Object.entries(results).slice(0, 10).map(([productId, result]) => {
+    const status = isRecord(result) ? commandStatus(result) : 'unknown';
+    return `${productId} ${status}`;
+  });
 }
 
 function readableValues(response: Record<string, unknown>): Record<string, unknown> {
@@ -763,6 +822,58 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
   }
 
   return {
+    async daemonStatus() {
+      const result = await send({ action: 'ping' });
+      const status = commandStatus(result);
+      const pong = optionalBoolean(result, 'pong');
+      const message = optionalString(result, 'message');
+      return {
+        ok: status === 'ok',
+        status,
+        ...(pong !== undefined ? { pong } : {}),
+        ...(message ? { message } : {}),
+        lines: [`ping: ${status}`, ...(pong !== undefined ? [`pong: ${pong}`] : []), ...(message ? [`message: ${message}`] : [])],
+      };
+    },
+    async platformSearch(keyword) {
+      const result = await send({ action: 'platform-search', keyword });
+      const status = commandStatus(result);
+      const rows = Array.isArray(result.products)
+        ? result.products
+        : Array.isArray(result.rows)
+          ? result.rows
+          : Array.isArray(result.results)
+            ? result.results
+            : Array.isArray(result.items)
+              ? result.items
+              : [];
+      const count = optionalNumber(result, 'count') ?? rows.length;
+      return {
+        ok: status === 'ok' || status === 'partial',
+        status,
+        keyword,
+        count,
+        rows,
+        lines: [`platform-search: ${status}`, `keyword: ${keyword}`, `count: ${count}`, ...summarizeRows(rows)],
+      };
+    },
+    async batchRead(productIds) {
+      const result = await send({ action: 'batch-read', productIds });
+      const status = commandStatus(result);
+      const results = isRecord(result.results) ? result.results : {};
+      const errors = Array.isArray(result.errors) ? result.errors : [];
+      const warnings = Array.isArray(result.warnings) ? result.warnings : [];
+      const count = optionalNumber(result, 'count') ?? Object.keys(results).length;
+      return {
+        ok: status === 'ok' || status === 'partial',
+        status,
+        count,
+        results,
+        errors,
+        warnings,
+        lines: [`batch-read: ${status}`, `count: ${count}`, ...summarizeBatchReadResults(results)],
+      };
+    },
     async read(productId) {
       const result = await send({ action: 'read', productId });
       const status = commandStatus(result);
