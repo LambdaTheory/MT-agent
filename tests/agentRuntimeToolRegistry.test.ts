@@ -44,6 +44,9 @@ describe('agent runtime tool registry', () => {
       'operations.refreshActivityExecute',
       'closedOrder.syncFeedback',
       'closedOrder.runObservationReport',
+      'rental.daemonStatus',
+      'rental.platformSearch',
+      'rental.batchRead',
       'rental.copy',
       'rental.delist',
       'rental.tenancySet',
@@ -69,7 +72,7 @@ describe('agent runtime tool registry', () => {
 
     const tools = listAgentTools();
     tools.pop();
-    expect(listAgentTools()).toHaveLength(48);
+    expect(listAgentTools()).toHaveLength(51);
   });
 
   it('returns defensive copies of tool metadata', () => {
@@ -160,6 +163,9 @@ describe('agent runtime tool registry', () => {
     expect(findAgentTool('operations.refreshActivityExecute')).toMatchObject({ risk: 'high', requiresConfirmation: true });
     expect(findAgentTool('closedOrder.syncFeedback')).toMatchObject({ risk: 'write', requiresConfirmation: false });
     expect(findAgentTool('closedOrder.runObservationReport')).toMatchObject({ risk: 'write', requiresConfirmation: false });
+    expect(findAgentTool('rental.daemonStatus')).toMatchObject({ risk: 'read', requiresConfirmation: false });
+    expect(findAgentTool('rental.platformSearch')).toMatchObject({ risk: 'read', requiresConfirmation: false });
+    expect(findAgentTool('rental.batchRead')).toMatchObject({ risk: 'read', requiresConfirmation: false });
     expect(findAgentTool('rental.copy')).toMatchObject({ risk: 'high', requiresConfirmation: true });
     expect(findAgentTool('rental.delist')).toMatchObject({ risk: 'high', requiresConfirmation: true });
     expect(findAgentTool('rental.tenancySet')).toMatchObject({ risk: 'high', requiresConfirmation: true });
@@ -273,6 +279,9 @@ describe('agent runtime tool registry', () => {
       'operations.refreshActivityPlan',
       'closedOrder.syncFeedback',
       'closedOrder.runObservationReport',
+      'rental.daemonStatus',
+      'rental.platformSearch',
+      'rental.batchRead',
       'rental.copy',
       'rental.delist',
       'rental.tenancySet',
@@ -386,6 +395,29 @@ describe('agent runtime tool registry', () => {
         newLinkItems: { type: 'array' },
       },
       required: ['date', 'delistProductIds', 'newLinkItems'],
+      additionalProperties: false,
+    });
+    expect(findAgentTool('rental.daemonStatus')?.inputSchema).toMatchObject({
+      type: 'object',
+      additionalProperties: false,
+    });
+    expect(findAgentTool('rental.platformSearch')?.inputSchema).toMatchObject({
+      properties: {
+        keyword: { type: 'string' },
+      },
+      required: ['keyword'],
+      additionalProperties: false,
+    });
+    expect(findAgentTool('rental.batchRead')?.inputSchema).toMatchObject({
+      properties: {
+        productIds: {
+          type: 'array',
+          minItems: 1,
+          maxItems: 60,
+          items: { type: 'string' },
+        },
+      },
+      required: ['productIds'],
       additionalProperties: false,
     });
     expect(findAgentTool('rental.priceChange')?.inputSchema).toMatchObject({

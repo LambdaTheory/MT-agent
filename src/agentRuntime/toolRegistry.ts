@@ -276,6 +276,22 @@ const specRemovePlanArgumentsSchema = {
   required: ['query', 'keyword'],
   additionalProperties: false,
 };
+const rentalPlatformSearchArgumentsSchema = {
+  type: 'object',
+  properties: {
+    keyword: { type: 'string' },
+  },
+  required: ['keyword'],
+  additionalProperties: false,
+};
+const rentalBatchReadArgumentsSchema = {
+  type: 'object',
+  properties: {
+    productIds: { type: 'array', minItems: 1, maxItems: 60, items: { type: 'string' } },
+  },
+  required: ['productIds'],
+  additionalProperties: false,
+};
 const refreshActivityPlanArgumentsSchema = {
   type: 'object',
   properties: {
@@ -666,6 +682,27 @@ const agentTools: AgentToolDefinition[] = [
     risk: 'write',
     requiresConfirmation: false,
     inputSchema: noArgumentsSchema,
+  },
+  {
+    name: 'rental.daemonStatus',
+    description: '只读查询 rental-price-agent daemon 状态，用于确认底层 skill 服务是否可用；不会执行商品写操作。',
+    risk: 'read',
+    requiresConfirmation: false,
+    inputSchema: noArgumentsSchema,
+  },
+  {
+    name: 'rental.platformSearch',
+    description: '只读调用 rental-price-agent 在租赁后台按关键词搜索商品，返回候选商品；不会复制、下架或改价。',
+    risk: 'read',
+    requiresConfirmation: false,
+    inputSchema: rentalPlatformSearchArgumentsSchema,
+  },
+  {
+    name: 'rental.batchRead',
+    description: '只读批量读取多个端内ID的租赁后台当前规格和价格，单次最多 60 个商品；不会执行商品写操作。',
+    risk: 'read',
+    requiresConfirmation: false,
+    inputSchema: rentalBatchReadArgumentsSchema,
   },
   {
     name: 'rental.copy',
