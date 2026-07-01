@@ -186,6 +186,10 @@ function dataSourceStatus(context: PublicTrafficDataReportContext): DataSourceSt
   return { template, text: `数据源状态：${exposureText}；${dashboardText}` };
 }
 
+function dataSourceStatusLabel(status: DataSourceStatus): string {
+  return status.template === 'green' ? "<text_tag color='green'>数据完整</text_tag> " : '';
+}
+
 function funnelColumnSet(context: PublicTrafficDataReportContext): Record<string, unknown> {
   return { tag: 'column_set', element_id: 'funnel_summary', flex_mode: 'stretch', horizontal_spacing: '8px', columns: [
     nestedMetricColumn(`公域（${shortDataDate(context.date)}）`, publicFunnelMetrics(context), 4),
@@ -514,7 +518,7 @@ export function buildPublicTrafficCard(context: PublicTrafficDataReportContext, 
     },
     body: {
       elements: [
-        { tag: 'markdown', content: sourceStatus.text },
+        { tag: 'markdown', content: `${dataSourceStatusLabel(sourceStatus)}${sourceStatus.text}` },
         ...funnelElements(context),
         { tag: 'hr' },
         ...metricTables(context, productNameMap),

@@ -329,6 +329,9 @@ describe('public traffic report outputs', () => {
 
     expect(card.header).toMatchObject({ template });
     expect(JSON.stringify(card)).toContain(text);
+    if (template === 'green') {
+      expect(JSON.stringify(card)).toContain("<text_tag color='green'>数据完整</text_tag>");
+    }
   });
 
   it('keeps removed-link Agent data out of visible Markdown and Feishu card outputs', () => {
