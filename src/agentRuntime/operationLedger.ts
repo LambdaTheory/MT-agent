@@ -142,6 +142,15 @@ export async function appendOperationLedgerJsonlEntry(
   });
 }
 
+export async function recordOperationEvent(
+  outputDir: string,
+  entry: OperationPlanJournalEntry,
+): Promise<OperationPlanJournalEntry> {
+  await appendOperationLedgerJsonlEntry(outputDir, entry);
+  await appendOperationPlanJournalEntry(outputDir, entry);
+  return entry;
+}
+
 export async function loadOperationLedgerJsonlEntries(
   outputDir: string,
   date: string,

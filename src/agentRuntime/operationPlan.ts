@@ -21,11 +21,21 @@ export interface OperationPlan {
   metadata?: Record<string, unknown>;
 }
 
+export interface OperationSubject {
+  kind: 'product' | 'sameSkuGroup' | 'link';
+  id: string;
+  displayName?: string;
+}
+
 export interface OperationPlanJournalEntry {
   planId: string;
   at: string;
   event: string;
   stepId?: string;
   status?: OperationPlanStepStatus;
+  runId?: string;
+  decisionId?: string;
+  toolName?: string;
+  subject?: OperationSubject;
   metadata?: Record<string, unknown>;
 }
