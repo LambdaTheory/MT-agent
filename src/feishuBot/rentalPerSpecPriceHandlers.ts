@@ -5,12 +5,19 @@ import type { RentalPriceSkillClient } from './rentalPrice.js';
 
 const PRICE_FIELD_NAMES = new Set(['rent1day', 'rent2day', 'rent3day', 'rent4day', 'rent5day', 'rent7day', 'rent10day', 'rent15day', 'rent30day', 'rent60day', 'rent90day', 'rent180day', 'marketPrice', 'deposit', 'purchasePrice', 'costPrice', 'finalPayment']);
 
+type LedgerContext = { runId?: string; decisionId?: string; subject?: string };
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function readString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function readProductId(value: unknown): string | null {
+  const raw = readString(value);
+  return raw && /^\d+$/.test(raw) ? raw : null;
 }
 
 function money(value: string | number): string {
@@ -52,6 +59,10 @@ function formatPreviewLines(currentValues: Record<string, Record<string, string>
   }));
 }
 
+function executionEvent(toolName: string, productId: string, ok: boolean, ledgerContext?: LedgerContext): Record<string, unknown> | undefined {
+  return ledgerContext ? { type: 'execution', toolName, productId, ok, ...ledgerContext } : undefined;
+}
+
 export async function rentalPerSpecPricePlanResponse(
   args: Record<string, unknown>,
   reason: string,
@@ -59,7 +70,7 @@ export async function rentalPerSpecPricePlanResponse(
   outputDir: string,
   continuation?: AgentToolConfirmRequest['continuation'],
 ): Promise<BotResponse> {
-  const productId = readString(args.productId);
+  const productId = readProductId(args.productId);
   const specFields = readSpecPrices(args.specPrices);
   if (!productId || !specFields) return { text: '按规格改价参数无效：需要 productId 和 specPrices。', metadata: { toolName: 'rental.perSpecPricePlan', ok: false } };
   if (!client.read) return { text: '当前租赁改价客户端还没有接入只读价格读取能力，无法生成按规格改价预览。', metadata: { toolName: 'rental.perSpecPricePlan', ok: false, productId } };
@@ -86,14 +97,14 @@ export async function rentalPerSpecPricePlanResponse(
   };
 }
 
-export async function rentalPerSpecPriceApplyResponse(args: Record<string, unknown>, client: RentalPriceSkillClient, ledgerContext?: { runId?: string; decisionId?: string; subject?: string }): Promise<BotResponse> {
-  const productId = readString(args.productId);
+export async function rentalPerSpecPriceApplyResponse(args: Record<string, unknown>, client: RentalPriceSkillClient, ledgerContext?: LedgerContext): Promise<BotResponse> {
+  const productId = readProductId(args.productId);
   const specFields = readSpecFields(args.specFields);
   if (!productId || !specFields) throw new Error('按规格改价执行参数无效，请重新发起预览。');
   if (!client.applyPerSpec) throw new Error('当前租赁改价客户端不支持按规格改价。');
   const result = await client.applyPerSpec(productId, specFields);
   return {
     text: `${result.ok ? '按规格改价成功' : '按规格改价失败'}：商品 ${result.productId}\n${result.lines.join('\n')}`,
-    metadata: { toolName: 'rental.perSpecPriceApply', ok: result.ok, productId: result.productId, resultFile: result.audit?.resultFile, ...(ledgerContext ? { ledgerContext } : {}) },
+    metadata: { toolName: 'rental.perSpecPriceApply', ok: result.ok, productId: result.productId, resultFile: result.audit?.resultFile, ...(ledgerContext ? { ledgerContext, executionEvent: executionEvent('rental.perSpecPriceApply', result.productId, result.ok, ledgerContext) } : {}) },
   };
 }

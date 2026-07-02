@@ -45,6 +45,21 @@ describe('rental spec dimension tools', () => {
     expect(JSON.stringify(response.card)).toContain('rental.specDimApply');
   });
 
+  it('rejects non-numeric product ids before spec dimension preview reads', async () => {
+    const specDiscover = vi.fn();
+    const client = clientWith({ specDiscover });
+
+    const response = await executeAgentToolRequest(
+      { toolName: 'rental.specDimPlan', arguments: { productId: '../648', action: 'add', title: '激光险' }, reason: 'invalid id' },
+      outputDir,
+      { rentalPriceClient: client },
+    );
+
+    expect(specDiscover).not.toHaveBeenCalled();
+    expect(response.metadata).toMatchObject({ toolName: 'rental.specDimPlan', ok: false });
+    expect(response.text).toContain('参数无效');
+  });
+
   it('applies spec dimension add and remove through atomic client methods', async () => {
     const specAddDim = vi.fn(async () => ({ productId: '648', ok: true, itemTitle: '激光险', lines: ['spec-add-dim: ok'] }));
     const specRemoveDim = vi.fn(async () => ({ productId: '648', ok: true, specDimId: 'dim-1', itemTitle: 'dim-1', lines: ['spec-remove-dim: ok'] }));
@@ -65,5 +80,26 @@ describe('rental spec dimension tools', () => {
     expect(specRemoveDim).toHaveBeenCalledWith({ productId: '648', specDimId: 'dim-1' });
     expect(add.metadata).toMatchObject({ toolName: 'rental.specDimApply', ok: true, productId: '648', action: 'add' });
     expect(remove.metadata).toMatchObject({ toolName: 'rental.specDimApply', ok: true, productId: '648', action: 'remove' });
+  });
+
+  it('rejects non-numeric product ids before spec dimension apply calls', async () => {
+    const specAddDim = vi.fn();
+    const specRemoveDim = vi.fn();
+    const client = clientWith({ specAddDim, specRemoveDim });
+
+    await expect(executeAgentToolRequest(
+      { toolName: 'rental.specDimApply', arguments: { productId: '../648', action: 'add', title: '激光险' }, reason: 'invalid id' },
+      outputDir,
+      { rentalPriceClient: client },
+    )).rejects.toThrow('规格维度变更执行参数无效');
+
+    await expect(executeAgentToolRequest(
+      { toolName: 'rental.specDimApply', arguments: { productId: '../648', action: 'remove', specDimId: 'dim-1' }, reason: 'invalid id' },
+      outputDir,
+      { rentalPriceClient: client },
+    )).rejects.toThrow('规格维度变更执行参数无效');
+
+    expect(specAddDim).not.toHaveBeenCalled();
+    expect(specRemoveDim).not.toHaveBeenCalled();
   });
 });

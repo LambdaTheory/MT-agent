@@ -4,9 +4,15 @@ import type { BotResponse } from './types.js';
 import type { RentalPriceSkillClient } from './rentalPrice.js';
 
 type SpecDimAction = 'add' | 'remove';
+type LedgerContext = { runId?: string; decisionId?: string; subject?: string };
 
 function readString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function readProductId(value: unknown): string | null {
+  const raw = readString(value);
+  return raw && /^\d+$/.test(raw) ? raw : null;
 }
 
 function readAction(value: unknown): SpecDimAction | null {
@@ -14,7 +20,7 @@ function readAction(value: unknown): SpecDimAction | null {
 }
 
 function readSpecDimArgs(args: Record<string, unknown>): { productId: string; action: SpecDimAction; title?: string; specDimId?: string } | null {
-  const productId = readString(args.productId);
+  const productId = readProductId(args.productId);
   const action = readAction(args.action);
   if (!productId || !action) return null;
   if (action === 'add') {
@@ -23,6 +29,10 @@ function readSpecDimArgs(args: Record<string, unknown>): { productId: string; ac
   }
   const specDimId = readString(args.specDimId);
   return specDimId ? { productId, action, specDimId } : null;
+}
+
+function executionEvent(toolName: string, productId: string, ok: boolean, action: SpecDimAction, ledgerContext?: LedgerContext): Record<string, unknown> | undefined {
+  return ledgerContext ? { type: 'execution', toolName, productId, ok, action, ...ledgerContext } : undefined;
 }
 
 export async function rentalSpecDimPlanResponse(
@@ -60,7 +70,7 @@ export async function rentalSpecDimPlanResponse(
   };
 }
 
-export async function rentalSpecDimApplyResponse(args: Record<string, unknown>, client: RentalPriceSkillClient, ledgerContext?: { runId?: string; decisionId?: string; subject?: string }): Promise<BotResponse> {
+export async function rentalSpecDimApplyResponse(args: Record<string, unknown>, client: RentalPriceSkillClient, ledgerContext?: LedgerContext): Promise<BotResponse> {
   const request = readSpecDimArgs(args);
   if (!request) throw new Error('规格维度变更执行参数无效，请重新发起预览。');
   if (request.action === 'add') {
@@ -68,13 +78,13 @@ export async function rentalSpecDimApplyResponse(args: Record<string, unknown>, 
     const result = await client.specAddDim(request.productId, request.title!);
     return {
       text: `${result.ok ? '规格维度添加成功' : '规格维度添加失败'}：商品 ${result.productId}，${result.itemTitle}\n${result.lines.join('\n')}`,
-      metadata: { toolName: 'rental.specDimApply', ok: result.ok, productId: result.productId, action: request.action, ...(ledgerContext ? { ledgerContext } : {}) },
+      metadata: { toolName: 'rental.specDimApply', ok: result.ok, productId: result.productId, action: request.action, ...(ledgerContext ? { ledgerContext, executionEvent: executionEvent('rental.specDimApply', result.productId, result.ok, request.action, ledgerContext) } : {}) },
     };
   }
   if (!client.specRemoveDim) throw new Error('当前租赁商品客户端不支持规格维度删除。');
   const result = await client.specRemoveDim({ productId: request.productId, specDimId: request.specDimId! });
   return {
     text: `${result.ok ? '规格维度删除成功' : '规格维度删除失败'}：商品 ${result.productId}，维度 ${result.specDimId}\n${result.lines.join('\n')}`,
-    metadata: { toolName: 'rental.specDimApply', ok: result.ok, productId: result.productId, action: request.action, ...(ledgerContext ? { ledgerContext } : {}) },
+    metadata: { toolName: 'rental.specDimApply', ok: result.ok, productId: result.productId, action: request.action, ...(ledgerContext ? { ledgerContext, executionEvent: executionEvent('rental.specDimApply', result.productId, result.ok, request.action, ledgerContext) } : {}) },
   };
 }

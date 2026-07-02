@@ -49,6 +49,21 @@ describe('rental per-spec price tools', () => {
     expect(JSON.stringify(response.card)).toContain('rental.perSpecPriceApply');
   });
 
+  it('rejects non-numeric product ids before preview reads', async () => {
+    const read = vi.fn();
+    const client = clientWith({ read });
+
+    const response = await executeAgentToolRequest(
+      { toolName: 'rental.perSpecPricePlan', arguments: { productId: '../648', specPrices: [{ specId: '3863', fields: { rent1day: '80.00' } }] }, reason: 'invalid id' },
+      outputDir,
+      { rentalPriceClient: client },
+    );
+
+    expect(read).not.toHaveBeenCalled();
+    expect(response.metadata).toMatchObject({ toolName: 'rental.perSpecPricePlan', ok: false });
+    expect(response.text).toContain('productId');
+  });
+
   it('applies only the specified spec values', async () => {
     const applyPerSpec = vi.fn(async () => ({ productId: '648', ok: true, lines: ['apply: ok', 'submit: ok', 'verify: ok'] }));
     const client = clientWith({ applyPerSpec });
@@ -62,5 +77,18 @@ describe('rental per-spec price tools', () => {
     expect(applyPerSpec).toHaveBeenCalledWith('648', { '3863': { rent1day: '80.00' } });
     expect(response.text).toContain('按规格改价成功：商品 648');
     expect(response.metadata).toMatchObject({ toolName: 'rental.perSpecPriceApply', ok: true, productId: '648' });
+  });
+
+  it('rejects non-numeric product ids before applying', async () => {
+    const applyPerSpec = vi.fn();
+    const client = clientWith({ applyPerSpec });
+
+    await expect(executeAgentToolRequest(
+      { toolName: 'rental.perSpecPriceApply', arguments: { productId: '../648', specFields: { '3863': { rent1day: '80.00' } } }, reason: 'invalid id' },
+      outputDir,
+      { rentalPriceClient: client },
+    )).rejects.toThrow('按规格改价执行参数无效');
+
+    expect(applyPerSpec).not.toHaveBeenCalled();
   });
 });
