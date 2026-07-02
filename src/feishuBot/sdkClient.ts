@@ -379,7 +379,7 @@ function statusCard(title: string, content: string, template: 'blue' | 'green' |
 }
 
 function isFailedBotResponse(response: { metadata?: Record<string, unknown> }): boolean {
-  return response.metadata?.ok === false;
+  return response.metadata?.ok === false && response.metadata.status !== 'pending_confirmation';
 }
 
 function agentToolResultStatusCard(response: { text: string; metadata?: Record<string, unknown> }): FeishuCardPayload {
@@ -828,7 +828,7 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
             try {
               const missionResult = await resolveDailyMissionApproval(request, config.outputDir ?? 'output', agentToolExecutionOptions);
               const response = missionResult
-                ? { text: missionResult.text, metadata: { ok: missionResult.ok } }
+                ? { text: missionResult.text, card: missionResult.card, metadata: { ok: missionResult.ok, status: missionResult.status } }
                 : await executeAgentToolRequestWithContinuation(request, config.outputDir ?? 'output', agentToolExecutionOptions);
               const ok = !isFailedBotResponse(response);
               setRentalActionStatus(claim.key, ok ? 'completed' : 'failed');
