@@ -1,10 +1,10 @@
-import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { createExposureCollector, createSalesCollector } from '../agentRuntime/dailyMissionCollectors.js';
 import { collectRecentOperations, type ContextCollector } from '../agentRuntime/dailyMissionContext.js';
 import { runDailyMissionPlan } from '../agentRuntime/dailyMissionOrchestrator.js';
 import { writeDailyJournal } from '../agentRuntime/dailyJournalWriter.js';
-import { RuleBasedDecisionBuilder } from '../agentRuntime/decisionBuilder.js';
+import { createDecisionBuilder, resolveLlmProviderFromEnv } from '../agentRuntime/decisionBuilderFactory.js';
 import { FileHotspotEventProvider } from '../agentRuntime/hotspotEvents.js';
 import { loadEnv } from '../config/loadEnv.js';
 
@@ -12,15 +12,6 @@ function readArg(argv: string[], name: string): string | undefined {
   const flagIndex = argv.indexOf(name);
   if (flagIndex >= 0) return argv[flagIndex + 1];
   return argv.find((item) => item.startsWith(`${name}=`))?.slice(name.length + 1);
-}
-
-async function readOptionalJson(path: string): Promise<unknown | undefined> {
-  try {
-    return JSON.parse(await readFile(path, 'utf8')) as unknown;
-  } catch (error) {
-    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return undefined;
-    throw error;
-  }
 }
 
 export async function main(argv = process.argv.slice(2)): Promise<void> {
@@ -32,8 +23,8 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     path: join(outputDir, 'daily-mission', date, 'hotspot-events.json'),
   });
   const collectors: ContextCollector[] = [
-    { name: 'exposure', collect: async () => ({ exposure: await readOptionalJson(join(outputDir, 'daily-mission', date, 'exposure.json')) }) },
-    { name: 'sales', collect: async () => ({ sales: await readOptionalJson(join(outputDir, 'daily-mission', date, 'sales.json')) }) },
+    createExposureCollector(outputDir),
+    createSalesCollector(outputDir),
     { name: 'recentOperations', collect: async () => ({ recentOperations: await collectRecentOperations(outputDir, date, 7) }) },
     { name: 'hotspots', collect: async () => ({ hotspots: await hotspotProvider.listEvents({ date, lookaheadDays: 7 }) }) },
   ];
@@ -44,7 +35,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     runId,
     trigger: 'manual',
     collectors,
-    decisionBuilder: new RuleBasedDecisionBuilder(),
+    decisionBuilder: createDecisionBuilder({ provider: resolveLlmProviderFromEnv() }),
   });
   await writeDailyJournal({
     outputDir,

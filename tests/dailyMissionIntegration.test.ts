@@ -72,12 +72,13 @@ describe('daily mission integration', () => {
     expect(markdown).toContain('演唱会A');
   });
 
-  it('CLI collects exposure, sales, recent operations, and hotspots when local inputs exist', async () => {
+  it('CLI collects exposure, sales, recent operations, and hotspots from report context', async () => {
     const date = '2026-07-01';
     const missionDir = join(dir, 'daily-mission', date);
+    const reportDir = join(dir, date);
     await mkdir(missionDir, { recursive: true });
-    await writeFile(join(missionDir, 'exposure.json'), JSON.stringify({ summary: 'exposure' }), 'utf8');
-    await writeFile(join(missionDir, 'sales.json'), JSON.stringify({ summary: 'sales' }), 'utf8');
+    await mkdir(reportDir, { recursive: true });
+    await writeFile(join(reportDir, 'report-context.json'), JSON.stringify({ date, summary: { '1d': { exposure: 1 } }, rows: [], orderAnalysis: { pages: {} } }), 'utf8');
     await writeFile(join(missionDir, 'hotspot-events.json'), JSON.stringify([
       {
         eventId: 'e1',
@@ -92,13 +93,13 @@ describe('daily mission integration', () => {
     await runDailyMissionCli(['--output-dir', dir, '--date', date, '--run-id', 'run-cli']);
 
     const context = JSON.parse(await readFile(join(missionDir, 'collected-context.json'), 'utf8')) as {
-      exposure?: { summary: string };
-      sales?: { summary: string };
+      exposure?: { date: string; source: string; context: { date: string } };
+      sales?: { date: string; source: string; context: { date: string } };
       recentOperations?: unknown[];
       hotspots?: unknown[];
     };
-    expect(context.exposure).toEqual({ summary: 'exposure' });
-    expect(context.sales).toEqual({ summary: 'sales' });
+    expect(context.exposure).toEqual({ date, source: 'publicTraffic', context: expect.objectContaining({ date }) });
+    expect(context.sales).toEqual({ date, source: 'orderAnalysis', context: expect.objectContaining({ date }) });
     expect(context.recentOperations).toEqual([]);
     expect(context.hotspots).toHaveLength(1);
   });
