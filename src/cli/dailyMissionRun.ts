@@ -5,6 +5,7 @@ import { runDailyMissionPlan } from '../agentRuntime/dailyMissionOrchestrator.js
 import { writeDailyJournal } from '../agentRuntime/dailyJournalWriter.js';
 import { RuleBasedDecisionBuilder } from '../agentRuntime/decisionBuilder.js';
 import { FileHotspotEventProvider } from '../agentRuntime/hotspotEvents.js';
+import { loadEnv } from '../config/loadEnv.js';
 
 function readArg(argv: string[], name: string): string | undefined {
   const flagIndex = argv.indexOf(name);
@@ -13,7 +14,8 @@ function readArg(argv: string[], name: string): string | undefined {
 }
 
 export async function main(argv = process.argv.slice(2)): Promise<void> {
-  const outputDir = readArg(argv, '--output-dir') ?? process.env.MT_OUTPUT_DIR ?? 'output';
+  await loadEnv();
+  const outputDir = readArg(argv, '--output-dir') ?? process.env.MT_AGENT_OUTPUT_DIR ?? 'output';
   const date = readArg(argv, '--date') ?? new Date().toISOString().slice(0, 10);
   const runId = readArg(argv, '--run-id') ?? `run-${date}-${Date.now()}`;
   const hotspotProvider = new FileHotspotEventProvider({

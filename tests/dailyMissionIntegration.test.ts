@@ -57,9 +57,15 @@ describe('daily mission integration', () => {
 
     expect(result.run.status).toBe('waiting_approval');
     expect(result.decisions).toHaveLength(1);
+    await readFile(join(hotspotDir, 'mission-run.json'), 'utf8');
+    await readFile(join(hotspotDir, 'collected-context.json'), 'utf8');
+    await readFile(join(hotspotDir, 'decisions.json'), 'utf8');
+    await readFile(join(hotspotDir, 'approval-request.json'), 'utf8');
+    await readFile(join(hotspotDir, 'daily-journal.json'), 'utf8');
     const events = (await loadOperationLedgerJsonlEntries(dir, '2026-07-01')).map((entry) => entry.event);
     expect(events).toContain('data_collected');
     expect(events).toContain('journal_written');
+    expect(events).not.toContain('approval_requested');
     expect(events).not.toContain('execution_started');
     const markdown = await readFile(join(hotspotDir, 'daily-journal.md'), 'utf8');
     expect(markdown).toContain('演唱会A');

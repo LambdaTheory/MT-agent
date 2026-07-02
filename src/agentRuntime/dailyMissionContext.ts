@@ -6,13 +6,15 @@ export interface CollectedContext {
   runId: string;
   date: string;
   outputDir: string;
+  collectedAt: string;
   exposure?: unknown;
+  sales?: unknown;
   hotspots?: HotspotEvent[];
   recentOperations?: OperationPlanJournalEntry[];
   missingSources: string[];
 }
 
-export type CollectedContextPatch = Partial<Omit<CollectedContext, 'runId' | 'date' | 'outputDir' | 'missingSources'>>;
+export type CollectedContextPatch = Partial<Omit<CollectedContext, 'runId' | 'date' | 'outputDir' | 'collectedAt' | 'missingSources'>>;
 
 export interface ContextCollectionBase {
   runId: string;
@@ -29,14 +31,15 @@ export async function collectDailyMissionContext(
   collectors: ContextCollector[],
   base: ContextCollectionBase,
 ): Promise<CollectedContext> {
-  const context: CollectedContext = { ...base, missingSources: [] };
-  for (const collector of collectors) {
-    try {
-      Object.assign(context, await collector.collect(base));
-    } catch {
-      context.missingSources.push(collector.name);
+  const context: CollectedContext = { ...base, collectedAt: new Date().toISOString(), missingSources: [] };
+  const results = await Promise.allSettled(collectors.map((collector) => collector.collect(base)));
+  results.forEach((result, index) => {
+    if (result.status === 'fulfilled') {
+      Object.assign(context, result.value);
+    } else {
+      context.missingSources.push(collectors[index].name);
     }
-  }
+  });
   return context;
 }
 

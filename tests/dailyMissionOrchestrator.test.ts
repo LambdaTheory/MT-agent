@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { runDailyMissionPlan } from '../src/agentRuntime/dailyMissionOrchestrator.js';
 import { RuleBasedDecisionBuilder } from '../src/agentRuntime/decisionBuilder.js';
 import type { ContextCollector } from '../src/agentRuntime/dailyMissionContext.js';
+import type { DecisionBuilder } from '../src/agentRuntime/decisionBuilder.js';
 import { loadOperationLedgerJsonlEntries } from '../src/agentRuntime/operationLedger.js';
 
 describe('runDailyMissionPlan', () => {
@@ -58,7 +59,39 @@ describe('runDailyMissionPlan', () => {
     const events = (await loadOperationLedgerJsonlEntries(dir, '2026-07-01')).map((entry) => entry.event);
     expect(events).toContain('data_collected');
     expect(events).toContain('decision_created');
-    expect(events).toContain('approval_requested');
+    expect(events).not.toContain('approval_requested');
     expect(events).not.toContain('execution_started');
+  });
+
+  it('records approval_requested only for executable approvals', async () => {
+    const builder: DecisionBuilder = {
+      build: async (context) => ([{
+        decisionId: 'dec-1',
+        runId: context.runId,
+        title: '审批执行',
+        subjects: [{ kind: 'product', id: '648' }],
+        operationType: 'price_down',
+        recommendation: 'approve_to_execute',
+        risk: 'write',
+        rationale: ['证据充分'],
+        evidenceRefs: ['manual'],
+        proposedTool: { toolName: 'rental.pricePreview', arguments: { productId: '648' } },
+        uncertainties: [],
+      }]),
+    };
+
+    await runDailyMissionPlan({
+      outputDir: dir,
+      date: '2026-07-01',
+      runId: 'run-1',
+      trigger: 'manual',
+      collectors: [],
+      decisionBuilder: builder,
+    });
+
+    const entries = await loadOperationLedgerJsonlEntries(dir, '2026-07-01');
+    const approval = entries.find((entry) => entry.event === 'approval_requested');
+    expect(approval?.decisionId).toBe('dec-1');
+    expect(approval?.subject).toEqual({ kind: 'product', id: '648' });
   });
 });

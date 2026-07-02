@@ -5,6 +5,7 @@ import type { CollectedContext } from './dailyMissionContext.js';
 import type { ClassifiedDecisions } from './decisionPolicy.js';
 import type { DecisionRecord } from './decisionRecord.js';
 import { recordOperationEvent } from './operationLedger.js';
+import type { OperationSubject } from './operationPlan.js';
 
 export interface WriteDailyJournalInput {
   outputDir: string;
@@ -45,6 +46,10 @@ function renderMarkdown(input: WriteDailyJournalInput): string {
   ].join('\n');
 }
 
+function runSubject(date: string): OperationSubject {
+  return { kind: 'link', id: `daily-mission:${date}` };
+}
+
 export async function writeDailyJournal(input: WriteDailyJournalInput): Promise<DailyJournalPaths> {
   const jsonPath = dailyMissionArtifactPath(input.outputDir, input.date, 'dailyJournalJson');
   const markdownPath = dailyMissionArtifactPath(input.outputDir, input.date, 'dailyJournalMarkdown');
@@ -64,6 +69,8 @@ export async function writeDailyJournal(input: WriteDailyJournalInput): Promise<
     at: `${input.date}T00:00:00.000Z`,
     event: 'journal_written',
     runId: input.runId,
+    decisionId: `${input.runId}:journal_written`,
+    subject: runSubject(input.date),
   });
   return { jsonPath, markdownPath };
 }

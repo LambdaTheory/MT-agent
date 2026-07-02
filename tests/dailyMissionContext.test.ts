@@ -21,6 +21,7 @@ describe('collectDailyMissionContext', () => {
     const ctx = await collectDailyMissionContext(collectors, base);
 
     expect(ctx.runId).toBe('run-1');
+    expect(ctx.collectedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     expect(ctx.exposure).toEqual({ summary: 'ok' });
     expect(ctx.hotspots).toEqual([]);
     expect(ctx.missingSources).toEqual([]);
@@ -34,6 +35,32 @@ describe('collectDailyMissionContext', () => {
     const ctx = await collectDailyMissionContext(collectors, base);
 
     expect(ctx.missingSources).toContain('sales');
+  });
+
+  it('runs collectors in parallel and preserves sales context', async () => {
+    const completed: string[] = [];
+    const collectors: ContextCollector[] = [
+      {
+        name: 'slow',
+        collect: async () => {
+          await new Promise((resolve) => setTimeout(resolve, 20));
+          completed.push('slow');
+          return { exposure: { summary: 'slow' } };
+        },
+      },
+      {
+        name: 'fast',
+        collect: async () => {
+          completed.push('fast');
+          return { sales: { summary: 'fast' } };
+        },
+      },
+    ];
+
+    const ctx = await collectDailyMissionContext(collectors, base);
+
+    expect(completed).toEqual(['fast', 'slow']);
+    expect(ctx.sales).toEqual({ summary: 'fast' });
   });
 });
 

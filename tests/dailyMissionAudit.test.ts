@@ -36,6 +36,9 @@ describe('buildDailyMissionAuditSummary', () => {
 
     expect(summary.eventCounts.decision_created).toBe(1);
     expect(summary.eventCounts.approval_requested).toBe(1);
+    expect(summary.events).toEqual(['decision_created', 'approval_requested']);
+    expect(summary.approvals).toEqual(['d1']);
+    expect(summary.executions).toEqual([]);
     expect(summary.lines.join('\n')).toContain('2026-07-01');
   });
 });

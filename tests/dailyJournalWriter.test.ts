@@ -25,6 +25,7 @@ describe('writeDailyJournal', () => {
         runId: 'run-1',
         date: '2026-07-01',
         outputDir: dir,
+        collectedAt: '2026-07-01T00:00:00.000Z',
         missingSources: ['sales'],
       },
       decisions: [],
@@ -38,5 +39,7 @@ describe('writeDailyJournal', () => {
     expect(json.runId).toBe('run-1');
     const events = await loadOperationLedgerJsonlEntries(dir, '2026-07-01');
     expect(events.map((entry) => entry.event)).toContain('journal_written');
+    expect(events[0].decisionId).toBe('run-1:journal_written');
+    expect(events[0].subject).toEqual({ kind: 'link', id: 'daily-mission:2026-07-01' });
   });
 });

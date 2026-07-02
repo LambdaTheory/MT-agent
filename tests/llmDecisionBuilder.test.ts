@@ -7,6 +7,7 @@ const context: CollectedContext = {
   runId: 'run-9',
   date: '2026-07-01',
   outputDir: '/tmp/out',
+  collectedAt: '2026-07-01T00:00:00.000Z',
   missingSources: [],
 };
 
