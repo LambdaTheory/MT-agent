@@ -114,8 +114,19 @@ const publicTrafficReportQueryArgumentsSchema = {
 };
 const keywordArgumentsSchema = { type: 'object', properties: { keyword: { type: 'string' }, date: reportDateSchema }, required: ['keyword'], additionalProperties: false };
 const productRankingArgumentsSchema = { type: 'object', properties: { query: { type: 'string' } }, required: ['query'], additionalProperties: false };
-const inventoryStatusQueryArgumentsSchema = { type: 'object', properties: { query: { type: 'string' } }, required: ['query'], additionalProperties: false };
 const positiveIntegerLikeSchema = { type: ['integer', 'string'], pattern: '^[1-9]\\d*$', minimum: 1 };
+const categoryRankingArgumentsSchema = {
+  type: 'object',
+  properties: {
+    category: { type: 'string' },
+    metric: { type: 'string', enum: ['shippedOrders', 'amount', 'exposure'] },
+    periodDays: { type: ['integer', 'string'], enum: [1, 7, 30, '1', '7', '30'] },
+    limit: positiveIntegerLikeSchema,
+  },
+  required: ['metric', 'periodDays'],
+  additionalProperties: false,
+};
+const inventoryStatusQueryArgumentsSchema = { type: 'object', properties: { query: { type: 'string' } }, required: ['query'], additionalProperties: false };
 const linkRegistryResolveProductsArgumentsSchema = {
   type: 'object',
   properties: {
@@ -549,6 +560,13 @@ const agentTools: AgentToolDefinition[] = [
     requiresConfirmation: false,
     inputSchema: productRankingArgumentsSchema,
     resultMetadataSchema: productRankingResultMetadataSchema,
+  },
+  {
+    name: 'product.rankByCategory',
+    description: '按链接档案里的品类/类型筛选商品，并按公域日报指标排名。metric 支持 shippedOrders/amount/exposure，periodDays 支持 1/7/30。',
+    risk: 'read',
+    requiresConfirmation: false,
+    inputSchema: categoryRankingArgumentsSchema,
   },
   {
     name: 'productId.lookup',

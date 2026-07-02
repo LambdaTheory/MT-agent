@@ -15,6 +15,7 @@ describe('agent runtime tool registry', () => {
       'publicTraffic.reportQuery',
       'product.query',
       'product.rankBestSameSku',
+      'product.rankByCategory',
       'productId.lookup',
       'productId.lookupCard',
       'inventory.statusOverview',
@@ -80,7 +81,7 @@ describe('agent runtime tool registry', () => {
 
     const tools = listAgentTools();
     tools.pop();
-    expect(listAgentTools()).toHaveLength(59);
+    expect(listAgentTools()).toHaveLength(60);
   });
 
   it('returns defensive copies of tool metadata', () => {
@@ -264,6 +265,7 @@ describe('agent runtime tool registry', () => {
       'publicTraffic.reportQuery',
       'product.query',
       'product.rankBestSameSku',
+      'product.rankByCategory',
       'productId.lookup',
       'productId.lookupCard',
       'inventory.statusOverview',

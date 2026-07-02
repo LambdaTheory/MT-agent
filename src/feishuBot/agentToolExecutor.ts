@@ -10,6 +10,7 @@ import { loadClosedOrderIngestState } from '../closedOrderFeedback/ingest.js';
 import { buildClosedOrderObservationReport, writeClosedOrderObservationReportArtifacts } from '../closedOrderFeedback/observation.js';
 import { loadClosedOrderRegistryContext, type ClosedOrderRegistryPathsInput } from '../closedOrderFeedback/runtime.js';
 import type { AgentIntent, AgentProblemType } from '../agentData/types.js';
+import { rankProductsByCategory, type CategoryRankingMetric } from '../agentData/categoryRanking.js';
 import { openLinkRegistryGovernancePrompt } from '../linkRegistry/governanceSession.js';
 import { openLinkRegistryMaintenancePrompt } from '../linkRegistry/maintenanceSession.js';
 import { createLinkRegistry } from '../linkRegistry/store.js';
@@ -236,6 +237,42 @@ async function inventoryStatusToolResponse(
 function readProblemType(value: unknown): AgentProblemType {
   if (value === 'low_exposure' || value === 'weak_conversion' || value === 'high_potential' || value === 'new_product_pool' || value === 'recommended_action') return value;
   throw new Error('problemType must be low_exposure, weak_conversion, high_potential, new_product_pool, or recommended_action');
+}
+
+function readCategoryRankingMetric(value: unknown): CategoryRankingMetric {
+  if (value === 'shippedOrders' || value === 'amount' || value === 'exposure') return value;
+  throw new Error('metric must be shippedOrders, amount, or exposure');
+}
+
+function readPeriodDays(value: unknown): 1 | 7 | 30 {
+  const parsed = typeof value === 'string' ? Number(value) : value;
+  if (parsed === 1 || parsed === 7 || parsed === 30) return parsed;
+  throw new Error('periodDays must be 1, 7, or 30');
+}
+
+function readOptionalLimit(value: unknown): number | undefined {
+  if (value === undefined) return undefined;
+  const parsed = typeof value === 'string' ? Number(value) : value;
+  if (Number.isInteger(parsed) && typeof parsed === 'number' && parsed > 0) return parsed;
+  throw new Error('limit must be a positive integer');
+}
+
+function formatCategoryRankingMetric(metric: CategoryRankingMetric): string {
+  if (metric === 'shippedOrders') return '发货';
+  if (metric === 'amount') return '金额';
+  return '曝光';
+}
+
+function formatCategoryRankingResponse(result: ReturnType<typeof rankProductsByCategory>): BotResponse {
+  const label = formatCategoryRankingMetric(result.metric);
+  const lines = result.items.map((item, index) => `${index + 1}. ${item.productName}（端内ID ${item.internalProductId}，${item.category}）${label} ${item.value}`);
+  return {
+    text: [
+      `品类排名：${result.category ?? '全部'} ${result.period} ${label}`,
+      ...lines,
+    ].join('\n'),
+    metadata: { toolName: 'product.rankByCategory', date: result.date, category: result.category, metric: result.metric, period: result.period, items: result.items },
+  };
 }
 
 function queryableEntries(entries: LinkRegistryEntry[]): LinkRegistryEntry[] {
@@ -1671,6 +1708,18 @@ export async function executeAgentToolRequest(
     case 'product.rankBestSameSku': {
       const query = requireString(request.arguments.query, 'query');
       return runReadOnlyAgentIntent(outputDir, { type: 'best_product_by_same_sku', query }, options);
+    }
+    case 'product.rankByCategory': {
+      const report = await findReportContextForTool(outputDir, readOptionalDate(request.arguments.date));
+      if (!report) return { text: missingReportContextText(readOptionalDate(request.arguments.date)) };
+      const registryContext = await loadClosedOrderRegistryContext(options.closedOrderRegistryPaths);
+      const result = rankProductsByCategory(report.context, registryContext.registry, {
+        ...(typeof request.arguments.category === 'string' ? { category: request.arguments.category } : {}),
+        metric: readCategoryRankingMetric(request.arguments.metric),
+        periodDays: readPeriodDays(request.arguments.periodDays),
+        limit: readOptionalLimit(request.arguments.limit),
+      });
+      return formatCategoryRankingResponse(result);
     }
     case 'productId.lookup': {
       const date = readOptionalDate(request.arguments.date);
