@@ -1,9 +1,9 @@
-import { buildAgentToolConfirmCard } from '../agentRuntime/approvalCard.js';
-import { decisionToConfirmRequest } from '../agentRuntime/dailyMissionApproval.js';
+import { buildAgentToolConfirmCard, type AgentToolConfirmRequest } from '../agentRuntime/approvalCard.js';
 import { classifyDecisions } from '../agentRuntime/decisionPolicy.js';
 import { resolveLlmProviderFromEnv } from '../agentRuntime/decisionBuilderFactory.js';
 import { buildReadOnlyExploreTools } from '../agentRuntime/exploreToolset.js';
 import { runAgentExploreLoop } from '../agentRuntime/agentExploreLoop.js';
+import type { DecisionRecord } from '../agentRuntime/decisionRecord.js';
 import type { AgentToolExecutionOptions } from './agentToolExecutor.js';
 import type { BotResponse } from './types.js';
 import type { LlmProvider } from '../llm/provider.js';
@@ -16,6 +16,15 @@ export interface AgentExploreResponseOptions {
 
 function formatSteps(steps: Array<{ tool: string }>): string {
   return steps.length ? `探索步骤：${steps.map((step) => step.tool).join(' -> ')}` : '探索步骤：无';
+}
+
+function exploreDecisionToConfirmRequest(decision: DecisionRecord): AgentToolConfirmRequest {
+  if (!decision.proposedTool) throw new Error(`Decision ${decision.decisionId} has no proposedTool`);
+  return {
+    toolName: decision.proposedTool.toolName,
+    arguments: decision.proposedTool.arguments,
+    reason: `agentExplore:${decision.decisionId} ${decision.title}`,
+  };
 }
 
 export async function agentExploreResponse(
@@ -42,7 +51,7 @@ export async function agentExploreResponse(
 
   return {
     text,
-    ...(approval ? { card: buildAgentToolConfirmCard(decisionToConfirmRequest(approval)) } : {}),
+    ...(approval ? { card: buildAgentToolConfirmCard(exploreDecisionToConfirmRequest(approval)) } : {}),
     metadata: { toolName: 'agentExplore', ok: result.stopReason !== 'invalid', stopReason: result.stopReason, stepCount: result.steps.length },
   };
 }

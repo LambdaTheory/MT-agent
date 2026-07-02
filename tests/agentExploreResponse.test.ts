@@ -77,7 +77,10 @@ describe('agentExploreResponse', () => {
 
     expect(delist).not.toHaveBeenCalled();
     expect(response.text).toContain('待确认执行：1 项');
-    expect(readConfirmRequest(response.card).toolName).toBe('rental.delist');
+    const request = readConfirmRequest(response.card);
+    expect(request.toolName).toBe('rental.delist');
+    expect(request.reason).not.toContain('[[dailyMission:');
+    expect(request.reason).toContain('下架 648');
   });
 
   it('routes explicit explore commands from the Feishu unknown branch', async () => {
