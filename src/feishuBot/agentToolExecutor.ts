@@ -1176,7 +1176,6 @@ async function rentalDelistBatchResponse(
     try {
       const result = await client.delist(productId);
       results.push(result);
-      if (!result.ok && !isSafeMissingDelistResult(result)) break;
     } catch (error) {
       results.push({ productId, ok: false, lines: [error instanceof Error ? error.message : String(error)] });
       break;
@@ -1187,9 +1186,9 @@ async function rentalDelistBatchResponse(
   const skippedMissing = results.filter((result) => isSafeMissingDelistResult(result));
   const failed = results.filter((result) => !result.ok && !isSafeMissingDelistResult(result));
   const pending = productIds.slice(results.length);
-  const completedWithoutBlocking = failed.length === 0 && pending.length === 0;
-  const ok = completedWithoutBlocking && skippedMissing.length === 0;
-  const title = ok ? '批量下架完成' : completedWithoutBlocking ? '批量下架部分完成' : '批量下架中断';
+  const allAttempted = pending.length === 0;
+  const ok = allAttempted && failed.length === 0 && skippedMissing.length === 0;
+  const title = ok ? '批量下架完成' : allAttempted ? '批量下架部分完成' : '批量下架中断';
   const detailLines = results.map((result, index) => {
     const status = result.ok ? '成功' : isSafeMissingDelistResult(result) ? '跳过' : '失败';
     const detail = result.lines.length ? `｜${result.lines.slice(0, 4).join('；')}` : '';

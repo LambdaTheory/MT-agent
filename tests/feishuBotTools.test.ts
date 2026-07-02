@@ -2795,6 +2795,43 @@ describe('handleBotIntent', () => {
     });
   });
 
+  it('continues batch delist after an individual product fails verification', async () => {
+    const calls: string[] = [];
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run'); },
+      async execute() { throw new Error('execute should not run'); },
+      async copy() { throw new Error('copy should not run'); },
+      async delist(productId) {
+        calls.push(productId);
+        if (productId === '467') {
+          return { productId, ok: false, lines: ['delist: error', 'Product still visible after delist'] };
+        }
+        return { productId, ok: true, lines: ['delist: ok'] };
+      },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+
+    const response = await executeAgentToolRequest(
+      { toolName: 'rental.delistBatch', arguments: { productIds: ['251', '467', '252'] }, reason: '批量下架测试' },
+      'output',
+      { rentalPriceClient },
+    );
+
+    expect(calls).toEqual(['251', '467', '252']);
+    expect(response.text).toContain('批量下架部分完成');
+    expect(response.text).toContain('失败：1 个（467）');
+    expect(response.text).not.toContain('未执行');
+    expect(response.metadata).toMatchObject({
+      toolName: 'rental.delistBatch',
+      ok: false,
+      delistedProductIds: ['251', '252'],
+      failedProductIds: ['467'],
+      pendingProductIds: [],
+    });
+  });
+
   it('keeps rental.delist compatible with productIds arrays from the planner', async () => {
     const calls: string[] = [];
     const rentalPriceClient: RentalPriceSkillClient = {
