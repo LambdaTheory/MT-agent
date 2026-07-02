@@ -40,7 +40,7 @@ function buildToolCatalogPrompt(): string {
   const tools = listAgentTools().filter((tool) => tool.plannerVisible !== false);
   return [
     '可用可执行工具（proposedTool.toolName 只能取以下之一）：',
-    ...tools.map((tool) => `- ${tool.name}: ${tool.description}`),
+    ...tools.map((tool) => `- ${tool.name}: ${tool.description}; inputSchema=${JSON.stringify(tool.inputSchema ?? {})}`),
   ].join('\n');
 }
 

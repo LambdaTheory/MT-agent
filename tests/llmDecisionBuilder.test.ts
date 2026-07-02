@@ -19,6 +19,7 @@ describe('LlmDecisionBuilder', () => {
 
     const system = provider.lastInput?.messages.find((message) => message.role === 'system')?.content ?? '';
     expect(system).toContain('rental.pricePreview');
+    expect(system).toContain('productIds');
     expect(system).not.toContain('rental.priceApply');
   });
 
