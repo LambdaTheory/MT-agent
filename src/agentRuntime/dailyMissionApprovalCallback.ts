@@ -2,8 +2,12 @@ import type { AgentToolExecutionOptions } from '../feishuBot/agentToolExecutor.j
 import type { AgentToolConfirmRequest } from './approvalCard.js';
 import { parseDailyMissionReason } from './dailyMissionApproval.js';
 import { decisionMatchesRequest, findApprovedDecision, loadApprovalRequest } from './dailyMissionApprovalStore.js';
-import { appendExecutionResult, executeApprovedDecision, type DailyMissionExecutionResult } from './dailyMissionExecution.js';
-import { findDailyMissionRunByRunId, isDailyMissionTerminalStatus } from './dailyMissionRun.js';
+import { appendExecutionResult, executeApprovedDecision, loadAllExecutionResults, type DailyMissionExecutionResult } from './dailyMissionExecution.js';
+import { findDailyMissionRunByRunId, isDailyMissionTerminalStatus, saveDailyMissionRun, transitionDailyMissionRun } from './dailyMissionRun.js';
+
+function executionStatus(result: DailyMissionExecutionResult): DailyMissionExecutionResult['status'] {
+  return result.status ?? (result.ok ? 'executed' : 'failed');
+}
 
 export async function resolveDailyMissionApproval(
   request: AgentToolConfirmRequest,
@@ -29,5 +33,18 @@ export async function resolveDailyMissionApproval(
   }
   const result = await executeApprovedDecision({ decision, outputDir, date: run.date, options });
   await appendExecutionResult(outputDir, run.date, result);
+  const now = new Date().toISOString();
+  let advanced = run.status === 'waiting_approval' ? transitionDailyMissionRun(run, 'executing', now) : run;
+  const results = await loadAllExecutionResults(outputDir, run.date);
+  const pending = results.some((entry) => executionStatus(entry) === 'pending_confirmation');
+  const terminalDecisionIds = new Set(results
+    .filter((entry) => executionStatus(entry) === 'executed' || executionStatus(entry) === 'failed')
+    .map((entry) => entry.decisionId));
+  const allApprovedTerminal = approval.approvals.every((item) => terminalDecisionIds.has(item.decisionId));
+  if (!pending && allApprovedTerminal) {
+    const failedDecisionIds = new Set(results.filter((entry) => executionStatus(entry) === 'failed').map((entry) => entry.decisionId));
+    advanced = transitionDailyMissionRun(advanced, approval.approvals.some((item) => failedDecisionIds.has(item.decisionId)) ? 'failed' : 'completed', now);
+  }
+  await saveDailyMissionRun(outputDir, advanced);
   return result;
 }

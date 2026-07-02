@@ -75,13 +75,18 @@ export async function loadExecutionResult(
   date: string,
   decisionId: string,
 ): Promise<DailyMissionExecutionResult | null> {
+  const results = await loadAllExecutionResults(outputDir, date);
+  return results.find((entry) => entry.decisionId === decisionId) ?? null;
+}
+
+export async function loadAllExecutionResults(outputDir: string, date: string): Promise<DailyMissionExecutionResult[]> {
   const path = dailyMissionArtifactPath(outputDir, date, 'executionResults');
   try {
     const parsed = JSON.parse(await readFile(path, 'utf8')) as unknown;
-    if (!Array.isArray(parsed)) return null;
-    return parsed.filter(isExecutionResult).find((entry) => entry.decisionId === decisionId) ?? null;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(isExecutionResult);
   } catch {
-    return null;
+    return [];
   }
 }
 
