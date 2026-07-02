@@ -381,6 +381,47 @@ const rentalPriceApplyArgumentsSchema = {
   required: ['items'],
   additionalProperties: false,
 };
+const rentalPerSpecPricePlanArgumentsSchema = {
+  type: 'object',
+  properties: {
+    productId: { type: 'string' },
+    specPrices: {
+      type: 'array',
+      minItems: 1,
+      items: {
+        type: 'object',
+        properties: {
+          specId: { type: 'string' },
+          fields: { type: 'object', description: 'Absolute price fields for this specId, e.g. { rent1day: "80.00" }. Relative calculation must happen before calling this tool.' },
+        },
+        required: ['specId', 'fields'],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ['productId', 'specPrices'],
+  additionalProperties: false,
+};
+const rentalPerSpecPriceApplyArgumentsSchema = {
+  type: 'object',
+  properties: {
+    productId: { type: 'string' },
+    specFields: { type: 'object', description: 'Nested absolute price changes keyed by specId: { specId: { field: value } }.' },
+  },
+  required: ['productId', 'specFields'],
+  additionalProperties: false,
+};
+const rentalSpecDimArgumentsSchema = {
+  type: 'object',
+  properties: {
+    productId: { type: 'string' },
+    action: { type: 'string', enum: ['add', 'remove'] },
+    title: { type: 'string', description: 'Required when action is add.' },
+    specDimId: { type: 'string', description: 'Required when action is remove.' },
+  },
+  required: ['productId', 'action'],
+  additionalProperties: false,
+};
 const rentalPriceRollbackArgumentsSchema = {
   type: 'object',
   properties: {
@@ -788,6 +829,36 @@ const agentTools: AgentToolDefinition[] = [
     requiresConfirmation: true,
     plannerVisible: false,
     inputSchema: rentalOperationArgumentsSchema,
+  },
+  {
+    name: 'rental.perSpecPricePlan',
+    description: '按单个商品的具体 specId 生成差异化改价确认卡；只接受已经算好的绝对价格，不做相对计算或场景编排。确认前不会改价。',
+    risk: 'high',
+    requiresConfirmation: true,
+    inputSchema: rentalPerSpecPricePlanArgumentsSchema,
+  },
+  {
+    name: 'rental.perSpecPriceApply',
+    description: '确认后按 specId 写入绝对价格字段；每次只调用 daemon nested apply 原子动作。',
+    risk: 'high',
+    requiresConfirmation: true,
+    plannerVisible: false,
+    inputSchema: rentalPerSpecPriceApplyArgumentsSchema,
+  },
+  {
+    name: 'rental.specDimPlan',
+    description: '生成租赁商品规格维度添加或删除确认卡；add 传 title，remove 传 specDimId。确认前不会修改。',
+    risk: 'high',
+    requiresConfirmation: true,
+    inputSchema: rentalSpecDimArgumentsSchema,
+  },
+  {
+    name: 'rental.specDimApply',
+    description: '确认后执行单个规格维度添加或删除原子动作。',
+    risk: 'high',
+    requiresConfirmation: true,
+    plannerVisible: false,
+    inputSchema: rentalSpecDimArgumentsSchema,
   },
 ];
 

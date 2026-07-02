@@ -85,11 +85,14 @@ import { inferPriceMultiplierFromText, readPriceMultiplierArgument } from './pri
 import { runPublicTrafficReportDateComparison, runPublicTrafficReportQuery, type PublicTrafficReportQueryArguments } from './reportQuery.js';
 import { findLatestReportContext, findReportContextByDate, formatConversionSummary, formatLatestSummary, formatProductRows, parseNumericProductIdList, queryProductRows } from './reportStore.js';
 import { saveAgentToolConfirmRequest } from './agentToolConfirmStore.js';
+import { rentalPerSpecPriceApplyResponse, rentalPerSpecPricePlanResponse } from './rentalPerSpecPriceHandlers.js';
+import { rentalSpecDimApplyResponse, rentalSpecDimPlanResponse } from './rentalSpecDimHandlers.js';
 
 export interface AgentToolExecutionOptions {
   rentalPriceClient?: RentalPriceSkillClient;
   closedOrderFetchImpl?: typeof fetch;
   closedOrderRegistryPaths?: ClosedOrderRegistryPathsInput;
+  ledgerContext?: { runId?: string; decisionId?: string; subject?: string };
 }
 
 let publicTrafficReportRunning = false;
@@ -1835,6 +1838,14 @@ export async function executeAgentToolRequest(
       return rentalPricePreviewResponse(request.arguments, request.reason, options.rentalPriceClient ?? createRentalPriceSkillClient(), outputDir, request.continuation);
     case 'rental.priceApply':
       return rentalPriceApplyResponse(request.arguments, options.rentalPriceClient ?? createRentalPriceSkillClient());
+    case 'rental.perSpecPricePlan':
+      return rentalPerSpecPricePlanResponse(request.arguments, request.reason, options.rentalPriceClient ?? createRentalPriceSkillClient(), outputDir, request.continuation);
+    case 'rental.perSpecPriceApply':
+      return rentalPerSpecPriceApplyResponse(request.arguments, options.rentalPriceClient ?? createRentalPriceSkillClient(), options.ledgerContext);
+    case 'rental.specDimPlan':
+      return rentalSpecDimPlanResponse(request.arguments, request.reason, options.rentalPriceClient ?? createRentalPriceSkillClient(), outputDir, request.continuation);
+    case 'rental.specDimApply':
+      return rentalSpecDimApplyResponse(request.arguments, options.rentalPriceClient ?? createRentalPriceSkillClient(), options.ledgerContext);
     case 'rental.priceSnapshot': {
       const query = requireString(request.arguments.query, 'query');
       return rentalPriceSnapshotResponse(query, options.rentalPriceClient ?? createRentalPriceSkillClient(), options);
