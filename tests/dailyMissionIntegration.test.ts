@@ -8,6 +8,7 @@ import { writeDailyJournal } from '../src/agentRuntime/dailyJournalWriter.js';
 import { RuleBasedDecisionBuilder } from '../src/agentRuntime/decisionBuilder.js';
 import { FileHotspotEventProvider } from '../src/agentRuntime/hotspotEvents.js';
 import { loadOperationLedgerJsonlEntries } from '../src/agentRuntime/operationLedger.js';
+import { main as runDailyMissionCli } from '../src/cli/dailyMissionRun.js';
 
 describe('daily mission integration', () => {
   let dir: string;
@@ -69,5 +70,36 @@ describe('daily mission integration', () => {
     expect(events).not.toContain('execution_started');
     const markdown = await readFile(join(hotspotDir, 'daily-journal.md'), 'utf8');
     expect(markdown).toContain('演唱会A');
+  });
+
+  it('CLI collects exposure, sales, recent operations, and hotspots when local inputs exist', async () => {
+    const date = '2026-07-01';
+    const missionDir = join(dir, 'daily-mission', date);
+    await mkdir(missionDir, { recursive: true });
+    await writeFile(join(missionDir, 'exposure.json'), JSON.stringify({ summary: 'exposure' }), 'utf8');
+    await writeFile(join(missionDir, 'sales.json'), JSON.stringify({ summary: 'sales' }), 'utf8');
+    await writeFile(join(missionDir, 'hotspot-events.json'), JSON.stringify([
+      {
+        eventId: 'e1',
+        source: 'manual',
+        title: '演唱会A',
+        startsAt: '2026-07-03T00:00:00.000Z',
+        affectedCategories: ['相机'],
+        confidence: 'high',
+      },
+    ]), 'utf8');
+
+    await runDailyMissionCli(['--output-dir', dir, '--date', date, '--run-id', 'run-cli']);
+
+    const context = JSON.parse(await readFile(join(missionDir, 'collected-context.json'), 'utf8')) as {
+      exposure?: { summary: string };
+      sales?: { summary: string };
+      recentOperations?: unknown[];
+      hotspots?: unknown[];
+    };
+    expect(context.exposure).toEqual({ summary: 'exposure' });
+    expect(context.sales).toEqual({ summary: 'sales' });
+    expect(context.recentOperations).toEqual([]);
+    expect(context.hotspots).toHaveLength(1);
   });
 });

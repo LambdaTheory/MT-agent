@@ -1,6 +1,7 @@
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import type { ContextCollector } from '../agentRuntime/dailyMissionContext.js';
+import { collectRecentOperations, type ContextCollector } from '../agentRuntime/dailyMissionContext.js';
 import { runDailyMissionPlan } from '../agentRuntime/dailyMissionOrchestrator.js';
 import { writeDailyJournal } from '../agentRuntime/dailyJournalWriter.js';
 import { RuleBasedDecisionBuilder } from '../agentRuntime/decisionBuilder.js';
@@ -13,6 +14,15 @@ function readArg(argv: string[], name: string): string | undefined {
   return argv.find((item) => item.startsWith(`${name}=`))?.slice(name.length + 1);
 }
 
+async function readOptionalJson(path: string): Promise<unknown | undefined> {
+  try {
+    return JSON.parse(await readFile(path, 'utf8')) as unknown;
+  } catch (error) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return undefined;
+    throw error;
+  }
+}
+
 export async function main(argv = process.argv.slice(2)): Promise<void> {
   await loadEnv();
   const outputDir = readArg(argv, '--output-dir') ?? process.env.MT_AGENT_OUTPUT_DIR ?? 'output';
@@ -22,6 +32,9 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     path: join(outputDir, 'daily-mission', date, 'hotspot-events.json'),
   });
   const collectors: ContextCollector[] = [
+    { name: 'exposure', collect: async () => ({ exposure: await readOptionalJson(join(outputDir, 'daily-mission', date, 'exposure.json')) }) },
+    { name: 'sales', collect: async () => ({ sales: await readOptionalJson(join(outputDir, 'daily-mission', date, 'sales.json')) }) },
+    { name: 'recentOperations', collect: async () => ({ recentOperations: await collectRecentOperations(outputDir, date, 7) }) },
     { name: 'hotspots', collect: async () => ({ hotspots: await hotspotProvider.listEvents({ date, lookaheadDays: 7 }) }) },
   ];
 
