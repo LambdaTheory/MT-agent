@@ -1,17 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { runAgentExploreLoop, type ExploreTool } from '../src/agentRuntime/agentExploreLoop.js';
-import type { LlmGenerateJsonInput, LlmProvider, LlmProviderResult } from '../src/llm/provider.js';
-
-class ScriptedProvider implements LlmProvider {
-  private index = 0;
-
-  constructor(private readonly scripts: string[]) {}
-
-  async generateJson(_input: LlmGenerateJsonInput): Promise<LlmProviderResult> {
-    const text = this.scripts[Math.min(this.index++, this.scripts.length - 1)];
-    return { text, json: JSON.parse(text), model: 'fake' };
-  }
-}
+import { FakeLlmProvider } from '../src/llm/fakeProvider.js';
 
 const tools: ExploreTool[] = [
   { name: 'read', description: '读商品', run: async (args) => ({ productId: args.productId, exposure: 100 }) },
@@ -19,7 +8,7 @@ const tools: ExploreTool[] = [
 
 describe('runAgentExploreLoop', () => {
   it('calls a tool then finishes with an answer', async () => {
-    const provider = new ScriptedProvider([
+    const provider = new FakeLlmProvider([
       JSON.stringify({ action: 'call_tool', tool: 'read', args: { productId: '648' } }),
       JSON.stringify({ action: 'finish', answer: '648 曝光 100' }),
     ]);
@@ -33,7 +22,7 @@ describe('runAgentExploreLoop', () => {
   });
 
   it('stops at maxSteps if the model never finishes', async () => {
-    const provider = new ScriptedProvider([
+    const provider = new FakeLlmProvider([
       JSON.stringify({ action: 'call_tool', tool: 'read', args: { productId: '648' } }),
     ]);
 
@@ -44,7 +33,7 @@ describe('runAgentExploreLoop', () => {
   });
 
   it('stops as invalid when the model requests an unknown tool', async () => {
-    const provider = new ScriptedProvider([
+    const provider = new FakeLlmProvider([
       JSON.stringify({ action: 'call_tool', tool: 'nope', args: {} }),
     ]);
 
@@ -55,7 +44,7 @@ describe('runAgentExploreLoop', () => {
   });
 
   it('stops as invalid when a tool rejects model-produced arguments', async () => {
-    const provider = new ScriptedProvider([
+    const provider = new FakeLlmProvider([
       JSON.stringify({ action: 'call_tool', tool: 'read', args: { productId: 'bad' } }),
     ]);
     const throwingTools: ExploreTool[] = [

@@ -5,18 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parseAgentToolConfirmRequest } from '../src/agentRuntime/approvalCard.js';
 import { agentExploreResponse } from '../src/feishuBot/agentExploreResponse.js';
 import type { RentalPriceSkillClient } from '../src/feishuBot/rentalPrice.js';
-import type { LlmGenerateJsonInput, LlmProvider, LlmProviderResult } from '../src/llm/provider.js';
-
-class ScriptedProvider implements LlmProvider {
-  private index = 0;
-
-  constructor(private readonly scripts: string[]) {}
-
-  async generateJson(_input: LlmGenerateJsonInput): Promise<LlmProviderResult> {
-    const text = this.scripts[Math.min(this.index++, this.scripts.length - 1)];
-    return { text, json: JSON.parse(text), model: 'fake' };
-  }
-}
+import { FakeLlmProvider } from '../src/llm/fakeProvider.js';
 
 function readConfirmRequest(card: unknown) {
   const body = (card as { body?: { elements?: Array<{ elements?: Array<{ name?: string; behaviors?: Array<{ value?: unknown }> }> }> } }).body;
@@ -55,7 +44,7 @@ describe('Agent Brain integration', () => {
   });
 
   it('uses registered read tools before returning a confirmation-card decision without executing writes', async () => {
-    const provider = new ScriptedProvider([
+    const provider = new FakeLlmProvider([
       JSON.stringify({ action: 'call_tool', tool: 'publicTraffic.windowedFindings', args: { lookbackDays: 2, predicate: 'exposure_without_orders', endDate: '2026-07-02' } }),
       JSON.stringify({
         action: 'finish',
