@@ -1,5 +1,5 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
 import { dailyMissionArtifactPath } from './dailyMissionArtifacts.js';
 
 export type DailyMissionRunStatus =
@@ -111,4 +111,20 @@ export async function loadDailyMissionRun(outputDir: string, date: string): Prom
     if (isRecord(error) && error.code === 'ENOENT') return null;
     throw error;
   }
+}
+
+export async function findDailyMissionRunByRunId(outputDir: string, runId: string): Promise<DailyMissionRun | null> {
+  const root = join(outputDir, 'daily-mission');
+  let entries: string[];
+  try {
+    entries = await readdir(root);
+  } catch (error) {
+    if (isRecord(error) && error.code === 'ENOENT') return null;
+    throw error;
+  }
+  for (const date of entries) {
+    const run = await loadDailyMissionRun(outputDir, date);
+    if (run?.runId === runId) return run;
+  }
+  return null;
 }
