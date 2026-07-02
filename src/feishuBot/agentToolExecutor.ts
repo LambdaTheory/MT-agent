@@ -1142,6 +1142,11 @@ async function writeRefreshActivityAudit(outputDir: string, value: unknown): Pro
   return path;
 }
 
+function isSafeMissingDelistResult(result: Awaited<ReturnType<RentalPriceSkillClient['delist']>>): boolean {
+  if (result.ok) return false;
+  return /Product not found/i.test(result.lines.join('\n'));
+}
+
 async function refreshActivityPlanResponse(
   outputDir: string,
   args: Record<string, unknown>,
@@ -1246,14 +1251,17 @@ async function refreshActivityExecuteResponse(
   for (const productId of request.delistProductIds) {
     const result = await client.delist(productId);
     delistResults.push(result);
-    if (!result.ok) break;
+    if (!result.ok && !isSafeMissingDelistResult(result)) break;
   }
 
   const delistSuccess = delistResults.filter((result) => result.ok);
-  const allDelisted = delistResults.length === request.delistProductIds.length && delistSuccess.length === request.delistProductIds.length;
+  const skippedMissingDelist = delistResults.filter((result) => isSafeMissingDelistResult(result));
+  const blockingDelistFailures = delistResults.filter((result) => !result.ok && !isSafeMissingDelistResult(result));
+  const delistFinished = delistResults.length === request.delistProductIds.length && blockingDelistFailures.length === 0;
+  const allDelisted = delistFinished && skippedMissingDelist.length === 0;
 
   let newLinkResult: Awaited<ReturnType<typeof executeNewLinkBatchConfirmRequest>> | Awaited<ReturnType<typeof executeNewLinkBatchMultiConfirmRequest>> | null = null;
-  if (allDelisted) {
+  if (delistFinished) {
     const items: NewLinkBatchConfirmRequest[] = request.newLinkItems.map((item) => ({
       safetyVersion: NEW_LINK_BATCH_CONFIRMATION_VERSION,
       workflowName: NEW_LINK_BATCH_WORKFLOW_NAME,
@@ -1275,12 +1283,15 @@ async function refreshActivityExecuteResponse(
         reason: '活跃度刷新计划确认执行',
       });
   }
+  const overallOk = allDelisted && Boolean(newLinkResult?.ok);
 
   const auditPath = await writeRefreshActivityAudit(outputDir, {
     request,
     delistResults,
+    skippedMissingDelistProductIds: skippedMissingDelist.map((result) => result.productId),
+    blockingDelistFailureProductIds: blockingDelistFailures.map((result) => result.productId),
     newLinkResult,
-    ok: allDelisted && Boolean(newLinkResult?.ok),
+    ok: overallOk,
     createdAt: new Date().toISOString(),
   });
 
@@ -1289,8 +1300,9 @@ async function refreshActivityExecuteResponse(
   const delistLines = delistResults.map((result) => `- ${result.ok ? '成功' : '失败'}：商品 ${result.productId}${result.lines.length ? `｜${result.lines.join('；')}` : ''}`);
   return {
     text: [
-      `${allDelisted && newLinkResult?.ok ? '活跃度刷新执行完成' : '活跃度刷新执行中断'}：${request.date}`,
+      `${overallOk ? '活跃度刷新执行完成' : delistFinished && skippedMissingDelist.length ? '活跃度刷新部分完成' : '活跃度刷新执行中断'}：${request.date}`,
       `下架：成功 ${delistSuccess.length}/${request.delistProductIds.length}`,
+      ...(skippedMissingDelist.length ? [`跳过：${skippedMissingDelist.length} 个商品不存在（${skippedMissingDelist.map((result) => result.productId).join('、')}）`] : []),
       `补链：${newLinkResult ? `${newLinkResult.ok ? '成功' : '失败'}，完成 ${newLinkResult.completedCount}/${request.newLinkItems.reduce((sum, item) => sum + item.count, 0)} 条` : '因下架未全部成功，已跳过'}`,
       '',
       '处理种类：',
@@ -1306,8 +1318,10 @@ async function refreshActivityExecuteResponse(
       toolName: 'operations.refreshActivityExecute',
       auditPath,
       delistedProductIds: delistSuccess.map((result) => result.productId),
+      skippedMissingDelistProductIds: skippedMissingDelist.map((result) => result.productId),
+      blockingDelistFailureProductIds: blockingDelistFailures.map((result) => result.productId),
       newProductIds: newLinkResult?.newProductIds ?? [],
-      ok: allDelisted && Boolean(newLinkResult?.ok),
+      ok: overallOk,
     },
   };
 }

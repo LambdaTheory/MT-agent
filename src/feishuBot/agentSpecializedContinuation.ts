@@ -64,6 +64,7 @@ export function botResponseFromNewLinkBatchResult(
       ok: result.ok,
       newProductIds: result.newProductIds,
       completedCount: result.completedCount,
+      ...(result.failedItems?.length ? { failedItems: result.failedItems } : {}),
       ...(request.workflowName ? { workflowName: request.workflowName } : {}),
       ...('items' in request
         ? { items: request.items.map((item) => ({ keyword: item.keyword, count: item.count, sourceProductId: item.sourceProductId })) }

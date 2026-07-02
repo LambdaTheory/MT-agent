@@ -2539,6 +2539,49 @@ describe('handleBotIntent', () => {
     expect(audit.request?.delistProductIds).toEqual(['901', '902']);
   });
 
+  it('skips missing products during confirmed activity refresh execution and continues the batch', async () => {
+    const { outputDir, registryPaths } = await writeRefreshActivityFixtures();
+    const plan = await executeAgentToolRequest(
+      { toolName: 'operations.refreshActivityPlan', arguments: {}, reason: 'test refresh activity plan' },
+      outputDir,
+      { closedOrderRegistryPaths: registryPaths },
+    );
+    const request = readAgentToolConfirmRequestFromCard(plan.card);
+    const calls: string[] = [];
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run'); },
+      async execute() { throw new Error('execute should not run'); },
+      async copy(productId) {
+        calls.push(`copy:${productId}`);
+        return { productId, ok: true, newProductId: `new-${calls.length}`, lines: ['copy: ok'] };
+      },
+      async delist(productId) {
+        calls.push(`delist:${productId}`);
+        if (productId === '901') {
+          return { productId, ok: false, lines: ['delist: error', 'Product not found: 901'] };
+        }
+        return { productId, ok: true, lines: ['delist: ok'] };
+      },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+
+    const response = await executeAgentToolRequest(request, outputDir, { rentalPriceClient });
+
+    expect(calls).toEqual(['delist:901', 'delist:902', 'copy:900', 'copy:900']);
+    expect(response.text).toContain('活跃度刷新部分完成');
+    expect(response.text).toContain('跳过：1 个商品不存在（901）');
+    expect(response.metadata?.skippedMissingDelistProductIds).toEqual(['901']);
+    expect(response.metadata?.ok).toBe(false);
+    const audit = JSON.parse(await readFile(response.metadata?.auditPath as string, 'utf8')) as {
+      ok?: boolean;
+      skippedMissingDelistProductIds?: string[];
+    };
+    expect(audit.ok).toBe(false);
+    expect(audit.skippedMissingDelistProductIds).toEqual(['901']);
+  });
+
   it('continues a multi-step plan after a confirmed activity refresh execution card', async () => {
     const { outputDir, registryPaths } = await writeRefreshActivityFixtures();
     const planner: AgentPlannerProvider = {
