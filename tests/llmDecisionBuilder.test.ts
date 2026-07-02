@@ -12,6 +12,16 @@ const context: CollectedContext = {
 };
 
 describe('LlmDecisionBuilder', () => {
+  it('injects planner-visible tools into the system prompt', async () => {
+    const provider = new FakeLlmProvider(JSON.stringify({ decisions: [] }));
+
+    await new LlmDecisionBuilder({ provider }).build(context);
+
+    const system = provider.lastInput?.messages.find((message) => message.role === 'system')?.content ?? '';
+    expect(system).toContain('rental.pricePreview');
+    expect(system).not.toContain('rental.priceApply');
+  });
+
   it('parses valid decisions and forces runId', async () => {
     const provider = new FakeLlmProvider(JSON.stringify({
       decisions: [

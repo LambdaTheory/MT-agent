@@ -1,6 +1,7 @@
 import type { CollectedContext } from './dailyMissionContext.js';
 import { isValidDecisionRecord } from './decisionRecord.js';
 import type { DecisionRecord } from './decisionRecord.js';
+import { listAgentTools } from './toolRegistry.js';
 import type { LlmProvider } from '../llm/provider.js';
 
 export interface DecisionBuilder {
@@ -35,13 +36,21 @@ const DECISION_SYSTEM_PROMPT = [
   'recommendation 取值 observe|approve_to_execute|skip；不确定时用 observe。evidenceRefs 必须引用上下文中的字段。',
 ].join('\n');
 
+function buildToolCatalogPrompt(): string {
+  const tools = listAgentTools().filter((tool) => tool.plannerVisible !== false);
+  return [
+    '可用可执行工具（proposedTool.toolName 只能取以下之一）：',
+    ...tools.map((tool) => `- ${tool.name}: ${tool.description}`),
+  ].join('\n');
+}
+
 export class LlmDecisionBuilder implements DecisionBuilder {
   constructor(private readonly options: { provider: LlmProvider }) {}
 
   async build(context: CollectedContext): Promise<DecisionRecord[]> {
     const result = await this.options.provider.generateJson({
       messages: [
-        { role: 'system', content: DECISION_SYSTEM_PROMPT },
+        { role: 'system', content: `${DECISION_SYSTEM_PROMPT}\n\n${buildToolCatalogPrompt()}` },
         { role: 'user', content: JSON.stringify(context) },
       ],
       temperature: 0,
