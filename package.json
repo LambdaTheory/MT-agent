@@ -23,6 +23,8 @@
     "link-registry:merge-review": "tsx src/cli/linkRegistryMergeReview.ts",
     "link-registry:apply-merge-review": "tsx src/cli/linkRegistryApplyMergeReview.ts",
     "operations-learning-loop:preview": "tsx src/cli/operationsLearningLoopPreview.ts",
+    "daily-mission-run": "tsx src/cli/dailyMissionRun.ts",
+    "daily-mission-audit": "tsx src/cli/dailyMissionAudit.ts",
     "activity-automation:scout": "tsx src/cli/activityAutomation.ts",
     "capture-dashboard": "tsx src/cli/captureDashboard.ts",
     "agent:dry-run": "tsx src/cli/agentDryRun.ts",
