@@ -58,7 +58,22 @@ export class LlmDecisionBuilder implements DecisionBuilder {
     const raw = result.json.decisions;
     if (!Array.isArray(raw)) return [];
     return raw
-      .filter(isValidDecisionRecord)
-      .map((record) => ({ ...record, runId: context.runId }));
+      .map((record, index) => (isValidDecisionRecord(record) ? { ...record, runId: context.runId } : invalidLlmDecision(context, index)))
   }
+}
+
+function invalidLlmDecision(context: CollectedContext, index: number): DecisionRecord {
+  return {
+    decisionId: `${context.runId}-llm-invalid-${index + 1}`,
+    runId: context.runId,
+    title: 'LLM 决策未通过数据契约校验',
+    subjects: [{ kind: 'link', id: `daily-mission:${context.date}` }],
+    operationType: 'observe',
+    recommendation: 'observe',
+    risk: 'read',
+    rationale: ['LLM 返回了不符合 DecisionRecord 数据契约的决策，已降级为观察项。'],
+    evidenceRefs: ['llm.validation'],
+    uncertainties: [],
+    blockedReason: 'LLM 决策未通过数据契约校验',
+  };
 }

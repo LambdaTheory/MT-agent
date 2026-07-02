@@ -46,9 +46,20 @@ describe('LlmDecisionBuilder', () => {
     expect(decisions[0].runId).toBe('run-9');
   });
 
-  it('drops invalid decisions and never throws', async () => {
+  it('converts invalid decisions into blocked observations and never throws', async () => {
     const provider = new FakeLlmProvider(JSON.stringify({ decisions: [{ nonsense: true }] }));
 
-    expect(await new LlmDecisionBuilder({ provider }).build(context)).toEqual([]);
+    const decisions = await new LlmDecisionBuilder({ provider }).build(context);
+    expect(decisions).toMatchObject([
+      {
+        runId: 'run-9',
+        recommendation: 'observe',
+        operationType: 'observe',
+        risk: 'read',
+        evidenceRefs: ['llm.validation'],
+        blockedReason: 'LLM 决策未通过数据契约校验',
+      },
+    ]);
+    expect(decisions[0]?.proposedTool).toBeUndefined();
   });
 });
