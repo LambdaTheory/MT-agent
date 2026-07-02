@@ -110,6 +110,7 @@ const NON_RENT_PRICE_FIELD_LABELS: Record<string, string[]> = {
   finalPayment: ['finalPayment', '尾款'],
 };
 const REFRESH_ACTIVITY_EXECUTION_MAX_PRODUCTS = 20;
+const RENTAL_DELIST_BATCH_MAX_PRODUCTS = 80;
 const RENT_FIELD_ORDER: Array<{ field: string; label: string }> = [
   { field: 'rent1day', label: '1天' },
   { field: 'rent2day', label: '2天' },
@@ -618,6 +619,16 @@ function readProductIdArray(value: unknown, maxItems: number): string[] | null {
   const ids = value.map((item) => typeof item === 'string' ? item.trim() : '').filter(Boolean);
   if (ids.length !== value.length || ids.some((id) => !/^\d+$/.test(id))) return null;
   return [...new Set(ids)];
+}
+
+function readDelistProductIds(args: Record<string, unknown>): string[] | null {
+  const fromArray = readProductIdArray(args.productIds, RENTAL_DELIST_BATCH_MAX_PRODUCTS);
+  const fromString = readString(args.productId);
+  const parsedStringIds = fromString ? parseNumericProductIdList(fromString) : [];
+  const ids = [...(fromArray ?? []), ...parsedStringIds].filter((id) => /^\d+$/.test(id));
+  const unique = [...new Set(ids)];
+  if (unique.length === 0 || unique.length > RENTAL_DELIST_BATCH_MAX_PRODUCTS) return null;
+  return unique;
 }
 
 async function rentalPricePreviewResponse(
@@ -1145,6 +1156,67 @@ async function writeRefreshActivityAudit(outputDir: string, value: unknown): Pro
 function isSafeMissingDelistResult(result: Awaited<ReturnType<RentalPriceSkillClient['delist']>>): boolean {
   if (result.ok) return false;
   return /Product not found/i.test(result.lines.join('\n'));
+}
+
+async function rentalDelistBatchResponse(
+  args: Record<string, unknown>,
+  client: RentalPriceSkillClient,
+  toolName: 'rental.delist' | 'rental.delistBatch' = 'rental.delistBatch',
+): Promise<BotResponse> {
+  const productIds = readDelistProductIds(args);
+  if (!productIds) {
+    return {
+      text: `批量下架参数无效：请提供 1 到 ${RENTAL_DELIST_BATCH_MAX_PRODUCTS} 个端内ID。`,
+      metadata: { toolName, ok: false },
+    };
+  }
+
+  const results: Awaited<ReturnType<RentalPriceSkillClient['delist']>>[] = [];
+  for (const productId of productIds) {
+    try {
+      const result = await client.delist(productId);
+      results.push(result);
+      if (!result.ok && !isSafeMissingDelistResult(result)) break;
+    } catch (error) {
+      results.push({ productId, ok: false, lines: [error instanceof Error ? error.message : String(error)] });
+      break;
+    }
+  }
+
+  const success = results.filter((result) => result.ok);
+  const skippedMissing = results.filter((result) => isSafeMissingDelistResult(result));
+  const failed = results.filter((result) => !result.ok && !isSafeMissingDelistResult(result));
+  const pending = productIds.slice(results.length);
+  const completedWithoutBlocking = failed.length === 0 && pending.length === 0;
+  const ok = completedWithoutBlocking && skippedMissing.length === 0;
+  const title = ok ? '批量下架完成' : completedWithoutBlocking ? '批量下架部分完成' : '批量下架中断';
+  const detailLines = results.map((result, index) => {
+    const status = result.ok ? '成功' : isSafeMissingDelistResult(result) ? '跳过' : '失败';
+    const detail = result.lines.length ? `｜${result.lines.slice(0, 4).join('；')}` : '';
+    return `${index + 1}. ${status}：商品 ${result.productId}${detail}`;
+  });
+
+  return {
+    text: [
+      `${title}：成功 ${success.length}/${productIds.length}`,
+      skippedMissing.length ? `跳过：${skippedMissing.length} 个商品不存在（${skippedMissing.map((result) => result.productId).join('、')}）` : undefined,
+      failed.length ? `失败：${failed.length} 个（${failed.map((result) => result.productId).join('、')}）` : undefined,
+      pending.length ? `未执行：${pending.length} 个（${pending.join('、')}）` : undefined,
+      '',
+      '下架明细：',
+      ...detailLines,
+    ].filter((line): line is string => Boolean(line)).join('\n'),
+    metadata: {
+      toolName,
+      ok,
+      productIds,
+      delistedProductIds: success.map((result) => result.productId),
+      skippedMissingProductIds: skippedMissing.map((result) => result.productId),
+      failedProductIds: failed.map((result) => result.productId),
+      pendingProductIds: pending,
+      completedCount: success.length,
+    },
+  };
 }
 
 async function refreshActivityPlanResponse(
@@ -1697,7 +1769,6 @@ export async function executeAgentToolRequest(
     case 'operations.refreshActivityExecute':
       return refreshActivityExecuteResponse(outputDir, request.arguments, options.rentalPriceClient ?? createRentalPriceSkillClient());
     case 'rental.copy':
-    case 'rental.delist':
     case 'rental.tenancySet':
     case 'rental.specDiscover':
     case 'rental.specAddAndRefresh': {
@@ -1714,6 +1785,26 @@ export async function executeAgentToolRequest(
         },
       };
     }
+    case 'rental.delist': {
+      const productIds = readDelistProductIds(request.arguments);
+      if (request.arguments.productIds !== undefined || (productIds && productIds.length > 1)) {
+        return rentalDelistBatchResponse(request.arguments, options.rentalPriceClient ?? createRentalPriceSkillClient(), request.toolName);
+      }
+      const rentalRequest = rentalAgentToolRequest(request.toolName, request.arguments);
+      if (!rentalRequest) throw new Error('租赁商品操作参数无效，请重新发起。');
+      const result = await executeRentalOperationConfirmRequest(options.rentalPriceClient ?? createRentalPriceSkillClient(), rentalRequest);
+      return {
+        text: result.text,
+        metadata: {
+          ...(result.metadata ?? {}),
+          toolName: request.toolName,
+          ok: result.ok,
+          productId: rentalRequest.productId,
+        },
+      };
+    }
+    case 'rental.delistBatch':
+      return rentalDelistBatchResponse(request.arguments, options.rentalPriceClient ?? createRentalPriceSkillClient(), request.toolName);
     case 'rental.specRemovePlan': {
       const query = requireString(request.arguments.query, 'query');
       const keyword = requireString(request.arguments.keyword, 'keyword');

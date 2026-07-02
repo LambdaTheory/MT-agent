@@ -95,6 +95,30 @@ describe('agent runtime approval card', () => {
 
     expect(parseAgentToolConfirmRequest({
       request: {
+        toolName: 'rental.delistBatch',
+        arguments: { productIds: ['251', '467', '252'] },
+        reason: '用户要求批量下架',
+      },
+    })).toEqual({
+      toolName: 'rental.delistBatch',
+      arguments: { productIds: ['251', '467', '252'] },
+      reason: '用户要求批量下架',
+    });
+
+    expect(parseAgentToolConfirmRequest({
+      request: {
+        toolName: 'rental.delist',
+        arguments: { productIds: ['251', '467'] },
+        reason: '兼容 rental.delist 批量参数',
+      },
+    })).toEqual({
+      toolName: 'rental.delist',
+      arguments: { productIds: ['251', '467'] },
+      reason: '兼容 rental.delist 批量参数',
+    });
+
+    expect(parseAgentToolConfirmRequest({
+      request: {
         toolName: 'rental.operationConfirmRequest',
         arguments: { action: 'delist', productId: '761' },
         reason: '兼容升级前已发出的旧确认卡',
