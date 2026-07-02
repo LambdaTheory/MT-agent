@@ -1,4 +1,6 @@
 import { pathToFileURL } from 'node:url';
+import { loadApprovalRequest } from '../agentRuntime/dailyMissionApprovalStore.js';
+import { loadAllExecutionResults } from '../agentRuntime/dailyMissionExecution.js';
 import { loadDailyMissionRun } from '../agentRuntime/dailyMissionRun.js';
 import { loadOperationLedgerJsonlEntries } from '../agentRuntime/operationLedger.js';
 import { loadEnv } from '../config/loadEnv.js';
@@ -25,6 +27,8 @@ export async function buildDailyMissionAuditSummary(
 ): Promise<DailyMissionAuditSummary> {
   const entries = await loadOperationLedgerJsonlEntries(outputDir, date);
   const run = await loadDailyMissionRun(outputDir, date);
+  const approvalRequest = await loadApprovalRequest(outputDir, date);
+  const executionResults = await loadAllExecutionResults(outputDir, date);
   const eventCounts: Record<string, number> = {};
   for (const entry of entries) eventCounts[entry.event] = (eventCounts[entry.event] ?? 0) + 1;
   const events = entries.map((entry) => entry.event);
@@ -34,12 +38,16 @@ export async function buildDailyMissionAuditSummary(
   const executions = entries
     .filter((entry) => entry.event.startsWith('execution_'))
     .map((entry) => entry.decisionId ?? entry.planId);
+  const executedCount = executionResults.filter((entry) => (entry.status ?? (entry.ok ? 'executed' : 'failed')) === 'executed').length;
+  const pendingCount = executionResults.filter((entry) => entry.status === 'pending_confirmation').length;
+  const failedCount = executionResults.filter((entry) => (entry.status ?? (entry.ok ? 'executed' : 'failed')) === 'failed').length;
   const lines = [
     `Daily Mission 审计：${date}`,
     `状态：${run?.status ?? '无 run'}`,
     `事件总数：${entries.length}`,
     `审批请求：${approvals.length}`,
     `执行事件：${executions.length}`,
+    `决策汇总：待审批 ${approvalRequest?.approvals.length ?? 0} | 观察 ${approvalRequest?.observations.length ?? 0} | 已执行 ${executedCount} | 待二次确认 ${pendingCount} | 失败 ${failedCount}`,
     ...Object.entries(eventCounts).map(([event, count]) => `- ${event}: ${count}`),
   ];
   return { date, status: run?.status ?? 'none', events, approvals, executions, eventCounts, lines };

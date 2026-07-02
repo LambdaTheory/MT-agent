@@ -157,10 +157,16 @@ export async function loadOperationLedgerJsonlEntries(
 ): Promise<OperationPlanJournalEntry[]> {
   try {
     const raw = await readFile(operationLedgerJsonlPath(outputDir, date), 'utf8');
-    return raw
-      .split('\n')
-      .filter((line) => line.length > 0)
-      .map((line) => JSON.parse(line) as OperationPlanJournalEntry);
+    const entries: OperationPlanJournalEntry[] = [];
+    for (const line of raw.split('\n')) {
+      if (!line.trim()) continue;
+      try {
+        entries.push(JSON.parse(line) as OperationPlanJournalEntry);
+      } catch {
+        // Keep audit/recent-operations usable when a JSONL append is partially corrupted.
+      }
+    }
+    return entries;
   } catch (error) {
     if (isRecord(error) && error.code === 'ENOENT') return [];
     throw error;
