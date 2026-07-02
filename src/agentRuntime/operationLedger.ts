@@ -77,6 +77,11 @@ async function writeJson(path: string, value: unknown): Promise<void> {
   await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
 }
 
+async function writeJsonl(path: string, entries: OperationPlanJournalEntry[]): Promise<void> {
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, entries.map((entry) => JSON.stringify(entry)).join('\n') + (entries.length > 0 ? '\n' : ''), 'utf8');
+}
+
 async function withLedgerLock<T>(outputDir: string, action: () => Promise<T>): Promise<T> {
   const key = operationLedgerPath(outputDir);
   const previous = ledgerLocks.get(key) ?? Promise.resolve();
@@ -146,9 +151,24 @@ export async function recordOperationEvent(
   outputDir: string,
   entry: OperationPlanJournalEntry,
 ): Promise<OperationPlanJournalEntry> {
-  await appendOperationLedgerJsonlEntry(outputDir, entry);
-  await appendOperationPlanJournalEntry(outputDir, entry);
-  return entry;
+  return withLedgerLock(outputDir, async () => {
+    const date = entry.at.slice(0, 10);
+    const key = operationEventKey(entry);
+    const jsonlPath = operationLedgerJsonlPath(outputDir, date);
+    const jsonlEntries = await loadOperationLedgerJsonlEntries(outputDir, date);
+    const ledger = await loadOperationLedgerStore(outputDir);
+    const daily = await loadDailyOperationJournalStore(outputDir, date);
+    if (jsonlEntries.some((item) => operationEventKey(item) === key) || daily.entries.some((item) => operationEventKey(item) === key)) return entry;
+    const now = new Date().toISOString();
+    await writeJsonl(jsonlPath, [...jsonlEntries, entry]);
+    await writeJson(operationLedgerPath(outputDir), { ...ledger, updatedAt: now, journal: [...ledger.journal, entry] });
+    await writeJson(dailyOperationJournalPath(outputDir, date), { ...daily, date, updatedAt: now, entries: [...daily.entries, entry] });
+    return entry;
+  });
+}
+
+function operationEventKey(entry: OperationPlanJournalEntry): string {
+  return [entry.runId ?? '', entry.decisionId ?? '', entry.event, entry.at, entry.toolName ?? ''].join('|');
 }
 
 export async function loadOperationLedgerJsonlEntries(
