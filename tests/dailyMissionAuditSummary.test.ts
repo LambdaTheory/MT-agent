@@ -37,12 +37,19 @@ describe('audit summary aggregation', () => {
         recommendation: 'approve_to_execute',
         subjects: [{ kind: 'product', id: '648' }],
       }],
-      observations: [],
+      observations: [{
+        decisionId: 'obs-1',
+        recommendation: 'observe',
+        subjects: [{ kind: 'link', id: 'daily-mission:2026-07-02' }],
+      }],
     }), 'utf8');
     await writeFile(join(missionDir, 'execution-results.json'), JSON.stringify([{ runId: 'run-1', decisionId: 'dec-1', ok: true, status: 'executed', text: '' }]), 'utf8');
 
     const summary = await buildDailyMissionAuditSummary(dir, '2026-07-02');
     expect(summary.decisions?.find((item: { decisionId: string }) => item.decisionId === 'dec-1')?.status).toBe('executed');
+    expect(summary.decisions?.find((item: { decisionId: string }) => item.decisionId === 'dec-1')?.approved).toBe(true);
+    expect(summary.decisions?.find((item: { decisionId: string }) => item.decisionId === 'obs-1')?.approved).toBe(false);
+    expect(summary.decisions?.find((item: { decisionId: string }) => item.decisionId === 'obs-1')?.status).toBe('observation');
     expect(summary.lines.join('\n')).toContain('dec-1：executed');
   });
 });

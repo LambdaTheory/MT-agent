@@ -11,7 +11,7 @@ export interface DailyMissionAuditSummary {
   events: string[];
   approvals: string[];
   executions: string[];
-  decisions: Array<{ decisionId: string; recommendation?: string; subject?: string; status: string }>;
+  decisions: Array<{ decisionId: string; recommendation?: string; subject?: string; status: string; approved: boolean }>;
   eventCounts: Record<string, number>;
   lines: string[];
 }
@@ -47,12 +47,22 @@ export async function buildDailyMissionAuditSummary(
   const pendingCount = executionResults.filter((entry) => entry.status === 'pending_confirmation').length;
   const failedCount = executionResults.filter((entry) => executionStatus(entry) === 'failed').length;
   const executionStatusByDecision = new Map(executionResults.map((entry) => [entry.decisionId, executionStatus(entry)]));
-  const decisions = (approvalRequest?.approvals ?? []).map((decision) => ({
+  const decisions = [
+    ...(approvalRequest?.approvals ?? []).map((decision) => ({
     decisionId: decision.decisionId,
     recommendation: decision.recommendation,
     subject: decision.subjects?.map((subject) => `${subject.kind}:${subject.id}`).join(', '),
     status: executionStatusByDecision.get(decision.decisionId) ?? 'pending',
-  }));
+    approved: true,
+    })),
+    ...(approvalRequest?.observations ?? []).map((decision) => ({
+      decisionId: decision.decisionId,
+      recommendation: decision.recommendation,
+      subject: decision.subjects?.map((subject) => `${subject.kind}:${subject.id}`).join(', '),
+      status: 'observation',
+      approved: false,
+    })),
+  ];
   const lines = [
     `Daily Mission 审计：${date}`,
     `状态：${run?.status ?? '无 run'}`,
