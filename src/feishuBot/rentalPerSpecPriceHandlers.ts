@@ -1,11 +1,14 @@
 import { buildAgentToolConfirmCard, type AgentToolConfirmRequest } from '../agentRuntime/approvalCard.js';
+import { recordOperationEvent } from '../agentRuntime/operationLedger.js';
 import { saveAgentToolConfirmRequest } from './agentToolConfirmStore.js';
 import type { BotResponse } from './types.js';
 import type { RentalPriceSkillClient } from './rentalPrice.js';
+import type { RentalWriteLedgerContext } from './rentalWriteOperationHandlers.js';
 
 const PRICE_FIELD_NAMES = new Set(['rent1day', 'rent2day', 'rent3day', 'rent4day', 'rent5day', 'rent7day', 'rent10day', 'rent15day', 'rent30day', 'rent60day', 'rent90day', 'rent180day', 'marketPrice', 'deposit', 'purchasePrice', 'costPrice', 'finalPayment']);
 
-type LedgerContext = { runId?: string; decisionId?: string; subject?: string };
+type LedgerContext = Partial<RentalWriteLedgerContext> & { subject?: string };
+type RentalWriteEvent = 'execution_started' | 'execution_succeeded' | 'execution_failed';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -63,6 +66,33 @@ function executionEvent(toolName: string, productId: string, ok: boolean, ledger
   return ledgerContext ? { type: 'execution', toolName, productId, ok, ...ledgerContext } : undefined;
 }
 
+async function recordWriteEvent(
+  context: LedgerContext | undefined,
+  event: RentalWriteEvent,
+  toolName: string,
+  productId: string,
+): Promise<void> {
+  if (!context?.outputDir) return;
+  await recordOperationEvent(context.outputDir, {
+    planId: context.decisionId ?? context.runId ?? 'ad-hoc',
+    at: context.missionDate ? `${context.missionDate}T00:00:00.000Z` : new Date().toISOString(),
+    event,
+    toolName,
+    ...(context.runId ? { runId: context.runId } : {}),
+    ...(context.decisionId ? { decisionId: context.decisionId } : {}),
+    subject: { kind: 'product', id: productId },
+    ...(context.missionDate ? { metadata: { missionDate: context.missionDate } } : {}),
+  });
+}
+
+async function recordFailedWriteEvent(context: LedgerContext | undefined, toolName: string, productId: string): Promise<void> {
+  try {
+    await recordWriteEvent(context, 'execution_failed', toolName, productId);
+  } catch (ledgerError) {
+    console.warn('Failed to record rental per-spec price failure event.', ledgerError);
+  }
+}
+
 export async function rentalPerSpecPricePlanResponse(
   args: Record<string, unknown>,
   reason: string,
@@ -102,7 +132,15 @@ export async function rentalPerSpecPriceApplyResponse(args: Record<string, unkno
   const specFields = readSpecFields(args.specFields);
   if (!productId || !specFields) throw new Error('按规格改价执行参数无效，请重新发起预览。');
   if (!client.applyPerSpec) throw new Error('当前租赁改价客户端不支持按规格改价。');
-  const result = await client.applyPerSpec(productId, specFields);
+  await recordWriteEvent(ledgerContext, 'execution_started', 'rental.perSpecPriceApply', productId);
+  let result: Awaited<ReturnType<NonNullable<RentalPriceSkillClient['applyPerSpec']>>>;
+  try {
+    result = await client.applyPerSpec(productId, specFields);
+    await recordWriteEvent(ledgerContext, result.ok ? 'execution_succeeded' : 'execution_failed', 'rental.perSpecPriceApply', result.productId);
+  } catch (error) {
+    await recordFailedWriteEvent(ledgerContext, 'rental.perSpecPriceApply', productId);
+    throw error;
+  }
   return {
     text: `${result.ok ? '按规格改价成功' : '按规格改价失败'}：商品 ${result.productId}\n${result.lines.join('\n')}`,
     metadata: { toolName: 'rental.perSpecPriceApply', ok: result.ok, productId: result.productId, resultFile: result.audit?.resultFile, ...(ledgerContext ? { ledgerContext, executionEvent: executionEvent('rental.perSpecPriceApply', result.productId, result.ok, ledgerContext) } : {}) },
