@@ -53,4 +53,18 @@ describe('runAgentExploreLoop', () => {
     expect(result.stopReason).toBe('invalid');
     expect(result.steps).toHaveLength(0);
   });
+
+  it('stops as invalid when a tool rejects model-produced arguments', async () => {
+    const provider = new ScriptedProvider([
+      JSON.stringify({ action: 'call_tool', tool: 'read', args: { productId: 'bad' } }),
+    ]);
+    const throwingTools: ExploreTool[] = [
+      { name: 'read', description: '读商品', run: async () => { throw new Error('invalid product id'); } },
+    ];
+
+    const result = await runAgentExploreLoop({ provider, instruction: '查bad曝光', tools: throwingTools });
+
+    expect(result.stopReason).toBe('invalid');
+    expect(result.steps).toHaveLength(0);
+  });
 });

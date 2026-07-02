@@ -92,7 +92,12 @@ export async function runAgentExploreLoop(input: RunAgentExploreLoopInput): Prom
     const args = readArgs(action.args);
     if (!tool || !args) return invalidResult(steps);
 
-    const result = await tool.run(args);
+    let result: unknown;
+    try {
+      result = await tool.run(args);
+    } catch {
+      return invalidResult(steps);
+    }
     steps.push({ tool: tool.name, args, result });
   }
 
