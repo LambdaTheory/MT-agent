@@ -56,6 +56,14 @@ describe('executeApprovedDecision', () => {
     expect(entries.every((entry) => entry.subject?.id === '648')).toBe(true);
   });
 
+  it('records dated execution events under the mission date partition', async () => {
+    await executeApprovedDecision({ decision, outputDir: dir, date: '2026-07-02', options: { rentalPriceClient: fakeClient() } });
+
+    const entries = (await loadOperationLedgerJsonlEntries(dir, '2026-07-02')).filter((entry) => entry.decisionId === 'dec-1');
+    expect(entries.map((entry) => entry.event)).toEqual(['approval_accepted', 'execution_started', 'execution_succeeded']);
+    expect(entries.every((entry) => entry.metadata?.missionDate === '2026-07-02')).toBe(true);
+  });
+
   it('writes execution-results.json', async () => {
     await writeExecutionResults(dir, '2026-07-02', [{ runId: 'run-1', decisionId: 'dec-1', ok: true, status: 'executed', text: 'delisted' }]);
 

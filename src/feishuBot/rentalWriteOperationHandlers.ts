@@ -12,6 +12,7 @@ export interface RentalWriteLedgerContext {
   outputDir: string;
   runId?: string;
   decisionId?: string;
+  missionDate?: string;
 }
 
 type RentalWriteEvent = 'execution_started' | 'execution_succeeded' | 'execution_failed';
@@ -72,12 +73,13 @@ async function recordWriteEvent(
   if (!context) return;
   await recordOperationEvent(context.outputDir, {
     planId: context.decisionId ?? context.runId ?? 'ad-hoc',
-    at: new Date().toISOString(),
+    at: context.missionDate ? `${context.missionDate}T00:00:00.000Z` : new Date().toISOString(),
     event,
     toolName,
     ...(context.runId ? { runId: context.runId } : {}),
     ...(context.decisionId ? { decisionId: context.decisionId } : {}),
     subject: { kind: 'product', id: productId },
+    ...(context.missionDate ? { metadata: { missionDate: context.missionDate } } : {}),
   });
 }
 

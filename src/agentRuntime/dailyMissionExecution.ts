@@ -55,15 +55,16 @@ export async function executeApprovedDecision(input: ExecuteApprovedDecisionInpu
   }
   await recordOperationEvent(outputDir, {
     planId: decision.decisionId,
-    at: new Date().toISOString(),
+    at: input.date ? `${input.date}T00:00:00.000Z` : new Date().toISOString(),
     event: 'approval_accepted',
     runId: decision.runId,
     decisionId: decision.decisionId,
     subject: decision.subjects[0],
+    ...(input.date ? { metadata: { missionDate: input.date } } : {}),
   });
   const response = await executeAgentToolRequest(decisionToConfirmRequest(decision), outputDir, {
     ...input.options,
-    ledgerContext: { outputDir, runId: decision.runId, decisionId: decision.decisionId },
+    ledgerContext: { outputDir, runId: decision.runId, decisionId: decision.decisionId, ...(input.date ? { missionDate: input.date } : {}) },
   });
   if (response.card) {
     return { runId: decision.runId, decisionId: decision.decisionId, ok: false, status: 'pending_confirmation', text: response.text, card: response.card };
