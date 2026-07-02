@@ -70,7 +70,16 @@ describe('resolveDailyMissionApproval', () => {
     expect(events).toContain('approval_accepted');
     expect(events).toContain('execution_succeeded');
     const rawResults = await readFile(join(dir, 'daily-mission', '2026-07-02', 'execution-results.json'), 'utf8');
-    expect(JSON.parse(rawResults)).toEqual([{ runId: 'run-custom', decisionId: 'dec-1', ok: true, status: 'executed', text: expect.any(String) }]);
+    expect(JSON.parse(rawResults)).toEqual([{
+      runId: 'run-custom',
+      decisionId: 'dec-1',
+      ok: true,
+      status: 'executed',
+      text: expect.any(String),
+      operationType: 'delist',
+      subject: { kind: 'product', id: '648' },
+      executedAt: expect.any(String),
+    }]);
     const journalJson = JSON.parse(await readFile(join(dir, 'daily-mission', '2026-07-02', 'daily-journal.json'), 'utf8')) as { executionResults?: Array<{ decisionId: string }> };
     expect(journalJson.executionResults?.[0]?.decisionId).toBe('dec-1');
   });
