@@ -9,6 +9,7 @@ import { recordOperationEvent } from './operationLedger.js';
 export interface ExecuteApprovedDecisionInput {
   decision: DecisionRecord;
   outputDir: string;
+  date?: string;
   options?: AgentToolExecutionOptions;
 }
 
@@ -20,6 +21,10 @@ export interface DailyMissionExecutionResult {
 
 export async function executeApprovedDecision(input: ExecuteApprovedDecisionInput): Promise<DailyMissionExecutionResult> {
   const { decision, outputDir } = input;
+  if (input.date) {
+    const existing = await loadExecutionResult(outputDir, input.date, decision.decisionId);
+    if (existing?.ok) return existing;
+  }
   await recordOperationEvent(outputDir, {
     planId: decision.decisionId,
     at: new Date().toISOString(),
@@ -52,6 +57,21 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isExecutionResult(value: unknown): value is DailyMissionExecutionResult {
   return isRecord(value) && typeof value.decisionId === 'string' && typeof value.ok === 'boolean' && typeof value.text === 'string';
+}
+
+export async function loadExecutionResult(
+  outputDir: string,
+  date: string,
+  decisionId: string,
+): Promise<DailyMissionExecutionResult | null> {
+  const path = dailyMissionArtifactPath(outputDir, date, 'executionResults');
+  try {
+    const parsed = JSON.parse(await readFile(path, 'utf8')) as unknown;
+    if (!Array.isArray(parsed)) return null;
+    return parsed.filter(isExecutionResult).find((entry) => entry.decisionId === decisionId) ?? null;
+  } catch {
+    return null;
+  }
 }
 
 export async function appendExecutionResult(
