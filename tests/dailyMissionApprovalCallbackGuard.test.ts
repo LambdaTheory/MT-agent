@@ -6,7 +6,7 @@ import { resolveDailyMissionApproval } from '../src/agentRuntime/dailyMissionApp
 import { createDailyMissionRun, saveDailyMissionRun, transitionDailyMissionRun } from '../src/agentRuntime/dailyMissionRun.js';
 import type { RentalPriceSkillClient } from '../src/feishuBot/rentalPrice.js';
 
-async function seedRun(dir: string, status: 'waiting_approval' | 'completed'): Promise<void> {
+async function seedRun(dir: string, status: 'waiting_approval' | 'completed', approvalRunId = 'run-1'): Promise<void> {
   let run = createDailyMissionRun({ runId: 'run-1', date: '2026-07-02', trigger: 'manual', startedAt: '2026-07-02T00:00:00.000Z' });
   run = transitionDailyMissionRun(run, 'planning', '2026-07-02T00:00:01.000Z');
   run = transitionDailyMissionRun(run, 'waiting_approval', '2026-07-02T00:00:02.000Z');
@@ -20,7 +20,7 @@ async function seedRun(dir: string, status: 'waiting_approval' | 'completed'): P
   await writeFile(join(missionDir, 'approval-request.json'), JSON.stringify({
     approvals: [{
       decisionId: 'dec-1',
-      runId: 'run-1',
+      runId: approvalRunId,
       title: '下架 648',
       subjects: [{ kind: 'product', id: '648' }],
       operationType: 'delist',
@@ -98,6 +98,14 @@ describe('resolveDailyMissionApproval guards', () => {
     const { client: c, delist } = client();
 
     await expect(resolveDailyMissionApproval(request({ args: { productId: '999' } }), dir, { rentalPriceClient: c })).rejects.toThrow();
+    expect(delist).not.toHaveBeenCalled();
+  });
+
+  it('rejects when persisted decision belongs to another run', async () => {
+    await seedRun(dir, 'waiting_approval', 'other-run');
+    const { client: c, delist } = client();
+
+    await expect(resolveDailyMissionApproval(request(), dir, { rentalPriceClient: c })).rejects.toThrow('does not belong');
     expect(delist).not.toHaveBeenCalled();
   });
 });
