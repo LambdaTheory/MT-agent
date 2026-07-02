@@ -4,6 +4,7 @@ import { resolveLlmProviderFromEnv } from '../agentRuntime/decisionBuilderFactor
 import { buildReadOnlyExploreTools } from '../agentRuntime/exploreToolset.js';
 import { runAgentExploreLoop } from '../agentRuntime/agentExploreLoop.js';
 import type { DecisionRecord } from '../agentRuntime/decisionRecord.js';
+import type { FeishuCardPayload } from '../notify/feishuApp.js';
 import type { AgentToolExecutionOptions } from './agentToolExecutor.js';
 import type { BotResponse } from './types.js';
 import type { LlmProvider } from '../llm/provider.js';
@@ -27,6 +28,24 @@ function exploreDecisionToConfirmRequest(decision: DecisionRecord): AgentToolCon
   };
 }
 
+function buildExploreConfirmCard(approvals: DecisionRecord[]): FeishuCardPayload | undefined {
+  if (!approvals.length) return undefined;
+  const cards = approvals.map((approval) => buildAgentToolConfirmCard(exploreDecisionToConfirmRequest(approval)));
+  const elements = cards.flatMap((card, index) => {
+    const body = card.body as { elements?: unknown[] } | undefined;
+    return [
+      ...(index === 0 ? [] : [{ tag: 'hr' }]),
+      ...(body?.elements ?? []),
+    ];
+  });
+  return {
+    schema: '2.0',
+    config: { wide_screen_mode: true },
+    header: { title: { tag: 'plain_text', content: 'Agent 探索操作确认' }, template: 'orange' },
+    body: { elements },
+  };
+}
+
 export async function agentExploreResponse(
   instruction: string,
   outputDir: string,
@@ -42,7 +61,7 @@ export async function agentExploreResponse(
     maxSteps: options.maxSteps,
   });
   const classified = classifyDecisions(result.decisions ?? []);
-  const approval = classified.approvals[0];
+  const card = buildExploreConfirmCard(classified.approvals);
   const text = [
     result.answer || (result.stopReason === 'max_steps' ? '探索达到最大步数，已停止。' : '探索未形成有效结论。'),
     formatSteps(result.steps),
@@ -51,7 +70,7 @@ export async function agentExploreResponse(
 
   return {
     text,
-    ...(approval ? { card: buildAgentToolConfirmCard(exploreDecisionToConfirmRequest(approval)) } : {}),
+    ...(card ? { card } : {}),
     metadata: { toolName: 'agentExplore', ok: result.stopReason !== 'invalid', stopReason: result.stopReason, stepCount: result.steps.length },
   };
 }

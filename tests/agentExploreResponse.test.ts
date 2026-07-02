@@ -3,18 +3,7 @@ import { parseAgentToolConfirmRequest } from '../src/agentRuntime/approvalCard.j
 import { agentExploreResponse } from '../src/feishuBot/agentExploreResponse.js';
 import { handleBotIntent } from '../src/feishuBot/tools.js';
 import type { RentalPriceSkillClient } from '../src/feishuBot/rentalPrice.js';
-import type { LlmGenerateJsonInput, LlmProvider, LlmProviderResult } from '../src/llm/provider.js';
-
-class ScriptedProvider implements LlmProvider {
-  private index = 0;
-
-  constructor(private readonly scripts: string[]) {}
-
-  async generateJson(_input: LlmGenerateJsonInput): Promise<LlmProviderResult> {
-    const text = this.scripts[Math.min(this.index++, this.scripts.length - 1)];
-    return { text, json: JSON.parse(text), model: 'fake' };
-  }
-}
+import { FakeLlmProvider } from '../src/llm/fakeProvider.js';
 
 function readConfirmRequest(card: unknown) {
   const body = (card as { body?: { elements?: Array<{ elements?: Array<{ name?: string; behaviors?: Array<{ value?: unknown }> }> }> } }).body;
@@ -23,6 +12,15 @@ function readConfirmRequest(card: unknown) {
   const request = parseAgentToolConfirmRequest(button?.behaviors?.[0]?.value);
   if (!request) throw new Error('confirm request missing');
   return request;
+}
+
+function readConfirmRequests(card: unknown) {
+  const body = (card as { body?: { elements?: Array<{ elements?: Array<{ name?: string; behaviors?: Array<{ value?: unknown }> }> }> } }).body;
+  return (body?.elements ?? [])
+    .flatMap((element) => element.elements ?? [])
+    .filter((element) => element.name === 'agent_tool_confirm_submit')
+    .map((element) => parseAgentToolConfirmRequest(element.behaviors?.[0]?.value))
+    .filter((request): request is NonNullable<ReturnType<typeof parseAgentToolConfirmRequest>> => request !== null);
 }
 
 function rentalClientWithDelist(delist: RentalPriceSkillClient['delist']): RentalPriceSkillClient {
@@ -39,7 +37,7 @@ function rentalClientWithDelist(delist: RentalPriceSkillClient['delist']): Renta
 
 describe('agentExploreResponse', () => {
   it('runs a read-only tool and returns the answer with step summary', async () => {
-    const provider = new ScriptedProvider([
+    const provider = new FakeLlmProvider([
       JSON.stringify({ action: 'call_tool', tool: 'system.help', args: {} }),
       JSON.stringify({ action: 'finish', answer: '已查看帮助' }),
     ]);
@@ -52,7 +50,7 @@ describe('agentExploreResponse', () => {
   });
 
   it('turns executable decisions into confirmation cards without executing writes', async () => {
-    const provider = new ScriptedProvider([
+    const provider = new FakeLlmProvider([
       JSON.stringify({
         action: 'finish',
         answer: '建议下架 648',
@@ -83,8 +81,50 @@ describe('agentExploreResponse', () => {
     expect(request.reason).toContain('下架 648');
   });
 
+  it('turns every executable decision into an actionable confirmation button', async () => {
+    const provider = new FakeLlmProvider(JSON.stringify({
+      action: 'finish',
+      answer: '建议处理两条链接',
+      decisions: [
+        {
+          decisionId: 'dec-1',
+          runId: 'run-1',
+          title: '下架 648',
+          subjects: [{ kind: 'product', id: '648' }],
+          operationType: 'delist',
+          recommendation: 'approve_to_execute',
+          risk: 'high',
+          rationale: ['测试证据'],
+          evidenceRefs: ['explore.test'],
+          proposedTool: { toolName: 'rental.delist', arguments: { productId: '648' } },
+          uncertainties: [],
+        },
+        {
+          decisionId: 'dec-2',
+          runId: 'run-1',
+          title: '下架 649',
+          subjects: [{ kind: 'product', id: '649' }],
+          operationType: 'delist',
+          recommendation: 'approve_to_execute',
+          risk: 'high',
+          rationale: ['测试证据'],
+          evidenceRefs: ['explore.test'],
+          proposedTool: { toolName: 'rental.delist', arguments: { productId: '649' } },
+          uncertainties: [],
+        },
+      ],
+    }));
+
+    const response = await agentExploreResponse('分析 648 649', 'output', { provider });
+    const requests = readConfirmRequests(response.card);
+
+    expect(response.text).toContain('待确认执行：2 项');
+    expect(requests.map((request) => request.arguments.productId)).toEqual(['648', '649']);
+    expect(requests.every((request) => !request.reason.includes('[[dailyMission:'))).toBe(true);
+  });
+
   it('routes explicit explore commands from the Feishu unknown branch', async () => {
-    const provider = new ScriptedProvider([
+    const provider = new FakeLlmProvider([
       JSON.stringify({ action: 'finish', answer: '探索完成' }),
     ]);
 
