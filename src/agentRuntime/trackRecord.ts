@@ -63,14 +63,31 @@ function finalize(record: TrackRecord): TrackRecord {
   return { ...record, successRate: record.samples === 0 ? 0 : record.positive / record.samples };
 }
 
+function readOptionalText(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function trackRecordDimensions(outcome: OutcomeRecord): Pick<TrackRecord, 'category' | 'magnitudeBucket'> {
+  const raw = outcome as OutcomeRecord & { category?: unknown; magnitudeBucket?: unknown };
+  return {
+    ...(readOptionalText(raw.category) ? { category: readOptionalText(raw.category) } : {}),
+    ...(readOptionalText(raw.magnitudeBucket) ? { magnitudeBucket: readOptionalText(raw.magnitudeBucket) } : {}),
+  };
+}
+
+function trackRecordKey(outcome: OutcomeRecord, dimensions: Pick<TrackRecord, 'category' | 'magnitudeBucket'>): string {
+  return [outcome.operationType, dimensions.category, dimensions.magnitudeBucket].filter(Boolean).join('|');
+}
+
 export async function buildTrackRecord(outputDir: string, options: BuildTrackRecordOptions = {}): Promise<TrackRecord[]> {
   const groups = new Map<string, TrackRecord>();
   for (const date of selectedDates(await datedMissionDirs(outputDir), options)) {
     const path = join(outputDir, 'daily-mission', date, 'outcomes.json');
     const outcomes = parseOutcomes(JSON.parse(await readFile(path, 'utf8').catch(() => '[]')));
     for (const outcome of outcomes.filter((item) => item.outcome !== 'pending')) {
-      const key = outcome.operationType;
-      const current = groups.get(key) ?? { key, operationType: outcome.operationType, samples: 0, positive: 0, neutral: 0, negative: 0, successRate: 0 };
+      const dimensions = trackRecordDimensions(outcome);
+      const key = trackRecordKey(outcome, dimensions);
+      const current = groups.get(key) ?? { key, operationType: outcome.operationType, ...dimensions, samples: 0, positive: 0, neutral: 0, negative: 0, successRate: 0 };
       current.samples += 1;
       countOutcome(current, outcome.outcome);
       groups.set(key, current);

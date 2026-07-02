@@ -79,6 +79,17 @@ describe('daily mission integration', () => {
     await mkdir(missionDir, { recursive: true });
     await mkdir(reportDir, { recursive: true });
     await writeFile(join(reportDir, 'report-context.json'), JSON.stringify({ date, summary: { '1d': { exposure: 1 } }, rows: [], orderAnalysis: { pages: {} } }), 'utf8');
+    await writeFile(join(missionDir, 'outcomes.json'), JSON.stringify([{
+      decisionId: 'dec-history',
+      runId: 'run-history',
+      operationType: 'price_down',
+      subject: { kind: 'product', id: '648' },
+      executedAt: '2026-07-01T00:00:00.000Z',
+      measuredAt: '2026-07-01T00:00:00.000Z',
+      before: { exposure: 10 },
+      after: { exposure: 20 },
+      outcome: 'positive',
+    }]), 'utf8');
     await writeFile(join(missionDir, 'hotspot-events.json'), JSON.stringify([
       {
         eventId: 'e1',
@@ -96,11 +107,13 @@ describe('daily mission integration', () => {
       exposure?: { date: string; source: string; context: { date: string } };
       sales?: { date: string; source: string; context: { date: string } };
       recentOperations?: unknown[];
+      trackRecord?: unknown[];
       hotspots?: unknown[];
     };
     expect(context.exposure).toEqual({ date, source: 'publicTraffic', context: expect.objectContaining({ date }) });
     expect(context.sales).toEqual({ date, source: 'orderAnalysis', context: expect.objectContaining({ date }) });
     expect(context.recentOperations).toEqual([]);
+    expect(context.trackRecord).toEqual([expect.objectContaining({ key: 'price_down', samples: 1, positive: 1 })]);
     expect(context.hotspots).toHaveLength(1);
     const run = JSON.parse(await readFile(join(missionDir, 'mission-run.json'), 'utf8')) as { trigger: string };
     expect(run.trigger).toBe('scheduled');
