@@ -37,6 +37,7 @@ describe('agent runtime tool registry', () => {
       'publicTraffic.inactiveLinks',
       'publicTraffic.removedLinks',
       'publicTraffic.orderSummary',
+      'publicTraffic.windowedFindings',
       'publicTraffic.runReport',
       'publicTraffic.resendLatestReport',
       'publicTraffic.pushLatestReportToGroup',
@@ -81,7 +82,7 @@ describe('agent runtime tool registry', () => {
 
     const tools = listAgentTools();
     tools.pop();
-    expect(listAgentTools()).toHaveLength(60);
+    expect(listAgentTools()).toHaveLength(61);
   });
 
   it('returns defensive copies of tool metadata', () => {
@@ -287,6 +288,7 @@ describe('agent runtime tool registry', () => {
       'publicTraffic.inactiveLinks',
       'publicTraffic.removedLinks',
       'publicTraffic.orderSummary',
+      'publicTraffic.windowedFindings',
       'publicTraffic.runReport',
       'publicTraffic.resendLatestReport',
       'publicTraffic.pushLatestReportToGroup',

@@ -241,6 +241,16 @@ const problemProductsArgumentsSchema = {
   required: ['problemType'],
   additionalProperties: false,
 };
+const windowedFindingsArgumentsSchema = {
+  type: 'object',
+  properties: {
+    lookbackDays: positiveIntegerLikeSchema,
+    predicate: { type: 'string', enum: ['exposure_without_orders'] },
+    endDate: reportDateSchema,
+  },
+  required: ['lookbackDays', 'predicate'],
+  additionalProperties: false,
+};
 const optionalSendToArgumentsSchema = {
   type: 'object',
   properties: { sendTo: { type: 'string' }, date: reportDateSchema },
@@ -715,6 +725,13 @@ const agentTools: AgentToolDefinition[] = [
     risk: 'read',
     requiresConfirmation: false,
     inputSchema: noArgumentsSchema,
+  },
+  {
+    name: 'publicTraffic.windowedFindings',
+    description: '跨多天公域日报筛选商品发现；当前支持 exposure_without_orders（有曝光但 1 日订单金额为 0）。',
+    risk: 'read',
+    requiresConfirmation: false,
+    inputSchema: windowedFindingsArgumentsSchema,
   },
   {
     name: 'publicTraffic.runReport',

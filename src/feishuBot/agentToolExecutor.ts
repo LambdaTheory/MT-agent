@@ -11,6 +11,7 @@ import { buildClosedOrderObservationReport, writeClosedOrderObservationReportArt
 import { loadClosedOrderRegistryContext, type ClosedOrderRegistryPathsInput } from '../closedOrderFeedback/runtime.js';
 import type { AgentIntent, AgentProblemType } from '../agentData/types.js';
 import { rankProductsByCategory, type CategoryRankingMetric } from '../agentData/categoryRanking.js';
+import { findWindowedProducts, type WindowedPredicate } from '../agentData/windowedFindings.js';
 import { openLinkRegistryGovernancePrompt } from '../linkRegistry/governanceSession.js';
 import { openLinkRegistryMaintenancePrompt } from '../linkRegistry/maintenanceSession.js';
 import { createLinkRegistry } from '../linkRegistry/store.js';
@@ -272,6 +273,19 @@ function formatCategoryRankingResponse(result: ReturnType<typeof rankProductsByC
       ...lines,
     ].join('\n'),
     metadata: { toolName: 'product.rankByCategory', date: result.date, category: result.category, metric: result.metric, period: result.period, items: result.items },
+  };
+}
+
+function readWindowedPredicate(value: unknown): WindowedPredicate {
+  if (value === 'exposure_without_orders') return value;
+  throw new Error('predicate must be exposure_without_orders');
+}
+
+function formatWindowedFindingsResponse(result: Awaited<ReturnType<typeof findWindowedProducts>>): BotResponse {
+  const lines = result.items.map((item, index) => `${index + 1}. ${item.productName}（端内ID ${item.productId}）命中 ${item.daysMatched} 天，曝光 ${item.exposure}，金额 ${item.amount}`);
+  return {
+    text: [`窗口发现：${result.startDate} 至 ${result.endDate}`, ...lines].join('\n'),
+    metadata: { toolName: 'publicTraffic.windowedFindings', predicate: result.predicate, startDate: result.startDate, endDate: result.endDate, items: result.items },
   };
 }
 
@@ -1777,6 +1791,14 @@ export async function executeAgentToolRequest(
       return runReadOnlyAgentIntent(outputDir, { type: 'removed_links' }, options);
     case 'publicTraffic.orderSummary':
       return runReadOnlyAgentIntent(outputDir, { type: 'order_summary' }, options);
+    case 'publicTraffic.windowedFindings': {
+      const result = await findWindowedProducts(outputDir, {
+        lookbackDays: readOptionalLimit(request.arguments.lookbackDays) ?? 1,
+        predicate: readWindowedPredicate(request.arguments.predicate),
+        ...(typeof request.arguments.endDate === 'string' ? { endDate: request.arguments.endDate } : {}),
+      });
+      return formatWindowedFindingsResponse(result);
+    }
     case 'publicTraffic.runReport':
       if (publicTrafficReportRunning) return { text: '公域日报正在运行中，请稍后再试。' };
       publicTrafficReportRunning = true;
