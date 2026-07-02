@@ -65,5 +65,7 @@ describe('rental atomization integration', () => {
     ]);
     expect(add.metadata).toMatchObject({ toolName: 'rental.specDimApply', ok: true, ledgerContext });
     expect(price.metadata).toMatchObject({ toolName: 'rental.perSpecPriceApply', ok: true, ledgerContext });
+    expect(add.metadata?.executionEvent).toMatchObject({ type: 'execution', toolName: 'rental.specDimApply', productId: '648', ok: true, action: 'add', ...ledgerContext });
+    expect(price.metadata?.executionEvent).toMatchObject({ type: 'execution', toolName: 'rental.perSpecPriceApply', productId: '648', ok: true, ...ledgerContext });
   });
 });
