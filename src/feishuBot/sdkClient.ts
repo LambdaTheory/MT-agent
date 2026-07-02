@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { createActivityCancellationAssistant, type ActivityCancellationAssistant } from '../activityAutomation/cancelAssistance.js';
 import { updateActivitySubmitSessionStatus } from '../activityAutomation/submitSession.js';
 import { resolveDailyMissionApproval } from '../agentRuntime/dailyMissionApprovalCallback.js';
+import { recordDailyMissionRejection } from '../agentRuntime/dailyMissionRejection.js';
 import type { AgentToolConfirmRequest } from '../agentRuntime/approvalCard.js';
 import { buildClarifiedMessage, parseAgentClarificationCustomSelection, parseAgentClarificationSelection } from '../agentRuntime/clarificationCard.js';
 import type { AgentPlannerProvider } from '../agentRuntime/planner.js';
@@ -865,10 +866,13 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
 
         if (actionName === 'agent_tool_cancel') {
           const toolName = readString(value?.toolName) ?? '未知工具';
+          const reason = readString(value?.reason);
+          const args = isRecord(value?.arguments) ? value.arguments : {};
           const claim = claimRentalAction(messageId, actionName, value);
           if (!claim.claimed) {
             return cardActionUpdateResponse(claimStatusCard('Agent 操作已处理', claim.claim));
           }
+          if (reason) await recordDailyMissionRejection({ toolName, arguments: args, reason }, config.outputDir ?? 'output');
           setRentalActionStatus(claim.key, 'cancelled');
           recordLearning({
             type: 'tool_cancelled',
