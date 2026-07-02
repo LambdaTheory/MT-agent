@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { buildAgentToolConfirmCard } from '../agentRuntime/approvalCard.js';
+import { recordOperationEvent } from '../agentRuntime/operationLedger.js';
 import { runPublicTrafficReportCli } from '../cli/publicTrafficReport.js';
 import type { AgentToolConfirmRequest } from '../agentRuntime/approvalCard.js';
 import { loadConfig } from '../config/loadConfig.js';
@@ -93,6 +94,8 @@ export interface AgentToolExecutionOptions {
   closedOrderRegistryPaths?: ClosedOrderRegistryPathsInput;
   ledgerContext?: RentalWriteLedgerContext;
 }
+
+type AgentToolWriteEvent = 'execution_started' | 'execution_succeeded' | 'execution_failed';
 
 let publicTrafficReportRunning = false;
 
@@ -748,9 +751,28 @@ function readPriceApplyItems(value: unknown): Array<{ productId: string; fields:
   return items;
 }
 
+async function recordAgentToolWriteEvent(
+  context: RentalWriteLedgerContext | undefined,
+  event: AgentToolWriteEvent,
+  toolName: string,
+  productId: string,
+): Promise<void> {
+  if (!context) return;
+  await recordOperationEvent(context.outputDir, {
+    planId: context.decisionId ?? context.runId ?? 'ad-hoc',
+    at: new Date().toISOString(),
+    event,
+    toolName,
+    ...(context.runId ? { runId: context.runId } : {}),
+    ...(context.decisionId ? { decisionId: context.decisionId } : {}),
+    subject: { kind: 'product', id: productId },
+  });
+}
+
 async function rentalPriceApplyResponse(
   args: Record<string, unknown>,
   client: RentalPriceSkillClient,
+  ledgerContext?: RentalWriteLedgerContext,
 ): Promise<BotResponse> {
   const items = readPriceApplyItems(args.items);
   if (!items) throw new Error('改价执行参数无效，请重新发起预览。');
@@ -763,8 +785,12 @@ async function rentalPriceApplyResponse(
       ...(item.audit ? { audit: item.audit } : {}),
     };
     try {
-      results.push(await client.execute(request));
+      await recordAgentToolWriteEvent(ledgerContext, 'execution_started', 'rental.priceApply', item.productId);
+      const result = await client.execute(request);
+      await recordAgentToolWriteEvent(ledgerContext, result.ok ? 'execution_succeeded' : 'execution_failed', 'rental.priceApply', item.productId);
+      results.push(result);
     } catch (error) {
+      await recordAgentToolWriteEvent(ledgerContext, 'execution_failed', 'rental.priceApply', item.productId);
       results.push({ productId: item.productId, ok: false, lines: [error instanceof Error ? error.message : String(error)] });
     }
   }
@@ -1242,11 +1268,20 @@ async function refreshActivityExecuteResponse(
   outputDir: string,
   args: Record<string, unknown>,
   client: RentalPriceSkillClient,
+  ledgerContext?: RentalWriteLedgerContext,
 ): Promise<BotResponse> {
   const request = readRefreshActivityExecuteRequest(args);
   const delistResults = [];
   for (const productId of request.delistProductIds) {
-    const result = await client.delist(productId);
+    await recordAgentToolWriteEvent(ledgerContext, 'execution_started', 'operations.refreshActivityExecute', productId);
+    let result;
+    try {
+      result = await client.delist(productId);
+    } catch (error) {
+      await recordAgentToolWriteEvent(ledgerContext, 'execution_failed', 'operations.refreshActivityExecute', productId);
+      throw error;
+    }
+    await recordAgentToolWriteEvent(ledgerContext, result.ok ? 'execution_succeeded' : 'execution_failed', 'operations.refreshActivityExecute', productId);
     delistResults.push(result);
     if (!result.ok) break;
   }
@@ -1266,6 +1301,9 @@ async function refreshActivityExecuteResponse(
       dataDate: request.date,
       reason: '活跃度刷新计划确认执行',
     }));
+    for (const item of items) {
+      await recordAgentToolWriteEvent(ledgerContext, 'execution_started', 'operations.refreshActivityExecute', item.sourceProductId);
+    }
     newLinkResult = items.length === 1
       ? await executeNewLinkBatchConfirmRequest(client, items[0]!)
       : await executeNewLinkBatchMultiConfirmRequest(client, {
@@ -1276,6 +1314,9 @@ async function refreshActivityExecuteResponse(
         dataDate: request.date,
         reason: '活跃度刷新计划确认执行',
       });
+    for (const item of items) {
+      await recordAgentToolWriteEvent(ledgerContext, newLinkResult.ok ? 'execution_succeeded' : 'execution_failed', 'operations.refreshActivityExecute', item.sourceProductId);
+    }
   }
 
   const auditPath = await writeRefreshActivityAudit(outputDir, {
@@ -1650,7 +1691,7 @@ export async function executeAgentToolRequest(
     case 'operations.refreshActivityPlan':
       return refreshActivityPlanResponse(outputDir, request.arguments, options, request.continuation);
     case 'operations.refreshActivityExecute':
-      return refreshActivityExecuteResponse(outputDir, request.arguments, options.rentalPriceClient ?? createRentalPriceSkillClient());
+      return refreshActivityExecuteResponse(outputDir, request.arguments, options.rentalPriceClient ?? createRentalPriceSkillClient(), options.ledgerContext);
     case 'rental.daemonStatus':
     case 'rental.platformSearch':
     case 'rental.platformSearchAll':
@@ -1690,7 +1731,7 @@ export async function executeAgentToolRequest(
     case 'rental.pricePreview':
       return rentalPricePreviewResponse(request.arguments, request.reason, options.rentalPriceClient ?? createRentalPriceSkillClient(), outputDir, request.continuation);
     case 'rental.priceApply':
-      return rentalPriceApplyResponse(request.arguments, options.rentalPriceClient ?? createRentalPriceSkillClient());
+      return rentalPriceApplyResponse(request.arguments, options.rentalPriceClient ?? createRentalPriceSkillClient(), options.ledgerContext);
     case 'rental.priceSnapshot': {
       const query = requireString(request.arguments.query, 'query');
       return rentalPriceSnapshotResponse(query, options.rentalPriceClient ?? createRentalPriceSkillClient(), options);
