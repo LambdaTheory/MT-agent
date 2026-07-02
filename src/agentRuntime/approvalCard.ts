@@ -131,7 +131,11 @@ function hasValidConfirmationKey(value: Record<string, unknown>, request: AgentT
 }
 
 function requiresConfirmationKey(tool: AgentToolDefinition): boolean {
-  return tool.plannerVisible === false;
+  return tool.requiresConfirmation === true;
+}
+
+function isDailyMissionConfirmRequest(request: AgentToolConfirmRequest): boolean {
+  return /^\[\[dailyMission:runId=[^;]+;decisionId=[^\]]+\]\]/.test(request.reason);
 }
 
 export function buildAgentToolConfirmCard(request: AgentToolConfirmRequest, options: AgentToolConfirmCardOptions = {}): FeishuCardPayload {
@@ -206,6 +210,7 @@ export function parseAgentToolConfirmRequest(value: unknown): AgentToolConfirmRe
   const parsedRequest = { toolName, arguments: args, reason, ...(continuation ? { continuation } : {}) };
   if (value.confirmationKey !== undefined && !hasValidConfirmationKey(value, parsedRequest)) return null;
   if (continuation && !hasValidConfirmationKey(value, parsedRequest)) return null;
+  if (isDailyMissionConfirmRequest(parsedRequest) && !hasValidConfirmationKey(value, parsedRequest)) return null;
   if (requiresConfirmationKey(tool) && !hasValidConfirmationKey(value, parsedRequest)) return null;
   return parsedRequest;
 }
