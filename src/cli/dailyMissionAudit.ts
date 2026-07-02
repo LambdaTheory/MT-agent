@@ -11,8 +11,13 @@ export interface DailyMissionAuditSummary {
   events: string[];
   approvals: string[];
   executions: string[];
+  decisions: Array<{ decisionId: string; recommendation?: string; subject?: string; status: string }>;
   eventCounts: Record<string, number>;
   lines: string[];
+}
+
+function executionStatus(entry: { ok: boolean; status?: string }): string {
+  return entry.status ?? (entry.ok ? 'executed' : 'failed');
 }
 
 function readArg(argv: string[], name: string): string | undefined {
@@ -38,9 +43,16 @@ export async function buildDailyMissionAuditSummary(
   const executions = entries
     .filter((entry) => entry.event.startsWith('execution_'))
     .map((entry) => entry.decisionId ?? entry.planId);
-  const executedCount = executionResults.filter((entry) => (entry.status ?? (entry.ok ? 'executed' : 'failed')) === 'executed').length;
+  const executedCount = executionResults.filter((entry) => executionStatus(entry) === 'executed').length;
   const pendingCount = executionResults.filter((entry) => entry.status === 'pending_confirmation').length;
-  const failedCount = executionResults.filter((entry) => (entry.status ?? (entry.ok ? 'executed' : 'failed')) === 'failed').length;
+  const failedCount = executionResults.filter((entry) => executionStatus(entry) === 'failed').length;
+  const executionStatusByDecision = new Map(executionResults.map((entry) => [entry.decisionId, executionStatus(entry)]));
+  const decisions = (approvalRequest?.approvals ?? []).map((decision) => ({
+    decisionId: decision.decisionId,
+    recommendation: decision.recommendation,
+    subject: decision.subjects?.map((subject) => `${subject.kind}:${subject.id}`).join(', '),
+    status: executionStatusByDecision.get(decision.decisionId) ?? 'pending',
+  }));
   const lines = [
     `Daily Mission 审计：${date}`,
     `状态：${run?.status ?? '无 run'}`,
@@ -48,9 +60,10 @@ export async function buildDailyMissionAuditSummary(
     `审批请求：${approvals.length}`,
     `执行事件：${executions.length}`,
     `决策汇总：待审批 ${approvalRequest?.approvals.length ?? 0} | 观察 ${approvalRequest?.observations.length ?? 0} | 已执行 ${executedCount} | 待二次确认 ${pendingCount} | 失败 ${failedCount}`,
+    ...decisions.map((decision) => `- ${decision.decisionId}：${decision.status}${decision.subject ? `（${decision.subject}）` : ''}`),
     ...Object.entries(eventCounts).map(([event, count]) => `- ${event}: ${count}`),
   ];
-  return { date, status: run?.status ?? 'none', events, approvals, executions, eventCounts, lines };
+  return { date, status: run?.status ?? 'none', events, approvals, executions, decisions, eventCounts, lines };
 }
 
 export async function main(argv = process.argv.slice(2)): Promise<void> {
