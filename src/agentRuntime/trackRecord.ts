@@ -76,7 +76,11 @@ function trackRecordDimensions(outcome: OutcomeRecord): Pick<TrackRecord, 'categ
 }
 
 function trackRecordKey(outcome: OutcomeRecord, dimensions: Pick<TrackRecord, 'category' | 'magnitudeBucket'>): string {
-  return [outcome.operationType, dimensions.category, dimensions.magnitudeBucket].filter(Boolean).join('|');
+  return [
+    outcome.operationType,
+    dimensions.category ? `category:${dimensions.category}` : undefined,
+    dimensions.magnitudeBucket ? `magnitudeBucket:${dimensions.magnitudeBucket}` : undefined,
+  ].filter(Boolean).join('|');
 }
 
 export async function buildTrackRecord(outputDir: string, options: BuildTrackRecordOptions = {}): Promise<TrackRecord[]> {

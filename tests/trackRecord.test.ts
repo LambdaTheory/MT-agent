@@ -87,9 +87,47 @@ describe('buildTrackRecord', () => {
     const records = await buildTrackRecord(dir);
 
     expect(records).toEqual([
-      { key: 'price_down|灯光|small', operationType: 'price_down', category: '灯光', magnitudeBucket: 'small', samples: 1, positive: 0, neutral: 1, negative: 0, successRate: 0 },
-      { key: 'price_down|相机|large', operationType: 'price_down', category: '相机', magnitudeBucket: 'large', samples: 1, positive: 0, neutral: 0, negative: 1, successRate: 0 },
-      { key: 'price_down|相机|small', operationType: 'price_down', category: '相机', magnitudeBucket: 'small', samples: 1, positive: 1, neutral: 0, negative: 0, successRate: 1 },
+      { key: 'price_down|category:灯光|magnitudeBucket:small', operationType: 'price_down', category: '灯光', magnitudeBucket: 'small', samples: 1, positive: 0, neutral: 1, negative: 0, successRate: 0 },
+      { key: 'price_down|category:相机|magnitudeBucket:large', operationType: 'price_down', category: '相机', magnitudeBucket: 'large', samples: 1, positive: 0, neutral: 0, negative: 1, successRate: 0 },
+      { key: 'price_down|category:相机|magnitudeBucket:small', operationType: 'price_down', category: '相机', magnitudeBucket: 'small', samples: 1, positive: 1, neutral: 0, negative: 0, successRate: 1 },
+    ]);
+  });
+
+  it('does not collide category-only and magnitude-only dimensions with the same value', async () => {
+    const missionDir = join(dir, 'daily-mission', '2026-07-01');
+    await mkdir(missionDir, { recursive: true });
+    await writeFile(join(missionDir, 'outcomes.json'), JSON.stringify([
+      {
+        decisionId: 'dec-category-small',
+        runId: 'run-1',
+        operationType: 'price_down',
+        category: 'small',
+        subject: { kind: 'product', id: '648' },
+        executedAt: '2026-07-01T00:00:00.000Z',
+        measuredAt: '2026-07-01T00:00:00.000Z',
+        before: { exposure: 10 },
+        after: { exposure: 20 },
+        outcome: 'positive',
+      },
+      {
+        decisionId: 'dec-magnitude-small',
+        runId: 'run-1',
+        operationType: 'price_down',
+        magnitudeBucket: 'small',
+        subject: { kind: 'product', id: '649' },
+        executedAt: '2026-07-01T00:00:00.000Z',
+        measuredAt: '2026-07-01T00:00:00.000Z',
+        before: { exposure: 10 },
+        after: { exposure: 5 },
+        outcome: 'negative',
+      },
+    ]), 'utf8');
+
+    const records = await buildTrackRecord(dir);
+
+    expect(records).toEqual([
+      { key: 'price_down|category:small', operationType: 'price_down', category: 'small', samples: 1, positive: 1, neutral: 0, negative: 0, successRate: 1 },
+      { key: 'price_down|magnitudeBucket:small', operationType: 'price_down', magnitudeBucket: 'small', samples: 1, positive: 0, neutral: 0, negative: 1, successRate: 0 },
     ]);
   });
 });
