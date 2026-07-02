@@ -6,6 +6,7 @@ import { runDailyMissionPlan } from '../agentRuntime/dailyMissionOrchestrator.js
 import { writeDailyJournal } from '../agentRuntime/dailyJournalWriter.js';
 import { createDecisionBuilder, resolveLlmProviderFromEnv } from '../agentRuntime/decisionBuilderFactory.js';
 import { FileHotspotEventProvider } from '../agentRuntime/hotspotEvents.js';
+import { createMarketPriceCollector } from '../agentRuntime/marketPriceCollector.js';
 import { loadEnv } from '../config/loadEnv.js';
 
 function readArg(argv: string[], name: string): string | undefined {
@@ -25,6 +26,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   const collectors: ContextCollector[] = [
     createExposureCollector(outputDir),
     createSalesCollector(outputDir),
+    createMarketPriceCollector(outputDir),
     { name: 'recentOperations', collect: async () => ({ recentOperations: await collectRecentOperations(outputDir, date, 7) }) },
     { name: 'hotspots', collect: async () => ({ hotspots: await hotspotProvider.listEvents({ date, lookaheadDays: 7 }) }) },
   ];

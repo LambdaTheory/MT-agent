@@ -10,6 +10,7 @@ export interface CollectedContext {
   exposure?: unknown;
   sales?: unknown;
   hotspots?: HotspotEvent[];
+  marketPrice?: unknown;
   recentOperations?: OperationPlanJournalEntry[];
   missingSources: string[];
 }
