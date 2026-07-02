@@ -20,6 +20,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   const outputDir = readArg(argv, '--output-dir') ?? process.env.MT_AGENT_OUTPUT_DIR ?? 'output';
   const date = readArg(argv, '--date') ?? new Date().toISOString().slice(0, 10);
   const runId = readArg(argv, '--run-id') ?? `run-${date}-${Date.now()}`;
+  const trigger = readArg(argv, '--trigger') === 'scheduled' ? 'scheduled' : 'manual';
   const hotspotProvider = new FileHotspotEventProvider({
     path: join(outputDir, 'daily-mission', date, 'hotspot-events.json'),
   });
@@ -35,7 +36,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     outputDir,
     date,
     runId,
-    trigger: 'manual',
+    trigger,
     collectors,
     decisionBuilder: createDecisionBuilder({ provider: resolveLlmProviderFromEnv() }),
   });

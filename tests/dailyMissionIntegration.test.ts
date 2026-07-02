@@ -90,7 +90,7 @@ describe('daily mission integration', () => {
       },
     ]), 'utf8');
 
-    await runDailyMissionCli(['--output-dir', dir, '--date', date, '--run-id', 'run-cli']);
+    await runDailyMissionCli(['--output-dir', dir, '--date', date, '--run-id', 'run-cli', '--trigger', 'scheduled']);
 
     const context = JSON.parse(await readFile(join(missionDir, 'collected-context.json'), 'utf8')) as {
       exposure?: { date: string; source: string; context: { date: string } };
@@ -102,5 +102,7 @@ describe('daily mission integration', () => {
     expect(context.sales).toEqual({ date, source: 'orderAnalysis', context: expect.objectContaining({ date }) });
     expect(context.recentOperations).toEqual([]);
     expect(context.hotspots).toHaveLength(1);
+    const run = JSON.parse(await readFile(join(missionDir, 'mission-run.json'), 'utf8')) as { trigger: string };
+    expect(run.trigger).toBe('scheduled');
   });
 });
