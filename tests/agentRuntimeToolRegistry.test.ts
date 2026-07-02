@@ -64,6 +64,10 @@ describe('agent runtime tool registry', () => {
       'rental.priceRollback',
       'rental.priceApply',
       'rental.operationConfirmRequest',
+      'rental.perSpecPricePlan',
+      'rental.perSpecPriceApply',
+      'rental.specDimPlan',
+      'rental.specDimApply',
     ]);
     expect(listAgentTools().map((tool) => tool.name)).toContain('rental.newLinkBatchPlan');
     expect(listAgentTools().map((tool) => tool.name)).toContain('rental.pricePreview');
@@ -76,7 +80,7 @@ describe('agent runtime tool registry', () => {
 
     const tools = listAgentTools();
     tools.pop();
-    expect(listAgentTools()).toHaveLength(55);
+    expect(listAgentTools()).toHaveLength(59);
   });
 
   it('returns defensive copies of tool metadata', () => {
@@ -184,6 +188,10 @@ describe('agent runtime tool registry', () => {
     expect(findAgentTool('rental.priceRollback')).toMatchObject({ risk: 'high', requiresConfirmation: true });
     expect(findAgentTool('rental.priceApply')).toMatchObject({ risk: 'high', requiresConfirmation: true, plannerVisible: false });
     expect(findAgentTool('rental.operationConfirmRequest')).toMatchObject({ risk: 'high', requiresConfirmation: true });
+    expect(findAgentTool('rental.perSpecPricePlan')).toMatchObject({ risk: 'high', requiresConfirmation: true });
+    expect(findAgentTool('rental.perSpecPriceApply')).toMatchObject({ risk: 'high', requiresConfirmation: true, plannerVisible: false });
+    expect(findAgentTool('rental.specDimPlan')).toMatchObject({ risk: 'high', requiresConfirmation: true });
+    expect(findAgentTool('rental.specDimApply')).toMatchObject({ risk: 'high', requiresConfirmation: true, plannerVisible: false });
   });
 
   it('allows read-only report tools to target an explicit report date', () => {
@@ -302,9 +310,13 @@ describe('agent runtime tool registry', () => {
       'rental.priceSnapshot',
       'rental.newLinkBatchPlan',
       'rental.priceRollback',
+      'rental.perSpecPricePlan',
+      'rental.specDimPlan',
     ]);
     expect(plannerToolNames).not.toContain('rental.operationConfirmRequest');
     expect(plannerToolNames).not.toContain('rental.priceApply');
+    expect(plannerToolNames).not.toContain('rental.perSpecPriceApply');
+    expect(plannerToolNames).not.toContain('rental.specDimApply');
     expect(plannerToolNames).not.toContain('operations.refreshActivityExecute');
   });
 
@@ -503,6 +515,18 @@ describe('agent runtime tool registry', () => {
     });
     expect(findAgentTool('rental.operationConfirmRequest')?.inputSchema).toMatchObject({
       required: ['action', 'productId'],
+    });
+    expect(findAgentTool('rental.perSpecPricePlan')?.inputSchema).toMatchObject({
+      required: ['productId', 'specPrices'],
+    });
+    expect(findAgentTool('rental.perSpecPriceApply')?.inputSchema).toMatchObject({
+      required: ['productId', 'specFields'],
+    });
+    expect(findAgentTool('rental.specDimPlan')?.inputSchema).toMatchObject({
+      required: ['productId', 'action'],
+    });
+    expect(findAgentTool('rental.specDimApply')?.inputSchema).toMatchObject({
+      required: ['productId', 'action'],
     });
   });
 });

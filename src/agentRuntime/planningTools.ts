@@ -4,6 +4,8 @@ export const PRE_CONFIRMATION_PLANNING_TOOLS = new Set([
   'rental.pricePreview',
   'rental.specRemovePlan',
   'rental.newLinkBatchPlan',
+  'rental.perSpecPricePlan',
+  'rental.specDimPlan',
 ]);
 
 export function isPreConfirmationPlanningTool(toolName: string): boolean {

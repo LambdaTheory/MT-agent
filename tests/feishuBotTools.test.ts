@@ -2527,6 +2527,83 @@ describe('handleBotIntent', () => {
     expect(cardText).not.toContain('agent_tool_confirm');
   });
 
+  it('turns Agent-planned per-spec price plan into the apply confirmation card without confirming the plan first', async () => {
+    const outputDir = await writeContext();
+    const planner: AgentPlannerProvider = {
+      async proposePlan(request) {
+        expect(request.tools.map((tool) => tool.name)).toContain('rental.perSpecPricePlan');
+        return JSON.stringify({
+          goal: '给商品 648 的指定规格写绝对租金',
+          selectedTool: 'rental.perSpecPricePlan',
+          arguments: { productId: '648', specPrices: [{ specId: '3863', fields: { rent1day: '80.00' } }] },
+          confidence: 0.91,
+          reason: '用户要求按规格差异化改价，必须先生成确认卡',
+        });
+      },
+    };
+    const readCalls: string[] = [];
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run for per-spec plan'); },
+      async execute() { throw new Error('execute should not run for per-spec plan'); },
+      async read(productId) {
+        readCalls.push(productId);
+        return { productId, ok: true, specs: [{ specId: '3863', title: 'B' }], values: { '3863': { rent1day: '70.00' } }, lines: ['read: ok'] };
+      },
+      async copy() { throw new Error('copy should not run'); },
+      async delist() { throw new Error('delist should not run'); },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+      async applyPerSpec() { throw new Error('applyPerSpec should not run before confirmation'); },
+    };
+
+    const response = await handleBotIntent({ type: 'unknown', text: '648 的 3863 规格 1天改成80' }, outputDir, { agentPlannerProvider: planner, rentalPriceClient });
+
+    expect(readCalls).toEqual(['648']);
+    expect(response.text).toContain('按规格改价预览：商品 648');
+    const confirmRequest = await loadAgentToolConfirmRequestFromCard(outputDir, response.card);
+    expect(confirmRequest.toolName).toBe('rental.perSpecPriceApply');
+    expect(confirmRequest.arguments).toEqual({ productId: '648', specFields: { '3863': { rent1day: '80.00' } } });
+  });
+
+  it('turns Agent-planned spec dimension plan into the apply confirmation card without confirming the plan first', async () => {
+    const outputDir = await writeContext();
+    const planner: AgentPlannerProvider = {
+      async proposePlan(request) {
+        expect(request.tools.map((tool) => tool.name)).toContain('rental.specDimPlan');
+        return JSON.stringify({
+          goal: '给商品 648 添加规格维度',
+          selectedTool: 'rental.specDimPlan',
+          arguments: { productId: '648', action: 'add', title: '激光险' },
+          confidence: 0.91,
+          reason: '用户要求添加规格维度，必须先生成确认卡',
+        });
+      },
+    };
+    const specDiscoverCalls: string[] = [];
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run for spec dimension plan'); },
+      async execute() { throw new Error('execute should not run for spec dimension plan'); },
+      async copy() { throw new Error('copy should not run'); },
+      async delist() { throw new Error('delist should not run'); },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover(productId) {
+        specDiscoverCalls.push(productId);
+        return { productId, ok: true, dimensions: [], lines: ['spec-discover: ok'] };
+      },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+      async specAddDim() { throw new Error('specAddDim should not run before confirmation'); },
+    };
+
+    const response = await handleBotIntent({ type: 'unknown', text: '给 648 加激光险规格维度' }, outputDir, { agentPlannerProvider: planner, rentalPriceClient });
+
+    expect(specDiscoverCalls).toEqual(['648']);
+    expect(response.text).toContain('规格维度变更预览：商品 648');
+    const confirmRequest = await loadAgentToolConfirmRequestFromCard(outputDir, response.card);
+    expect(confirmRequest.toolName).toBe('rental.specDimApply');
+    expect(confirmRequest.arguments).toEqual({ productId: '648', action: 'add', title: '激光险' });
+  });
+
   it('keeps explicit internal id spec removal scoped to that product only', async () => {
     const outputDir = await writeContext();
     const registryRoot = await mkdtemp(join(tmpdir(), 'mt-agent-x300-spec-remove-explicit-id-'));
