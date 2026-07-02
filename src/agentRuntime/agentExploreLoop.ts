@@ -1,4 +1,4 @@
-import type { DecisionRecord } from './decisionRecord.js';
+import { isValidDecisionRecord, type DecisionRecord } from './decisionRecord.js';
 import type { LlmProvider } from '../llm/provider.js';
 
 export interface ExploreTool {
@@ -38,7 +38,18 @@ function readArgs(value: unknown): Record<string, unknown> | null {
 }
 
 function readDecisions(value: unknown): DecisionRecord[] | undefined {
-  return Array.isArray(value) ? (value as DecisionRecord[]) : undefined;
+  return Array.isArray(value) && value.every(isValidDecisionRecord) ? value : undefined;
+}
+
+interface FinishAction extends Record<string, unknown> {
+  action: 'finish';
+  answer: string;
+  decisions?: DecisionRecord[];
+}
+
+function hasValidFinishPayload(action: Record<string, unknown>): action is FinishAction {
+  return typeof action.answer === 'string'
+    && (action.decisions === undefined || readDecisions(action.decisions) !== undefined);
 }
 
 function buildSystemPrompt(tools: ExploreTool[]): string {
@@ -82,8 +93,9 @@ export async function runAgentExploreLoop(input: RunAgentExploreLoopInput): Prom
     }
 
     if (action.action === 'finish') {
-      const answer = typeof action.answer === 'string' ? action.answer : '';
-      const decisions = readDecisions(action.decisions);
+      if (!hasValidFinishPayload(action)) return invalidResult(steps);
+      const answer = action.answer;
+      const decisions = action.decisions;
       return { steps, answer, ...(decisions ? { decisions } : {}), stopReason: 'answered' };
     }
 

@@ -56,4 +56,37 @@ describe('runAgentExploreLoop', () => {
     expect(result.stopReason).toBe('invalid');
     expect(result.steps).toHaveLength(0);
   });
+
+  it('stops as invalid when finish answer is not a string', async () => {
+    const provider = new FakeLlmProvider([
+      JSON.stringify({ action: 'finish', answer: 123 }),
+    ]);
+
+    const result = await runAgentExploreLoop({ provider, instruction: 'x', tools });
+
+    expect(result.stopReason).toBe('invalid');
+    expect(result.answer).toBe('');
+  });
+
+  it('stops as invalid when finish decisions is present but not an array', async () => {
+    const provider = new FakeLlmProvider([
+      JSON.stringify({ action: 'finish', answer: 'done', decisions: { decisionId: 'bad' } }),
+    ]);
+
+    const result = await runAgentExploreLoop({ provider, instruction: 'x', tools });
+
+    expect(result.stopReason).toBe('invalid');
+    expect(result.answer).toBe('');
+  });
+
+  it('stops as invalid when finish decisions contains malformed records', async () => {
+    const provider = new FakeLlmProvider([
+      JSON.stringify({ action: 'finish', answer: 'done', decisions: [{}] }),
+    ]);
+
+    const result = await runAgentExploreLoop({ provider, instruction: 'x', tools });
+
+    expect(result.stopReason).toBe('invalid');
+    expect(result.answer).toBe('');
+  });
 });
