@@ -5,6 +5,7 @@ import type { ExposureCumulativeProduct, ExposureOverviewMetric } from '../publi
 import { extractOverviewFromText } from '../publicTraffic/extractOverviewFromText.js';
 import { extractProductIdFromInfo, resolveFallbackProductId } from '../publicTraffic/extractProductIdFromInfo.js';
 import { parseMoney, parseNumberText } from '../publicTraffic/exposureNormalize.js';
+import { normalizeExposureStatusLabel, parseExposureLinkStatus } from '../publicTraffic/exposureStatus.js';
 import { selectSubAccountIfNeeded } from './subAccount.js';
 import { shouldKeepBrowserOpenOnFailure } from './failureHandling.js';
 import { ensureAuthenticatedMerchantSession } from './merchantSession.js';
@@ -107,7 +108,7 @@ async function extractAllOverviews(page: Page): Promise<ExposureOverviewMetric[]
 
 async function getCurrentTable(page: Page): Promise<{
   headers: string[];
-  rows: Array<{ cells: string[]; productTitle: string; domProductId: string }>;
+  rows: Array<{ cells: string[]; productTitle: string; domProductId: string; statusLabel: string }>;
   signature: string;
 }> {
   return page.evaluate(`(() => {
@@ -138,6 +139,12 @@ async function getCurrentTable(page: Page): Promise<{
         .filter((text) => text && text !== '预览' && !text.includes('商品ID') && !text.includes('平台商品ID') && !text.includes('元/日') && !text.includes('出售中') && !text.includes('已下架'));
       return candidates.sort((a, b) => b.length - a.length)[0] ?? '';
     };
+    const statusFromInfoCell = (cell) => {
+      const candidates = Array.from(cell.querySelectorAll('div, span, a'))
+        .map((element) => clean(element.textContent))
+        .filter((text) => text === '\\u51fa\\u552e\\u4e2d' || text === '\\u5df2\\u4e0b\\u67b6');
+      return candidates[0] ?? '';
+    };
     const idFromInfoCell = (cell) => {
       const idText = clean(cell.querySelector('[class*="idWrap"] span')?.textContent);
       return idText.match(/(?:ID|商品ID|平台商品ID)\s*[:：]?\s*(20\d{20,})/)?.[1] ?? '';
@@ -149,6 +156,7 @@ async function getCurrentTable(page: Page): Promise<{
         cells: cells.map((cell) => clean(cell.textContent)),
         productTitle: infoCell ? titleFromInfoCell(infoCell) : '',
         domProductId: infoCell ? idFromInfoCell(infoCell) : '',
+        statusLabel: infoCell ? statusFromInfoCell(infoCell) : '',
       };
     });
 
@@ -373,7 +381,7 @@ async function extractProductRows(page: Page, mapping: ProductIdMapping): Promis
       throw new Error(`Missing exposure table columns. Actual headers: ${headers.join(', ')}`);
     }
 
-    for (const { cells, productTitle, domProductId } of rows) {
+    for (const { cells, productTitle, domProductId, statusLabel } of rows) {
       const infoText = normalizeText(cells[infoIndex]);
       const regexProductId = extractProductIdFromInfo(infoText);
       const platformProductId = domProductId || resolveFallbackProductId(regexProductId, mapping) || regexProductId;
@@ -399,6 +407,8 @@ async function extractProductRows(page: Page, mapping: ProductIdMapping): Promis
         visits: parseNumberText(cells[visitsIndex]),
         amount: parseMoney(cells[amountIndex]),
         custodyDays: custodyIndex >= 0 ? custodyDaysFromText(normalizeText(cells[custodyIndex])) : null,
+        listingStatus: parseExposureLinkStatus(statusLabel || infoText),
+        listingStatusLabel: normalizeExposureStatusLabel(statusLabel || infoText),
         raw,
       });
     }

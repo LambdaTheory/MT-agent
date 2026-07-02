@@ -52,6 +52,7 @@ describe('agent runtime tool registry', () => {
       'rental.readRaw',
       'rental.copy',
       'rental.delist',
+      'rental.delistBatch',
       'rental.tenancySet',
       'rental.specDiscover',
       'rental.specAddAndRefresh',
@@ -75,7 +76,7 @@ describe('agent runtime tool registry', () => {
 
     const tools = listAgentTools();
     tools.pop();
-    expect(listAgentTools()).toHaveLength(54);
+    expect(listAgentTools()).toHaveLength(55);
   });
 
   it('returns defensive copies of tool metadata', () => {
@@ -171,6 +172,7 @@ describe('agent runtime tool registry', () => {
     expect(findAgentTool('rental.batchRead')).toMatchObject({ risk: 'read', requiresConfirmation: false });
     expect(findAgentTool('rental.copy')).toMatchObject({ risk: 'high', requiresConfirmation: true });
     expect(findAgentTool('rental.delist')).toMatchObject({ risk: 'high', requiresConfirmation: true });
+    expect(findAgentTool('rental.delistBatch')).toMatchObject({ risk: 'high', requiresConfirmation: true });
     expect(findAgentTool('rental.tenancySet')).toMatchObject({ risk: 'high', requiresConfirmation: true });
     expect(findAgentTool('rental.specDiscover')).toMatchObject({ risk: 'read', requiresConfirmation: false });
     expect(findAgentTool('rental.specAddAndRefresh')).toMatchObject({ risk: 'high', requiresConfirmation: true });
@@ -290,6 +292,7 @@ describe('agent runtime tool registry', () => {
       'rental.readRaw',
       'rental.copy',
       'rental.delist',
+      'rental.delistBatch',
       'rental.tenancySet',
       'rental.specDiscover',
       'rental.specAddAndRefresh',
@@ -471,6 +474,13 @@ describe('agent runtime tool registry', () => {
         query: { type: 'string' },
       },
       required: ['query'],
+      additionalProperties: false,
+    });
+    expect(findAgentTool('rental.delistBatch')?.inputSchema).toMatchObject({
+      properties: {
+        productIds: { type: 'array' },
+      },
+      required: ['productIds'],
       additionalProperties: false,
     });
     expect(findAgentTool('rental.newLinkBatchPlan')?.inputSchema).toMatchObject({

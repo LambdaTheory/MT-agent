@@ -2754,6 +2754,49 @@ describe('handleBotIntent', () => {
     expect(audit.request?.delistProductIds).toEqual(['901', '902']);
   });
 
+  it('skips missing products during confirmed activity refresh execution and continues the batch', async () => {
+    const { outputDir, registryPaths } = await writeRefreshActivityFixtures();
+    const plan = await executeAgentToolRequest(
+      { toolName: 'operations.refreshActivityPlan', arguments: {}, reason: 'test refresh activity plan' },
+      outputDir,
+      { closedOrderRegistryPaths: registryPaths },
+    );
+    const request = readAgentToolConfirmRequestFromCard(plan.card);
+    const calls: string[] = [];
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run'); },
+      async execute() { throw new Error('execute should not run'); },
+      async copy(productId) {
+        calls.push(`copy:${productId}`);
+        return { productId, ok: true, newProductId: `new-${calls.length}`, lines: ['copy: ok'] };
+      },
+      async delist(productId) {
+        calls.push(`delist:${productId}`);
+        if (productId === '901') {
+          return { productId, ok: false, lines: ['delist: error', 'Product not found: 901'] };
+        }
+        return { productId, ok: true, lines: ['delist: ok'] };
+      },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+
+    const response = await executeAgentToolRequest(request, outputDir, { rentalPriceClient });
+
+    expect(calls).toEqual(['delist:901', 'delist:902', 'copy:900', 'copy:900']);
+    expect(response.text).toContain('活跃度刷新部分完成');
+    expect(response.text).toContain('跳过：1 个商品不存在（901）');
+    expect(response.metadata?.skippedMissingDelistProductIds).toEqual(['901']);
+    expect(response.metadata?.ok).toBe(false);
+    const audit = JSON.parse(await readFile(response.metadata?.auditPath as string, 'utf8')) as {
+      ok?: boolean;
+      skippedMissingDelistProductIds?: string[];
+    };
+    expect(audit.ok).toBe(false);
+    expect(audit.skippedMissingDelistProductIds).toEqual(['901']);
+  });
+
   it('continues a multi-step plan after a confirmed activity refresh execution card', async () => {
     const { outputDir, registryPaths } = await writeRefreshActivityFixtures();
     const planner: AgentPlannerProvider = {
@@ -2892,6 +2935,168 @@ describe('handleBotIntent', () => {
     expect(JSON.stringify(response.card)).toContain('agent_tool_confirm');
     expect(JSON.stringify(response.card)).toContain('rental.delist');
     expect(JSON.stringify(response.card)).toContain('761');
+  });
+
+  it('turns batch delist agent plans into one approval card without side effects', async () => {
+    const planner: AgentPlannerProvider = {
+      async proposePlan(request) {
+        expect(request.tools.map((tool) => tool.name)).toContain('rental.delistBatch');
+        return JSON.stringify({
+          goal: '批量下架租赁商品',
+          selectedTool: 'rental.delistBatch',
+          arguments: { productIds: ['251', '467', '252'] },
+          confidence: 0.95,
+          reason: '用户明确给出多个端内ID并要求下架',
+          requiresConfirmation: true,
+        });
+      },
+    };
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run before approval'); },
+      async execute() { throw new Error('execute should not run before approval'); },
+      async copy() { throw new Error('copy should not run before approval'); },
+      async delist() { throw new Error('delist should not run before approval'); },
+      async tenancySet() { throw new Error('tenancySet should not run before approval'); },
+      async specDiscover() { throw new Error('specDiscover should not run before approval'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run before approval'); },
+    };
+
+    const response = await handleBotIntent({ type: 'unknown', text: '下架: 251, 467, 252' }, 'output', {
+      agentPlannerProvider: planner,
+      rentalPriceClient,
+    });
+
+    expect(response.text).toContain('请确认 Agent 操作：rental.delistBatch');
+    expect(response.card).toBeDefined();
+    expect(JSON.stringify(response.card)).toContain('agent_tool_confirm');
+    expect(JSON.stringify(response.card)).toContain('rental.delistBatch');
+    expect(JSON.stringify(response.card)).toContain('251');
+    expect(JSON.stringify(response.card)).toContain('467');
+    expect(JSON.stringify(response.card)).toContain('252');
+  });
+
+  it('executes batch delist requests and skips missing products safely', async () => {
+    const calls: string[] = [];
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run'); },
+      async execute() { throw new Error('execute should not run'); },
+      async copy() { throw new Error('copy should not run'); },
+      async delist(productId) {
+        calls.push(productId);
+        if (productId === '901') {
+          return { productId, ok: false, lines: ['delist: error', 'Product not found: 901'] };
+        }
+        return { productId, ok: true, lines: ['delist: ok'] };
+      },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+
+    const response = await executeAgentToolRequest(
+      { toolName: 'rental.delistBatch', arguments: { productIds: ['900', '901', '902'] }, reason: '批量下架测试' },
+      'output',
+      { rentalPriceClient },
+    );
+
+    expect(calls).toEqual(['900', '901', '902']);
+    expect(response.text).toContain('批量下架部分完成');
+    expect(response.text).toContain('跳过：1 个商品不存在（901）');
+    expect(response.metadata).toMatchObject({
+      toolName: 'rental.delistBatch',
+      ok: false,
+      delistedProductIds: ['900', '902'],
+      skippedMissingProductIds: ['901'],
+    });
+  });
+
+  it('continues batch delist after an individual product fails verification', async () => {
+    const calls: string[] = [];
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run'); },
+      async execute() { throw new Error('execute should not run'); },
+      async copy() { throw new Error('copy should not run'); },
+      async delist(productId) {
+        calls.push(productId);
+        if (productId === '467') {
+          return { productId, ok: false, lines: ['delist: error', 'Product still visible after delist'] };
+        }
+        return { productId, ok: true, lines: ['delist: ok'] };
+      },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+
+    const response = await executeAgentToolRequest(
+      { toolName: 'rental.delistBatch', arguments: { productIds: ['251', '467', '252'] }, reason: '批量下架测试' },
+      'output',
+      { rentalPriceClient },
+    );
+
+    expect(calls).toEqual(['251', '467', '252']);
+    expect(response.text).toContain('批量下架部分完成');
+    expect(response.text).toContain('失败：1 个（467）');
+    expect(response.text).not.toContain('未执行');
+    expect(response.metadata).toMatchObject({
+      toolName: 'rental.delistBatch',
+      ok: false,
+      delistedProductIds: ['251', '252'],
+      failedProductIds: ['467'],
+      pendingProductIds: [],
+    });
+  });
+
+  it('keeps rental.delist compatible with productIds arrays from the planner', async () => {
+    const calls: string[] = [];
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run'); },
+      async execute() { throw new Error('execute should not run'); },
+      async copy() { throw new Error('copy should not run'); },
+      async delist(productId) {
+        calls.push(productId);
+        return { productId, ok: true, lines: ['delist: ok'] };
+      },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+
+    const response = await executeAgentToolRequest(
+      { toolName: 'rental.delist', arguments: { productIds: ['251', '467'] }, reason: '兼容批量下架参数' },
+      'output',
+      { rentalPriceClient },
+    );
+
+    expect(calls).toEqual(['251', '467']);
+    expect(response.text).toContain('批量下架完成');
+    expect(response.metadata).toMatchObject({ toolName: 'rental.delist', ok: true, delistedProductIds: ['251', '467'] });
+  });
+
+  it('keeps rental.delist compatible with comma separated productId lists from the planner', async () => {
+    const calls: string[] = [];
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run'); },
+      async execute() { throw new Error('execute should not run'); },
+      async copy() { throw new Error('copy should not run'); },
+      async delist(productId) {
+        calls.push(productId);
+        return { productId, ok: true, lines: ['delist: ok'] };
+      },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+
+    const response = await executeAgentToolRequest(
+      { toolName: 'rental.delist', arguments: { productId: '251, 467, 252' }, reason: '兼容批量下架 productId 字符串' },
+      'output',
+      { rentalPriceClient },
+    );
+
+    expect(calls).toEqual(['251', '467', '252']);
+    expect(response.text).toContain('批量下架完成');
+    expect(response.metadata).toMatchObject({ toolName: 'rental.delist', ok: true, delistedProductIds: ['251', '467', '252'] });
   });
 
   it('turns ambiguous generic agent plans into clarification cards', async () => {

@@ -249,6 +249,23 @@ const productIdArgumentsSchema = {
   required: ['productId'],
   additionalProperties: false,
 };
+const rentalDelistArgumentsSchema = {
+  type: 'object',
+  properties: {
+    productId: { type: 'string', description: 'Single internal product id, or a comma/newline separated list for batch delist compatibility.' },
+    productIds: { type: 'array', minItems: 1, maxItems: 80, items: { type: 'string' }, description: 'Internal product ids to delist in one confirmed batch.' },
+  },
+  minProperties: 1,
+  additionalProperties: false,
+};
+const rentalDelistBatchArgumentsSchema = {
+  type: 'object',
+  properties: {
+    productIds: { type: 'array', minItems: 1, maxItems: 80, items: { type: 'string' } },
+  },
+  required: ['productIds'],
+  additionalProperties: false,
+};
 const tenancySetArgumentsSchema = {
   type: 'object',
   properties: {
@@ -751,10 +768,17 @@ const agentTools: AgentToolDefinition[] = [
   },
   {
     name: 'rental.delist',
-    description: '下架租赁商品前的确认请求',
+    description: '下架单个或多个租赁商品前的确认请求；多个端内ID请用 productIds 数组。',
     risk: 'high',
     requiresConfirmation: true,
-    inputSchema: productIdArgumentsSchema,
+    inputSchema: rentalDelistArgumentsSchema,
+  },
+  {
+    name: 'rental.delistBatch',
+    description: '批量下架多个租赁商品前的确认请求；确认后逐个下架，找不到的商品会跳过并继续。',
+    risk: 'high',
+    requiresConfirmation: true,
+    inputSchema: rentalDelistBatchArgumentsSchema,
   },
   {
     name: 'rental.tenancySet',

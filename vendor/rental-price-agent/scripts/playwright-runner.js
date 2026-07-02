@@ -910,6 +910,15 @@ async function clickWithDelistConfirmation(buttonHandle) {
   }
 }
 
+function classifyDelistRowStatus(rowText) {
+  const text = String(rowText || "").replace(/\s+/g, " ").trim();
+  if (!text) return { delisted: false, saleable: false, label: "" };
+  const saleable = text.includes("可售卖");
+  const delisted = !saleable && /已下架|不可售卖|停售/.test(text);
+  const label = saleable ? "可售卖" : delisted ? "已下架" : "";
+  return { delisted, saleable, label };
+}
+
 async function verifyProductAbsentFromActiveList(productId) {
   await page.goto(config.saas.productListUrl + "&pagesize=100", { waitUntil: "networkidle" }).catch(() => {});
   await ensureLogin();
@@ -925,7 +934,14 @@ async function verifyProductAbsentFromActiveList(productId) {
   const rowText = link
     ? await link.evaluate(el => (el.closest("tr")?.textContent || "").replace(/\s+/g, " ").trim().substring(0, 300)).catch(() => "")
     : "";
-  return { absent: !link, stillVisible: Boolean(link), rowText, url: page.url() };
+  const rowStatus = classifyDelistRowStatus(rowText);
+  return {
+    absent: !link || rowStatus.delisted,
+    stillVisible: Boolean(link) && !rowStatus.delisted,
+    rowText,
+    rowStatus,
+    url: page.url(),
+  };
 }
 
 function copyResultStatus(newProductId) {
@@ -986,6 +1002,7 @@ async function actionDelist(productId) {
     confirmKind: confirm.kind,
     absent: verify.absent,
     stillVisible: verify.stillVisible,
+    rowStatus: verify.rowStatus,
     rowText: verify.rowText,
   });
   if (verify.absent) {
@@ -1730,4 +1747,5 @@ module.exports = {
   normalizeDialogLabel,
   scoreConfirmButtonCandidate,
   chooseConfirmButtonIndex,
+  classifyDelistRowStatus,
 };

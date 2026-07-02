@@ -38,8 +38,8 @@ describe('mergePreviousCumulativeSnapshots', () => {
         { '2026030222000898839075': '251' },
       ),
     ).toEqual([
-      { productName: 'Other', platformProductId: '2026060122000000000000', exposure: 10, visits: 1, amount: 0, custodyDays: 1, raw: {} },
-      { productName: 'SX70', platformProductId: '2026030222000898839075', exposure: 160078, visits: 7969, amount: 27308, custodyDays: 102, raw: {} },
+      { productName: 'Other', platformProductId: '2026060122000000000000', exposure: 10, visits: 1, amount: 0, custodyDays: 1, listingStatus: 'unknown', listingStatusLabel: null, raw: {} },
+      { productName: 'SX70', platformProductId: '2026030222000898839075', exposure: 160078, visits: 7969, amount: 27308, custodyDays: 102, listingStatus: 'unknown', listingStatusLabel: null, raw: {} },
     ]);
   });
 });

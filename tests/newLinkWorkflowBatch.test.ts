@@ -383,6 +383,72 @@ describe('new link batch workflow', () => {
     expect(JSON.stringify(card)).not.toContain('"tag":"action"');
   });
 
+  it('skips a missing source product and continues the remaining multi-product new-link batch', async () => {
+    const calls: string[] = [];
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run'); },
+      async execute() { throw new Error('execute should not run'); },
+      async copy(productId) {
+        calls.push(productId);
+        if (productId === 'missing') {
+          return {
+            productId,
+            ok: false,
+            status: 'error',
+            newProductId: null,
+            message: 'Product not found: missing',
+            lines: ['copy: error', 'message: Product not found: missing'],
+          };
+        }
+        return { productId, ok: true, newProductId: `new-${calls.length}`, lines: ['copy: ok'] };
+      },
+      async delist() { throw new Error('delist should not run'); },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+
+    const result = await executeNewLinkBatchMultiConfirmRequest(rentalPriceClient, {
+      safetyVersion: 2,
+      workflowName: 'rental.newLinkBatch',
+      mode: 'multi-source',
+      dataDate: '2026-06-28',
+      reason: 'test partial batch',
+      items: [
+        {
+          safetyVersion: 2,
+          workflowName: 'rental.newLinkBatch',
+          keyword: 'missing sku',
+          count: 2,
+          sourceProductId: 'missing',
+          sourceProductName: 'missing sku',
+          dataDate: '2026-06-28',
+          reason: 'test partial batch',
+        },
+        {
+          safetyVersion: 2,
+          workflowName: 'rental.newLinkBatch',
+          keyword: 'valid sku',
+          count: 2,
+          sourceProductId: 'valid',
+          sourceProductName: 'valid sku',
+          dataDate: '2026-06-28',
+          reason: 'test partial batch',
+        },
+      ],
+    });
+
+    expect(calls).toEqual(['missing', 'valid', 'valid']);
+    expect(result).toMatchObject({
+      ok: false,
+      completedCount: 2,
+      newProductIds: ['new-2', 'new-3'],
+      failedItems: [expect.objectContaining({ sourceProductId: 'missing', skipped: true, blocking: false })],
+    });
+    expect(result.text).toContain('部分完成');
+    expect(result.text).toContain('跳过 1 个找不到的商品');
+  });
+
   it('blocks multi-product new-link confirmations only when they exceed the multi-total cap', () => {
     const plans = ['pocket3', 'wide 300', 'SQ1'].map((keyword, index) =>
       buildNewLinkBatchPlan({ keyword, count: 20, sourceProductId: index % 2 === 0 ? '733' : '841' }, context(), registry()));

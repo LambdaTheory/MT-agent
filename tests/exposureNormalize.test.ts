@@ -29,6 +29,8 @@ describe('exposure normalization', () => {
         visits: 159,
         amount: 119,
         custodyDays: 23,
+        listingStatus: 'unknown',
+        listingStatusLabel: null,
         raw: {
           商品名称: 'DJI Pocket 3',
           商品ID: '2026052122000827682227',
@@ -55,6 +57,8 @@ describe('exposure normalization', () => {
         visits: 159,
         amount: 199,
         custodyDays: null,
+        listingStatus: 'unknown',
+        listingStatusLabel: null,
         raw: {
           平台商品ID: '2026052122000827682227',
           商品名称: 'DJI Pocket 3',

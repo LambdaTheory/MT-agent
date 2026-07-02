@@ -1,4 +1,5 @@
 import type { ExposureCumulativeProduct } from './types.js';
+import { normalizeExposureStatusLabel, parseExposureLinkStatus } from './exposureStatus.js';
 
 function normalize(value: unknown): string {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
@@ -58,6 +59,7 @@ export function normalizeExposureProductRows(headers: string[], rows: string[][]
     '退货',
     'refund',
   ]);
+  const infoIndex = headers.findIndex((header) => normalize(header).includes('鍟嗗搧淇℃伅'));
   const custodyIndex = headers.findIndex((header) => normalize(header).includes('托管'));
 
   return rows
@@ -74,6 +76,8 @@ export function normalizeExposureProductRows(headers: string[], rows: string[][]
         visits: parseCountText(row[visitsIndex]),
         amount: parseMoney(row[amountIndex]),
         custodyDays: custodyIndex >= 0 ? parseCountText(row[custodyIndex]) : null,
+        listingStatus: parseExposureLinkStatus(infoIndex >= 0 ? row[infoIndex] : row[nameIndex]),
+        listingStatusLabel: normalizeExposureStatusLabel(infoIndex >= 0 ? row[infoIndex] : row[nameIndex]),
         raw,
       };
     })

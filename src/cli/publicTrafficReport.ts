@@ -42,7 +42,7 @@ import { savePublicTrafficRunState } from '../publicTraffic/publicTrafficRunStat
 import { loadRecentExposureDeltas } from '../publicTraffic/recentExposureDeltas.js';
 import type { PeriodProductMetrics, RawTableData } from '../domain/types.js';
 import type { GoodsManagerNewProductPoolItem } from '../publicTraffic/goodsManagerNewProducts.js';
-import type { ExposureCumulativeProduct, ExposureOverviewMetric, GoodsSnapshotItem, PublicTrafficDataReportContext, PublicTrafficDataSummary } from '../publicTraffic/types.js';
+import type { ExposureCumulativeProduct, ExposureLinkStatus, ExposureOverviewMetric, GoodsSnapshotItem, PublicTrafficDataReportContext, PublicTrafficDataSummary } from '../publicTraffic/types.js';
 import { createRunLog } from '../storage/runLog.js';
 
 const TODAY_DASHBOARD_NOT_UPDATED_NOTE = '今日访问数据支付宝暂未更新，本期访问量板块指标缺失。';
@@ -100,6 +100,18 @@ function daysBefore(date: string, days: number): string {
   return d.toISOString().slice(0, 10);
 }
 
+function isExposureLinkStatus(value: unknown): value is ExposureLinkStatus {
+  return value === 'active' || value === 'removed' || value === 'unknown';
+}
+
+function normalizeExposureCumulativeProduct(row: ExposureCumulativeProduct): ExposureCumulativeProduct {
+  return {
+    ...row,
+    listingStatus: isExposureLinkStatus(row.listingStatus) ? row.listingStatus : 'unknown',
+    listingStatusLabel: typeof row.listingStatusLabel === 'string' ? row.listingStatusLabel : null,
+  };
+}
+
 function isExposureCumulativeProduct(value: unknown): value is ExposureCumulativeProduct {
   if (!value || typeof value !== 'object') return false;
   const row = value as Record<string, unknown>;
@@ -110,6 +122,8 @@ function isExposureCumulativeProduct(value: unknown): value is ExposureCumulativ
     typeof row.visits === 'number' &&
     typeof row.amount === 'number' &&
     (typeof row.custodyDays === 'number' || row.custodyDays === null) &&
+    (row.listingStatus === undefined || isExposureLinkStatus(row.listingStatus)) &&
+    (row.listingStatusLabel === undefined || typeof row.listingStatusLabel === 'string' || row.listingStatusLabel === null) &&
     !!row.raw &&
     typeof row.raw === 'object' &&
     !Array.isArray(row.raw)
@@ -147,7 +161,7 @@ export function parsePreviousCumulativeSnapshot(text: string): ExposureCumulativ
     throw new Error('Invalid previous exposure snapshot: expected ExposureCumulativeProduct[]');
   }
 
-  return parsed;
+  return parsed.map((row) => normalizeExposureCumulativeProduct(row));
 }
 
 function canonicalProductId(platformProductId: string, mapping: Record<string, string>): string {
@@ -160,7 +174,7 @@ export function mergePreviousCumulativeSnapshots(snapshots: ExposureCumulativePr
     for (const row of snapshot) {
       const platformProductId = canonicalProductId(row.platformProductId, mapping);
       if (!merged.has(platformProductId)) {
-        merged.set(platformProductId, { ...row, platformProductId });
+        merged.set(platformProductId, normalizeExposureCumulativeProduct({ ...row, platformProductId }));
       }
     }
   }

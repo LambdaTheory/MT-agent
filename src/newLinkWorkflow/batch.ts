@@ -66,6 +66,18 @@ export interface NewLinkBatchExecutionResult {
   text: string;
   newProductIds: string[];
   completedCount: number;
+  failedItems?: NewLinkBatchFailedItem[];
+}
+
+export interface NewLinkBatchFailedItem {
+  keyword: string;
+  sourceProductId: string;
+  requestedCount: number;
+  completedCount: number;
+  reason: string;
+  skipped: boolean;
+  blocking: boolean;
+  lines: string[];
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -662,18 +674,49 @@ function isSafeMissingSourceCopyResult(result: Awaited<ReturnType<RentalPriceSki
   return /Product not found/i.test(result.message ?? result.lines.join('\n'));
 }
 
+function failedCopyItem(
+  request: NewLinkBatchConfirmRequest,
+  sourceProductId: string,
+  completedCount: number,
+  reason: string,
+  lines: string[],
+  options: { skipped: boolean; blocking: boolean },
+): NewLinkBatchFailedItem {
+  return {
+    keyword: request.keyword,
+    sourceProductId,
+    requestedCount: request.count,
+    completedCount,
+    reason,
+    skipped: options.skipped,
+    blocking: options.blocking,
+    lines,
+  };
+}
+
+function isNonBlockingNewLinkFailure(result: NewLinkBatchExecutionResult): boolean {
+  return Boolean(result.failedItems?.length && result.failedItems.every((item) => item.skipped && !item.blocking));
+}
+
+function copyResultStatusLabel(result: NewLinkBatchExecutionResult): string {
+  if (result.ok) return '完成';
+  return isNonBlockingNewLinkFailure(result) ? '跳过' : '失败';
+}
+
 export async function executeNewLinkBatchConfirmRequest(
   client: RentalPriceSkillClient,
   request: NewLinkBatchConfirmRequest,
 ): Promise<NewLinkBatchExecutionResult> {
   const newProductIds: string[] = [];
   const lines: string[] = [];
+  const failedItems: NewLinkBatchFailedItem[] = [];
   const sourceIds = [request.sourceProductId, ...(request.fallbackSourceProductIds ?? [])]
     .filter((value, index, array) => array.indexOf(value) === index);
   let sourceIndex = 0;
+  let activeSourceProductId = request.sourceProductId;
 
   for (let index = 1; index <= request.count;) {
-    const sourceProductId = sourceIds[sourceIndex] ?? request.sourceProductId;
+    const sourceProductId = sourceIds[sourceIndex] ?? activeSourceProductId;
     try {
       const result = await client.copy(sourceProductId);
       const isUnknownCopy = result.status === 'unknown' || result.sideEffectPossible === true;
@@ -682,29 +725,46 @@ export async function executeNewLinkBatchConfirmRequest(
       if (!result.ok) {
         const nextSourceId = sourceIds[sourceIndex + 1];
         if (nextSourceId && isSafeMissingSourceCopyResult(result)) {
+          failedItems.push(failedCopyItem(request, sourceProductId, newProductIds.length, result.message ?? 'Product not found', result.lines, { skipped: true, blocking: false }));
           lines.push(`源商品 ${sourceProductId} 未找到，已切换候选源 ${nextSourceId} 继续复制。`);
           sourceIndex += 1;
-          request.sourceProductId = nextSourceId;
+          activeSourceProductId = nextSourceId;
           continue;
+        }
+        if (isSafeMissingSourceCopyResult(result)) {
+          failedItems.push(failedCopyItem(request, sourceProductId, newProductIds.length, result.message ?? 'Product not found', result.lines, { skipped: true, blocking: false }));
+          lines.push(`源商品 ${sourceProductId} 未找到，已跳过该商品的剩余 ${request.count - newProductIds.length} 条复制。`);
+          return {
+            ok: false,
+            text: `新链批量复制部分完成：源商品 ${sourceProductId}，成功 ${newProductIds.length}/${request.count} 条，跳过 1 个找不到的商品。\n${lines.join('\n')}\n${result.lines.join('\n')}`,
+            newProductIds,
+            completedCount: newProductIds.length,
+            failedItems,
+          };
         }
         const safetyNote = isUnknownCopy
           ? '\n注意：本次复制可能已经提交但未拿到新商品ID；为避免重复铺链，请先到后台核对，确认后再决定是否继续，当前确认卡不要直接重试。'
           : '';
+        failedItems.push(failedCopyItem(request, sourceProductId, newProductIds.length, result.message ?? (result.lines.join('\n') || 'copy failed'), result.lines, { skipped: false, blocking: true }));
         return {
           ok: false,
           text: `新链批量复制中断：源商品 ${request.sourceProductId}，已完成 ${newProductIds.length}/${request.count} 条。\n${lines.join('\n')}\n${result.lines.join('\n')}${safetyNote}`,
           newProductIds,
           completedCount: newProductIds.length,
+          failedItems,
         };
       }
       newProductIds.push(result.newProductId ?? 'unknown');
       index += 1;
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      failedItems.push(failedCopyItem(request, sourceProductId, newProductIds.length, message, [message], { skipped: false, blocking: true }));
       return {
         ok: false,
         text: `新链批量复制失败：源商品 ${request.sourceProductId}，已完成 ${newProductIds.length}/${request.count} 条。\n${error instanceof Error ? error.message : String(error)}`,
         newProductIds,
         completedCount: newProductIds.length,
+        failedItems,
       };
     }
   }
@@ -712,7 +772,7 @@ export async function executeNewLinkBatchConfirmRequest(
   const ids = newProductIds.length ? `\n新商品ID：${newProductIds.join('、')}` : '';
   return {
     ok: true,
-    text: `新链批量复制完成：源商品 ${request.sourceProductId}，成功 ${request.count} 条。${ids}`,
+    text: `新链批量复制完成：源商品 ${activeSourceProductId}，成功 ${request.count} 条。${ids}`,
     newProductIds,
     completedCount: request.count,
   };
@@ -724,22 +784,36 @@ export async function executeNewLinkBatchMultiConfirmRequest(
 ): Promise<NewLinkBatchExecutionResult> {
   const newProductIds: string[] = [];
   const lines: string[] = [];
+  const failedItems: NewLinkBatchFailedItem[] = [];
   let completedCount = 0;
 
   for (const item of request.items) {
     const result = await executeNewLinkBatchConfirmRequest(client, item);
     newProductIds.push(...result.newProductIds);
     completedCount += result.completedCount;
-    lines.push(`【${item.keyword} / 源商品 ${item.sourceProductId}】${result.ok ? '完成' : '失败'}`);
+    failedItems.push(...(result.failedItems ?? []));
+    lines.push(`【${item.keyword} / 源商品 ${item.sourceProductId}】${copyResultStatusLabel(result)}`);
     lines.push(result.text);
-    if (!result.ok) {
+    if (!result.ok && !isNonBlockingNewLinkFailure(result)) {
       return {
         ok: false,
         text: `多商品新链批量复制中断，已完成 ${completedCount}/${request.items.reduce((sum, next) => sum + next.count, 0)} 条。\n${lines.join('\n')}`,
         newProductIds,
         completedCount,
+        failedItems,
       };
     }
+  }
+
+  if (failedItems.length) {
+    const skippedCount = failedItems.filter((item) => item.skipped && !item.blocking).length;
+    return {
+      ok: false,
+      text: `多商品新链批量复制部分完成：${request.items.length} 个商品，成功 ${completedCount}/${request.items.reduce((sum, item) => sum + item.count, 0)} 条，跳过 ${skippedCount} 个找不到的商品。\n${lines.join('\n')}`,
+      newProductIds,
+      completedCount,
+      failedItems,
+    };
   }
 
   return {
