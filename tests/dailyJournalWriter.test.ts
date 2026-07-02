@@ -42,4 +42,29 @@ describe('writeDailyJournal', () => {
     expect(events[0].decisionId).toBe('run-1:journal_written');
     expect(events[0].subject).toEqual({ kind: 'link', id: 'daily-mission:2026-07-01' });
   });
+
+  it('renders actual execution results into json and markdown journals', async () => {
+    const { jsonPath, markdownPath } = await writeDailyJournal({
+      outputDir: dir,
+      date: '2026-07-02',
+      runId: 'run-1',
+      context: {
+        runId: 'run-1',
+        date: '2026-07-02',
+        outputDir: dir,
+        collectedAt: '2026-07-02T00:00:00.000Z',
+        missingSources: [],
+      },
+      decisions: [],
+      classified: { approvals: [], observations: [] },
+      executionResults: [{ runId: 'run-1', decisionId: 'dec-1', ok: true, status: 'executed', text: '已下架 648' }],
+    });
+
+    const markdown = await readFile(markdownPath, 'utf8');
+    expect(markdown).toContain('实际执行');
+    expect(markdown).toContain('dec-1');
+    expect(markdown).toContain('已下架 648');
+    const json = JSON.parse(await readFile(jsonPath, 'utf8')) as { executionResults?: Array<{ decisionId: string }> };
+    expect(json.executionResults?.[0]?.decisionId).toBe('dec-1');
+  });
 });

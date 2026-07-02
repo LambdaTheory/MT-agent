@@ -71,6 +71,8 @@ describe('resolveDailyMissionApproval', () => {
     expect(events).toContain('execution_succeeded');
     const rawResults = await readFile(join(dir, 'daily-mission', '2026-07-02', 'execution-results.json'), 'utf8');
     expect(JSON.parse(rawResults)).toEqual([{ runId: 'run-custom', decisionId: 'dec-1', ok: true, status: 'executed', text: expect.any(String) }]);
+    const journalJson = JSON.parse(await readFile(join(dir, 'daily-mission', '2026-07-02', 'daily-journal.json'), 'utf8')) as { executionResults?: Array<{ decisionId: string }> };
+    expect(journalJson.executionResults?.[0]?.decisionId).toBe('dec-1');
   });
 
   it('preserves previous execution results when a second decision is approved', async () => {

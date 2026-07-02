@@ -3,6 +3,7 @@ import type { AgentToolConfirmRequest } from './approvalCard.js';
 import { parseDailyMissionReason } from './dailyMissionApproval.js';
 import { decisionMatchesRequest, findApprovedDecision, loadApprovalRequest } from './dailyMissionApprovalStore.js';
 import { appendExecutionResult, executeApprovedDecision, loadAllExecutionResults, type DailyMissionExecutionResult } from './dailyMissionExecution.js';
+import { writeDailyJournal } from './dailyJournalWriter.js';
 import { findDailyMissionRunByRunId, isDailyMissionTerminalStatus, saveDailyMissionRun, transitionDailyMissionRun } from './dailyMissionRun.js';
 
 function executionStatus(result: DailyMissionExecutionResult): DailyMissionExecutionResult['status'] {
@@ -50,5 +51,14 @@ export async function resolveDailyMissionApproval(
     advanced = transitionDailyMissionRun(advanced, approval.approvals.some((item) => failedDecisionIds.has(item.decisionId)) ? 'failed' : 'completed', now);
   }
   await saveDailyMissionRun(outputDir, advanced);
+  await writeDailyJournal({
+    outputDir,
+    date: run.date,
+    runId: run.runId,
+    context: { runId: run.runId, date: run.date, outputDir, collectedAt: now, missingSources: [] },
+    decisions: approval.approvals,
+    classified: approval,
+    executionResults: runResults,
+  });
   return result;
 }

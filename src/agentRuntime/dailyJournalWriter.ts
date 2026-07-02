@@ -2,6 +2,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { dailyMissionArtifactPath } from './dailyMissionArtifacts.js';
 import type { CollectedContext } from './dailyMissionContext.js';
+import type { DailyMissionExecutionResult } from './dailyMissionExecution.js';
 import type { ClassifiedDecisions } from './decisionPolicy.js';
 import type { DecisionRecord } from './decisionRecord.js';
 import { recordOperationEvent } from './operationLedger.js';
@@ -14,6 +15,7 @@ export interface WriteDailyJournalInput {
   context: CollectedContext;
   decisions: DecisionRecord[];
   classified: ClassifiedDecisions;
+  executionResults?: DailyMissionExecutionResult[];
   failure?: { stage: string; message: string };
 }
 
@@ -31,6 +33,10 @@ function renderMarkdown(input: WriteDailyJournalInput): string {
   const approvals = input.classified.approvals.map((decision) => (
     `- ${decision.title}${decision.proposedTool ? ` -> ${decision.proposedTool.toolName}` : ''}`
   ));
+  const executionResults = input.executionResults ?? [];
+  const executionLines = executionResults.map((result) => (
+    `- ${result.decisionId} -> ${result.status}${result.ok ? '（成功）' : ''}：${result.text}`
+  ));
   const failureLines = input.failure ? [`> 任务失败，停在 ${input.failure.stage}：${input.failure.message}`, ''] : [];
   return [
     `# 运营日报 ${input.date}`,
@@ -46,6 +52,9 @@ function renderMarkdown(input: WriteDailyJournalInput): string {
     '',
     '## 待审批执行项',
     ...(approvals.length > 0 ? approvals : ['- 无']),
+    '',
+    '## 实际执行',
+    ...(executionLines.length > 0 ? executionLines : ['- 无']),
   ].join('\n');
 }
 
@@ -64,6 +73,7 @@ export async function writeDailyJournal(input: WriteDailyJournalInput): Promise<
     decisions: input.decisions,
     approvals: input.classified.approvals.map((decision) => decision.decisionId),
     observations: input.classified.observations.map((decision) => decision.decisionId),
+    executionResults: input.executionResults ?? [],
     failure: input.failure ?? null,
   };
   await writeFile(jsonPath, `${JSON.stringify(journal, null, 2)}\n`, 'utf8');
