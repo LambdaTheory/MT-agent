@@ -57,7 +57,7 @@ describe('executeApprovedDecision', () => {
   });
 
   it('writes execution-results.json', async () => {
-    await writeExecutionResults(dir, '2026-07-02', [{ decisionId: 'dec-1', ok: true, status: 'executed', text: 'delisted' }]);
+    await writeExecutionResults(dir, '2026-07-02', [{ runId: 'run-1', decisionId: 'dec-1', ok: true, status: 'executed', text: 'delisted' }]);
 
     const raw = await readFile(join(dir, 'daily-mission', '2026-07-02', 'execution-results.json'), 'utf8');
     expect(JSON.parse(raw)[0].decisionId).toBe('dec-1');

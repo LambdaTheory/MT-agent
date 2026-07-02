@@ -15,9 +15,10 @@ export interface ExecuteApprovedDecisionInput {
 }
 
 export interface DailyMissionExecutionResult {
+  runId: string;
   decisionId: string;
   ok: boolean;
-  status: 'executed' | 'pending_confirmation' | 'failed';
+  status: 'processing' | 'executed' | 'pending_confirmation' | 'failed';
   text: string;
   card?: FeishuCardPayload;
 }
@@ -25,8 +26,15 @@ export interface DailyMissionExecutionResult {
 export async function executeApprovedDecision(input: ExecuteApprovedDecisionInput): Promise<DailyMissionExecutionResult> {
   const { decision, outputDir } = input;
   if (input.date) {
-    const existing = await loadExecutionResult(outputDir, input.date, decision.decisionId);
-    if (existing?.ok) return existing;
+    const existing = await loadExecutionResult(outputDir, input.date, decision.runId, decision.decisionId);
+    if (existing?.ok || existing?.status === 'processing' || existing?.status === 'pending_confirmation') return existing;
+    await appendExecutionResult(outputDir, input.date, {
+      runId: decision.runId,
+      decisionId: decision.decisionId,
+      ok: false,
+      status: 'processing',
+      text: 'Daily Mission approval execution is processing.',
+    });
   }
   await recordOperationEvent(outputDir, {
     planId: decision.decisionId,
@@ -41,10 +49,10 @@ export async function executeApprovedDecision(input: ExecuteApprovedDecisionInpu
     ledgerContext: { outputDir, runId: decision.runId, decisionId: decision.decisionId },
   });
   if (response.card) {
-    return { decisionId: decision.decisionId, ok: false, status: 'pending_confirmation', text: response.text, card: response.card };
+    return { runId: decision.runId, decisionId: decision.decisionId, ok: false, status: 'pending_confirmation', text: response.text, card: response.card };
   }
   const ok = response.metadata?.ok !== false;
-  return { decisionId: decision.decisionId, ok, status: ok ? 'executed' : 'failed', text: response.text };
+  return { runId: decision.runId, decisionId: decision.decisionId, ok, status: ok ? 'executed' : 'failed', text: response.text };
 }
 
 export async function writeExecutionResults(
@@ -64,19 +72,21 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isExecutionResult(value: unknown): value is DailyMissionExecutionResult {
   return isRecord(value)
+    && typeof value.runId === 'string'
     && typeof value.decisionId === 'string'
     && typeof value.ok === 'boolean'
     && typeof value.text === 'string'
-    && (value.status === undefined || value.status === 'executed' || value.status === 'pending_confirmation' || value.status === 'failed');
+    && (value.status === 'processing' || value.status === 'executed' || value.status === 'pending_confirmation' || value.status === 'failed');
 }
 
 export async function loadExecutionResult(
   outputDir: string,
   date: string,
+  runId: string,
   decisionId: string,
 ): Promise<DailyMissionExecutionResult | null> {
   const results = await loadAllExecutionResults(outputDir, date);
-  return results.find((entry) => entry.decisionId === decisionId) ?? null;
+  return results.find((entry) => entry.runId === runId && entry.decisionId === decisionId) ?? null;
 }
 
 export async function loadAllExecutionResults(outputDir: string, date: string): Promise<DailyMissionExecutionResult[]> {
@@ -103,7 +113,7 @@ export async function appendExecutionResult(
   } catch (error) {
     if (!isRecord(error) || error.code !== 'ENOENT') throw error;
   }
-  const next = existing.filter((entry) => entry.decisionId !== result.decisionId);
+  const next = existing.filter((entry) => entry.runId !== result.runId || entry.decisionId !== result.decisionId);
   next.push(result);
   return writeExecutionResults(outputDir, date, next);
 }

@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { readFile, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -44,7 +44,7 @@ describe('daily mission idempotency', () => {
   });
 
   it('does not call client again when decision already executed ok', async () => {
-    await appendExecutionResult(dir, '2026-07-02', { decisionId: 'dec-1', ok: true, status: 'executed', text: '已下架' });
+    await appendExecutionResult(dir, '2026-07-02', { runId: 'run-1', decisionId: 'dec-1', ok: true, status: 'executed', text: '已下架' });
     const delist = vi.fn(async () => ({ ok: true, action: 'delist', productId: '648', lines: [] }));
 
     const result = await executeApprovedDecision({
@@ -55,6 +55,54 @@ describe('daily mission idempotency', () => {
     });
 
     expect(result.ok).toBe(true);
+    expect(delist).not.toHaveBeenCalled();
+  });
+
+  it('does not treat the same decisionId in another run as already executed', async () => {
+    await appendExecutionResult(dir, '2026-07-02', { runId: 'other-run', decisionId: 'dec-1', ok: true, status: 'executed', text: '已下架' });
+    const delist = vi.fn(async () => ({ ok: true, action: 'delist', productId: '648', lines: [] }));
+
+    const result = await executeApprovedDecision({
+      decision,
+      outputDir: dir,
+      date: '2026-07-02',
+      options: { rentalPriceClient: fakeClient(delist) },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(delist).toHaveBeenCalledTimes(1);
+  });
+
+  it('writes a processing claim before executing a dated decision', async () => {
+    let claimed = false;
+    const delist = vi.fn(async () => {
+      const raw = await readFile(join(dir, 'daily-mission', '2026-07-02', 'execution-results.json'), 'utf8');
+      claimed = JSON.parse(raw).some((entry: { runId?: string; decisionId?: string; status?: string }) => entry.runId === 'run-1' && entry.decisionId === 'dec-1' && entry.status === 'processing');
+      return { ok: true, action: 'delist', productId: '648', lines: [] };
+    });
+
+    await executeApprovedDecision({
+      decision,
+      outputDir: dir,
+      date: '2026-07-02',
+      options: { rentalPriceClient: fakeClient(delist) },
+    });
+
+    expect(claimed).toBe(true);
+  });
+
+  it('does not execute again when decision is already pending confirmation', async () => {
+    await appendExecutionResult(dir, '2026-07-02', { runId: 'run-1', decisionId: 'dec-1', ok: false, status: 'pending_confirmation', text: '等待二次确认' });
+    const delist = vi.fn(async () => ({ ok: true, action: 'delist', productId: '648', lines: [] }));
+
+    const result = await executeApprovedDecision({
+      decision,
+      outputDir: dir,
+      date: '2026-07-02',
+      options: { rentalPriceClient: fakeClient(delist) },
+    });
+
+    expect(result.status).toBe('pending_confirmation');
     expect(delist).not.toHaveBeenCalled();
   });
 });
