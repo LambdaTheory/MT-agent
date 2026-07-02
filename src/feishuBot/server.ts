@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { createActivityCancellationAssistant, type ActivityCancellationAssistant } from '../activityAutomation/cancelAssistance.js';
 import { updateActivitySubmitSessionStatus } from '../activityAutomation/submitSession.js';
+import { resolveDailyMissionApproval } from '../agentRuntime/dailyMissionApprovalCallback.js';
 import type { AgentToolConfirmRequest } from '../agentRuntime/approvalCard.js';
 import { buildClarifiedMessage, parseAgentClarificationCustomSelection, parseAgentClarificationSelection } from '../agentRuntime/clarificationCard.js';
 import type { AgentPlannerProvider } from '../agentRuntime/planner.js';
@@ -533,11 +534,15 @@ async function handleCardActionTrigger(
       arguments: request.arguments,
       reason: request.reason,
     });
-    const response = await executeAgentToolRequestWithContinuation(request, config.outputDir ?? 'output', {
+    const executionOptions = {
       rentalPriceClient: config.rentalPriceClient,
       closedOrderFetchImpl: config.closedOrderFetchImpl,
       closedOrderRegistryPaths: config.closedOrderRegistryPaths,
-    });
+    };
+    const missionResult = await resolveDailyMissionApproval(request, config.outputDir ?? 'output', executionOptions);
+    const response = missionResult
+      ? { text: missionResult.text, metadata: { ok: missionResult.ok } }
+      : await executeAgentToolRequestWithContinuation(request, config.outputDir ?? 'output', executionOptions);
     const ok = response.metadata?.ok !== false;
     setServerCardActionStatus(claim.key, ok ? 'completed' : 'failed');
     await recordAgentLearningEvent(outputDir, {

@@ -2,6 +2,7 @@ import * as lark from '@larksuiteoapi/node-sdk';
 import { createHash } from 'node:crypto';
 import { createActivityCancellationAssistant, type ActivityCancellationAssistant } from '../activityAutomation/cancelAssistance.js';
 import { updateActivitySubmitSessionStatus } from '../activityAutomation/submitSession.js';
+import { resolveDailyMissionApproval } from '../agentRuntime/dailyMissionApprovalCallback.js';
 import type { AgentToolConfirmRequest } from '../agentRuntime/approvalCard.js';
 import { buildClarifiedMessage, parseAgentClarificationCustomSelection, parseAgentClarificationSelection } from '../agentRuntime/clarificationCard.js';
 import type { AgentPlannerProvider } from '../agentRuntime/planner.js';
@@ -824,7 +825,10 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
           void (async () => {
             await deliverCard(client, messageId, statusCard('Agent 操作处理中', `工具 ${request.toolName} 已收到确认，正在执行。`, 'blue'), logError);
             try {
-              const response = await executeAgentToolRequestWithContinuation(request, config.outputDir ?? 'output', agentToolExecutionOptions);
+              const missionResult = await resolveDailyMissionApproval(request, config.outputDir ?? 'output', agentToolExecutionOptions);
+              const response = missionResult
+                ? { text: missionResult.text, metadata: { ok: missionResult.ok } }
+                : await executeAgentToolRequestWithContinuation(request, config.outputDir ?? 'output', agentToolExecutionOptions);
               const ok = !isFailedBotResponse(response);
               setRentalActionStatus(claim.key, ok ? 'completed' : 'failed');
               recordLearning({
