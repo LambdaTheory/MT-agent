@@ -46,7 +46,7 @@ import { executeNewLinkBatchConfirmRequest, executeNewLinkBatchMultiConfirmReque
 import { createRentalPriceSkillClient, executeRentalOperationConfirmRequest, parseRentalOperationConfirmRequest, parseRentalPriceConfirmRequest, type RentalPriceSkillClient } from './rentalPrice.js';
 import type { LlmIntentProposalProvider } from './llmIntentProposal.js';
 import type { BotIntent, BotResponse, FeishuBotDispatchResult, FeishuBotIncomingTextMessage, FeishuMessageEvent } from './types.js';
-import { handleUrlVerification } from './verify.js';
+import { handleUrlVerification, verifyFeishuSignature } from './verify.js';
 
 export interface FeishuBotServerConfig {
   port: number;
@@ -56,6 +56,7 @@ export interface FeishuBotServerConfig {
   botMentionName?: string;
   verificationToken?: string;
   encryptKey?: string;
+  callbackSignatureSecret?: string;
   outputDir?: string;
   handleIntent?: (intent: BotIntent, outputDir?: string) => Promise<BotResponse>;
   dispatchMessage?: (message: FeishuBotIncomingTextMessage) => Promise<FeishuBotDispatchResult>;
@@ -542,9 +543,9 @@ async function handleCardActionTrigger(
     };
     const missionResult = await resolveDailyMissionApproval(request, config.outputDir ?? 'output', executionOptions);
     const response = missionResult
-      ? { text: missionResult.text, metadata: { ok: missionResult.ok } }
+      ? { text: missionResult.text, card: missionResult.card, metadata: { ok: missionResult.ok, status: missionResult.status } }
       : await executeAgentToolRequestWithContinuation(request, config.outputDir ?? 'output', executionOptions);
-    const ok = response.metadata?.ok !== false;
+    const ok = response.metadata?.ok !== false || response.metadata?.status === 'pending_confirmation';
     setServerCardActionStatus(claim.key, ok ? 'completed' : 'failed');
     await recordAgentLearningEvent(outputDir, {
       type: ok ? 'tool_completed' : 'tool_failed',
@@ -884,6 +885,14 @@ export function startFeishuBotServer(config: FeishuBotServerConfig) {
     if (verification) return writeJson(res, 200, verification);
 
     if (isCardActionTrigger(payload)) {
+      const validSignature = verifyFeishuSignature({
+        timestamp: req.headers['x-lark-request-timestamp'] as string | undefined,
+        nonce: req.headers['x-lark-request-nonce'] as string | undefined,
+        signature: req.headers['x-lark-signature'] as string | undefined,
+        secret: config.callbackSignatureSecret,
+        body,
+      });
+      if (!validSignature) return writeJson(res, 401, { error: 'invalid signature' });
       const card = await handleCardActionTrigger(payload, config, dispatchMessage);
       writeJson(res, 200, card ?? { ok: true });
       return;
