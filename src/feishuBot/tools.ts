@@ -21,6 +21,7 @@ import {
   buildCancelDifferentialPricingCardResult,
   type ActivityAutomationSkillClient,
 } from './activityAutomation.js';
+import { agentExploreResponse } from './agentExploreResponse.js';
 import { continueAgentPlannerSteps, reviewAgentToolArguments } from './agentToolContinuation.js';
 import { executeAgentToolRequest } from './agentToolExecutor.js';
 import {
@@ -39,6 +40,7 @@ import { runReadOnlyToolSelection } from './llmReadOnlyToolAdapter.js';
 import { parseLlmToolSelection, type LlmReadOnlyToolName, type LlmToolSelectionProvider } from './llmProvider.js';
 import { getRegistryBackedLlmTools } from './llmToolSelector.js';
 import { parseExactBotIntent } from './intent.js';
+import type { LlmProvider } from '../llm/provider.js';
 import {
   buildRentalOperationConfirmCard,
   buildRentalPricePreviewCard,
@@ -203,10 +205,16 @@ export interface HandleBotIntentOptions {
   llmToolSelector?: LlmToolSelectionProvider;
   llmIntentProposalProvider?: LlmIntentProposalProvider;
   agentPlannerProvider?: AgentPlannerProvider;
+  agentExploreProvider?: LlmProvider;
   rentalPriceClient?: RentalPriceSkillClient;
   activityAutomationClient?: ActivityAutomationSkillClient;
   closedOrderFetchImpl?: typeof fetch;
   closedOrderRegistryPaths?: ClosedOrderRegistryPathsInput;
+}
+
+function parseAgentExploreInstruction(text: string): string | null {
+  const match = /^(?:探索|分析)\s+(.+)$/.exec(text.trim());
+  return match?.[1]?.trim() || null;
 }
 
 function rentalIntentToConfirmRequest(intent: BotIntent): RentalOperationConfirmRequest | null {
@@ -711,6 +719,18 @@ export async function handleBotIntent(intent: BotIntent, outputDir = 'output', o
   }
 
   if (intent.type === 'unknown') {
+    const exploreInstruction = parseAgentExploreInstruction(intent.text);
+    if (exploreInstruction) {
+      return agentExploreResponse(exploreInstruction, outputDir, {
+        provider: options.agentExploreProvider,
+        executionOptions: {
+          rentalPriceClient: options.rentalPriceClient,
+          closedOrderFetchImpl: options.closedOrderFetchImpl,
+          closedOrderRegistryPaths: options.closedOrderRegistryPaths,
+        },
+      });
+    }
+
     const plannedResponse = await agentPlannerResponse(intent.text, outputDir, options);
     if (plannedResponse) return plannedResponse;
 
