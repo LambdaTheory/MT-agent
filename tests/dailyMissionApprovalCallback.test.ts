@@ -1,9 +1,9 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { resolveDailyMissionApproval } from '../src/agentRuntime/dailyMissionApprovalCallback.js';
-import { createDailyMissionRun, saveDailyMissionRun } from '../src/agentRuntime/dailyMissionRun.js';
+import { createDailyMissionRun, saveDailyMissionRun, transitionDailyMissionRun } from '../src/agentRuntime/dailyMissionRun.js';
 import { loadOperationLedgerJsonlEntries } from '../src/agentRuntime/operationLedger.js';
 import type { RentalPriceSkillClient } from '../src/feishuBot/rentalPrice.js';
 
@@ -20,6 +20,31 @@ function fakeClient(): RentalPriceSkillClient {
   };
 }
 
+async function seedWaitingApprovalRun(dir: string, approvals: Array<{ decisionId: string; productId: string }>): Promise<void> {
+  let run = createDailyMissionRun({ runId: 'run-custom', date: '2026-07-02', trigger: 'manual', startedAt: '2026-07-02T00:00:00.000Z' });
+  run = transitionDailyMissionRun(run, 'planning', '2026-07-02T00:00:01.000Z');
+  run = transitionDailyMissionRun(run, 'waiting_approval', '2026-07-02T00:00:02.000Z');
+  await saveDailyMissionRun(dir, run);
+  const missionDir = join(dir, 'daily-mission', '2026-07-02');
+  await mkdir(missionDir, { recursive: true });
+  await writeFile(join(missionDir, 'approval-request.json'), JSON.stringify({
+    approvals: approvals.map(({ decisionId, productId }) => ({
+      decisionId,
+      runId: 'run-custom',
+      title: `下架 ${productId}`,
+      subjects: [{ kind: 'product', id: productId }],
+      operationType: 'delist',
+      recommendation: 'approve_to_execute',
+      risk: 'high',
+      rationale: [],
+      evidenceRefs: ['approval.callback'],
+      uncertainties: [],
+      proposedTool: { toolName: 'rental.delist', arguments: { productId } },
+    })),
+    observations: [],
+  }), 'utf8');
+}
+
 describe('resolveDailyMissionApproval', () => {
   let dir: string;
 
@@ -32,7 +57,7 @@ describe('resolveDailyMissionApproval', () => {
   });
 
   it('executes a daily-mission-tagged confirm request', async () => {
-    await saveDailyMissionRun(dir, createDailyMissionRun({ runId: 'run-custom', date: '2026-07-02', trigger: 'manual', startedAt: '2026-07-02T00:00:00.000Z' }));
+    await seedWaitingApprovalRun(dir, [{ decisionId: 'dec-1', productId: '648' }]);
     const result = await resolveDailyMissionApproval(
       { toolName: 'rental.delist', arguments: { productId: '648' }, reason: '[[dailyMission:runId=run-custom;decisionId=dec-1]] 下架 648' },
       dir,
@@ -45,11 +70,11 @@ describe('resolveDailyMissionApproval', () => {
     expect(events).toContain('approval_accepted');
     expect(events).toContain('execution_succeeded');
     const rawResults = await readFile(join(dir, 'daily-mission', '2026-07-02', 'execution-results.json'), 'utf8');
-    expect(JSON.parse(rawResults)).toEqual([{ decisionId: 'dec-1', ok: true, text: expect.any(String) }]);
+    expect(JSON.parse(rawResults)).toEqual([{ decisionId: 'dec-1', ok: true, status: 'executed', text: expect.any(String) }]);
   });
 
   it('preserves previous execution results when a second decision is approved', async () => {
-    await saveDailyMissionRun(dir, createDailyMissionRun({ runId: 'run-custom', date: '2026-07-02', trigger: 'manual', startedAt: '2026-07-02T00:00:00.000Z' }));
+    await seedWaitingApprovalRun(dir, [{ decisionId: 'dec-1', productId: '648' }, { decisionId: 'dec-2', productId: '649' }]);
 
     await resolveDailyMissionApproval(
       { toolName: 'rental.delist', arguments: { productId: '648' }, reason: '[[dailyMission:runId=run-custom;decisionId=dec-1]] 下架 648' },
@@ -90,7 +115,7 @@ describe('resolveDailyMissionApproval', () => {
       { toolName: 'rental.delist', arguments: { productId: '648' }, reason: '[[dailyMission:runId=missing-run;decisionId=dec-1]] 下架 648' },
       dir,
       { rentalPriceClient: client },
-    )).rejects.toThrow('Daily Mission run not found for missing-run');
+    )).rejects.toThrow('Daily Mission run not found: missing-run');
 
     expect(calls).toEqual([]);
   });
