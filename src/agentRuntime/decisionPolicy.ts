@@ -10,12 +10,15 @@ export interface ClassifiedDecisions {
 function toolArgumentsValid(record: DecisionRecord): boolean {
   if (!record.proposedTool) return false;
   const tool = findAgentTool(record.proposedTool.toolName);
-  return Boolean(tool && schemaAllowsArguments(tool.inputSchema, record.proposedTool.arguments));
+  return Boolean(tool && tool.plannerVisible !== false && schemaAllowsArguments(tool.inputSchema, record.proposedTool.arguments));
 }
 
 function blockedReason(record: DecisionRecord): string {
   if (!record.proposedTool) return '缺少可执行工具参数';
-  if (!toolArgumentsValid(record)) return '工具参数非法';
+  const tool = findAgentTool(record.proposedTool.toolName);
+  if (!tool) return '工具参数非法';
+  if (tool.plannerVisible === false) return '工具不允许自动审批';
+  if (!schemaAllowsArguments(tool.inputSchema, record.proposedTool.arguments)) return '工具参数非法';
   if (record.uncertainties.length > 0) return '存在不确定项';
   return '证据不足';
 }
