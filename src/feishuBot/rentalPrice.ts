@@ -149,6 +149,7 @@ export interface RentalOperationExecutionResult {
 export interface RentalPriceSkillClient {
   preview(request: RentalPriceChangeRequest): Promise<RentalPricePreview>;
   execute(request: Extract<RentalPriceChangeRequest, { mode: 'explicit_fields' }>): Promise<RentalPriceExecutionResult>;
+  applyPerSpec?(productId: string, specFields: Record<string, Record<string, string>>): Promise<RentalPriceExecutionResult>;
   rollback?(request: RentalPriceRollbackRequest): Promise<RentalPriceRollbackResult>;
   read?(productId: string): Promise<RentalPriceReadResult>;
   copy(productId: string): Promise<RentalPriceCopyResult>;
@@ -156,6 +157,8 @@ export interface RentalPriceSkillClient {
   tenancySet(productId: string, days: string): Promise<RentalPriceTenancySetResult>;
   specDiscover(productId: string): Promise<RentalPriceSpecDiscoverResult>;
   specAddAndRefresh(productId: string, itemTitle: string): Promise<RentalPriceSpecAddResult>;
+  specAddDim?(productId: string, title: string): Promise<RentalPriceSpecAddResult>;
+  specRemoveDim?(request: { productId: string; specDimId: string }): Promise<RentalPriceSpecRemoveResult>;
   specRemoveItem?(request: { productId: string; specDimId: string; itemId?: string; itemTitle: string }): Promise<RentalPriceSpecRemoveResult>;
 }
 
@@ -452,6 +455,26 @@ function readableValues(response: Record<string, unknown>): Record<string, unkno
 function verifiedFields(response: Record<string, unknown>, fields: Record<string, string>): boolean {
   const values = readableValues(response);
   return Object.entries(fields).every(([field, value]) => moneyValue(values[field]) === value);
+}
+
+function normalizePerSpecPriceFields(specFields: Record<string, Record<string, string>>): Record<string, Record<string, string>> {
+  const normalized: Record<string, Record<string, string>> = {};
+  for (const [specId, fields] of Object.entries(specFields)) {
+    const clean: Record<string, string> = {};
+    for (const [field, value] of Object.entries(fields)) {
+      if (PRICE_FIELD_NAMES.has(field) && Number.isFinite(Number(value))) clean[field] = money(value);
+    }
+    if (Object.keys(clean).length) normalized[specId] = clean;
+  }
+  return normalized;
+}
+
+function verifiedPerSpecFields(response: Record<string, unknown>, specFields: Record<string, Record<string, string>>): boolean {
+  const values = normalizeReadValues(response.values);
+  return Object.entries(specFields).every(([specId, fields]) => {
+    const actual = values[specId] ?? {};
+    return Object.entries(fields).every(([field, value]) => moneyValue(actual[field]) === value);
+  });
 }
 
 function moneyValue(value: unknown): string | null {
@@ -880,6 +903,52 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
         ...(audit ? { audit: { ...(audit.taskId ? { taskId: audit.taskId } : {}), status: audit.taskId ? auditStatus : 'untracked', resultFile, ...(audit.rollbackFile ? { rollbackFile: audit.rollbackFile } : {}) } } : {}),
       };
     },
+    async applyPerSpec(productId, specFields) {
+      const tasksDir = join(rootDir, 'tasks');
+      await mkdir(tasksDir, { recursive: true });
+      const normalized = normalizePerSpecPriceFields(specFields);
+      if (!Object.keys(normalized).length) {
+        return { productId, ok: false, lines: ['apply: skipped', 'submit: skipped', 'verify: skipped', 'fields: empty'] };
+      }
+      const changesFile = join(tasksDir, `mt-agent-per-spec-changes-${productId}-${timestampToken()}.json`);
+      await writeJsonFile(changesFile, normalized);
+
+      const apply = await send({ action: 'apply', productId, changesFile });
+      const applyStatus = commandStatus(apply);
+      if (applyStatus !== 'ok') {
+        return { productId, ok: false, lines: [`apply: ${applyStatus}`, 'submit: skipped', 'verify: skipped', `changesFile: ${changesFile}`] };
+      }
+
+      const submit = await send({ action: 'submit' });
+      const submitStatus = commandStatus(submit);
+      if (submitStatus !== 'ok') {
+        return { productId, ok: false, lines: [`apply: ${applyStatus}`, `submit: ${submitStatus}`, 'verify: skipped', `changesFile: ${changesFile}`] };
+      }
+
+      const verified = await send({ action: 'read', productId });
+      const verifyStatus = commandStatus(verified);
+      const fieldsMatch = verifiedPerSpecFields(verified, normalized);
+      const ok = verifyStatus !== 'error' && fieldsMatch;
+      const resultFile = join(tasksDir, `per-spec-verify-${productId}-${timestampToken()}.json`);
+      await writeJsonFile(resultFile, {
+        productId,
+        ok,
+        expectedSpecFields: normalized,
+        applyStatus,
+        submitStatus,
+        verifyStatus,
+        fieldsMatch,
+        verified,
+        changesFile,
+        createdAt: new Date().toISOString(),
+      });
+      return {
+        productId,
+        ok,
+        lines: [`apply: ${applyStatus}`, `submit: ${submitStatus}`, `verify: ${verifyStatus}`, `fields: ${fieldsMatch ? 'matched' : 'mismatch'}`, `changesFile: ${changesFile}`, `verifyFile: ${resultFile}`],
+        audit: { status: ok ? 'completed' : 'verify_failed', resultFile },
+      };
+    },
     async rollback(request) {
       const tasksDir = join(rootDir, 'tasks');
       await mkdir(tasksDir, { recursive: true });
@@ -988,6 +1057,36 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
       const result = await send({ action: 'spec-add-and-refresh', productId, itemTitle });
       const status = commandStatus(result);
       return { productId, ok: status === 'ok', itemTitle, lines: [`spec-add-and-refresh: ${status}`] };
+    },
+    async specAddDim(productId, title) {
+      const result = await send({ action: 'spec-add-dim', productId, itemTitle: title });
+      const status = commandStatus(result);
+      const discovered = await send({ action: 'spec-discover', productId });
+      const discoverStatus = commandStatus(discovered);
+      return {
+        productId,
+        ok: status === 'ok' && discoverStatus === 'ok',
+        itemTitle: title,
+        lines: [`spec-add-dim: ${status}`, `spec-discover: ${discoverStatus}`],
+      };
+    },
+    async specRemoveDim(request) {
+      const remove = await send({
+        action: 'spec-remove-dim',
+        productId: request.productId,
+        specDimId: request.specDimId,
+        expectedProductId: request.productId,
+      });
+      const removeStatus = commandStatus(remove);
+      const discovered = await send({ action: 'spec-discover', productId: request.productId });
+      const discoverStatus = commandStatus(discovered);
+      return {
+        productId: request.productId,
+        ok: removeStatus === 'ok' && discoverStatus === 'ok',
+        specDimId: request.specDimId,
+        itemTitle: request.specDimId,
+        lines: [`spec-remove-dim: ${removeStatus}`, `spec-discover: ${discoverStatus}`],
+      };
     },
     async specRemoveItem(request) {
       const before = await send({ action: 'spec-discover', productId: request.productId });
