@@ -50,6 +50,7 @@ export function isValidDecisionRecord(value: unknown): value is DecisionRecord {
     && typeof value.runId === 'string'
     && typeof value.title === 'string'
     && Array.isArray(value.subjects)
+    && value.subjects.length > 0
     && value.subjects.every(isDecisionSubject)
     && typeof value.operationType === 'string'
     && OPERATION_TYPES.includes(value.operationType as DecisionRecord['operationType'])

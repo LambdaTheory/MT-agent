@@ -82,4 +82,8 @@ describe('isValidDecisionRecord', () => {
     expect(isValidDecisionRecord(record({ subjects: [{ kind: 'product', id: '648', displayName: 1 as unknown as string }] }))).toBe(false);
     expect(isValidDecisionRecord(record({ blockedReason: 1 as unknown as string }))).toBe(false);
   });
+
+  it('rejects decisions without subjects', () => {
+    expect(isValidDecisionRecord(record({ subjects: [] }))).toBe(false);
+  });
 });
