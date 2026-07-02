@@ -44,7 +44,7 @@ describe('daily mission idempotency', () => {
   });
 
   it('does not call client again when decision already executed ok', async () => {
-    await appendExecutionResult(dir, '2026-07-02', { decisionId: 'dec-1', ok: true, text: '已下架' });
+    await appendExecutionResult(dir, '2026-07-02', { decisionId: 'dec-1', ok: true, status: 'executed', text: '已下架' });
     const delist = vi.fn(async () => ({ ok: true, action: 'delist', productId: '648', lines: [] }));
 
     const result = await executeApprovedDecision({
