@@ -1,5 +1,7 @@
 import type { CollectedContext } from './dailyMissionContext.js';
+import { isValidDecisionRecord } from './decisionRecord.js';
 import type { DecisionRecord } from './decisionRecord.js';
+import type { LlmProvider } from '../llm/provider.js';
 
 export interface DecisionBuilder {
   build(context: CollectedContext): Promise<DecisionRecord[]>;
@@ -23,5 +25,31 @@ export class RuleBasedDecisionBuilder implements DecisionBuilder {
       evidenceRefs: [`hotspots.${event.eventId}`],
       uncertainties: [],
     }));
+  }
+}
+
+const DECISION_SYSTEM_PROMPT = [
+  '你是租赁商品运营决策助手。基于给定的运营上下文 JSON，产出结构化决策。',
+  '只输出 JSON，形如 {"decisions": DecisionRecord[]}。',
+  '每条 DecisionRecord 必含 decisionId, runId, title, subjects, operationType, recommendation, risk, rationale, evidenceRefs, uncertainties。',
+  'recommendation 取值 observe|approve_to_execute|skip；不确定时用 observe。evidenceRefs 必须引用上下文中的字段。',
+].join('\n');
+
+export class LlmDecisionBuilder implements DecisionBuilder {
+  constructor(private readonly options: { provider: LlmProvider }) {}
+
+  async build(context: CollectedContext): Promise<DecisionRecord[]> {
+    const result = await this.options.provider.generateJson({
+      messages: [
+        { role: 'system', content: DECISION_SYSTEM_PROMPT },
+        { role: 'user', content: JSON.stringify(context) },
+      ],
+      temperature: 0,
+    });
+    const raw = result.json.decisions;
+    if (!Array.isArray(raw)) return [];
+    return raw
+      .filter(isValidDecisionRecord)
+      .map((record) => ({ ...record, runId: context.runId }));
   }
 }
