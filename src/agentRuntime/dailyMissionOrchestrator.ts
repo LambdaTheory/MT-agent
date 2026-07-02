@@ -2,9 +2,11 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { dailyMissionArtifactPath, type DailyMissionArtifactName } from './dailyMissionArtifacts.js';
 import { collectDailyMissionContext, type CollectedContext, type ContextCollector } from './dailyMissionContext.js';
+import { buildDailyMissionApprovalCards } from './dailyMissionApproval.js';
 import type { DecisionBuilder } from './decisionBuilder.js';
 import { classifyDecisions, type ClassifiedDecisions } from './decisionPolicy.js';
 import type { DecisionRecord } from './decisionRecord.js';
+import { writeDailyJournal } from './dailyJournalWriter.js';
 import {
   addDailyMissionArtifact,
   createDailyMissionRun,
@@ -60,6 +62,7 @@ async function saveFailedRun(outputDir: string, run: DailyMissionRun, at: string
 
 export async function runDailyMissionPlan(input: RunDailyMissionPlanInput): Promise<RunDailyMissionPlanResult> {
   let eventIndex = 0;
+  let stage = 'starting';
   const now = () => new Date().toISOString();
   const eventAt = () => `${input.date}T00:00:${String(eventIndex++).padStart(2, '0')}.000Z`;
   const subject = runSubject(input.date);
@@ -72,6 +75,7 @@ export async function runDailyMissionPlan(input: RunDailyMissionPlanInput): Prom
 
   try {
     run = await saveDailyMissionRun(input.outputDir, run);
+    stage = 'collecting';
     const context = await collectDailyMissionContext(input.collectors, {
       runId: input.runId,
       date: input.date,
@@ -89,6 +93,7 @@ export async function runDailyMissionPlan(input: RunDailyMissionPlanInput): Prom
       subject,
     });
 
+    stage = 'planning';
     run = transitionDailyMissionRun(run, 'planning', now());
     run = await saveDailyMissionRun(input.outputDir, run);
     const decisions = await input.decisionBuilder.build(context);
@@ -106,8 +111,12 @@ export async function runDailyMissionPlan(input: RunDailyMissionPlanInput): Prom
       });
     }
 
+    stage = 'waiting_approval';
     const classified = classifyDecisions(decisions);
-    const approvalPath = await writeArtifact(input.outputDir, input.date, 'approvalRequest', classified);
+    const approvalPath = await writeArtifact(input.outputDir, input.date, 'approvalRequest', {
+      ...classified,
+      approvalCards: buildDailyMissionApprovalCards(classified.approvals),
+    });
     run = addDailyMissionArtifact(run, { type: 'approvalRequest', path: approvalPath });
     run = transitionDailyMissionRun(run, 'waiting_approval', now());
     run = await saveDailyMissionRun(input.outputDir, run);
@@ -125,6 +134,17 @@ export async function runDailyMissionPlan(input: RunDailyMissionPlanInput): Prom
     return { run, context, decisions, classified };
   } catch (error) {
     await saveFailedRun(input.outputDir, run, now());
+    await writeDailyJournal({
+      outputDir: input.outputDir,
+      date: input.date,
+      runId: input.runId,
+      context: { runId: input.runId, date: input.date, outputDir: input.outputDir, collectedAt: now(), missingSources: [] },
+      decisions: [],
+      classified: { approvals: [], observations: [] },
+      failure: { stage, message: error instanceof Error ? error.message : String(error) },
+    }).catch((journalError) => {
+      console.warn('Failed to write failed Daily Mission journal.', journalError);
+    });
     throw error;
   }
 }

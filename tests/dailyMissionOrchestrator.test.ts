@@ -75,7 +75,7 @@ describe('runDailyMissionPlan', () => {
         risk: 'write',
         rationale: ['证据充分'],
         evidenceRefs: ['manual'],
-        proposedTool: { toolName: 'rental.pricePreview', arguments: { productId: '648' } },
+        proposedTool: { toolName: 'rental.pricePreview', arguments: { productIds: ['648'] } },
         uncertainties: [],
       }]),
     };
@@ -93,5 +93,11 @@ describe('runDailyMissionPlan', () => {
     const approval = entries.find((entry) => entry.event === 'approval_requested');
     expect(approval?.decisionId).toBe('dec-1');
     expect(approval?.subject).toEqual({ kind: 'product', id: '648' });
+    const approvalRequest = JSON.parse(await readFile(join(dir, 'daily-mission', '2026-07-01', 'approval-request.json'), 'utf8')) as {
+      approvalCards?: unknown[];
+    };
+    expect(approvalRequest.approvalCards).toHaveLength(1);
+    expect(JSON.stringify(approvalRequest.approvalCards?.[0])).toContain('agent_tool_confirm');
+    expect(JSON.stringify(approvalRequest.approvalCards?.[0])).toContain('confirmationKey');
   });
 });
