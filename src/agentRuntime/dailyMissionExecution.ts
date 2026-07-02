@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { executeAgentToolRequest, type AgentToolExecutionOptions } from '../feishuBot/agentToolExecutor.js';
+import type { FeishuCardPayload } from '../notify/feishuApp.js';
 import { dailyMissionArtifactPath } from './dailyMissionArtifacts.js';
 import { decisionToConfirmRequest } from './dailyMissionApproval.js';
 import type { DecisionRecord } from './decisionRecord.js';
@@ -16,7 +17,9 @@ export interface ExecuteApprovedDecisionInput {
 export interface DailyMissionExecutionResult {
   decisionId: string;
   ok: boolean;
+  status: 'executed' | 'pending_confirmation' | 'failed';
   text: string;
+  card?: FeishuCardPayload;
 }
 
 export async function executeApprovedDecision(input: ExecuteApprovedDecisionInput): Promise<DailyMissionExecutionResult> {
@@ -37,7 +40,11 @@ export async function executeApprovedDecision(input: ExecuteApprovedDecisionInpu
     ...input.options,
     ledgerContext: { outputDir, runId: decision.runId, decisionId: decision.decisionId },
   });
-  return { decisionId: decision.decisionId, ok: response.metadata?.ok !== false, text: response.text };
+  if (response.card) {
+    return { decisionId: decision.decisionId, ok: false, status: 'pending_confirmation', text: response.text, card: response.card };
+  }
+  const ok = response.metadata?.ok !== false;
+  return { decisionId: decision.decisionId, ok, status: ok ? 'executed' : 'failed', text: response.text };
 }
 
 export async function writeExecutionResults(
@@ -56,7 +63,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function isExecutionResult(value: unknown): value is DailyMissionExecutionResult {
-  return isRecord(value) && typeof value.decisionId === 'string' && typeof value.ok === 'boolean' && typeof value.text === 'string';
+  return isRecord(value)
+    && typeof value.decisionId === 'string'
+    && typeof value.ok === 'boolean'
+    && typeof value.text === 'string'
+    && (value.status === undefined || value.status === 'executed' || value.status === 'pending_confirmation' || value.status === 'failed');
 }
 
 export async function loadExecutionResult(
