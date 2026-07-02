@@ -1065,13 +1065,17 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
       if (!safeProductId) throw new Error('productId must be a numeric string');
       const result = await send({ action: 'spec-add-dim', productId: safeProductId, itemTitle: title });
       const status = commandStatus(result);
+      const submit = await send({ action: 'submit' });
+      const submitStatus = commandStatus(submit);
       const discovered = await send({ action: 'spec-discover', productId: safeProductId });
       const discoverStatus = commandStatus(discovered);
+      const dimensions = Array.isArray(discovered.dimensions) ? discovered.dimensions as RentalPriceSpecDiscoverResult['dimensions'] : [];
+      const verified = dimensions.some((dimension) => dimension.title.replace(/\s+/g, ' ').trim() === title.replace(/\s+/g, ' ').trim());
       return {
         productId: safeProductId,
-        ok: status === 'ok' && discoverStatus === 'ok',
+        ok: status === 'ok' && submitStatus === 'ok' && discoverStatus === 'ok' && verified,
         itemTitle: title,
-        lines: [`spec-add-dim: ${status}`, `spec-discover: ${discoverStatus}`],
+        lines: [`spec-add-dim: ${status}`, `submit: ${submitStatus}`, `spec-discover: ${discoverStatus}`, `verified: ${verified}`],
       };
     },
     async specRemoveDim(request) {
@@ -1084,14 +1088,18 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
         expectedProductId: safeProductId,
       });
       const removeStatus = commandStatus(remove);
+      const submit = await send({ action: 'submit' });
+      const submitStatus = commandStatus(submit);
       const discovered = await send({ action: 'spec-discover', productId: safeProductId });
       const discoverStatus = commandStatus(discovered);
+      const dimensions = Array.isArray(discovered.dimensions) ? discovered.dimensions as RentalPriceSpecDiscoverResult['dimensions'] : [];
+      const verified = !dimensions.some((dimension) => String(dimension.specId) === String(request.specDimId));
       return {
         productId: safeProductId,
-        ok: removeStatus === 'ok' && discoverStatus === 'ok',
+        ok: removeStatus === 'ok' && submitStatus === 'ok' && discoverStatus === 'ok' && verified,
         specDimId: request.specDimId,
         itemTitle: request.specDimId,
-        lines: [`spec-remove-dim: ${removeStatus}`, `spec-discover: ${discoverStatus}`],
+        lines: [`spec-remove-dim: ${removeStatus}`, `submit: ${submitStatus}`, `spec-discover: ${discoverStatus}`, `verified: ${verified}`],
       };
     },
     async specRemoveItem(request) {
