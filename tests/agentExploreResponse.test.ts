@@ -123,6 +123,27 @@ describe('agentExploreResponse', () => {
     expect(requests.every((request) => !request.reason.includes('[[dailyMission:'))).toBe(true);
   });
 
+  it('rejects malformed executable decisions before creating confirmation cards', async () => {
+    const provider = new FakeLlmProvider(JSON.stringify({
+      action: 'finish',
+      answer: 'malformed decision should not become actionable',
+      decisions: [{
+        recommendation: 'approve_to_execute',
+        risk: 'high',
+        operationType: 'delist',
+        evidenceRefs: ['explore.test'],
+        uncertainties: [],
+        proposedTool: { toolName: 'rental.delist', arguments: { productId: '648' } },
+      }],
+    }));
+
+    const response = await agentExploreResponse('分析 648', 'output', { provider });
+
+    expect(response.card).toBeUndefined();
+    expect(response.metadata).toMatchObject({ ok: false, stopReason: 'invalid' });
+    expect(response.text).toContain('探索未形成有效结论');
+  });
+
   it('routes explicit explore commands from the Feishu unknown branch', async () => {
     const provider = new FakeLlmProvider([
       JSON.stringify({ action: 'finish', answer: '探索完成' }),

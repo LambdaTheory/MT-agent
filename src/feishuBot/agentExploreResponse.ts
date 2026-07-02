@@ -3,7 +3,7 @@ import { classifyDecisions } from '../agentRuntime/decisionPolicy.js';
 import { resolveLlmProviderFromEnv } from '../agentRuntime/decisionBuilderFactory.js';
 import { buildReadOnlyExploreTools } from '../agentRuntime/exploreToolset.js';
 import { runAgentExploreLoop } from '../agentRuntime/agentExploreLoop.js';
-import type { DecisionRecord } from '../agentRuntime/decisionRecord.js';
+import { isValidDecisionRecord, type DecisionRecord } from '../agentRuntime/decisionRecord.js';
 import type { FeishuCardPayload } from '../notify/feishuApp.js';
 import type { AgentToolExecutionOptions } from './agentToolExecutor.js';
 import type { BotResponse } from './types.js';
@@ -46,6 +46,10 @@ function buildExploreConfirmCard(approvals: DecisionRecord[]): FeishuCardPayload
   };
 }
 
+function hasInvalidDecisions(decisions: unknown[] | undefined): boolean {
+  return decisions !== undefined && !decisions.every(isValidDecisionRecord);
+}
+
 export async function agentExploreResponse(
   instruction: string,
   outputDir: string,
@@ -60,6 +64,13 @@ export async function agentExploreResponse(
     tools: buildReadOnlyExploreTools(outputDir, options.executionOptions),
     maxSteps: options.maxSteps,
   });
+  if (hasInvalidDecisions(result.decisions)) {
+    return {
+      text: ['探索未形成有效结论。', formatSteps(result.steps)].join('\n'),
+      metadata: { toolName: 'agentExplore', ok: false, stopReason: 'invalid', stepCount: result.steps.length },
+    };
+  }
+
   const classified = classifyDecisions(result.decisions ?? []);
   const card = buildExploreConfirmCard(classified.approvals);
   const text = [
