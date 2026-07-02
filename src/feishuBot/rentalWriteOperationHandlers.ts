@@ -105,7 +105,15 @@ export async function executeRentalWriteOperationHandler(
     try {
       const result = await executeRentalOperationConfirmRequest(client, rentalRequest);
       await recordWriteEvent(ledgerContext, result.ok ? 'execution_succeeded' : 'execution_failed', request.toolName, rentalRequest.productId);
-      return { text: result.text };
+      return {
+        text: result.text,
+        metadata: {
+          ...(result.metadata ?? {}),
+          toolName: request.toolName,
+          ok: result.ok,
+          productId: rentalRequest.productId,
+        },
+      };
     } catch (error) {
       await recordFailedWriteEvent(ledgerContext, request.toolName, rentalRequest.productId);
       throw error;

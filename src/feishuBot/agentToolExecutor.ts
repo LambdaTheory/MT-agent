@@ -85,11 +85,13 @@ import { inferPriceMultiplierFromText, readPriceMultiplierArgument } from './pri
 import { runPublicTrafficReportDateComparison, runPublicTrafficReportQuery, type PublicTrafficReportQueryArguments } from './reportQuery.js';
 import { findLatestReportContext, findReportContextByDate, formatConversionSummary, formatLatestSummary, formatProductRows, parseNumericProductIdList, queryProductRows } from './reportStore.js';
 import { saveAgentToolConfirmRequest } from './agentToolConfirmStore.js';
+import type { RentalWriteLedgerContext } from './rentalWriteOperationHandlers.js';
 
 export interface AgentToolExecutionOptions {
   rentalPriceClient?: RentalPriceSkillClient;
   closedOrderFetchImpl?: typeof fetch;
   closedOrderRegistryPaths?: ClosedOrderRegistryPathsInput;
+  ledgerContext?: RentalWriteLedgerContext;
 }
 
 let publicTrafficReportRunning = false;
@@ -1661,14 +1663,14 @@ export async function executeAgentToolRequest(
     case 'rental.tenancySet':
     case 'rental.specDiscover':
     case 'rental.specAddAndRefresh':
-      return executeRentalWriteOperationHandler(request, options.rentalPriceClient ?? createRentalPriceSkillClient());
+      return executeRentalWriteOperationHandler(request, options.rentalPriceClient ?? createRentalPriceSkillClient(), options.ledgerContext);
     case 'rental.specRemovePlan': {
       const query = requireString(request.arguments.query, 'query');
       const keyword = requireString(request.arguments.keyword, 'keyword');
       return rentalSpecRemovePlanResponse(query, keyword, request.reason, options.rentalPriceClient ?? createRentalPriceSkillClient(), options, request.continuation);
     }
     case 'rental.operationConfirmRequest':
-      return executeRentalWriteOperationHandler(request, options.rentalPriceClient ?? createRentalPriceSkillClient());
+      return executeRentalWriteOperationHandler(request, options.rentalPriceClient ?? createRentalPriceSkillClient(), options.ledgerContext);
     case 'rental.priceChange': {
       const inferredFields = isRecord(request.arguments.fields) ? undefined : parseRentPriceFieldsFromText(request.reason);
       const rawFields = isRecord(request.arguments.fields)
