@@ -904,34 +904,36 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
       };
     },
     async applyPerSpec(productId, specFields) {
+      const safeProductId = readProductId(productId);
+      if (!safeProductId) throw new Error('productId must be a numeric string');
       const tasksDir = join(rootDir, 'tasks');
       await mkdir(tasksDir, { recursive: true });
       const normalized = normalizePerSpecPriceFields(specFields);
       if (!Object.keys(normalized).length) {
-        return { productId, ok: false, lines: ['apply: skipped', 'submit: skipped', 'verify: skipped', 'fields: empty'] };
+        return { productId: safeProductId, ok: false, lines: ['apply: skipped', 'submit: skipped', 'verify: skipped', 'fields: empty'] };
       }
-      const changesFile = join(tasksDir, `mt-agent-per-spec-changes-${productId}-${timestampToken()}.json`);
+      const changesFile = join(tasksDir, `mt-agent-per-spec-changes-${safeProductId}-${timestampToken()}.json`);
       await writeJsonFile(changesFile, normalized);
 
-      const apply = await send({ action: 'apply', productId, changesFile });
+      const apply = await send({ action: 'apply', productId: safeProductId, changesFile });
       const applyStatus = commandStatus(apply);
       if (applyStatus !== 'ok') {
-        return { productId, ok: false, lines: [`apply: ${applyStatus}`, 'submit: skipped', 'verify: skipped', `changesFile: ${changesFile}`] };
+        return { productId: safeProductId, ok: false, lines: [`apply: ${applyStatus}`, 'submit: skipped', 'verify: skipped', `changesFile: ${changesFile}`] };
       }
 
       const submit = await send({ action: 'submit' });
       const submitStatus = commandStatus(submit);
       if (submitStatus !== 'ok') {
-        return { productId, ok: false, lines: [`apply: ${applyStatus}`, `submit: ${submitStatus}`, 'verify: skipped', `changesFile: ${changesFile}`] };
+        return { productId: safeProductId, ok: false, lines: [`apply: ${applyStatus}`, `submit: ${submitStatus}`, 'verify: skipped', `changesFile: ${changesFile}`] };
       }
 
-      const verified = await send({ action: 'read', productId });
+      const verified = await send({ action: 'read', productId: safeProductId });
       const verifyStatus = commandStatus(verified);
       const fieldsMatch = verifiedPerSpecFields(verified, normalized);
       const ok = verifyStatus !== 'error' && fieldsMatch;
-      const resultFile = join(tasksDir, `per-spec-verify-${productId}-${timestampToken()}.json`);
+      const resultFile = join(tasksDir, `per-spec-verify-${safeProductId}-${timestampToken()}.json`);
       await writeJsonFile(resultFile, {
-        productId,
+        productId: safeProductId,
         ok,
         expectedSpecFields: normalized,
         applyStatus,
@@ -943,7 +945,7 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
         createdAt: new Date().toISOString(),
       });
       return {
-        productId,
+        productId: safeProductId,
         ok,
         lines: [`apply: ${applyStatus}`, `submit: ${submitStatus}`, `verify: ${verifyStatus}`, `fields: ${fieldsMatch ? 'matched' : 'mismatch'}`, `changesFile: ${changesFile}`, `verifyFile: ${resultFile}`],
         audit: { status: ok ? 'completed' : 'verify_failed', resultFile },
@@ -1059,29 +1061,33 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
       return { productId, ok: status === 'ok', itemTitle, lines: [`spec-add-and-refresh: ${status}`] };
     },
     async specAddDim(productId, title) {
-      const result = await send({ action: 'spec-add-dim', productId, itemTitle: title });
+      const safeProductId = readProductId(productId);
+      if (!safeProductId) throw new Error('productId must be a numeric string');
+      const result = await send({ action: 'spec-add-dim', productId: safeProductId, itemTitle: title });
       const status = commandStatus(result);
-      const discovered = await send({ action: 'spec-discover', productId });
+      const discovered = await send({ action: 'spec-discover', productId: safeProductId });
       const discoverStatus = commandStatus(discovered);
       return {
-        productId,
+        productId: safeProductId,
         ok: status === 'ok' && discoverStatus === 'ok',
         itemTitle: title,
         lines: [`spec-add-dim: ${status}`, `spec-discover: ${discoverStatus}`],
       };
     },
     async specRemoveDim(request) {
+      const safeProductId = readProductId(request.productId);
+      if (!safeProductId) throw new Error('productId must be a numeric string');
       const remove = await send({
         action: 'spec-remove-dim',
-        productId: request.productId,
+        productId: safeProductId,
         specDimId: request.specDimId,
-        expectedProductId: request.productId,
+        expectedProductId: safeProductId,
       });
       const removeStatus = commandStatus(remove);
-      const discovered = await send({ action: 'spec-discover', productId: request.productId });
+      const discovered = await send({ action: 'spec-discover', productId: safeProductId });
       const discoverStatus = commandStatus(discovered);
       return {
-        productId: request.productId,
+        productId: safeProductId,
         ok: removeStatus === 'ok' && discoverStatus === 'ok',
         specDimId: request.specDimId,
         itemTitle: request.specDimId,

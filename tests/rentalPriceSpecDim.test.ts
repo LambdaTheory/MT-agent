@@ -26,6 +26,16 @@ describe('spec dimension client', () => {
     ]);
   });
 
+  it('rejects non-numeric product ids before spec-add-dim daemon calls', async () => {
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    const client = createRentalPriceSkillClient({ daemonUrl: 'http://127.0.0.1:9223' });
+
+    await expect(client.specAddDim!('../648', '激光险')).rejects.toThrow('productId');
+
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it('sends spec-remove-dim with the requested dimension id and verifies through spec-discover', async () => {
     const commands: Record<string, unknown>[] = [];
     vi.stubGlobal('fetch', vi.fn(async (_input, init) => {
@@ -44,5 +54,15 @@ describe('spec dimension client', () => {
       { action: 'spec-remove-dim', productId: '648', specDimId: 'dim-1', expectedProductId: '648' },
       { action: 'spec-discover', productId: '648' },
     ]);
+  });
+
+  it('rejects non-numeric product ids before spec-remove-dim daemon calls', async () => {
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    const client = createRentalPriceSkillClient({ daemonUrl: 'http://127.0.0.1:9223' });
+
+    await expect(client.specRemoveDim!({ productId: '../648', specDimId: 'dim-1' })).rejects.toThrow('productId');
+
+    expect(fetch).not.toHaveBeenCalled();
   });
 });

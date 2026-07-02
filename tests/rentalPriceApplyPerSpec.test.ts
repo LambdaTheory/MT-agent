@@ -55,4 +55,14 @@ describe('applyPerSpec', () => {
     expect(changes).not.toHaveProperty('__broadcast');
     expect(commands.map((command) => command.action)).toEqual(['apply', 'submit', 'read']);
   });
+
+  it('rejects non-numeric product ids before writing changes files', async () => {
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    const client = createRentalPriceSkillClient({ rootDir, daemonUrl: 'http://127.0.0.1:9223' });
+
+    await expect(client.applyPerSpec!('../648', { '3862': { rent1day: '50.00' } })).rejects.toThrow('productId');
+
+    expect(fetch).not.toHaveBeenCalled();
+  });
 });
