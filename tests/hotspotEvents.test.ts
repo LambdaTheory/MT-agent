@@ -28,18 +28,18 @@ describe('FileHotspotEventProvider', () => {
       .resolves.toMatchObject([{ eventId: 'e1' }]);
   });
 
-  it('returns empty when file is missing', async () => {
+  it('rejects when file is missing', async () => {
     const provider = new FileHotspotEventProvider({ path: join(dir, 'nope.json') });
 
-    await expect(provider.listEvents({ date: '2026-07-01', lookaheadDays: 7 })).resolves.toEqual([]);
+    await expect(provider.listEvents({ date: '2026-07-01', lookaheadDays: 7 })).rejects.toThrow();
   });
 
-  it('returns empty when file contains malformed JSON', async () => {
+  it('rejects when file contains malformed JSON', async () => {
     const path = join(dir, 'hotspot-events.json');
     await writeFile(path, '{broken', 'utf8');
 
     const provider = new FileHotspotEventProvider({ path });
 
-    await expect(provider.listEvents({ date: '2026-07-01', lookaheadDays: 7 })).resolves.toEqual([]);
+    await expect(provider.listEvents({ date: '2026-07-01', lookaheadDays: 7 })).rejects.toThrow();
   });
 });

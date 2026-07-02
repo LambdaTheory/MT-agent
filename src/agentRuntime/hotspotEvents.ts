@@ -34,12 +34,7 @@ export class FileHotspotEventProvider implements HotspotEventProvider {
   constructor(private readonly options: { path: string }) {}
 
   async listEvents(input: { date: string; lookaheadDays: number }): Promise<HotspotEvent[]> {
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(await readFile(this.options.path, 'utf8')) as unknown;
-    } catch {
-      return [];
-    }
+    const parsed = JSON.parse(await readFile(this.options.path, 'utf8')) as unknown;
     if (!Array.isArray(parsed)) return [];
 
     const start = new Date(`${input.date}T00:00:00.000Z`).getTime();
