@@ -10,6 +10,8 @@ export interface ExposureOverviewMetric {
   amount: number;
 }
 
+export type ExposureLinkStatus = 'active' | 'removed' | 'unknown';
+
 export interface ExposureCumulativeProduct {
   productName: string;
   platformProductId: string;
@@ -17,6 +19,8 @@ export interface ExposureCumulativeProduct {
   visits: number;
   amount: number;
   custodyDays: number | null;
+  listingStatus?: ExposureLinkStatus;
+  listingStatusLabel?: string | null;
   raw: Record<string, string>;
 }
 

@@ -1,6 +1,7 @@
 import type { PeriodKey, PeriodProductMetrics } from '../domain/types.js';
 import type { ProductIdMapping } from '../mapping/productIdMapping.js';
 import { buildDisplayProductId } from './displayProductId.js';
+import { isRemovedExposureProduct } from './exposureStatus.js';
 import type {
   ExposureCumulativeProduct,
   ExposureProductSummary,
@@ -49,6 +50,11 @@ export function mergePublicTrafficData(input: MergePublicTrafficDataInput): Publ
   const productNames = new Map<string, string>();
   const custodyDays = new Map<string, number | null>();
   const periodRows = new Map<string, Record<PeriodKey, PublicTrafficPeriodMetrics>>();
+  const removedProductIds = new Set(
+    input.cumulativeProducts
+      .filter((row) => isRemovedExposureProduct(row))
+      .map((row) => canonicalPlatformProductId(row.platformProductId, input.mapping)),
+  );
 
   function ensure(platformProductId: string): Record<PeriodKey, PublicTrafficPeriodMetrics> {
     const existing = periodRows.get(platformProductId);
@@ -60,6 +66,7 @@ export function mergePublicTrafficData(input: MergePublicTrafficDataInput): Publ
 
   for (const row of input.cumulativeProducts) {
     const platformProductId = canonicalPlatformProductId(row.platformProductId, input.mapping);
+    if (removedProductIds.has(platformProductId)) continue;
     productNames.set(platformProductId, row.productName);
     custodyDays.set(platformProductId, row.custodyDays);
     ensure(platformProductId);
@@ -68,6 +75,7 @@ export function mergePublicTrafficData(input: MergePublicTrafficDataInput): Publ
   for (const period of PERIODS) {
     for (const row of input.exposureByPeriod[period] ?? []) {
       const platformProductId = canonicalPlatformProductId(row.platformProductId, input.mapping);
+      if (removedProductIds.has(platformProductId)) continue;
       productNames.set(platformProductId, productNames.get(platformProductId) || row.productName);
       const metrics = ensure(platformProductId)[period];
       metrics.exposure = row.exposure;
@@ -80,6 +88,7 @@ export function mergePublicTrafficData(input: MergePublicTrafficDataInput): Publ
 
   for (const row of input.dashboardRows) {
     const platformProductId = canonicalPlatformProductId(row.platformProductId, input.mapping);
+    if (removedProductIds.has(platformProductId)) continue;
     productNames.set(platformProductId, productNames.get(platformProductId) || row.productName);
     const metrics = ensure(platformProductId)[row.period];
     metrics.dashboardVisits = row.visits;
