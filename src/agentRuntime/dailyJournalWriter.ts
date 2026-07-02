@@ -14,6 +14,7 @@ export interface WriteDailyJournalInput {
   context: CollectedContext;
   decisions: DecisionRecord[];
   classified: ClassifiedDecisions;
+  failure?: { stage: string; message: string };
 }
 
 export interface DailyJournalPaths {
@@ -30,9 +31,11 @@ function renderMarkdown(input: WriteDailyJournalInput): string {
   const approvals = input.classified.approvals.map((decision) => (
     `- ${decision.title}${decision.proposedTool ? ` -> ${decision.proposedTool.toolName}` : ''}`
   ));
+  const failureLines = input.failure ? [`> 任务失败，停在 ${input.failure.stage}：${input.failure.message}`, ''] : [];
   return [
     `# 运营日报 ${input.date}`,
     '',
+    ...failureLines,
     `- 缺失数据源：${missingSources}`,
     `- 热点事件：${hotspots}`,
     `- 待审批执行项：${input.classified.approvals.length}`,
@@ -61,6 +64,7 @@ export async function writeDailyJournal(input: WriteDailyJournalInput): Promise<
     decisions: input.decisions,
     approvals: input.classified.approvals.map((decision) => decision.decisionId),
     observations: input.classified.observations.map((decision) => decision.decisionId),
+    failure: input.failure ?? null,
   };
   await writeFile(jsonPath, `${JSON.stringify(journal, null, 2)}\n`, 'utf8');
   await writeFile(markdownPath, `${renderMarkdown(input)}\n`, 'utf8');
