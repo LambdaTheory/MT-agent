@@ -1,5 +1,5 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
 import { executeAgentToolRequest, type AgentToolExecutionOptions } from '../feishuBot/agentToolExecutor.js';
 import type { FeishuCardPayload } from '../notify/feishuApp.js';
 import { dailyMissionArtifactPath } from './dailyMissionArtifacts.js';
@@ -21,6 +21,10 @@ export interface DailyMissionExecutionResult {
   status: 'processing' | 'executed' | 'pending_confirmation' | 'failed';
   text: string;
   card?: FeishuCardPayload;
+  operationType?: string;
+  subject?: DecisionRecord['subjects'][number];
+  executedAt?: string;
+  beforeMetric?: { exposure?: number; sales?: number };
 }
 
 const executionResultLocks = new Map<string, Promise<void>>();
@@ -42,6 +46,7 @@ async function withExecutionResultLock<T>(path: string, action: () => Promise<T>
 
 export async function executeApprovedDecision(input: ExecuteApprovedDecisionInput): Promise<DailyMissionExecutionResult> {
   const { decision, outputDir } = input;
+  const beforeMetric = input.date ? await loadSubjectMetric(outputDir, input.date, decision.subjects[0]?.id).catch(() => undefined) : undefined;
   if (input.date) {
     const existing = await loadExecutionResult(outputDir, input.date, decision.runId, decision.decisionId);
     if (existing?.ok || existing?.status === 'processing' || existing?.status === 'pending_confirmation') return existing;
@@ -67,10 +72,22 @@ export async function executeApprovedDecision(input: ExecuteApprovedDecisionInpu
     ledgerContext: { outputDir, runId: decision.runId, decisionId: decision.decisionId, ...(input.date ? { missionDate: input.date } : {}) },
   });
   if (response.card) {
-    return { runId: decision.runId, decisionId: decision.decisionId, ok: false, status: 'pending_confirmation', text: response.text, card: response.card };
+    return { runId: decision.runId, decisionId: decision.decisionId, ok: false, status: 'pending_confirmation', text: response.text, card: response.card, operationType: decision.operationType, subject: decision.subjects[0], executedAt: new Date().toISOString(), ...(beforeMetric ? { beforeMetric } : {}) };
   }
   const ok = response.metadata?.ok !== false;
-  return { runId: decision.runId, decisionId: decision.decisionId, ok, status: ok ? 'executed' : 'failed', text: response.text };
+  return { runId: decision.runId, decisionId: decision.decisionId, ok, status: ok ? 'executed' : 'failed', text: response.text, operationType: decision.operationType, subject: decision.subjects[0], executedAt: new Date().toISOString(), ...(beforeMetric ? { beforeMetric } : {}) };
+}
+
+async function loadSubjectMetric(outputDir: string, date: string, subjectId: string | undefined): Promise<{ exposure?: number; sales?: number } | undefined> {
+  if (!subjectId) return undefined;
+  const parsed = JSON.parse(await readFile(join(outputDir, date, 'report-context.json'), 'utf8')) as unknown;
+  if (typeof parsed !== 'object' || parsed === null || !Array.isArray((parsed as { rows?: unknown[] }).rows)) return undefined;
+  const row = (parsed as { rows: Array<Record<string, unknown>> }).rows.find((item) => item.productId === subjectId || item.internalProductId === subjectId || item.platformProductId === subjectId);
+  if (!row) return undefined;
+  const exposure = typeof row.exposure === 'number' ? row.exposure : undefined;
+  const salesValue = row.sales ?? row.signedOrders ?? row.createdOrders;
+  const sales = typeof salesValue === 'number' ? salesValue : undefined;
+  return exposure === undefined && sales === undefined ? undefined : { ...(exposure !== undefined ? { exposure } : {}), ...(sales !== undefined ? { sales } : {}) };
 }
 
 export async function writeExecutionResults(

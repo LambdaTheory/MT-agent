@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -62,6 +62,16 @@ describe('executeApprovedDecision', () => {
     const entries = (await loadOperationLedgerJsonlEntries(dir, '2026-07-02')).filter((entry) => entry.decisionId === 'dec-1');
     expect(entries.map((entry) => entry.event)).toEqual(['approval_accepted', 'execution_started', 'execution_succeeded']);
     expect(entries.every((entry) => entry.metadata?.missionDate === '2026-07-02')).toBe(true);
+  });
+
+  it('snapshots subject metrics before dated execution', async () => {
+    const reportDir = join(dir, '2026-07-02');
+    await mkdir(reportDir, { recursive: true });
+    await writeFile(join(reportDir, 'report-context.json'), JSON.stringify({ rows: [{ productId: '648', exposure: 10, signedOrders: 1 }] }), 'utf8');
+
+    const result = await executeApprovedDecision({ decision, outputDir: dir, date: '2026-07-02', options: { rentalPriceClient: fakeClient() } });
+
+    expect(result.beforeMetric).toEqual({ exposure: 10, sales: 1 });
   });
 
   it('writes execution-results.json', async () => {

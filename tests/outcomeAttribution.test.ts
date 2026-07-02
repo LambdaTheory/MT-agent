@@ -54,4 +54,28 @@ describe('attributeOutcomes', () => {
     const events = await loadOperationLedgerJsonlEntries(dir, '2026-07-02');
     expect(events.map((entry) => entry.event)).not.toContain('outcome_attributed');
   });
+
+  it('uses lookahead report context as after metric when execution result has only a before snapshot', async () => {
+    const missionDir = join(dir, 'daily-mission', '2026-07-02');
+    const afterDir = join(dir, '2026-07-09');
+    await mkdir(missionDir, { recursive: true });
+    await mkdir(afterDir, { recursive: true });
+    await writeFile(join(missionDir, 'execution-results.json'), JSON.stringify([{
+      runId: 'run-1',
+      decisionId: 'dec-1',
+      ok: true,
+      status: 'executed',
+      text: 'done',
+      operationType: 'price_down',
+      subject: { kind: 'product', id: '648' },
+      beforeMetric: { exposure: 10, sales: 1 },
+    }]), 'utf8');
+    await writeFile(join(afterDir, 'report-context.json'), JSON.stringify({
+      rows: [{ productId: '648', exposure: 20, signedOrders: 2 }],
+    }), 'utf8');
+
+    const records = await attributeOutcomes(dir, '2026-07-02', 7);
+
+    expect(records[0]).toMatchObject({ decisionId: 'dec-1', after: { exposure: 20, sales: 2 }, outcome: 'positive' });
+  });
 });
