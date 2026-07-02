@@ -23,6 +23,23 @@ export interface DailyMissionExecutionResult {
   card?: FeishuCardPayload;
 }
 
+const executionResultLocks = new Map<string, Promise<void>>();
+
+async function withExecutionResultLock<T>(path: string, action: () => Promise<T>): Promise<T> {
+  const previous = executionResultLocks.get(path) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => { release = resolve; });
+  const next = previous.then(() => current);
+  executionResultLocks.set(path, next);
+  await previous;
+  try {
+    return await action();
+  } finally {
+    release();
+    if (executionResultLocks.get(path) === next) executionResultLocks.delete(path);
+  }
+}
+
 export async function executeApprovedDecision(input: ExecuteApprovedDecisionInput): Promise<DailyMissionExecutionResult> {
   const { decision, outputDir } = input;
   if (input.date) {
@@ -106,14 +123,16 @@ export async function appendExecutionResult(
   result: DailyMissionExecutionResult,
 ): Promise<string> {
   const path = dailyMissionArtifactPath(outputDir, date, 'executionResults');
-  let existing: DailyMissionExecutionResult[] = [];
-  try {
-    const parsed = JSON.parse(await readFile(path, 'utf8')) as unknown;
-    if (Array.isArray(parsed) && parsed.every(isExecutionResult)) existing = parsed;
-  } catch (error) {
-    if (!isRecord(error) || error.code !== 'ENOENT') throw error;
-  }
-  const next = existing.filter((entry) => entry.runId !== result.runId || entry.decisionId !== result.decisionId);
-  next.push(result);
-  return writeExecutionResults(outputDir, date, next);
+  return withExecutionResultLock(path, async () => {
+    let existing: DailyMissionExecutionResult[] = [];
+    try {
+      const parsed = JSON.parse(await readFile(path, 'utf8')) as unknown;
+      if (Array.isArray(parsed) && parsed.every(isExecutionResult)) existing = parsed;
+    } catch (error) {
+      if (!isRecord(error) || error.code !== 'ENOENT') throw error;
+    }
+    const next = existing.filter((entry) => entry.runId !== result.runId || entry.decisionId !== result.decisionId);
+    next.push(result);
+    return writeExecutionResults(outputDir, date, next);
+  });
 }

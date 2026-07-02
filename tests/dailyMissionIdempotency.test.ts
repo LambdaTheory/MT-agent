@@ -2,7 +2,7 @@ import { readFile, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { appendExecutionResult, executeApprovedDecision } from '../src/agentRuntime/dailyMissionExecution.js';
+import { appendExecutionResult, executeApprovedDecision, loadAllExecutionResults } from '../src/agentRuntime/dailyMissionExecution.js';
 import type { DecisionRecord } from '../src/agentRuntime/decisionRecord.js';
 import type { RentalPriceSkillClient } from '../src/feishuBot/rentalPrice.js';
 
@@ -104,5 +104,15 @@ describe('daily mission idempotency', () => {
 
     expect(result.status).toBe('pending_confirmation');
     expect(delist).not.toHaveBeenCalled();
+  });
+
+  it('preserves concurrent execution result appends for different decisions', async () => {
+    await Promise.all([
+      appendExecutionResult(dir, '2026-07-02', { runId: 'run-1', decisionId: 'dec-1', ok: true, status: 'executed', text: 'one' }),
+      appendExecutionResult(dir, '2026-07-02', { runId: 'run-1', decisionId: 'dec-2', ok: true, status: 'executed', text: 'two' }),
+    ]);
+
+    const results = await loadAllExecutionResults(dir, '2026-07-02');
+    expect(results.map((entry) => entry.decisionId).sort()).toEqual(['dec-1', 'dec-2']);
   });
 });
