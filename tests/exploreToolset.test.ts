@@ -9,6 +9,15 @@ describe('buildReadOnlyExploreTools', () => {
     expect(names).toContain('system.help');
     expect(names).toContain('product.query');
     expect(names).toContain('rental.readRaw');
+    expect(names).toContain('publicTraffic.windowedFindings');
+    expect(names).not.toContain('linkRegistry.maintenancePrompt');
+    expect(names).not.toContain('linkRegistry.governancePrompt');
+    expect(names).not.toContain('linkRegistry.maintenanceHub');
+    expect(names).not.toContain('operations.refreshActivityPlan');
+    expect(names).not.toContain('operationsLearning.startQuiz');
+    expect(names).not.toContain('activity.differentialPricingCard');
+    expect(names).not.toContain('activity.cancelDifferentialPricingCard');
+    expect(names).not.toContain('productId.lookupCard');
     expect(names).not.toContain('rental.delist');
     expect(names).not.toContain('rental.priceApply');
     expect(names).not.toContain('operations.refreshActivityExecute');
