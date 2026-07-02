@@ -7,6 +7,7 @@ export const DAILY_MISSION_ARTIFACT_FILENAMES = {
   decisions: 'decisions.json',
   approvalRequest: 'approval-request.json',
   executionResults: 'execution-results.json',
+  outcomes: 'outcomes.json',
   dailyJournalJson: 'daily-journal.json',
   dailyJournalMarkdown: 'daily-journal.md',
 } as const;
