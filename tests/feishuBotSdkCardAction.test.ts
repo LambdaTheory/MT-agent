@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { buildAgentToolConfirmCard, type AgentToolConfirmContinuation } from '../src/agentRuntime/approvalCard.js';
 import { buildAgentClarificationCard } from '../src/agentRuntime/clarificationCard.js';
+import { loadOperationLedgerJsonlEntries } from '../src/agentRuntime/operationLedger.js';
+import { agentExploreReason } from '../src/feishuBot/agentExploreAttribution.js';
 import { createFeishuSdkBot } from '../src/feishuBot/sdkClient.js';
 import {
   buildActivityAutomationCard,
@@ -628,6 +630,60 @@ describe('createFeishuSdkBot card.action.trigger', () => {
 
     expect(calls).toEqual([{ productId: '653', fields: { rent1day: '29.85', rent10day: '74.85' } }]);
     expect(JSON.stringify(sent)).toContain('rental.priceApply');
+  });
+
+  it('records ledger attribution for confirmed Agent Explore writes from the SDK callback', async () => {
+    const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
+    const sent: unknown[] = [];
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-sdk-agent-explore-ledger-'));
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run'); },
+      async execute() { throw new Error('execute should not run'); },
+      async copy() { throw new Error('copy should not run'); },
+      async delist(productId) { return { productId, ok: true, lines: ['delisted'] }; },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+    const bot = createFeishuSdkBot({
+      appId: 'app',
+      appSecret: 'x',
+      outputDir,
+      rentalPriceClient,
+      sdk: fakeSdk(sent, registered),
+    });
+
+    bot.start();
+    const card = buildAgentToolConfirmCard({
+      toolName: 'rental.delist',
+      arguments: { productId: '648' },
+      reason: agentExploreReason('dec-sdk-ledger', '下架 648'),
+    });
+
+    await registered['card.action.trigger']({
+      event: {
+        context: { open_message_id: 'om-agent-explore-ledger' },
+        operator: { open_id: 'ou_agent' },
+        action: {
+          tag: 'button',
+          name: 'agent_tool_confirm_submit',
+          behaviors: [{ type: 'callback', value: agentToolConfirmActionValue(card) }],
+        },
+      },
+    });
+
+    const date = new Date().toISOString().slice(0, 10);
+    let entries: Awaited<ReturnType<typeof loadOperationLedgerJsonlEntries>> = [];
+    for (let attempt = 0; attempt < 100 && (entries.length < 2 || !JSON.stringify(sent).includes('下架成功：商品 648')); attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      entries = await loadOperationLedgerJsonlEntries(outputDir, date);
+    }
+
+    expect(JSON.stringify(sent)).toContain('下架成功：商品 648');
+    expect(entries).toEqual(expect.arrayContaining([
+      expect.objectContaining({ event: 'execution_started', runId: 'agentExplore', decisionId: 'dec-sdk-ledger', toolName: 'rental.delist' }),
+      expect.objectContaining({ event: 'execution_succeeded', runId: 'agentExplore', decisionId: 'dec-sdk-ledger', toolName: 'rental.delist' }),
+    ]));
   });
 
   it('renders failed Agent price apply results as a failure card from the SDK callback', async () => {

@@ -16,6 +16,7 @@ import { formatRuntimeLog, summarizeError, textPreview } from '../observability/
 import { findLatestReportContext } from './reportStore.js';
 import { createFeishuMessageDispatcher } from './dispatcher.js';
 import { continueAgentPlannerStepsAfterResponse, executeAgentToolRequestWithContinuation } from './agentToolContinuation.js';
+import { agentExploreLedgerContextFromRequest } from './agentExploreAttribution.js';
 import { loadAgentToolConfirmRequestFromValue } from './agentToolConfirmStore.js';
 import {
   agentRequestFromNewLinkBatchConfirm,
@@ -827,9 +828,14 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
             await deliverCard(client, messageId, statusCard('Agent 操作处理中', `工具 ${request.toolName} 已收到确认，正在执行。`, 'blue'), logError);
             try {
               const missionResult = await resolveDailyMissionApproval(request, config.outputDir ?? 'output', agentToolExecutionOptions);
+              const agentExploreLedgerContext = agentExploreLedgerContextFromRequest(request, config.outputDir ?? 'output');
               const response = missionResult
                 ? { text: missionResult.text, card: missionResult.card, metadata: { ok: missionResult.ok, status: missionResult.status } }
-                : await executeAgentToolRequestWithContinuation(request, config.outputDir ?? 'output', agentToolExecutionOptions);
+                : await executeAgentToolRequestWithContinuation(
+                  request,
+                  config.outputDir ?? 'output',
+                  agentExploreLedgerContext ? { ...agentToolExecutionOptions, ledgerContext: agentExploreLedgerContext } : agentToolExecutionOptions,
+                );
               const ok = !isFailedBotResponse(response);
               setRentalActionStatus(claim.key, ok ? 'completed' : 'failed');
               recordLearning({

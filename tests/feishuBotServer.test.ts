@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { buildAgentToolConfirmCard } from '../src/agentRuntime/approvalCard.js';
 import { createDailyMissionRun, saveDailyMissionRun, transitionDailyMissionRun } from '../src/agentRuntime/dailyMissionRun.js';
+import { loadOperationLedgerJsonlEntries } from '../src/agentRuntime/operationLedger.js';
+import { agentExploreReason } from '../src/feishuBot/agentExploreAttribution.js';
 import type { AgentPlannerProvider } from '../src/agentRuntime/planner.js';
 import { extractTextMessage, startFeishuBotServer } from '../src/feishuBot/server.js';
 import {
@@ -1300,6 +1302,61 @@ describe('startFeishuBotServer', () => {
       expect(replies).toHaveLength(1);
       expect(replies[0].text).toContain('改价执行完成');
       expect(replies[0].text).toContain('apply: ok');
+    } finally {
+      server.close();
+    }
+  });
+
+  it('records ledger attribution for confirmed Agent Explore writes through HTTP callbacks', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-http-agent-explore-ledger-'));
+    const replies: Array<{ messageId: string; text: string }> = [];
+    const rentalPriceClient = {
+      async preview() { throw new Error('preview should not run'); },
+      async execute() { throw new Error('execute should not run'); },
+      async copy() { throw new Error('copy should not run'); },
+      async delist(productId: string) { return { productId, ok: true, lines: ['delisted'] }; },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    } satisfies RentalPriceSkillClient;
+    const server = startFeishuBotServer({
+      port: 0,
+      appId: 'app',
+      appSecret: 'secret',
+      outputDir,
+      rentalPriceClient,
+      replyText: async ({ messageId }, text) => {
+        replies.push({ messageId, text });
+        return { sent: true, channel: 'app' };
+      },
+    });
+    try {
+      await new Promise<void>((resolve) => server.once('listening', resolve));
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+      const confirmValue = readAgentToolConfirmValue(buildAgentToolConfirmCard({
+        toolName: 'rental.delist',
+        arguments: { productId: '648' },
+        reason: agentExploreReason('dec-http-ledger', '下架 648'),
+      }));
+
+      const response = await fetch(`http://127.0.0.1:${address.port}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          header: { event_type: 'card.action.trigger' },
+          event: { context: { open_message_id: 'mid-http-agent-explore-ledger' }, action: { value: confirmValue } },
+        }),
+      });
+
+      const date = new Date().toISOString().slice(0, 10);
+      const entries = await loadOperationLedgerJsonlEntries(outputDir, date);
+      expect(response.status).toBe(200);
+      expect(replies[0]?.text).toContain('下架成功：商品 648');
+      expect(entries).toEqual(expect.arrayContaining([
+        expect.objectContaining({ event: 'execution_started', runId: 'agentExplore', decisionId: 'dec-http-ledger', toolName: 'rental.delist' }),
+        expect.objectContaining({ event: 'execution_succeeded', runId: 'agentExplore', decisionId: 'dec-http-ledger', toolName: 'rental.delist' }),
+      ]));
     } finally {
       server.close();
     }

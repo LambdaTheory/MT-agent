@@ -6,6 +6,7 @@ import { runAgentExploreLoop } from '../agentRuntime/agentExploreLoop.js';
 import { isValidDecisionRecord, type DecisionRecord } from '../agentRuntime/decisionRecord.js';
 import type { FeishuCardPayload } from '../notify/feishuApp.js';
 import type { AgentToolExecutionOptions } from './agentToolExecutor.js';
+import { agentExploreReason } from './agentExploreAttribution.js';
 import type { BotResponse } from './types.js';
 import type { LlmProvider } from '../llm/provider.js';
 
@@ -24,8 +25,26 @@ function exploreDecisionToConfirmRequest(decision: DecisionRecord): AgentToolCon
   return {
     toolName: decision.proposedTool.toolName,
     arguments: decision.proposedTool.arguments,
-    reason: `agentExplore:${decision.decisionId} ${decision.title}`,
+    reason: agentExploreReason(decision.decisionId, decision.title),
   };
+}
+
+function isLedgerCoveredExploreWrite(decision: DecisionRecord): boolean {
+  const toolName = decision.proposedTool?.toolName;
+  const args = decision.proposedTool?.arguments;
+  if (!toolName || !args) return false;
+  switch (toolName) {
+    case 'rental.copy':
+    case 'rental.tenancySet':
+    case 'rental.specAddAndRefresh':
+    case 'rental.operationConfirmRequest':
+    case 'operations.refreshActivityExecute':
+      return true;
+    case 'rental.delist':
+      return args.productIds === undefined;
+    default:
+      return false;
+  }
 }
 
 function buildExploreConfirmCard(approvals: DecisionRecord[]): FeishuCardPayload | undefined {
@@ -72,11 +91,12 @@ export async function agentExploreResponse(
   }
 
   const classified = classifyDecisions(result.decisions ?? []);
-  const card = buildExploreConfirmCard(classified.approvals);
+  const approvals = classified.approvals.filter(isLedgerCoveredExploreWrite);
+  const card = buildExploreConfirmCard(approvals);
   const text = [
     result.answer || (result.stopReason === 'max_steps' ? '探索达到最大步数，已停止。' : '探索未形成有效结论。'),
     formatSteps(result.steps),
-    ...(classified.approvals.length ? [`待确认执行：${classified.approvals.length} 项`] : []),
+    ...(approvals.length ? [`待确认执行：${approvals.length} 项`] : []),
   ].join('\n');
 
   return {

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { parseAgentToolConfirmRequest } from '../src/agentRuntime/approvalCard.js';
+import { agentExploreLedgerContextFromRequest } from '../src/feishuBot/agentExploreAttribution.js';
 import { agentExploreResponse } from '../src/feishuBot/agentExploreResponse.js';
 import { handleBotIntent } from '../src/feishuBot/tools.js';
 import type { RentalPriceSkillClient } from '../src/feishuBot/rentalPrice.js';
@@ -121,6 +122,75 @@ describe('agentExploreResponse', () => {
     expect(response.text).toContain('待确认执行：2 项');
     expect(requests.map((request) => request.arguments.productId)).toEqual(['648', '649']);
     expect(requests.every((request) => !request.reason.includes('[[dailyMission:'))).toBe(true);
+  });
+
+  it('round-trips valid Agent Explore decision ids into ledger attribution', async () => {
+    const provider = new FakeLlmProvider(JSON.stringify({
+      action: 'finish',
+      answer: '建议下架 648',
+      decisions: [{
+        decisionId: 'dec.1:with space/中文',
+        runId: 'run-1',
+        title: '下架 648',
+        subjects: [{ kind: 'product', id: '648' }],
+        operationType: 'delist',
+        recommendation: 'approve_to_execute',
+        risk: 'high',
+        rationale: ['测试证据'],
+        evidenceRefs: ['explore.test'],
+        proposedTool: { toolName: 'rental.delist', arguments: { productId: '648' } },
+        uncertainties: [],
+      }],
+    }));
+
+    const response = await agentExploreResponse('分析 648', 'output', { provider });
+    const request = readConfirmRequest(response.card);
+
+    expect(agentExploreLedgerContextFromRequest(request, 'output')).toMatchObject({
+      outputDir: 'output',
+      runId: 'agentExplore',
+      decisionId: 'dec.1:with space/中文',
+    });
+  });
+
+  it('does not create confirmation cards for unsupported Agent Explore write tools', async () => {
+    const provider = new FakeLlmProvider(JSON.stringify({
+      action: 'finish',
+      answer: '建议批量下架和回滚',
+      decisions: [
+        {
+          decisionId: 'batch-1',
+          runId: 'run-1',
+          title: '批量下架',
+          subjects: [{ kind: 'product', id: '648' }],
+          operationType: 'delist',
+          recommendation: 'approve_to_execute',
+          risk: 'high',
+          rationale: ['测试证据'],
+          evidenceRefs: ['explore.test'],
+          proposedTool: { toolName: 'rental.delistBatch', arguments: { productIds: ['648', '649'] } },
+          uncertainties: [],
+        },
+        {
+          decisionId: 'rollback-1',
+          runId: 'run-1',
+          title: '回滚改价',
+          subjects: [{ kind: 'product', id: '648' }],
+          operationType: 'price_up',
+          recommendation: 'approve_to_execute',
+          risk: 'high',
+          rationale: ['测试证据'],
+          evidenceRefs: ['explore.test'],
+          proposedTool: { toolName: 'rental.priceRollback', arguments: { taskId: 'task_123_abcd1234' } },
+          uncertainties: [],
+        },
+      ],
+    }));
+
+    const response = await agentExploreResponse('分析批量操作', 'output', { provider });
+
+    expect(response.card).toBeUndefined();
+    expect(response.text).not.toContain('待确认执行');
   });
 
   it('rejects malformed executable decisions before creating confirmation cards', async () => {

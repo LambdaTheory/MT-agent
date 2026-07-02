@@ -32,6 +32,7 @@ import {
   type ActivityAutomationSkillClient,
 } from './activityAutomation.js';
 import { continueAgentPlannerStepsAfterResponse, executeAgentToolRequestWithContinuation } from './agentToolContinuation.js';
+import { agentExploreLedgerContextFromRequest } from './agentExploreAttribution.js';
 import { loadAgentToolConfirmRequestFromValue } from './agentToolConfirmStore.js';
 import {
   agentRequestFromNewLinkBatchConfirm,
@@ -541,10 +542,16 @@ async function handleCardActionTrigger(
       closedOrderFetchImpl: config.closedOrderFetchImpl,
       closedOrderRegistryPaths: config.closedOrderRegistryPaths,
     };
-    const missionResult = await resolveDailyMissionApproval(request, config.outputDir ?? 'output', executionOptions);
+    const effectiveOutputDir = config.outputDir ?? 'output';
+    const agentExploreLedgerContext = agentExploreLedgerContextFromRequest(request, effectiveOutputDir);
+    const missionResult = await resolveDailyMissionApproval(request, effectiveOutputDir, executionOptions);
     const response = missionResult
       ? { text: missionResult.text, card: missionResult.card, metadata: { ok: missionResult.ok, status: missionResult.status } }
-      : await executeAgentToolRequestWithContinuation(request, config.outputDir ?? 'output', executionOptions);
+      : await executeAgentToolRequestWithContinuation(
+        request,
+        effectiveOutputDir,
+        agentExploreLedgerContext ? { ...executionOptions, ledgerContext: agentExploreLedgerContext } : executionOptions,
+      );
     const ok = response.metadata?.ok !== false || response.metadata?.status === 'pending_confirmation';
     setServerCardActionStatus(claim.key, ok ? 'completed' : 'failed');
     await recordAgentLearningEvent(outputDir, {
