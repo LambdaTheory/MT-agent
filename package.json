@@ -12,6 +12,7 @@
     "refresh-product-id-map": "tsx src/cli/refreshProductIdMap.ts",
     "rebuild-latest": "tsx src/cli/rebuildLatestReport.ts",
     "public-traffic-report": "tsx src/cli/publicTrafficReport.ts",
+    "repair-public-traffic-exposure": "tsx src/cli/repairPublicTrafficExposure.ts",
     "closed-order-feedback:sync": "tsx src/cli/closedOrderFeedbackSync.ts",
     "closed-order-feedback:preview": "tsx src/cli/closedOrderFeedbackPreview.ts",
     "closed-order-observation:report": "tsx src/cli/closedOrderObservationReport.ts",

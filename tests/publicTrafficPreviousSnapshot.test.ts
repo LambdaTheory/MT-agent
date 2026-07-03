@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mergePreviousCumulativeSnapshots, normalizeDashboardRowsForReport, parsePreviousCumulativeSnapshot } from '../src/cli/publicTrafficReport.js';
+import { assertUsableExposureProductSnapshot, mergePreviousCumulativeSnapshots, normalizeDashboardRowsForReport, parsePreviousCumulativeSnapshot } from '../src/cli/publicTrafficReport.js';
 import type { RawTableData } from '../src/domain/types.js';
 import { createRunLog } from '../src/storage/runLog.js';
 
@@ -41,6 +41,36 @@ describe('mergePreviousCumulativeSnapshots', () => {
       { productName: 'Other', platformProductId: '2026060122000000000000', exposure: 10, visits: 1, amount: 0, custodyDays: 1, listingStatus: 'unknown', listingStatusLabel: null, raw: {} },
       { productName: 'SX70', platformProductId: '2026030222000898839075', exposure: 160078, visits: 7969, amount: 27308, custodyDays: 102, listingStatus: 'unknown', listingStatusLabel: null, raw: {} },
     ]);
+  });
+});
+
+describe('assertUsableExposureProductSnapshot', () => {
+  it('rejects placeholder product details when overview has exposure', () => {
+    const products = Array.from({ length: 200 }, (_, index) => ({
+      productName: `商品${index}`,
+      platformProductId: `p-${index}`,
+      exposure: 0,
+      visits: 0,
+      amount: 0,
+      custodyDays: 1,
+      raw: { 曝光次数: '-' },
+    }));
+
+    expect(() => assertUsableExposureProductSnapshot(products, [{ period: '1d', exposure: 30900, visits: 1211, amount: 1453, conversionRate: 1.26 }])).toThrow(/曝光商品明细异常/);
+  });
+
+  it('allows a zero product snapshot when overview also has no exposure', () => {
+    const products = [{
+      productName: '商品',
+      platformProductId: 'p-1',
+      exposure: 0,
+      visits: 0,
+      amount: 0,
+      custodyDays: 1,
+      raw: {},
+    }];
+
+    expect(() => assertUsableExposureProductSnapshot(products, [{ period: '1d', exposure: 0, visits: 0, amount: 0, conversionRate: 0 }])).not.toThrow();
   });
 });
 

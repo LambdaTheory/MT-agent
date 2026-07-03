@@ -63,6 +63,36 @@ describe('mergePublicTrafficData', () => {
     expect(result.rows[0].periods['1d']).toMatchObject({ exposure: 40, publicVisits: 0, dashboardVisits: 0 });
   });
 
+  it('marks zero exposure rows with blocking flags as missing source data', () => {
+    const result = mergePublicTrafficData({
+      dashboardRows: [],
+      exposureByPeriod: {
+        '1d': [{ ...exposure('p2', 0, 0), flags: ['counter_reset_or_data_error'] }],
+        '7d': [],
+        '30d': [],
+      },
+      cumulativeProducts: [],
+      mapping: {},
+    });
+
+    expect(result.rows[0].periods['1d']).toMatchObject({ exposure: 0, publicVisits: 0, hasExposureData: false });
+  });
+
+  it('keeps flagged aggregate exposure usable when positive evidence exists', () => {
+    const result = mergePublicTrafficData({
+      dashboardRows: [],
+      exposureByPeriod: {
+        '1d': [],
+        '7d': [{ ...exposure('p2', 120, 3), flags: ['counter_reset_or_data_error'] }],
+        '30d': [],
+      },
+      cumulativeProducts: [],
+      mapping: {},
+    });
+
+    expect(result.rows[0].periods['7d']).toMatchObject({ exposure: 120, publicVisits: 3, hasExposureData: true });
+  });
+
   it('keeps rows that exist only in dashboard data', () => {
     const result = mergePublicTrafficData({
       dashboardRows: [dashboard('7d', 'p3', 70, 4)],

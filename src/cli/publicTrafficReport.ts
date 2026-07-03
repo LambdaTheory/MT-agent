@@ -103,6 +103,18 @@ function normalizeExposureOverview(overview: ExposureOverviewMetric[]): Exposure
   }));
 }
 
+export function assertUsableExposureProductSnapshot(products: ExposureCumulativeProduct[], overview: ExposureOverviewMetric[]): void {
+  const oneDayOverview = overview.find((item) => item.period === '1d');
+  if (!oneDayOverview || oneDayOverview.exposure <= 0 || products.length < 50) return;
+
+  const rowsWithMetrics = products.filter((row) => row.exposure > 0 || row.visits > 0 || row.amount > 0).length;
+  if (rowsWithMetrics > 0) return;
+
+  throw new Error(
+    `曝光商品明细异常: 总览1日曝光=${oneDayOverview.exposure}，但 ${products.length} 条商品明细曝光/访问/金额全为0，疑似支付宝数据未更新或页面返回占位值，已中止写入快照。`,
+  );
+}
+
 function daysBefore(date: string, days: number): string {
   const d = new Date(date);
   d.setDate(d.getDate() - days);
@@ -587,6 +599,9 @@ export async function runPublicTrafficReportCli(): Promise<PublicTrafficReportCl
     const previous = await loadPreviousCumulative(config.outputDir, runDate, mapping);
     assertExposureSnapshotCoverage(crawlResult.products.length, previous.products.length, log);
 
+    const exposureOverview = normalizeExposureOverview(crawlResult.overview);
+    assertUsableExposureProductSnapshot(crawlResult.products, exposureOverview);
+
     await writeFile(paths.exposureCumulativeProducts, JSON.stringify(crawlResult.products, null, 2), 'utf8');
     log.addEvent(`保存累计快照: ${crawlResult.products.length} 条商品`);
     const paginationStats = exposurePaginationStatsOrEmpty(crawlResult.paginationStats);
@@ -610,7 +625,6 @@ export async function runPublicTrafficReportCli(): Promise<PublicTrafficReportCl
       files: { orderAnalysis: paths.orderAnalysis },
     }), log);
 
-    const exposureOverview = normalizeExposureOverview(crawlResult.overview);
     let exposureOverviewWritten = false;
     if (exposureOverview.length > 0) {
       await writeFile(paths.exposureOverview, JSON.stringify(exposureOverview, null, 2), 'utf8');

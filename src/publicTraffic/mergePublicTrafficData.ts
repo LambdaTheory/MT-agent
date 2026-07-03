@@ -46,6 +46,13 @@ function canonicalPlatformProductId(platformProductId: string, mapping: ProductI
   return Object.prototype.hasOwnProperty.call(mapping, withoutTrailingPriceDigit) ? withoutTrailingPriceDigit : platformProductId;
 }
 
+function hasReliableExposureSummary(row: ExposureProductSummary): boolean {
+  const blockingFlags = new Set(['missing', 'missing_previous_snapshot_row', 'counter_reset_or_data_error']);
+  const hasBlockingFlag = row.flags.some((flag) => blockingFlags.has(flag));
+  const hasPositiveEvidence = row.exposure > 0 || row.visits > 0 || row.amount > 0;
+  return !hasBlockingFlag || hasPositiveEvidence;
+}
+
 export function mergePublicTrafficData(input: MergePublicTrafficDataInput): PublicTrafficDataContext {
   const productNames = new Map<string, string>();
   const custodyDays = new Map<string, number | null>();
@@ -82,7 +89,7 @@ export function mergePublicTrafficData(input: MergePublicTrafficDataInput): Publ
       metrics.publicVisits = row.visits;
       metrics.amount = row.amount;
       metrics.exposureVisitRate = row.exposure > 0 ? row.visits / row.exposure : 0;
-      metrics.hasExposureData = true;
+      metrics.hasExposureData = hasReliableExposureSummary(row);
     }
   }
 
