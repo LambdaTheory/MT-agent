@@ -10,6 +10,13 @@ import { FileHotspotEventProvider } from '../src/agentRuntime/hotspotEvents.js';
 import { loadOperationLedgerJsonlEntries } from '../src/agentRuntime/operationLedger.js';
 import { main as runDailyMissionCli } from '../src/cli/dailyMissionRun.js';
 
+function freshDataCollectors(date = '2026-07-01'): ContextCollector[] {
+  return [
+    { name: 'exposure', collect: async () => ({ exposure: { context: { date, rows: [{ id: '1' }] } } }) },
+    { name: 'sales', collect: async () => ({ sales: { date } }) },
+  ];
+}
+
 describe('daily mission integration', () => {
   let dir: string;
 
@@ -37,6 +44,7 @@ describe('daily mission integration', () => {
 
     const provider = new FileHotspotEventProvider({ path: join(hotspotDir, 'hotspot-events.json') });
     const collectors: ContextCollector[] = [
+      ...freshDataCollectors(),
       { name: 'hotspots', collect: async () => ({ hotspots: await provider.listEvents({ date: '2026-07-01', lookaheadDays: 7 }) }) },
     ];
     const result = await runDailyMissionPlan({
@@ -115,7 +123,11 @@ describe('daily mission integration', () => {
     expect(context.recentOperations).toEqual([]);
     expect(context.trackRecord).toEqual([expect.objectContaining({ key: 'price_down', samples: 1, positive: 1 })]);
     expect(context.hotspots).toHaveLength(1);
-    const run = JSON.parse(await readFile(join(missionDir, 'mission-run.json'), 'utf8')) as { trigger: string };
+    const run = JSON.parse(await readFile(join(missionDir, 'mission-run.json'), 'utf8')) as { status: string; trigger: string };
+    expect(run.status).toBe('skipped_stale_data');
     expect(run.trigger).toBe('scheduled');
+    const journal = JSON.parse(await readFile(join(missionDir, 'daily-journal.json'), 'utf8')) as { failure?: { stage?: string; message?: string } | null };
+    expect(journal.failure?.stage).toBe('freshness_gate');
+    expect(journal.failure?.message).toContain('exposure_rows_below_min');
   });
 });

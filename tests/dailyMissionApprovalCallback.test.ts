@@ -65,8 +65,7 @@ describe('resolveDailyMissionApproval', () => {
     );
 
     expect(result?.ok).toBe(true);
-    const date = new Date().toISOString().slice(0, 10);
-    const events = (await loadOperationLedgerJsonlEntries(dir, date)).map((entry) => entry.event);
+    const events = (await loadOperationLedgerJsonlEntries(dir, '2026-07-02')).map((entry) => entry.event);
     expect(events).toContain('approval_accepted');
     expect(events).toContain('execution_succeeded');
     const rawResults = await readFile(join(dir, 'daily-mission', '2026-07-02', 'execution-results.json'), 'utf8');

@@ -41,14 +41,16 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     collectors,
     decisionBuilder: createDecisionBuilder({ provider: resolveLlmProviderFromEnv() }),
   });
-  await writeDailyJournal({
-    outputDir,
-    date,
-    runId,
-    context: result.context,
-    decisions: result.decisions,
-    classified: result.classified,
-  });
+  if (result.run.status !== 'skipped_stale_data') {
+    await writeDailyJournal({
+      outputDir,
+      date,
+      runId,
+      context: result.context,
+      decisions: result.decisions,
+      classified: result.classified,
+    });
+  }
   console.log(`Daily Mission plan 完成：${date}，状态 ${result.run.status}，待审批 ${result.classified.approvals.length} 项，观察 ${result.classified.observations.length} 项。`);
 }
 

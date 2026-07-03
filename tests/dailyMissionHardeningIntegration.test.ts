@@ -66,8 +66,7 @@ describe('daily mission hardening integration', () => {
     expect(result?.status).toBe('executed');
     expect(delist).toHaveBeenCalledTimes(1);
     await expect(loadDailyMissionRun(dir, '2026-07-02')).resolves.toMatchObject({ status: 'completed' });
-    const date = new Date().toISOString().slice(0, 10);
-    const chain = (await loadOperationLedgerJsonlEntries(dir, date)).filter((entry) => entry.decisionId === 'dec-1').map((entry) => entry.event);
+    const chain = (await loadOperationLedgerJsonlEntries(dir, '2026-07-02')).filter((entry) => entry.decisionId === 'dec-1').map((entry) => entry.event);
     expect(chain).toContain('approval_accepted');
     expect(chain).toContain('execution_succeeded');
   });

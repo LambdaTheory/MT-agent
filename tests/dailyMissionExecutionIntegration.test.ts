@@ -66,8 +66,7 @@ describe('daily mission execution closure', () => {
     );
 
     expect(result?.ok).toBe(true);
-    const date = new Date().toISOString().slice(0, 10);
-    const chain = (await loadOperationLedgerJsonlEntries(dir, date)).filter((entry) => entry.decisionId === 'dec-1');
+    const chain = (await loadOperationLedgerJsonlEntries(dir, '2026-07-02')).filter((entry) => entry.decisionId === 'dec-1');
     expect(chain.map((entry) => entry.event)).toEqual(['approval_accepted', 'execution_started', 'execution_succeeded']);
     expect(chain.every((entry) => entry.runId === 'run-1')).toBe(true);
     expect(chain.every((entry) => entry.subject?.id === '648')).toBe(true);
