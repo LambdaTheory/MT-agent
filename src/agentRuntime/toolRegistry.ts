@@ -300,9 +300,26 @@ const specAddAndRefreshArgumentsSchema = {
   type: 'object',
   properties: {
     productId: { type: 'string' },
+    specDimId: { type: 'string' },
     itemTitle: { type: 'string' },
   },
-  required: ['productId', 'itemTitle'],
+  required: ['productId', 'specDimId', 'itemTitle'],
+  additionalProperties: false,
+};
+const specAddItemArgumentsSchema = specAddAndRefreshArgumentsSchema;
+const applyCurrentArgumentsSchema = {
+  type: 'object',
+  properties: {
+    expectedProductId: { type: 'string' },
+    changes: { type: 'object', additionalProperties: true },
+  },
+  required: ['expectedProductId', 'changes'],
+  additionalProperties: false,
+};
+const submitCurrentArgumentsSchema = {
+  type: 'object',
+  properties: { expectedProductId: { type: 'string' } },
+  required: ['expectedProductId'],
   additionalProperties: false,
 };
 const specRemovePlanArgumentsSchema = {
@@ -335,6 +352,36 @@ const rentalBatchReadArgumentsSchema = {
     productIds: { type: 'array', minItems: 1, maxItems: 60, items: { type: 'string' } },
   },
   required: ['productIds'],
+  additionalProperties: false,
+};
+const rentalBatchSpecFileArgumentsSchema = {
+  type: 'object',
+  properties: { specFile: { type: 'string' } },
+  required: ['specFile'],
+  additionalProperties: false,
+};
+const rentalBatchExecuteArgumentsSchema = {
+  type: 'object',
+  properties: { specFile: { type: 'string' }, confirmFormSetupWithoutPreview: { type: 'boolean' } },
+  required: ['specFile'],
+  additionalProperties: false,
+};
+const rentalBatchStateFileArgumentsSchema = {
+  type: 'object',
+  properties: { stateFile: { type: 'string' } },
+  required: ['stateFile'],
+  additionalProperties: false,
+};
+const rentalBatchRollbackArgumentsSchema = {
+  type: 'object',
+  properties: { stateFile: { type: 'string' }, confirm: { type: 'boolean' } },
+  required: ['stateFile'],
+  additionalProperties: false,
+};
+const rentalMirrorKeywordArgumentsSchema = {
+  type: 'object',
+  properties: { keyword: { type: 'string' } },
+  required: ['keyword'],
   additionalProperties: false,
 };
 const rentalReadRawArgumentsSchema = {
@@ -821,6 +868,62 @@ const agentTools: AgentToolDefinition[] = [
     inputSchema: rentalBatchReadArgumentsSchema,
   },
   {
+    name: 'rental.batchPreview',
+    description: '租赁 batch runner preview 控制面；specFile 必须位于 rental tasks/batches。',
+    risk: 'high',
+    requiresConfirmation: true,
+    inputSchema: rentalBatchSpecFileArgumentsSchema,
+  },
+  {
+    name: 'rental.batchExecute',
+    description: '租赁 batch runner execute 控制面；form-level setup 必须显式 confirmFormSetupWithoutPreview。',
+    risk: 'high',
+    requiresConfirmation: true,
+    inputSchema: rentalBatchExecuteArgumentsSchema,
+  },
+  {
+    name: 'rental.batchStatus',
+    description: '租赁 batch runner status 控制面；stateFile 用于绑定审计上下文。',
+    risk: 'high',
+    requiresConfirmation: true,
+    inputSchema: rentalBatchStateFileArgumentsSchema,
+  },
+  {
+    name: 'rental.batchResume',
+    description: '租赁 batch runner resume 控制面；stateFile 用于绑定审计上下文。',
+    risk: 'high',
+    requiresConfirmation: true,
+    inputSchema: rentalBatchStateFileArgumentsSchema,
+  },
+  {
+    name: 'rental.batchReport',
+    description: '租赁 batch runner report 控制面。',
+    risk: 'high',
+    requiresConfirmation: true,
+    inputSchema: rentalBatchStateFileArgumentsSchema,
+  },
+  {
+    name: 'rental.batchRollback',
+    description: '租赁 batch runner rollback 控制面；confirm=true 时执行回滚。',
+    risk: 'high',
+    requiresConfirmation: true,
+    inputSchema: rentalBatchRollbackArgumentsSchema,
+  },
+  {
+    name: 'rental.mirrorSearch',
+    description: '只读调用 rental mirror search，按关键词返回镜像候选商品；不执行 writeback。',
+    risk: 'read',
+    requiresConfirmation: false,
+    inputSchema: rentalMirrorKeywordArgumentsSchema,
+  },
+  {
+    name: 'rental.mirrorBatchSpec',
+    description: '只读调用 rental mirror batch-spec，生成批处理 spec 草稿；不执行 writeback-state。',
+    risk: 'read',
+    requiresConfirmation: false,
+    inputSchema: rentalMirrorKeywordArgumentsSchema,
+  },
+  {
     name: 'rental.specDiscoverFull',
     description: '只读读取租赁商品完整规格维度和规格项；不会新增、删除或刷新规格。',
     risk: 'read',
@@ -876,6 +979,34 @@ const agentTools: AgentToolDefinition[] = [
     risk: 'high',
     requiresConfirmation: true,
     inputSchema: specAddAndRefreshArgumentsSchema,
+  },
+  {
+    name: 'rental.specAddItem',
+    description: '高级表单态：在租赁商品规格维度下添加规格项，确认后执行单个 native spec-add-item 原子动作。',
+    risk: 'high',
+    requiresConfirmation: true,
+    inputSchema: specAddItemArgumentsSchema,
+  },
+  {
+    name: 'rental.specRefresh',
+    description: '高级表单态：刷新租赁商品当前规格结构，确认后执行单个 native spec-refresh 原子动作。',
+    risk: 'high',
+    requiresConfirmation: true,
+    inputSchema: productIdArgumentsSchema,
+  },
+  {
+    name: 'rental.applyCurrent',
+    description: '高级表单态：在当前租赁商品表单页应用变更；必须显式绑定 expectedProductId，确认后发送 native apply-current。',
+    risk: 'high',
+    requiresConfirmation: true,
+    inputSchema: applyCurrentArgumentsSchema,
+  },
+  {
+    name: 'rental.submitCurrent',
+    description: '高级表单态：提交当前租赁商品未保存表单；必须显式绑定 expectedProductId，确认后发送 native submit。',
+    risk: 'high',
+    requiresConfirmation: true,
+    inputSchema: submitCurrentArgumentsSchema,
   },
   {
     name: 'rental.specRemovePlan',

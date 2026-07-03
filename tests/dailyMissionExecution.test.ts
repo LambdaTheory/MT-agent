@@ -16,7 +16,7 @@ function fakeClient(): RentalPriceSkillClient {
     delist: async () => ({ productId: '648', ok: true, lines: ['delisted'] }),
     tenancySet: async (_productId, days) => ({ productId: '648', ok: true, days, lines: [] }),
     specDiscover: async () => ({ productId: '648', ok: true, dimensions: [], lines: [] }),
-    specAddAndRefresh: async (_productId, itemTitle) => ({ productId: '648', ok: true, itemTitle, lines: [] }),
+    specAddAndRefresh: async (_productId, _specDimId, itemTitle) => ({ productId: '648', ok: true, itemTitle, lines: [] }),
   };
 }
 

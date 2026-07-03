@@ -50,6 +50,14 @@ describe('agent runtime tool registry', () => {
       'rental.platformSearch',
       'rental.platformSearchAll',
       'rental.batchRead',
+      'rental.batchPreview',
+      'rental.batchExecute',
+      'rental.batchStatus',
+      'rental.batchResume',
+      'rental.batchReport',
+      'rental.batchRollback',
+      'rental.mirrorSearch',
+      'rental.mirrorBatchSpec',
       'rental.specDiscoverFull',
       'rental.readRaw',
       'rental.copy',
@@ -58,6 +66,10 @@ describe('agent runtime tool registry', () => {
       'rental.tenancySet',
       'rental.specDiscover',
       'rental.specAddAndRefresh',
+      'rental.specAddItem',
+      'rental.specRefresh',
+      'rental.applyCurrent',
+      'rental.submitCurrent',
       'rental.specRemovePlan',
       'rental.priceChange',
       'rental.pricePreview',
@@ -82,7 +94,7 @@ describe('agent runtime tool registry', () => {
 
     const tools = listAgentTools();
     tools.pop();
-    expect(listAgentTools()).toHaveLength(61);
+    expect(listAgentTools()).toHaveLength(73);
   });
 
   it('returns defensive copies of tool metadata', () => {
@@ -300,6 +312,14 @@ describe('agent runtime tool registry', () => {
       'rental.platformSearch',
       'rental.platformSearchAll',
       'rental.batchRead',
+      'rental.batchPreview',
+      'rental.batchExecute',
+      'rental.batchStatus',
+      'rental.batchResume',
+      'rental.batchReport',
+      'rental.batchRollback',
+      'rental.mirrorSearch',
+      'rental.mirrorBatchSpec',
       'rental.specDiscoverFull',
       'rental.readRaw',
       'rental.copy',
@@ -308,6 +328,10 @@ describe('agent runtime tool registry', () => {
       'rental.tenancySet',
       'rental.specDiscover',
       'rental.specAddAndRefresh',
+      'rental.specAddItem',
+      'rental.specRefresh',
+      'rental.applyCurrent',
+      'rental.submitCurrent',
       'rental.specRemovePlan',
       'rental.priceChange',
       'rental.pricePreview',
@@ -384,9 +408,10 @@ describe('agent runtime tool registry', () => {
     expect(findAgentTool('rental.specAddAndRefresh')?.inputSchema).toMatchObject({
       properties: {
         productId: { type: 'string' },
+        specDimId: { type: 'string' },
         itemTitle: { type: 'string' },
       },
-      required: ['productId', 'itemTitle'],
+      required: ['productId', 'specDimId', 'itemTitle'],
       additionalProperties: false,
     });
     expect(findAgentTool('rental.specRemovePlan')?.inputSchema).toMatchObject({

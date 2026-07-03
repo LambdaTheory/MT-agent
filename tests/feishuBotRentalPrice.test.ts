@@ -50,8 +50,8 @@ function fakeClient(): RentalPriceSkillClient & { previews: unknown[]; execution
       this.specDiscovers.push(productId);
       return { productId, ok: true, dimensions: [{ specId: '1', title: '版本', items: [{ id: '3862', title: '2+8G' }] }], lines: ['spec-discover: ok'] };
     },
-    async specAddAndRefresh(productId, itemTitle) {
-      this.specAdds.push({ productId, itemTitle });
+    async specAddAndRefresh(productId, specDimId, itemTitle) {
+      this.specAdds.push({ productId, specDimId, itemTitle });
       return { productId, ok: true, itemTitle, lines: ['spec-add-and-refresh: ok'] };
     },
     async specRemoveItem(request) {
@@ -207,11 +207,11 @@ describe('rental price Feishu integration', () => {
   });
 
   it('parses spec add commands and returns a confirmation card without executing', async () => {
-    expect(parseBotIntent('添加规格 761 128G')).toEqual({ type: 'rental_spec_add', productId: '761', itemTitle: '128G' });
-    expect(parseBotIntent('规格添加 761 256G')).toEqual({ type: 'rental_spec_add', productId: '761', itemTitle: '256G' });
+    expect(parseBotIntent('添加规格 761 1355 128G')).toEqual({ type: 'rental_spec_add', productId: '761', specDimId: '1355', itemTitle: '128G' });
+    expect(parseBotIntent('规格添加 761 1355 256G')).toEqual({ type: 'rental_spec_add', productId: '761', specDimId: '1355', itemTitle: '256G' });
 
     const client = fakeClient();
-    const intent = parseBotIntent('添加规格 761 128G');
+    const intent = parseBotIntent('添加规格 761 1355 128G');
     const response = await handleBotIntent(intent, 'output', { rentalPriceClient: client });
 
     expect(client.specAdds).toEqual([]);

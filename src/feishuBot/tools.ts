@@ -191,7 +191,7 @@ const HELP_TEXT = `📋 查询与分析
   下架商品 761 — 下架商品
   设置租期 761 1,10,30 — 设置租期天数
   查看规格 761 — 查看商品规格维度与项目
-  添加规格 761 128G — 添加规格项
+  添加规格 761 1355 128G — 添加规格项
 
 🛡️ 安全规则
   涉及商品修改的操作会先弹确认卡；取消后不会执行
@@ -228,7 +228,7 @@ function rentalIntentToConfirmRequest(intent: BotIntent): RentalOperationConfirm
     case 'rental_spec_discover':
       return { action: 'spec-discover', productId: intent.productId };
     case 'rental_spec_add':
-      return { action: 'spec-add-and-refresh', productId: intent.productId, itemTitle: intent.itemTitle };
+      return { action: 'spec-add-and-refresh', productId: intent.productId, specDimId: intent.specDimId, itemTitle: intent.itemTitle };
     default:
       return null;
   }
@@ -660,7 +660,7 @@ export async function handleBotIntent(intent: BotIntent, outputDir = 'output', o
   }
 
   if (intent.type === 'rental_spec_add') {
-    return rentalOperationConfirmResponse({ action: 'spec-add-and-refresh', productId: intent.productId, itemTitle: intent.itemTitle }, '明确飞书命令需要二次确认后才能添加规格。');
+    return rentalOperationConfirmResponse({ action: 'spec-add-and-refresh', productId: intent.productId, specDimId: intent.specDimId, itemTitle: intent.itemTitle }, '明确飞书命令需要二次确认后才能添加规格。');
   }
 
   if (intent.type === 'operations_learning_quiz') {

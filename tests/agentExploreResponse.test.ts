@@ -153,7 +153,7 @@ describe('agentExploreResponse', () => {
     });
   });
 
-  it('does not create confirmation cards for unsupported Agent Explore write tools', async () => {
+  it('creates confirmation cards for batch delist and rollback Agent Explore write tools', async () => {
     const provider = new FakeLlmProvider(JSON.stringify({
       action: 'finish',
       answer: '建议批量下架和回滚',
@@ -188,9 +188,10 @@ describe('agentExploreResponse', () => {
     }));
 
     const response = await agentExploreResponse('分析批量操作', 'output', { provider });
+    const requests = readConfirmRequests(response.card);
 
-    expect(response.card).toBeUndefined();
-    expect(response.text).not.toContain('待确认执行');
+    expect(response.text).toContain('待确认执行：2 项');
+    expect(requests.map((request) => request.toolName)).toEqual(['rental.delistBatch', 'rental.priceRollback']);
   });
 
   it('rejects malformed executable decisions before creating confirmation cards', async () => {

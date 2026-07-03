@@ -69,8 +69,8 @@ export function getSupportedLlmIntentProposals(): LlmIntentProposalRequest['inte
     },
     {
       name: 'rental_spec_add',
-      description: '添加租赁商品规格项。必须提供 productId 和 itemTitle。只生成确认卡，不直接执行。',
-      argumentsSchema: { type: 'object', required: ['productId', 'itemTitle'] },
+      description: '添加租赁商品规格项。必须提供 productId、specDimId 和 itemTitle。只生成确认卡，不直接执行。',
+      argumentsSchema: { type: 'object', required: ['productId', 'specDimId', 'itemTitle'] },
     },
   ];
 }
@@ -140,8 +140,9 @@ function proposalToIntent(intentName: LlmProposableIntentName, args: Record<stri
     case 'rental_spec_discover':
       return { type: 'rental_spec_discover', productId };
     case 'rental_spec_add': {
+      const specDimId = readNonEmptyString(args.specDimId);
       const itemTitle = readNonEmptyString(args.itemTitle);
-      return itemTitle ? { type: 'rental_spec_add', productId, itemTitle } : null;
+      return specDimId && itemTitle ? { type: 'rental_spec_add', productId, specDimId, itemTitle } : null;
     }
   }
 }

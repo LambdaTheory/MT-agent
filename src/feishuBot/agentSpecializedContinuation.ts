@@ -12,7 +12,14 @@ function rentalOperationArguments(request: RentalOperationConfirmRequest): Recor
     case 'tenancy-set':
       return { action: request.action, productId: request.productId, days: request.days };
     case 'spec-add-and-refresh':
-      return { action: request.action, productId: request.productId, itemTitle: request.itemTitle };
+    case 'spec-add-item':
+      return { action: request.action, productId: request.productId, specDimId: request.specDimId, itemTitle: request.itemTitle };
+    case 'spec-refresh':
+      return { action: request.action, productId: request.productId };
+    case 'apply-current':
+      return { action: request.action, productId: request.productId, changes: request.changes };
+    case 'submit-current':
+      return { action: request.action, productId: request.productId };
     case 'spec-remove-items':
       return {
         action: request.action,

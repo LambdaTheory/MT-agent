@@ -1,9 +1,10 @@
 import { buildAgentToolConfirmCard, type AgentToolConfirmRequest } from '../agentRuntime/approvalCard.js';
-import { classifyDecisions } from '../agentRuntime/decisionPolicy.js';
 import { resolveLlmProviderFromEnv } from '../agentRuntime/decisionBuilderFactory.js';
 import { buildReadOnlyExploreTools } from '../agentRuntime/exploreToolset.js';
 import { runAgentExploreLoop } from '../agentRuntime/agentExploreLoop.js';
 import { isValidDecisionRecord, type DecisionRecord } from '../agentRuntime/decisionRecord.js';
+import { schemaAllowsArguments } from '../agentRuntime/planner.js';
+import { findAgentTool } from '../agentRuntime/toolRegistry.js';
 import type { FeishuCardPayload } from '../notify/feishuApp.js';
 import type { AgentToolExecutionOptions } from './agentToolExecutor.js';
 import { agentExploreReason } from './agentExploreAttribution.js';
@@ -33,18 +34,19 @@ function isLedgerCoveredExploreWrite(decision: DecisionRecord): boolean {
   const toolName = decision.proposedTool?.toolName;
   const args = decision.proposedTool?.arguments;
   if (!toolName || !args) return false;
-  switch (toolName) {
-    case 'rental.copy':
-    case 'rental.tenancySet':
-    case 'rental.specAddAndRefresh':
-    case 'rental.operationConfirmRequest':
-    case 'operations.refreshActivityExecute':
-      return true;
-    case 'rental.delist':
-      return args.productIds === undefined;
-    default:
-      return false;
-  }
+  const tool = findAgentTool(toolName);
+  if (!tool || tool.requiresConfirmation !== true || tool.risk !== 'high') return false;
+  if (!schemaAllowsArguments(tool.inputSchema, args)) return false;
+  if (toolName === 'rental.delist') return args.productIds === undefined;
+  if (toolName === 'rental.applyCurrent' || toolName === 'rental.submitCurrent') return false;
+  return toolName === 'operations.refreshActivityExecute' || toolName.startsWith('rental.');
+}
+
+function isConfirmableExploreWrite(decision: DecisionRecord): boolean {
+  return decision.recommendation === 'approve_to_execute'
+    && decision.evidenceRefs.length > 0
+    && decision.uncertainties.length === 0
+    && isLedgerCoveredExploreWrite(decision);
 }
 
 function buildExploreConfirmCard(approvals: DecisionRecord[]): FeishuCardPayload | undefined {
@@ -90,8 +92,7 @@ export async function agentExploreResponse(
     };
   }
 
-  const classified = classifyDecisions(result.decisions ?? []);
-  const approvals = classified.approvals.filter(isLedgerCoveredExploreWrite);
+  const approvals = (result.decisions ?? []).filter(isConfirmableExploreWrite);
   const card = buildExploreConfirmCard(approvals);
   const text = [
     result.answer || (result.stopReason === 'max_steps' ? '探索达到最大步数，已停止。' : '探索未形成有效结论。'),

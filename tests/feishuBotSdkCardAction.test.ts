@@ -436,6 +436,66 @@ describe('createFeishuSdkBot card.action.trigger', () => {
     expect(JSON.stringify((second as any).card.data)).toContain('已经取消');
   });
 
+  it('resolves requestRef-only SDK Agent tool cancellation through the stored request', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-sdk-tool-ref-cancel-'));
+    const request = {
+      toolName: 'rental.delist',
+      arguments: { productId: '648' },
+      reason: '[[dailyMission:runId=run-sdk-ref-cancel;decisionId=dec-sdk-ref-cancel]] 下架确认取消',
+    };
+    const requestRef = await saveAgentToolConfirmRequest(outputDir, request);
+    const card = buildAgentToolConfirmCard(request, { requestRef });
+    const cancelValue = readButtonValue(card, 'agent_tool_cancel_submit');
+    const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
+    const sent: unknown[] = [];
+    const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', outputDir, sdk: fakeSdk(sent, registered) });
+
+    bot.start();
+    const result = await registered['card.action.trigger']({
+      event: {
+        context: { open_message_id: 'om-agent-tool-ref-cancel' },
+        operator: { open_id: 'ou_sdk_ref_cancel' },
+        action: { tag: 'button', name: 'agent_tool_cancel_submit', behaviors: [{ type: 'callback', value: cancelValue }] },
+      },
+    });
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ kind: 'patch', request: { path: { message_id: 'om-agent-tool-ref-cancel' } } });
+    const resultCard = result as { card?: { data?: unknown } };
+    expect(JSON.stringify(resultCard.card?.data)).toContain('rental.delist');
+    const date = new Date().toISOString().slice(0, 10);
+    const entries = await loadOperationLedgerJsonlEntries(outputDir, date);
+    expect(entries).toEqual(expect.arrayContaining([
+      expect.objectContaining({ event: 'approval_rejected', runId: 'run-sdk-ref-cancel', decisionId: 'dec-sdk-ref-cancel', toolName: 'rental.delist', subject: { kind: 'product', id: '648' } }),
+    ]));
+  });
+
+  it('fails closed for unresolved requestRef-only SDK Agent tool cancellation', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-sdk-tool-ref-cancel-missing-'));
+    const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
+    const sent: unknown[] = [];
+    const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', outputDir, sdk: fakeSdk(sent, registered) });
+
+    bot.start();
+    const result = await registered['card.action.trigger']({
+      event: {
+        context: { open_message_id: 'om-agent-tool-ref-cancel-missing' },
+        operator: { open_id: 'ou_sdk_ref_cancel_missing' },
+        action: {
+          tag: 'button',
+          name: 'agent_tool_cancel_submit',
+          behaviors: [{ type: 'callback', value: { action: 'agent_tool_cancel', requestRef: 'agent_tool_missing_ref', confirmationKey: '0123456789abcdef01234567' } }],
+        },
+      },
+    });
+
+    expect(sent).toHaveLength(0);
+    const resultCard = result as { card?: { data?: unknown } };
+    expect(JSON.stringify(resultCard.card?.data)).toContain('取消异常');
+    const date = new Date().toISOString().slice(0, 10);
+    expect(await loadOperationLedgerJsonlEntries(outputDir, date)).toEqual([]);
+  });
+
   it('renders failed Agent clarification continuation as a red status card', async () => {
     const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
     const sent: unknown[] = [];

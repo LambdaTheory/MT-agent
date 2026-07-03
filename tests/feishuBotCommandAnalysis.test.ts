@@ -336,8 +336,8 @@ describe('explicit commands — current parser behavior', () => {
   });
 
   it('parses rental spec-add command', () => {
-    expect(parseBotIntent('添加规格 761 128G')).toEqual({ type: 'rental_spec_add', productId: '761', itemTitle: '128G' });
-    expect(parseBotIntent('规格添加 761 256G')).toEqual({ type: 'rental_spec_add', productId: '761', itemTitle: '256G' });
+    expect(parseBotIntent('添加规格 761 1355 128G')).toEqual({ type: 'rental_spec_add', productId: '761', specDimId: '1355', itemTitle: '128G' });
+    expect(parseBotIntent('规格添加 761 1355 256G')).toEqual({ type: 'rental_spec_add', productId: '761', specDimId: '1355', itemTitle: '256G' });
   });
 
   // --- Future-natural variants that the current parser still does NOT support ---
@@ -588,8 +588,8 @@ describe('safety — accidental side-effect prevention baseline', () => {
     '租期设置 761 1,10,30',
     '查看规格 761',
     '规格查看 761',
-    '添加规格 761 128G',
-    '规格添加 761 256G',
+    '添加规格 761 1355 128G',
+    '规格添加 761 1355 256G',
     '跑日报',
     '生成日报',
     '重发日报',
@@ -694,8 +694,8 @@ describe('safety — accidental side-effect prevention baseline', () => {
     expect(parseBotIntent('规格查看 761').type).toBe('rental_spec_discover');
 
     // Spec-add only triggers from 添加规格 / 规格添加 prefix
-    expect(parseBotIntent('添加规格 761 128G').type).toBe('rental_spec_add');
-    expect(parseBotIntent('规格添加 761 256G').type).toBe('rental_spec_add');
+    expect(parseBotIntent('添加规格 761 1355 128G').type).toBe('rental_spec_add');
+    expect(parseBotIntent('规格添加 761 1355 256G').type).toBe('rental_spec_add');
     expect(parseBotIntent('给 761 添加规格 256G').type).not.toBe('rental_spec_add');
 
     // Report commands — exact prefixes still work

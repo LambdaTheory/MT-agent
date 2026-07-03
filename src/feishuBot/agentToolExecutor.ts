@@ -77,6 +77,8 @@ import {
 } from './rentalPrice.js';
 import { executeRentalReadOnlyOperationHandler } from './rentalReadOnlyOperationHandlers.js';
 import { executeRentalWriteOperationHandler } from './rentalWriteOperationHandlers.js';
+import { executeRentalBatchTool } from './rentalBatchHandlers.js';
+import { executeRentalMirrorTool } from './rentalMirrorHandlers.js';
 import { findReadOnlyTool } from './readOnlyToolRegistry.js';
 import { inferPriceAdjustmentAmountFromText, readPriceAdjustmentAmountArgument } from './priceAdjustment.js';
 import {
@@ -1862,6 +1864,10 @@ export async function executeAgentToolRequest(
     case 'rental.tenancySet':
     case 'rental.specDiscover':
     case 'rental.specAddAndRefresh':
+    case 'rental.specAddItem':
+    case 'rental.specRefresh':
+    case 'rental.applyCurrent':
+    case 'rental.submitCurrent':
       return executeRentalWriteOperationHandler(request, options.rentalPriceClient ?? createRentalPriceSkillClient(), options.ledgerContext);
     case 'rental.delist': {
       const productIds = readDelistProductIds(request.arguments);
@@ -1955,6 +1961,16 @@ export async function executeAgentToolRequest(
       const result = await client.rollback(rollbackRequest);
       return { text: `${result.ok ? '改价回滚成功' : '改价回滚失败'}：商品 ${result.productId}\n${result.lines.join('\n')}`, metadata: { toolName: 'rental.priceRollback', ok: result.ok, productId: result.productId, taskId: result.audit?.taskId, rollbackFile: result.audit?.rollbackFile } };
     }
+    case 'rental.batchPreview':
+    case 'rental.batchExecute':
+    case 'rental.batchStatus':
+    case 'rental.batchResume':
+    case 'rental.batchReport':
+    case 'rental.batchRollback':
+      return executeRentalBatchTool(request.toolName, request.arguments, options.ledgerContext);
+    case 'rental.mirrorSearch':
+    case 'rental.mirrorBatchSpec':
+      return executeRentalMirrorTool(request.toolName, request.arguments);
     case 'closedOrder.syncFeedback': {
       const result = await syncClosedOrderFeedbackFromApi(
         closedOrderIngestStatePath(outputDir),

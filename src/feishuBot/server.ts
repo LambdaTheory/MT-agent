@@ -569,9 +569,13 @@ async function handleCardActionTrigger(
   }
 
   if (actionName === 'agent_tool_cancel') {
-    const toolName = readString(value?.toolName) ?? '未知工具';
-    const reason = readString(value?.reason);
-    const args = isRecord(value?.arguments) ? value.arguments : {};
+    const referencedRequest = await loadAgentToolConfirmRequestFromValue(config.outputDir ?? 'output', value);
+    if (readString(value?.requestRef) && !referencedRequest) {
+      return statusCard('Agent 操作取消异常', '确认卡参数无效，未记录取消。请重新发起。', 'red');
+    }
+    const toolName = referencedRequest?.toolName ?? readString(value?.toolName) ?? '未知工具';
+    const reason = referencedRequest?.reason ?? readString(value?.reason);
+    const args = referencedRequest?.arguments ?? (isRecord(value?.arguments) ? value.arguments : {});
     const claim = claimServerCardAction(messageId, agentToolClaimFamily(value), actionName);
     if (!claim.claimed) {
       return claimStatusCard('Agent 操作已处理', claim.claim);
@@ -583,6 +587,8 @@ async function handleCardActionTrigger(
       messageId,
       actorId,
       toolName,
+      arguments: args,
+      reason,
     });
     return statusCard('Agent 操作已取消', `工具 ${toolName} 操作已取消。`, 'grey');
   }
