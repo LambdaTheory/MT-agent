@@ -181,7 +181,8 @@ export async function refreshLinkRegistryForPrompt(
     }
   })();
 
-  const mergedSnapshot = mergeGoodsSnapshotWithDaemon(baseSnapshot, daemonSnapshot?.entries ?? []);
+  const mergedSnapshot = mergeGoodsSnapshotWithDaemon(baseSnapshot, daemonSnapshot?.entries ?? [])
+    .map((item) => (item.listingState ? { ...item, observedAt: item.observedAt ?? referenceDate } : item));
   await mkdir(dirname(resolvedPaths.goodsSnapshotPath), { recursive: true });
   await writeFile(resolvedPaths.goodsSnapshotPath, `${JSON.stringify(mergedSnapshot, null, 2)}\n`, 'utf8');
   await mkdir(dirname(paths.goodsListSnapshot), { recursive: true });

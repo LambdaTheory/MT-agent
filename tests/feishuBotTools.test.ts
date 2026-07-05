@@ -1226,6 +1226,22 @@ describe('handleBotIntent', () => {
     expect(response.text).not.toContain('没有找到匹配商品');
   });
 
+  it('keeps gone links out of resolved operation candidates', async () => {
+    const outputDir = await writeContext();
+    const registryRoot = await mkdtemp(join(tmpdir(), 'mt-agent-bot-registry-gone-'));
+    const registryPaths = await writeLinkRegistryOverviewFixtures(registryRoot);
+
+    const response = await executeAgentToolRequest(
+      { toolName: 'linkRegistry.resolveProducts', arguments: { query: '562' }, reason: '确认可操作端内ID范围' },
+      outputDir,
+      { closedOrderRegistryPaths: registryPaths },
+    );
+
+    expect(response.text).toContain('链接数量：0 条');
+    expect(response.text).toContain('可用端内ID：无');
+    expect(response.text).not.toContain('端内ID 562 DJI Pocket 3 Creator Combo');
+  });
+
   it('returns an operations learning question card', async () => {
     const outputDir = await writeContext();
     const response = await handleBotIntent({ type: 'operations_learning_quiz' }, outputDir);

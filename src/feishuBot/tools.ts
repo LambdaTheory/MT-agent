@@ -484,9 +484,11 @@ function looksLikeNewLinkWriteIntent(text: string): boolean {
   return hasNewLink && hasWriteVerb;
 }
 
-function formatLinkRegistryStatus(status: LinkRegistryEntry['status']): string {
-  if (status === 'active') return '在架';
-  if (status === 'removed') return '已下架';
+function formatLinkRegistryStatus(entry: LinkRegistryEntry): string {
+  if (entry.listingState === 'delisted') return '已下架（上架后可操作）';
+  if (entry.listingState === 'gone') return '链接不存在（总表缺失）';
+  if (entry.status === 'active') return '在架';
+  if (entry.status === 'removed') return '已下架';
   return '未知';
 }
 
@@ -497,7 +499,7 @@ function formatRegistryProductRows(productIds: string[], entries: LinkRegistryEn
     if (!entry) return `端内ID ${productId}\n未在链接档案中找到`;
     const name = entry.productName ?? entry.shortName ?? '未命名商品';
     const platform = entry.platformProductId ? `平台商品ID ${entry.platformProductId}` : '平台商品ID 未记录';
-    return `端内ID ${entry.internalProductId} ${name}\n${platform}，状态 ${formatLinkRegistryStatus(entry.status)}`;
+    return `端内ID ${entry.internalProductId} ${name}\n${platform}，状态 ${formatLinkRegistryStatus(entry)}`;
   });
   return lines.join('\n\n');
 }

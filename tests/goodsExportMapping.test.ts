@@ -3,12 +3,62 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import XLSX from 'xlsx-js-style';
 import { afterEach, describe, expect, it } from 'vitest';
-import { parseGoodsExportMapping } from '../src/mapping/goodsExportMapping.js';
+import { parseGoodsExportMapping, parseGoodsExportSnapshot } from '../src/mapping/goodsExportMapping.js';
 
 const tempDirs: string[] = [];
 
 afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
+});
+
+describe('parseGoodsExportSnapshot', () => {
+  it('reads optional 商品状态 into listing state fields', async () => {
+    const path = await writeWorkbook([
+      ['商品名称', '商家侧编码', '平台侧编码', '商品状态'],
+      ['在售商品', '81665859-762-06081446', '2026060822000531936344', '出售中'],
+      ['下架商品', '81665859-653-04281516', '2026042822000820052623', '已下架'],
+      ['审核失败商品', '81665859-654-04281516', '2026042822000820052624', '审核失败'],
+    ]);
+
+    expect(parseGoodsExportSnapshot(path)).toEqual([
+      {
+        platformProductId: '2026042822000820052623',
+        internalProductId: '653',
+        productName: '下架商品',
+        listingState: 'delisted',
+        listingStatusText: '已下架',
+      },
+      {
+        platformProductId: '2026042822000820052624',
+        internalProductId: '654',
+        productName: '审核失败商品',
+        listingState: 'unknown',
+        listingStatusText: '审核失败',
+      },
+      {
+        platformProductId: '2026060822000531936344',
+        internalProductId: '762',
+        productName: '在售商品',
+        listingState: 'on_sale',
+        listingStatusText: '出售中',
+      },
+    ]);
+  });
+
+  it('keeps snapshot parsing compatible when 商品状态 is absent', async () => {
+    const path = await writeWorkbook([
+      ['商品名称', '商家侧编码', '平台侧编码'],
+      ['商品A', '81665859-762-06081446', '2026060822000531936344'],
+    ]);
+
+    expect(parseGoodsExportSnapshot(path)).toEqual([
+      {
+        platformProductId: '2026060822000531936344',
+        internalProductId: '762',
+        productName: '商品A',
+      },
+    ]);
+  });
 });
 
 async function writeWorkbook(rows: unknown[][]): Promise<string> {

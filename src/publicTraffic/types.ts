@@ -1,4 +1,5 @@
 import type { PeriodKey } from '../domain/types.js';
+import type { LinkListingState } from '../linkRegistry/types.js';
 import type { GoodsManagerNewProductPoolItem } from './goodsManagerNewProducts.js';
 import type { OrderAnalysisResult } from './orderAnalysis.js';
 
@@ -52,6 +53,9 @@ export interface GoodsSnapshotItem {
   platformProductId: string;
   internalProductId: string;
   productName: string;
+  listingState?: LinkListingState;
+  listingStatusText?: string;
+  observedAt?: string;
 }
 
 export interface NewProductObservationItem extends GoodsSnapshotItem {

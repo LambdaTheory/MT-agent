@@ -203,7 +203,7 @@ describe('link registry build', () => {
     }).map((entry) => entry.internalProductId)).toEqual(['2', '10']);
   });
 
-  it('prefers daemon catalog names and keeps daemon-only live links after merging', () => {
+  it('prefers daemon catalog names and keeps daemon status metadata after merging', () => {
     const registry = buildLinkRegistry({
       productIdMapping: {
         'platform-876': '876',
@@ -229,6 +229,7 @@ describe('link registry build', () => {
             internalProductId: '999',
             productName: 'Pocket 3 Creator Combo',
             listingStatusText: '上架 展示',
+            syncStatus: '可售卖',
             discoveredAt: '2026-06-27T10:00:00.000Z',
           },
         ],
@@ -240,7 +241,9 @@ describe('link registry build', () => {
         internalProductId: '876',
         platformProductId: 'platform-876',
         productName: 'Ipod touch6 顺丰发货，1天起租',
-        status: 'active',
+        status: 'unknown',
+        listingState: 'unknown',
+        statusSource: 'daemon_catalog',
         daemonStatusText: '上架 展示',
         daemonSyncStatus: '未同步',
         daemonChannels: ['小程序', '支付宝'],
@@ -251,9 +254,168 @@ describe('link registry build', () => {
         internalProductId: '999',
         productName: 'Pocket 3 Creator Combo',
         status: 'active',
+        listingState: 'on_sale',
+        statusSource: 'daemon_catalog',
         source: ['daemon_catalog'],
       }),
     ]));
+  });
+
+  it('maps daemon delisted sync statuses to removed listing states', () => {
+    expect(buildLinkRegistry({
+      daemonCatalog: {
+        generatedAt: '2026-07-04T10:00:00.000Z',
+        count: 2,
+        excludedCount: 0,
+        entries: [
+          { internalProductId: '701', productName: '下架商品', syncStatus: '已下架', discoveredAt: '2026-07-04T10:00:00.000Z' },
+          { internalProductId: '702', productName: '停售商品', syncStatus: '停售', discoveredAt: '2026-07-04T10:00:00.000Z' },
+        ],
+      },
+    })).toEqual(expect.arrayContaining([
+      expect.objectContaining({ internalProductId: '701', status: 'removed', listingState: 'delisted', statusSource: 'daemon_catalog' }),
+      expect.objectContaining({ internalProductId: '702', status: 'removed', listingState: 'delisted', statusSource: 'daemon_catalog' }),
+    ]));
+  });
+
+  it('uses daemon listing status text when sync status is unknown but listing status is delisted', () => {
+    expect(buildLinkRegistry({
+      lifecycle: {
+        active: {
+          '703': { platformProductId: 'platform-703', productName: '生命周期仍活跃商品' },
+        },
+        removedLinks: [],
+      },
+      daemonCatalog: {
+        generatedAt: '2026-07-04T10:00:00.000Z',
+        count: 1,
+        excludedCount: 0,
+        entries: [
+          { internalProductId: '703', productName: '生命周期仍活跃商品', syncStatus: '未同步', listingStatusText: '已下架', discoveredAt: '2026-07-04T10:00:00.000Z' },
+        ],
+      },
+    })).toEqual([
+      expect.objectContaining({
+        internalProductId: '703',
+        status: 'removed',
+        listingState: 'delisted',
+        statusSource: 'daemon_catalog',
+      }),
+    ]);
+  });
+
+  it('lets newer goods snapshot status override stale daemon status beyond freshness threshold', () => {
+    expect(buildLinkRegistry({
+      goodsSnapshot: [
+        {
+          platformProductId: 'platform-704',
+          internalProductId: '704',
+          productName: '重新上架商品',
+          listingState: 'on_sale',
+          listingStatusText: '出售中',
+          observedAt: '2026-07-04T10:00:00.000Z',
+        },
+      ],
+      daemonCatalog: {
+        generatedAt: '2026-07-01T00:00:00.000Z',
+        count: 1,
+        excludedCount: 0,
+        entries: [
+          { internalProductId: '704', productName: '重新上架商品', syncStatus: '已下架', discoveredAt: '2026-07-01T00:00:00.000Z' },
+        ],
+      },
+    })).toEqual([
+      expect.objectContaining({
+        internalProductId: '704',
+        status: 'active',
+        listingState: 'on_sale',
+        statusSource: 'goods_snapshot',
+        statusObservedAt: '2026-07-04T10:00:00.000Z',
+      }),
+    ]);
+  });
+
+  it('uses explicit exposure listing status as a low-trust registry observation', () => {
+    expect(buildLinkRegistry({
+      productIdMapping: {
+        'platform-801': '801',
+      },
+      exposureCumulativeProducts: [
+        {
+          platformProductId: 'platform-801',
+          productName: '曝光下架商品',
+          exposure: 10,
+          visits: 1,
+          amount: 0,
+          custodyDays: null,
+          raw: { 商品状态: '已下架' },
+        },
+      ],
+    })).toEqual([
+      expect.objectContaining({
+        internalProductId: '801',
+        platformProductId: 'platform-801',
+        productName: '曝光下架商品',
+        status: 'removed',
+        listingState: 'delisted',
+        statusSource: 'exposure',
+        source: expect.arrayContaining(['exposure']),
+      }),
+    ]);
+  });
+
+  it('prefers explicit exposure delisted status over weaker status-like columns', () => {
+    expect(buildLinkRegistry({
+      productIdMapping: {
+        'platform-803': '803',
+      },
+      exposureCumulativeProducts: [
+        {
+          platformProductId: 'platform-803',
+          productName: '多状态曝光商品',
+          exposure: 10,
+          visits: 1,
+          amount: 0,
+          custodyDays: null,
+          raw: { 审核状态: '通过', 商品状态: '已下架' },
+        },
+      ],
+    })).toEqual([
+      expect.objectContaining({
+        internalProductId: '803',
+        status: 'removed',
+        listingState: 'delisted',
+        statusSource: 'exposure',
+      }),
+    ]);
+  });
+
+  it('does not infer delisted from exposure rows without explicit status text', () => {
+    expect(buildLinkRegistry({
+      productIdMapping: {
+        'platform-802': '802',
+      },
+      exposureCumulativeProducts: [
+        {
+          platformProductId: 'platform-802',
+          productName: '曝光无状态商品',
+          exposure: 10,
+          visits: 1,
+          amount: 0,
+          custodyDays: null,
+          raw: { 商品信息: '曝光无状态商品' },
+        },
+      ],
+    })).toEqual([
+      expect.objectContaining({
+        internalProductId: '802',
+        platformProductId: 'platform-802',
+        productName: '曝光无状态商品',
+        status: 'unknown',
+        listingState: 'unknown',
+        source: expect.arrayContaining(['exposure']),
+      }),
+    ]);
   });
 
   it('normalizes bare daemon catalog model names into stable groups without manual overrides', () => {

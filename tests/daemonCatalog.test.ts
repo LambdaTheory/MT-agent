@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseDaemonCatalogSnapshot } from '../src/linkRegistry/daemonCatalog.js';
+import { mergeGoodsSnapshotWithDaemon, parseDaemonCatalogSnapshot } from '../src/linkRegistry/daemonCatalog.js';
 
 describe('daemonCatalog parsing', () => {
   it('parses platform rows with explicit sync status', () => {
@@ -69,5 +69,33 @@ describe('daemonCatalog parsing', () => {
       stockText: '100',
     });
     expect(snapshot.entries[0]).not.toHaveProperty('syncStatus');
+  });
+});
+
+describe('mergeGoodsSnapshotWithDaemon', () => {
+  it('preserves goods listing status fields while applying daemon names', () => {
+    expect(mergeGoodsSnapshotWithDaemon([
+      {
+        platformProductId: 'platform-701',
+        internalProductId: '701',
+        productName: '旧名称',
+        listingState: 'delisted',
+        listingStatusText: '已下架',
+      },
+    ], [
+      {
+        internalProductId: '701',
+        productName: 'daemon 名称',
+        discoveredAt: '2026-07-04T00:00:00.000Z',
+      },
+    ])).toEqual([
+      {
+        platformProductId: 'platform-701',
+        internalProductId: '701',
+        productName: 'daemon 名称',
+        listingState: 'delisted',
+        listingStatusText: '已下架',
+      },
+    ]);
   });
 });

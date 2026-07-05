@@ -509,7 +509,7 @@ export async function runPublicTrafficReportCli(): Promise<PublicTrafficReportCl
     const currentGoodsSnapshot = mergeGoodsSnapshotWithDaemon(
       goodsSnapshotFromExport ?? goodsSnapshotFromMapping(mapping),
       daemonCatalog?.entries ?? [],
-    );
+    ).map((item) => (item.listingState ? { ...item, observedAt: item.observedAt ?? runDate } : item));
     await mkdir(dirname(paths.goodsCurrentSnapshotState), { recursive: true });
     await writeFile(paths.goodsListSnapshot, JSON.stringify(currentGoodsSnapshot, null, 2), 'utf8');
     await writeFile(paths.goodsCurrentSnapshotState, JSON.stringify(currentGoodsSnapshot, null, 2), 'utf8');

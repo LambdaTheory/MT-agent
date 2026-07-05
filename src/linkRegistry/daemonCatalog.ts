@@ -294,6 +294,9 @@ export function mergeGoodsSnapshotWithDaemon(base: GoodsSnapshotItem[], daemonEn
       platformProductId: item.platformProductId.trim(),
       internalProductId: item.internalProductId.trim(),
       productName: item.productName.trim(),
+      ...(item.listingState ? { listingState: item.listingState } : {}),
+      ...(item.listingStatusText ? { listingStatusText: item.listingStatusText.trim() } : {}),
+      ...(item.observedAt ? { observedAt: item.observedAt.trim() } : {}),
     });
   }
 
@@ -305,6 +308,9 @@ export function mergeGoodsSnapshotWithDaemon(base: GoodsSnapshotItem[], daemonEn
       platformProductId: current?.platformProductId?.trim() ?? '',
       internalProductId,
       productName: entry.productName.trim() || current?.productName?.trim() || '',
+      ...(current?.listingState ? { listingState: current.listingState } : {}),
+      ...(current?.listingStatusText ? { listingStatusText: current.listingStatusText.trim() } : {}),
+      ...(current?.observedAt ? { observedAt: current.observedAt.trim() } : {}),
     });
   }
 
