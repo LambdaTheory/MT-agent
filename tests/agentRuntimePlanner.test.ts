@@ -493,6 +493,10 @@ describe('agent runtime planner proposal validation', () => {
           { label: '查询数据', message: '查询 pocket3 的公域数据', description: '只读查询' },
           { label: '铺新链', message: '帮我铺十条 pocket3 的新链', description: '需要确认后复制' },
         ],
+        candidates: [
+          { toolName: 'agent.clarifiedMessage', arguments: { message: '查询 pocket3 的公域数据' }, label: '查询数据', description: '只读查询' },
+          { toolName: 'agent.clarifiedMessage', arguments: { message: '帮我铺十条 pocket3 的新链' }, label: '铺新链', description: '需要确认后复制' },
+        ],
         confidence: 0.42,
         reason: '处理动作不明确',
       },

@@ -19,12 +19,44 @@ export interface AgentClarificationSelection {
   label: string;
 }
 
+export interface AgentClarificationCardOptions {
+  clarificationRef: string;
+  confirmationKey: string;
+}
+
+export interface AgentClarificationSelectRef {
+  clarificationRef: string;
+  candidateIndex: number;
+  confirmationKey: string;
+}
+
+export interface AgentClarificationCustomRef {
+  clarificationRef: string;
+  confirmationKey: string;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function readString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function readClarificationRef(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return /^clarify_\d+_[a-f0-9]{8,32}$/i.test(trimmed) ? trimmed : null;
+}
+
+function readConfirmationKey(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return /^[a-f0-9]{24}$/i.test(trimmed) ? trimmed.toLowerCase() : null;
+}
+
+function readCandidateIndex(value: unknown): number | null {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : null;
 }
 
 function compact(value: string, maxLength: number): string {
@@ -37,8 +69,9 @@ function optionMarkdown(option: AgentClarificationOption, index: number): string
     : `${index + 1}. ${option.label}`;
 }
 
-export function buildAgentClarificationCard(request: AgentClarificationRequest): FeishuCardPayload {
+export function buildAgentClarificationCard(request: AgentClarificationRequest, options?: AgentClarificationCardOptions): FeishuCardPayload {
   const optionLines = request.options.map(optionMarkdown).join('\n');
+  const baseValue = { clarificationRef: options?.clarificationRef ?? '', confirmationKey: options?.confirmationKey ?? '' };
   return {
     schema: '2.0',
     config: { wide_screen_mode: true },
@@ -80,7 +113,7 @@ export function buildAgentClarificationCard(request: AgentClarificationRequest):
                 type: 'callback',
                 value: {
                   action: 'agent_clarify_custom',
-                  originalMessage: request.originalMessage,
+                  ...baseValue,
                 },
               }],
             },
@@ -94,9 +127,8 @@ export function buildAgentClarificationCard(request: AgentClarificationRequest):
                 type: 'callback',
                 value: {
                   action: 'agent_clarify_select',
-                  originalMessage: request.originalMessage,
-                  selectedMessage: option.message,
-                  label: option.label,
+                  ...baseValue,
+                  candidateIndex: index,
                 },
               }],
             })),
@@ -110,7 +142,7 @@ export function buildAgentClarificationCard(request: AgentClarificationRequest):
                 type: 'callback',
                 value: {
                   action: 'agent_clarify_cancel',
-                  originalMessage: request.originalMessage,
+                  ...baseValue,
                 },
               }],
             },
@@ -119,6 +151,31 @@ export function buildAgentClarificationCard(request: AgentClarificationRequest):
       ],
     },
   };
+}
+
+export function parseAgentClarificationSelectRef(value: unknown): AgentClarificationSelectRef | null {
+  if (!isRecord(value) || value.action !== 'agent_clarify_select') return null;
+  const clarificationRef = readClarificationRef(value.clarificationRef);
+  const candidateIndex = readCandidateIndex(value.candidateIndex);
+  const confirmationKey = readConfirmationKey(value.confirmationKey);
+  if (!clarificationRef || candidateIndex === null || !confirmationKey) return null;
+  return { clarificationRef, candidateIndex, confirmationKey };
+}
+
+function parseAgentClarificationRef(value: unknown, action: 'agent_clarify_custom' | 'agent_clarify_cancel'): AgentClarificationCustomRef | null {
+  if (!isRecord(value) || value.action !== action) return null;
+  const clarificationRef = readClarificationRef(value.clarificationRef);
+  const confirmationKey = readConfirmationKey(value.confirmationKey);
+  if (!clarificationRef || !confirmationKey) return null;
+  return { clarificationRef, confirmationKey };
+}
+
+export function parseAgentClarificationCustomRef(value: unknown): AgentClarificationCustomRef | null {
+  return parseAgentClarificationRef(value, 'agent_clarify_custom');
+}
+
+export function parseAgentClarificationCancelRef(value: unknown): AgentClarificationCustomRef | null {
+  return parseAgentClarificationRef(value, 'agent_clarify_cancel');
 }
 
 export function parseAgentClarificationSelection(value: unknown): AgentClarificationSelection | null {
@@ -139,20 +196,12 @@ export function parseAgentClarificationCustomSelection(value: unknown, customMes
   return { originalMessage, selectedMessage, label: '自定义澄清' };
 }
 
-function looksLikeBareSupplement(message: string): boolean {
-  return (
-    /\btask_\d+_[a-f0-9]+\b/i.test(message)
-    || /rollback_[^\s"'，。；;]+\.json/i.test(message)
-    || /^\d+(?:[,\s，、]+\d+)*$/.test(message)
-  );
-}
-
 export function buildClarifiedMessage(selection: AgentClarificationSelection): string {
-  if (selection.label !== '自定义澄清' || !looksLikeBareSupplement(selection.selectedMessage)) {
+  if (selection.label !== '自定义澄清') {
     return selection.selectedMessage;
   }
   return [
+    selection.selectedMessage,
     `原始指令：${selection.originalMessage}`,
-    `补充说明：${selection.selectedMessage}`,
   ].join('\n');
 }

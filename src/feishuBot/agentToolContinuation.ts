@@ -1,6 +1,8 @@
 import type { AgentToolConfirmRequest } from '../agentRuntime/approvalCard.js';
 import { buildAgentToolConfirmCard } from '../agentRuntime/approvalCard.js';
 import { buildAgentClarificationCard } from '../agentRuntime/clarificationCard.js';
+import type { AgentClarificationRequest } from '../agentRuntime/clarificationCard.js';
+import { isClarifyDepthExceeded, type ClarificationContext, type ResolutionCandidate } from '../agentRuntime/intentResolution.js';
 import { decideAgentPolicy } from '../agentRuntime/policy.js';
 import { isPreConfirmationPlanningTool } from '../agentRuntime/planningTools.js';
 import type { AgentPlannerStep } from '../agentRuntime/planner.js';
@@ -18,6 +20,7 @@ import {
 import { inferPriceMultiplierFromText, readPriceMultiplierArgument } from './priceMultiplier.js';
 import { parseRentPriceFieldsFromText } from './rentalPrice.js';
 import type { BotResponse } from './types.js';
+import { clarificationConfirmationKey, saveClarificationContext } from './clarificationStore.js';
 
 interface ContinuePlannerStepsInput {
   goal: string;
@@ -30,6 +33,7 @@ interface ContinuePlannerStepsInput {
   outputDir: string;
   options: AgentToolExecutionOptions;
   sourceText?: string;
+  clarificationDepth?: number;
 }
 
 function cloneMetadataStore(store: AgentStepMetadataStore): AgentStepMetadataStore {
@@ -51,6 +55,7 @@ function buildContinuation(input: ContinuePlannerStepsInput, stepId: string, abs
     currentStepId: stepId,
     currentStepIndex: absoluteIndex,
     metadataStore: cloneMetadataStore(input.metadataStore),
+    ...(input.clarificationDepth !== undefined ? { clarificationDepth: input.clarificationDepth } : {}),
   };
 }
 
@@ -138,44 +143,92 @@ function extractDirectionalPriceNumber(text: string): { direction: 'decrease' | 
   return null;
 }
 
-function buildPriceSemanticsClarification(
+async function buildSavedClarificationCard(
+  outputDir: string,
+  request: AgentClarificationRequest,
+  candidates: ResolutionCandidate[],
+  confidence: number,
+  priorDepth: number,
+): Promise<BotResponse['card']> {
+  const depth = priorDepth + 1;
+  const context: ClarificationContext = {
+    originalMessage: request.originalMessage,
+    question: request.question,
+    reason: request.reason,
+    candidates,
+    depth,
+    confidence,
+  };
+  const clarificationRef = await saveClarificationContext(outputDir, context);
+  return buildAgentClarificationCard({
+    ...request,
+    options: candidates.map((candidate) => ({
+      label: candidate.label,
+      message: request.originalMessage,
+      ...(candidate.description ? { description: candidate.description } : {}),
+    })),
+  }, {
+    clarificationRef,
+    confirmationKey: clarificationConfirmationKey(context),
+  });
+}
+
+function declineClarificationLoop(depth: number): BotResponse {
+  return {
+    text: '我还是没法确定你的意图，请直接说明要操作的商品、动作、数量、金额或日期；本次没有执行任何操作。',
+    metadata: { ok: false, declined: true, clarificationDepth: depth },
+  };
+}
+
+async function buildPriceSemanticsClarification(
   sourceText: string,
   reason: string,
   parsed: { direction: 'decrease' | 'increase'; value: number },
+  outputDir: string,
+  priorDepth: number,
   inferredMultiplier?: number,
-): BotResponse {
+): Promise<BotResponse> {
+  if (isClarifyDepthExceeded(priorDepth)) return declineClarificationLoop(priorDepth);
   const action = parsed.direction === 'decrease' ? '下调' : '上调';
   const amountAction = parsed.direction === 'decrease' ? '减少' : '增加';
   const multiplier = inferredMultiplier ?? (parsed.direction === 'decrease' ? 1 - parsed.value / 100 : 1 + parsed.value / 100);
+  const question = `价格调整语义需要确认：${action}${parsed.value} 是按比例还是按金额？`;
+  const request = {
+    originalMessage: sourceText,
+    question,
+    reason,
+    options: [
+      {
+        label: '按比例',
+        message: `${sourceText}；按比例${action}${parsed.value}%，即租金乘以 ${multiplier.toFixed(4).replace(/0+$/u, '').replace(/\.$/u, '')}`,
+        description: `租金字段整体乘以 ${multiplier.toFixed(4).replace(/0+$/u, '').replace(/\.$/u, '')}`,
+      },
+      {
+        label: '按金额',
+        message: `${sourceText}；按金额${amountAction}${parsed.value}元`,
+        description: `每个租金字段${amountAction} ${parsed.value} 元`,
+      },
+    ],
+  };
+  const candidates = [
+    { toolName: 'agent.clarifiedMessage', arguments: { message: request.options[0].message }, label: request.options[0].label, description: request.options[0].description },
+    { toolName: 'agent.clarifiedMessage', arguments: { message: request.options[1].message }, label: request.options[1].label, description: request.options[1].description },
+  ];
   return {
-    text: `价格调整语义需要确认：${action}${parsed.value} 是按比例还是按金额？`,
-    card: buildAgentClarificationCard({
-      originalMessage: sourceText,
-      question: `价格调整语义需要确认：${action}${parsed.value} 是按比例还是按金额？`,
-      reason,
-      options: [
-        {
-          label: '按比例',
-          message: `${sourceText}；按比例${action}${parsed.value}%，即租金乘以 ${multiplier.toFixed(4).replace(/0+$/u, '').replace(/\.$/u, '')}`,
-          description: `租金字段整体乘以 ${multiplier.toFixed(4).replace(/0+$/u, '').replace(/\.$/u, '')}`,
-        },
-        {
-          label: '按金额',
-          message: `${sourceText}；按金额${amountAction}${parsed.value}元`,
-          description: `每个租金字段${amountAction} ${parsed.value} 元`,
-        },
-      ],
-    }),
+    text: question,
+    card: await buildSavedClarificationCard(outputDir, request, candidates, 0.4, priorDepth),
     metadata: { toolName: 'rental.pricePreview', ok: false, needsClarification: true },
   };
 }
 
-export function pricePreviewSemanticClarification(
+export async function pricePreviewSemanticClarification(
   toolName: string,
   args: Record<string, unknown>,
   contextText: string,
   sourceText: string,
-): BotResponse | null {
+  outputDir: string,
+  priorDepth = 0,
+): Promise<BotResponse | null> {
   if (toolName !== 'rental.pricePreview' || args.fields !== undefined) return null;
   const directional = extractDirectionalPriceNumber(contextText);
   if (!directional) return null;
@@ -185,15 +238,15 @@ export function pricePreviewSemanticClarification(
   const parsedAdjustment = args.adjustmentAmount !== undefined ? readPriceAdjustmentAmountArgument(args.adjustmentAmount) : null;
 
   if (!directional.hasPercent && !directional.hasAmountUnit && args.discount === undefined && args.adjustmentAmount === undefined) {
-    return buildPriceSemanticsClarification(sourceText, '价格调整数值缺少“%”或“元”等单位，无法安全判断是比例还是金额。', directional);
+    return buildPriceSemanticsClarification(sourceText, '价格调整数值缺少“%”或“元”等单位，无法安全判断是比例还是金额。', directional, outputDir, priorDepth);
   }
 
   if (directional.hasPercent && inferredMultiplier !== null) {
     if (parsedAdjustment !== null) {
-      return buildPriceSemanticsClarification(sourceText, '原始语义包含百分比，但工具参数被规划成金额调整；需要你确认后再继续。', directional, inferredMultiplier);
+        return buildPriceSemanticsClarification(sourceText, '原始语义包含百分比，但工具参数被规划成金额调整；需要你确认后再继续。', directional, outputDir, priorDepth, inferredMultiplier);
     }
     if (parsedDiscount !== null && !nearlyEqual(parsedDiscount, inferredMultiplier)) {
-      return buildPriceSemanticsClarification(sourceText, `原始语义推导的倍率是 ${inferredMultiplier}，但工具参数给的是 ${parsedDiscount}；需要你确认后再继续。`, directional, inferredMultiplier);
+        return buildPriceSemanticsClarification(sourceText, `原始语义推导的倍率是 ${inferredMultiplier}，但工具参数给的是 ${parsedDiscount}；需要你确认后再继续。`, directional, outputDir, priorDepth, inferredMultiplier);
     }
   }
 
@@ -292,12 +345,15 @@ function describeArgumentValue(value: unknown): string {
   return String(value);
 }
 
-function buildGenericArgumentClarification(input: {
+async function buildGenericArgumentClarification(input: {
   toolName: string;
   args: Record<string, unknown>;
   sourceText: string;
   reason: string;
-}): BotResponse {
+  outputDir: string;
+  priorDepth: number;
+}): Promise<BotResponse> {
+  if (isClarifyDepthExceeded(input.priorDepth)) return declineClarificationLoop(input.priorDepth);
   const tool = findAgentTool(input.toolName);
   const required = isRecord(tool?.inputSchema) && Array.isArray(tool.inputSchema.required)
     ? tool.inputSchema.required.filter((item): item is string => typeof item === 'string')
@@ -308,25 +364,32 @@ function buildGenericArgumentClarification(input: {
     .join('；') || '无';
   const requirementText = required.length ? `必填参数：${required.join('、')}` : '该工具需要结构化参数。';
   const question = `我已识别到工具 ${input.toolName}，但参数未通过安全校验。请补充或改写后再继续。`;
+  const request = {
+    originalMessage: input.sourceText,
+    question,
+    reason: `${input.reason}；${requirementText}；当前参数：${provided}`,
+    options: [
+      {
+        label: '补充参数',
+        message: `${input.sourceText}\n补充说明：请明确 ${input.toolName} 的缺失参数`,
+        description: requirementText,
+      },
+      {
+        label: '重新描述',
+        message: input.sourceText,
+        description: '用更完整的一句话重新发起，让 Agent 重新规划',
+      },
+    ],
+  };
+  const candidates = request.options.map((option) => ({
+    toolName: 'agent.clarifiedMessage',
+    arguments: { message: option.message },
+    label: option.label,
+    ...(option.description ? { description: option.description } : {}),
+  }));
   return {
     text: question,
-    card: buildAgentClarificationCard({
-      originalMessage: input.sourceText,
-      question,
-      reason: `${input.reason}；${requirementText}；当前参数：${provided}`,
-      options: [
-        {
-          label: '补充参数',
-          message: `${input.sourceText}\n补充说明：请明确 ${input.toolName} 的缺失参数`,
-          description: requirementText,
-        },
-        {
-          label: '重新描述',
-          message: input.sourceText,
-          description: '用更完整的一句话重新发起，让 Agent 重新规划',
-        },
-      ],
-    }),
+    card: await buildSavedClarificationCard(input.outputDir, request, candidates, 0.3, input.priorDepth),
     metadata: { toolName: input.toolName, ok: false, needsClarification: true },
   };
 }
@@ -348,22 +411,27 @@ function pricePreviewContractViolation(toolName: string, args: Record<string, un
   return null;
 }
 
-export function reviewAgentToolArguments(input: {
+export async function reviewAgentToolArguments(input: {
   toolName: string;
   args: Record<string, unknown>;
   metadataStore?: AgentStepMetadataStore;
   contextText: string;
   sourceText: string;
   reason: string;
-}): { ok: true; args: Record<string, unknown> } | { ok: false; response: BotResponse } {
+  outputDir: string;
+  clarificationDepth?: number;
+}): Promise<{ ok: true; args: Record<string, unknown> } | { ok: false; response: BotResponse }> {
+  const priorDepth = input.clarificationDepth ?? 0;
   const contractViolation = pricePreviewContractViolation(input.toolName, input.args);
   if (contractViolation) return { ok: false, response: contractViolation };
 
-  const semanticClarification = pricePreviewSemanticClarification(
+  const semanticClarification = await pricePreviewSemanticClarification(
     input.toolName,
     input.args,
     input.contextText,
     input.sourceText,
+    input.outputDir,
+    priorDepth,
   );
   if (semanticClarification) return { ok: false, response: semanticClarification };
 
@@ -378,11 +446,13 @@ export function reviewAgentToolArguments(input: {
   if (!validateAgentToolArguments(input.toolName, completed)) {
     return {
       ok: false,
-      response: buildGenericArgumentClarification({
+      response: await buildGenericArgumentClarification({
         toolName: input.toolName,
         args: completed,
         sourceText: input.sourceText,
         reason: input.reason,
+        outputDir: input.outputDir,
+        priorDepth,
       }),
     };
   }
@@ -402,13 +472,15 @@ export async function continueAgentPlannerSteps(input: ContinuePlannerStepsInput
       return { text: input.textParts.join('\n') };
     }
     const contextText = [input.sourceText, input.goal, input.reason, step.reason].filter(Boolean).join('\n');
-    const reviewed = reviewAgentToolArguments({
+    const reviewed = await reviewAgentToolArguments({
       toolName: step.toolName,
       args: resolvedArguments.value,
       metadataStore: input.metadataStore,
       contextText,
       sourceText: input.sourceText ?? input.goal,
       reason: step.reason || input.reason,
+      outputDir: input.outputDir,
+      clarificationDepth: input.clarificationDepth ?? 0,
     });
     if (!reviewed.ok) {
       input.textParts.push('');
@@ -515,6 +587,7 @@ export async function continueAgentPlannerStepsAfterResponse(
     textParts,
     outputDir,
     options,
+    clarificationDepth: continuation.clarificationDepth,
   });
   return continued ?? { text: textParts.join('\n') };
 }

@@ -67,9 +67,9 @@ describe('parseBotIntent', () => {
   it('parses latest summary intent', () => {
     expect(parseBotIntent('今日概况')).toEqual({ type: 'latest_summary' });
     expect(parseBotIntent('今天数据')).toEqual({ type: 'latest_summary' });
-    expect(parseBotIntent('查今天数据')).toEqual({ type: 'latest_summary' });
+    expect(parseBotIntent('查今天数据')).toEqual({ type: 'unknown', text: '查今天数据' });
     expect(parseBotIntent('查看日报')).toEqual({ type: 'latest_summary' });
-    expect(parseBotIntent('看下 今天数据')).toEqual({ type: 'latest_summary' });
+    expect(parseBotIntent('看下 今天数据')).toEqual({ type: 'unknown', text: '看下 今天数据' });
     expect(parseBotIntent('看下 公域日报')).toEqual({ type: 'latest_summary' });
   });
 
@@ -99,11 +99,11 @@ describe('parseBotIntent', () => {
     });
   });
 
-  it('parses natural read-only summary questions without triggering actions', () => {
-    expect(parseBotIntent('今天咋样')).toEqual({ type: 'latest_summary' });
-    expect(parseBotIntent('现在公域怎么样')).toEqual({ type: 'latest_summary' });
+  it('declines broad natural read-only summary questions instead of guessing', () => {
+    expect(parseBotIntent('今天咋样')).toEqual({ type: 'unknown', text: '今天咋样' });
+    expect(parseBotIntent('现在公域怎么样')).toEqual({ type: 'unknown', text: '现在公域怎么样' });
     expect(parseBotIntent('日报概况')).toEqual({ type: 'latest_summary' });
-    expect(parseBotIntent('能不能看下今天数据')).toEqual({ type: 'latest_summary' });
+    expect(parseBotIntent('能不能看下今天数据')).toEqual({ type: 'unknown', text: '能不能看下今天数据' });
   });
 
   it('parses product query intent', () => {

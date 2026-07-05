@@ -161,23 +161,19 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function readClarificationDepth(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : undefined;
+}
+
 function toBotResponse(response: AgentResponse): BotResponse {
-  if (response.card === undefined) return { text: response.text };
-  if (isRecord(response.card)) return { text: response.text, card: response.card };
-  return { text: response.text };
+  const base = response.metadata ? { text: response.text, metadata: response.metadata } : { text: response.text };
+  if (response.card === undefined) return base;
+  if (isRecord(response.card)) return { ...base, card: response.card };
+  return base;
 }
 
 export function createFeishuMessageDispatcher(config: FeishuMessageDispatcherConfig = {}): FeishuMessageDispatcher {
   const resolveIntent = config.resolveIntent ?? ((text: string) => (config.agentPlannerProvider ? parseAgentFirstBotIntent(text) : parseBotIntent(text)));
-  const handleIntent = config.handleIntent ?? ((intent, outputDir) => handleBotIntent(intent, outputDir, {
-    llmToolSelector: config.llmToolSelector,
-    llmIntentProposalProvider: config.llmIntentProposalProvider,
-    agentPlannerProvider: config.agentPlannerProvider,
-    rentalPriceClient: config.rentalPriceClient,
-    activityAutomationClient: config.activityAutomationClient,
-    closedOrderFetchImpl: config.closedOrderFetchImpl,
-    closedOrderRegistryPaths: config.closedOrderRegistryPaths,
-  }));
   const logError = config.logError ?? ((error, message) => console.error(`飞书消息处理失败 ${message.messageId}:`, error));
 
   return {
@@ -188,6 +184,16 @@ export function createFeishuMessageDispatcher(config: FeishuMessageDispatcherCon
 
       try {
         const text = textWithoutMentionKeys(message, config);
+        const handleIntent = config.handleIntent ?? ((intent, outputDir) => handleBotIntent(intent, outputDir, {
+          llmToolSelector: config.llmToolSelector,
+          llmIntentProposalProvider: config.llmIntentProposalProvider,
+          agentPlannerProvider: config.agentPlannerProvider,
+          rentalPriceClient: config.rentalPriceClient,
+          activityAutomationClient: config.activityAutomationClient,
+          closedOrderFetchImpl: config.closedOrderFetchImpl,
+          closedOrderRegistryPaths: config.closedOrderRegistryPaths,
+          clarificationDepth: readClarificationDepth(message.metadata?.clarificationDepth),
+        }));
         const runtime = config.runtime ?? createAgentRuntime({
           outputDir: config.outputDir,
           resolveIntent: (input) => canonicalizeIntent(resolveIntent(input, message)),

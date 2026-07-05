@@ -251,14 +251,16 @@ describe('agent runtime approval card', () => {
         { label: '查询数据', message: '查询 pocket3 的公域数据', description: '只读查询' },
         { label: '铺新链', message: '帮我铺十条 pocket3 的新链', description: '需要二次确认' },
       ],
-    });
+    }, { clarificationRef: 'clarify_1_deadbeef', confirmationKey: '0123456789abcdef01234567' });
 
     const raw = JSON.stringify(card);
     expect(raw).toContain('Agent 需要确认你的意图');
     expect(raw).toContain('custom_message');
     expect(raw).toContain('agent_clarify_custom');
     expect(raw).toContain('agent_clarify_select');
-    expect(raw).toContain('帮我铺十条 pocket3 的新链');
+    expect(raw).toContain('clarify_1_deadbeef');
+    expect(raw).not.toContain('帮我铺十条 pocket3 的新链');
+    expect(raw).not.toContain('selectedMessage');
     expect(raw).not.toContain('selectedTool');
 
     expect(parseAgentClarificationSelection({
@@ -302,6 +304,6 @@ describe('agent runtime approval card', () => {
       originalMessage: '帮我处理一下 875',
       selectedMessage: '复制商品 875',
       label: '自定义澄清',
-    })).toBe('复制商品 875');
+    })).toBe('复制商品 875\n原始指令：帮我处理一下 875');
   });
 });

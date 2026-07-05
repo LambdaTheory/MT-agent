@@ -295,7 +295,7 @@ function hasValidConfirmationKey(value: Record<string, unknown>, request: Record
 }
 
 export function parseRentalPriceChange(text: string): RentalPriceChangeRequest | null {
-  const normalized = text.replace(/\s+/g, ' ').trim();
+  const normalized = text.split(/\r?\n/, 1)[0]?.replace(/\s+/g, ' ').trim() ?? '';
   const command = /^改价\s+(?:商品)?(\d+)\s+(.+)$/.exec(normalized);
   if (!command) return null;
 
@@ -313,7 +313,7 @@ export function parseRentalPriceChange(text: string): RentalPriceChangeRequest |
 }
 
 export function parseRentPriceFieldsFromText(text: string): Record<string, string> {
-  const normalized = text.replace(/\s+/g, ' ').trim();
+  const normalized = text.split(/\r?\n/, 1)[0]?.replace(/\s+/g, ' ').trim() ?? '';
   const fields: Record<string, string> = {};
   for (const match of normalized.matchAll(RENT_FIELD_PATTERN)) {
     const day = match[1];
@@ -1457,31 +1457,31 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
 }
 
 export function parseRentalCopyCommand(text: string): string | null {
-  const normalized = text.replace(/\s+/g, ' ').trim();
+  const normalized = text.split(/\r?\n/, 1)[0]?.replace(/\s+/g, ' ').trim() ?? '';
   const match = /^(?:复制商品|商品复制)\s*(\d+)$/.exec(normalized);
   return match ? match[1] : null;
 }
 
 export function parseDelistCommand(text: string): string | null {
-  const normalized = text.replace(/\s+/g, ' ').trim();
+  const normalized = text.split(/\r?\n/, 1)[0]?.replace(/\s+/g, ' ').trim() ?? '';
   const match = /^(?:下架商品|商品下架)\s*(\d+)$/.exec(normalized);
   return match ? match[1] : null;
 }
 
 export function parseTenancySetCommand(text: string): { productId: string; days: string } | null {
-  const normalized = text.replace(/\s+/g, ' ').trim();
+  const normalized = text.split(/\r?\n/, 1)[0]?.replace(/\s+/g, ' ').trim() ?? '';
   const match = /^(?:设置租期|租期设置)\s*(\d+)\s+([\d,]+)$/.exec(normalized);
   return match ? { productId: match[1], days: match[2] } : null;
 }
 
 export function parseSpecDiscoverCommand(text: string): string | null {
-  const normalized = text.replace(/\s+/g, ' ').trim();
+  const normalized = text.split(/\r?\n/, 1)[0]?.replace(/\s+/g, ' ').trim() ?? '';
   const match = /^(?:查看规格|规格查看)\s*(\d+)$/.exec(normalized);
   return match ? match[1] : null;
 }
 
 export function parseSpecAddCommand(text: string): { productId: string; specDimId: string; itemTitle: string } | null {
-  const normalized = text.replace(/\s+/g, ' ').trim();
+  const normalized = text.split(/\r?\n/, 1)[0]?.replace(/\s+/g, ' ').trim() ?? '';
   const match = /^(?:添加规格|规格添加)\s*(\d+)\s+(\S+)\s+(.+)$/.exec(normalized);
   return match ? { productId: match[1], specDimId: match[2].trim(), itemTitle: match[3].trim() } : null;
 }

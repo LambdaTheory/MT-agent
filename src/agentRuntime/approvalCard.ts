@@ -20,6 +20,7 @@ export interface AgentToolConfirmContinuation {
   currentStepId: string;
   currentStepIndex: number;
   metadataStore: Record<string, unknown>;
+  clarificationDepth?: number;
 }
 
 export interface AgentToolConfirmCardOptions {
@@ -71,6 +72,7 @@ export function parseAgentToolConfirmContinuation(value: unknown): AgentToolConf
   const totalSteps = readNonNegativeInteger(value.totalSteps);
   const currentStepId = readStepId(value.currentStepId);
   const currentStepIndex = readNonNegativeInteger(value.currentStepIndex);
+  const clarificationDepth = value.clarificationDepth === undefined ? undefined : readNonNegativeInteger(value.clarificationDepth);
   const metadataStore = value.metadataStore;
   if (
     !goal ||
@@ -79,6 +81,7 @@ export function parseAgentToolConfirmContinuation(value: unknown): AgentToolConf
     totalSteps === null ||
     !currentStepId ||
     currentStepIndex === null ||
+    clarificationDepth === null ||
     !isRecord(metadataStore) ||
     !Array.isArray(value.steps) ||
     totalSteps < 2 ||
@@ -100,7 +103,7 @@ export function parseAgentToolConfirmContinuation(value: unknown): AgentToolConf
     }
     steps.push(parsed);
   }
-  return { goal, reason, steps, nextIndex, totalSteps, currentStepId, currentStepIndex, metadataStore };
+  return { goal, reason, steps, nextIndex, totalSteps, currentStepId, currentStepIndex, metadataStore, ...(clarificationDepth !== undefined ? { clarificationDepth } : {}) };
 }
 
 function compactJson(value: Record<string, unknown>): string {
