@@ -113,7 +113,16 @@ const publicTrafficReportQueryArgumentsSchema = {
   additionalProperties: false,
 };
 const keywordArgumentsSchema = { type: 'object', properties: { keyword: { type: 'string' }, date: reportDateSchema }, required: ['keyword'], additionalProperties: false };
-const productRankingArgumentsSchema = { type: 'object', properties: { query: { type: 'string' } }, required: ['query'], additionalProperties: false };
+const productRankingArgumentsSchema = {
+  type: 'object',
+  properties: {
+    query: { type: 'string' },
+    metric: { type: 'string', enum: ['shippedOrders', 'amount', 'exposure'] },
+    periodDays: { type: ['integer', 'string'], enum: [1, 7, 30, '1', '7', '30'] },
+  },
+  required: ['query'],
+  additionalProperties: false,
+};
 const positiveIntegerLikeSchema = { type: ['integer', 'string'], pattern: '^[1-9]\\d*$', minimum: 1 };
 const categoryRankingArgumentsSchema = {
   type: 'object',
@@ -209,8 +218,12 @@ const refreshActivityPlanResultMetadataSchema = {
         onlineDaysUnknown: { type: 'integer' },
       },
     },
-    executeRequest: { type: 'object', description: 'Hidden execution request included only inside the generated confirmation card.' },
+    executeRequest: { type: 'object', description: 'Deprecated direct execution request; refreshActivityPlan now returns strategyRequests for strategy choice cards.' },
+    strategyRequests: { type: 'object', description: 'Hidden strategy-specific execution requests for delist_only and delist_and_refill choices.' },
     blockers: { type: 'array', items: { type: 'string' } },
+    skippedGroups: { type: 'array', items: { type: 'string' } },
+    scope: { type: ['string', 'null'] },
+    zeroMetric: { type: 'string', enum: ['created_orders', 'amount'] },
   },
 };
 const refreshActivityExecuteResultMetadataSchema = {
@@ -398,6 +411,9 @@ const refreshActivityPlanArgumentsSchema = {
   properties: {
     date: { type: 'string' },
     maxCandidates: { type: 'number' },
+    query: { type: 'string' },
+    sameSkuGroupId: { type: 'string' },
+    zeroMetric: { type: 'string', enum: ['created_orders', 'amount'] },
   },
   additionalProperties: false,
 };
@@ -422,8 +438,9 @@ const refreshActivityExecuteArgumentsSchema = {
         additionalProperties: false,
       },
     },
+    strategy: { type: 'string', enum: ['delist_only', 'delist_and_refill'] },
   },
-  required: ['date', 'delistProductIds', 'newLinkItems'],
+  required: ['date', 'delistProductIds'],
   additionalProperties: false,
 };
 const rentalPriceChangeArgumentsSchema = {
@@ -612,7 +629,7 @@ const agentTools: AgentToolDefinition[] = [
   },
   {
     name: 'product.rankBestSameSku',
-    description: '按链接维护档案解析商品名、别名、端内ID或同款组，并返回同款组里公域数据表现最好的端内ID。适用于“s23最好的链接是哪条”“数据最好的 pocket3 的端内id是多少”。',
+    description: '按链接维护档案解析商品名、别名、端内ID或同款组，并返回同款组里公域数据表现最好的端内ID。适用于“s23最好的链接是哪条”“数据最好的 pocket3 的端内id是多少”“近30天金额最好的 r50 是哪条”。metric 支持 shippedOrders/amount/exposure，periodDays 支持 1/7/30。',
     risk: 'read',
     requiresConfirmation: false,
     inputSchema: productRankingArgumentsSchema,
@@ -810,7 +827,7 @@ const agentTools: AgentToolDefinition[] = [
   },
   {
     name: 'operations.refreshActivityPlan',
-    description: '按最新或指定日期公域日报筛选近 30 天创单为 0 的 active 链接，按链接档案汇总待下架链接和补链建议；命中安全源商品后生成执行确认卡，确认前不下架、不补链。',
+    description: '按最新或指定日期公域日报筛选近30天零创单或零订单金额 active 链接，按链接档案汇总待下架链接和补链建议；可传 query 或 sameSkuGroupId 将范围收窄到指定商品/同款组，可传 zeroMetric=amount 表示订单金额为0、zeroMetric=created_orders 表示创单为0；返回只下架 / 下架+补链策略选择卡，确认前不下架、不补链。',
     risk: 'read',
     requiresConfirmation: false,
     inputSchema: refreshActivityPlanArgumentsSchema,

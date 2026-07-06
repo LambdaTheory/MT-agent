@@ -93,6 +93,7 @@ import { saveAgentToolConfirmRequest } from './agentToolConfirmStore.js';
 import type { RentalWriteLedgerContext } from './rentalWriteOperationHandlers.js';
 import { rentalPerSpecPriceApplyResponse, rentalPerSpecPricePlanResponse } from './rentalPerSpecPriceHandlers.js';
 import { rentalSpecDimApplyResponse, rentalSpecDimPlanResponse } from './rentalSpecDimHandlers.js';
+import { buildRefreshActivityStrategyCard } from './refreshActivityCard.js';
 
 export interface AgentToolExecutionOptions {
   rentalPriceClient?: RentalPriceSkillClient;
@@ -249,10 +250,20 @@ function readCategoryRankingMetric(value: unknown): CategoryRankingMetric {
   throw new Error('metric must be shippedOrders, amount, or exposure');
 }
 
+function readOptionalCategoryRankingMetric(value: unknown): CategoryRankingMetric | undefined {
+  if (value === undefined) return undefined;
+  return readCategoryRankingMetric(value);
+}
+
 function readPeriodDays(value: unknown): 1 | 7 | 30 {
   const parsed = typeof value === 'string' ? Number(value) : value;
   if (parsed === 1 || parsed === 7 || parsed === 30) return parsed;
   throw new Error('periodDays must be 1, 7, or 30');
+}
+
+function readOptionalPeriodDays(value: unknown): 1 | 7 | 30 | undefined {
+  if (value === undefined) return undefined;
+  return readPeriodDays(value);
 }
 
 function readOptionalLimit(value: unknown): number | undefined {
@@ -1094,11 +1105,16 @@ interface RefreshActivityNewLinkItem {
   sameSkuGroupId?: string;
 }
 
+type RefreshActivityZeroMetric = 'created_orders' | 'amount';
+
 interface RefreshActivityExecuteRequest {
   date: string;
   delistProductIds: string[];
   newLinkItems: RefreshActivityNewLinkItem[];
+  strategy: RefreshActivityExecutionStrategy;
 }
+
+type RefreshActivityExecutionStrategy = 'delist_only' | 'delist_and_refill';
 
 function refreshActivitySourceScore(row: PublicTrafficProductDataRow): number {
   const one = row.periods['1d'];
@@ -1116,18 +1132,58 @@ function refreshActivitySourceScore(row: PublicTrafficProductDataRow): number {
   );
 }
 
+function readRefreshActivityZeroMetric(value: unknown): RefreshActivityZeroMetric {
+  if (value === undefined) return 'created_orders';
+  if (value === 'created_orders' || value === 'amount') return value;
+  throw new Error('zeroMetric must be created_orders or amount');
+}
+
+function refreshActivityZeroMetricLabel(zeroMetric: RefreshActivityZeroMetric): string {
+  return zeroMetric === 'amount' ? '近30天订单金额为0' : '近 30 天创单为 0';
+}
+
+function isRefreshActivityZeroMetricMatch(thirty: PublicTrafficProductDataRow['periods']['30d'], zeroMetric: RefreshActivityZeroMetric): boolean {
+  return zeroMetric === 'amount' ? thirty.amount === 0 : thirty.createdOrders === 0;
+}
+
+function scopedRefreshActivityEntries(
+  args: Record<string, unknown>,
+  registryEntries: LinkRegistryEntry[],
+): { entries: LinkRegistryEntry[]; scopeLine?: string } | { text: string } {
+  const query = readString(args.query);
+  const sameSkuGroupId = readString(args.sameSkuGroupId);
+  if (!query && !sameSkuGroupId) return { entries: registryEntries };
+
+  const registry = createLinkRegistry(registryEntries);
+  if (sameSkuGroupId) {
+    const entries = registry.listBySameSkuGroup(sameSkuGroupId, { includeUnknown: true });
+    if (entries.length === 0) return { text: `没有找到该商品对应的同款组/链接档案：${sameSkuGroupId}` };
+    const label = entries.find((entry) => entry.shortName?.trim())?.shortName?.trim() || sameSkuGroupId;
+    return { entries, scopeLine: `筛选范围：${label} / ${sameSkuGroupId}` };
+  }
+
+  const resolution = resolveRentalPriceSnapshotEntries(query!, registry, { expandSingleInternalIdToSameSkuGroup: true });
+  if (!resolution.ok) return { text: '没有找到该商品对应的同款组/链接档案' };
+  const label = resolution.entries.find((entry) => entry.shortName?.trim())?.shortName?.trim() || query!;
+  return { entries: resolution.entries, scopeLine: `筛选范围：${label} / ${resolution.sameSkuGroupId ?? '未分组'}` };
+}
+
 function buildRefreshActivityNewLinkItems(
   groups: ReturnType<typeof groupRefreshActivityCandidates>,
   context: PublicTrafficDataReportContext,
   registryEntries: LinkRegistryEntry[],
   delistProductIds: Set<string>,
-): { items: RefreshActivityNewLinkItem[]; blockers: string[] } {
+): { items: RefreshActivityNewLinkItem[]; blockers: string[]; skippedGroups: string[]; skippedBlockers: string[] } {
   const items: RefreshActivityNewLinkItem[] = [];
   const blockers: string[] = [];
+  const skippedGroups: string[] = [];
+  const skippedBlockers: string[] = [];
 
   for (const group of groups) {
     if (group.sameSkuGroupId === '未分组') {
-      blockers.push(`${group.label} 没有同款组，无法安全选择补链源商品。`);
+      const blocker = `${group.label} 没有同款组，无法安全选择补链源商品。`;
+      skippedGroups.push(group.label);
+      skippedBlockers.push(blocker);
       continue;
     }
 
@@ -1144,7 +1200,10 @@ function buildRefreshActivityNewLinkItems(
       .sort((left, right) => right.score - left.score || Number(left.entry.internalProductId) - Number(right.entry.internalProductId))[0];
 
     if (!source) {
-      blockers.push(`${group.label}｜${group.sameSkuGroupId} 没有可用的安全源商品；不会从即将下架的链接复制新链。`);
+      const skippedGroup = `${group.label}｜${group.sameSkuGroupId}`;
+      const blocker = `${skippedGroup} 没有可用的安全源商品；不会从即将下架的链接复制新链。`;
+      skippedGroups.push(skippedGroup);
+      skippedBlockers.push(blocker);
       continue;
     }
 
@@ -1162,7 +1221,7 @@ function buildRefreshActivityNewLinkItems(
     blockers.push(`补链总数 ${totalNewLinks} 条超过单次复制上限 ${MAX_NEW_LINK_BATCH_COUNT} 条，请缩小候选数量后再执行。`);
   }
 
-  return { items, blockers };
+  return { items, blockers, skippedGroups, skippedBlockers };
 }
 
 function buildRefreshActivityExecuteRequest(
@@ -1170,7 +1229,8 @@ function buildRefreshActivityExecuteRequest(
   groups: ReturnType<typeof groupRefreshActivityCandidates>,
   context: PublicTrafficDataReportContext,
   registryEntries: LinkRegistryEntry[],
-): { request?: RefreshActivityExecuteRequest; blockers: string[] } {
+  strategy: RefreshActivityExecutionStrategy,
+): { request?: RefreshActivityExecuteRequest; blockers: string[]; skippedGroups: string[]; skippedBlockers: string[] } {
   const delistProductIds = groups.flatMap((group) => group.items.map((item) => item.entry.internalProductId));
   const blockers: string[] = [];
   if (delistProductIds.length === 0) blockers.push('没有待下架候选。');
@@ -1178,14 +1238,32 @@ function buildRefreshActivityExecuteRequest(
     blockers.push(`待下架候选 ${delistProductIds.length} 条超过单次执行上限 ${REFRESH_ACTIVITY_EXECUTION_MAX_PRODUCTS} 条，请缩小候选数量后再执行。`);
   }
 
+  if (blockers.length > 0) return { blockers, skippedGroups: [], skippedBlockers: [] };
+
+  if (strategy === 'delist_only') {
+    return { request: { date, delistProductIds, newLinkItems: [], strategy }, blockers, skippedGroups: [], skippedBlockers: [] };
+  }
+
   const newLinks = buildRefreshActivityNewLinkItems(groups, context, registryEntries, new Set(delistProductIds));
   blockers.push(...newLinks.blockers);
-
-  if (blockers.length > 0) return { blockers };
+  if (blockers.length > 0) return { blockers, skippedGroups: newLinks.skippedGroups, skippedBlockers: newLinks.skippedBlockers };
+  const executableGroupIds = new Set(newLinks.items.map((item) => item.sameSkuGroupId).filter((value): value is string => Boolean(value)));
+  const executableDelistProductIds = groups
+    .filter((group) => executableGroupIds.has(group.sameSkuGroupId))
+    .flatMap((group) => group.items.map((item) => item.entry.internalProductId));
+  if (executableDelistProductIds.length === 0 || newLinks.items.length === 0) return { blockers: ['没有可执行的下架+补链候选。'], skippedGroups: newLinks.skippedGroups, skippedBlockers: newLinks.skippedBlockers };
   return {
-    request: { date, delistProductIds, newLinkItems: newLinks.items },
+    request: { date, delistProductIds: executableDelistProductIds, newLinkItems: newLinks.items, strategy },
     blockers,
+    skippedGroups: newLinks.skippedGroups,
+    skippedBlockers: newLinks.skippedBlockers,
   };
+}
+
+function readRefreshActivityExecutionStrategy(value: unknown): RefreshActivityExecutionStrategy {
+  if (value === undefined) return 'delist_and_refill';
+  if (value === 'delist_only' || value === 'delist_and_refill') return value;
+  throw new Error('strategy must be delist_only or delist_and_refill');
 }
 
 function readStringArray(value: unknown, fieldName: string, maxItems: number): string[] {
@@ -1220,10 +1298,12 @@ function readRefreshActivityNewLinkItems(value: unknown): RefreshActivityNewLink
 function readRefreshActivityExecuteRequest(args: Record<string, unknown>): RefreshActivityExecuteRequest {
   const date = requireString(args.date, 'date');
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error('date must be YYYY-MM-DD');
+  const strategy = readRefreshActivityExecutionStrategy(args.strategy);
   return {
     date,
     delistProductIds: readStringArray(args.delistProductIds, 'delistProductIds', REFRESH_ACTIVITY_EXECUTION_MAX_PRODUCTS),
-    newLinkItems: readRefreshActivityNewLinkItems(args.newLinkItems),
+    newLinkItems: args.newLinkItems === undefined && strategy === 'delist_only' ? [] : readRefreshActivityNewLinkItems(args.newLinkItems),
+    strategy,
   };
 }
 
@@ -1315,10 +1395,13 @@ async function refreshActivityPlanResponse(
   if (!report) return { text: missingReportContextText(date) };
   const registryContext = await loadClosedOrderRegistryContext(options.closedOrderRegistryPaths);
   const maxCandidates = readMaxCandidates(args.maxCandidates);
+  const zeroMetric = readRefreshActivityZeroMetric(args.zeroMetric);
+  const scoped = scopedRefreshActivityEntries(args, registryContext.registry);
+  if ('text' in scoped) return { text: scoped.text, metadata: { toolName: 'operations.refreshActivityPlan', ok: false } };
 
   const candidates: Array<{ entry: LinkRegistryEntry; row: PublicTrafficProductDataRow }> = [];
   const skipped = { missingRow: 0, missing30dDashboard: 0, inactive: 0, onlineLessThan30d: 0, onlineDaysUnknown: 0 };
-  for (const entry of registryContext.registry) {
+  for (const entry of scoped.entries) {
     if (entry.status !== 'active') {
       skipped.inactive += 1;
       continue;
@@ -1342,7 +1425,7 @@ async function refreshActivityPlanResponse(
       skipped.onlineLessThan30d += 1;
       continue;
     }
-    if (thirty.createdOrders === 0) candidates.push({ entry, row });
+    if (isRefreshActivityZeroMetricMatch(thirty, zeroMetric)) candidates.push({ entry, row });
   }
 
   const groups = groupRefreshActivityCandidates(candidates);
@@ -1353,47 +1436,65 @@ async function refreshActivityPlanResponse(
       || Number(left.entry.internalProductId) - Number(right.entry.internalProductId))
     .slice(0, maxCandidates);
   const shownGroups = groupRefreshActivityCandidates(shownCandidates);
-  const execution = buildRefreshActivityExecuteRequest(report.context.date, shownGroups, report.context, registryContext.registry);
+  const delistOnlyExecution = buildRefreshActivityExecuteRequest(report.context.date, shownGroups, report.context, registryContext.registry, 'delist_only');
+  const refillExecution = buildRefreshActivityExecuteRequest(report.context.date, shownGroups, report.context, registryContext.registry, 'delist_and_refill');
   const groupLines = shownGroups.slice(0, 12).map((group, index) => {
     const ids = group.items.map((item) => item.entry.internalProductId).join('、');
-    const newLinkItem = execution.request?.newLinkItems.find((item) => item.sameSkuGroupId === group.sameSkuGroupId);
+    const newLinkItem = refillExecution.request?.newLinkItems.find((item) => item.sameSkuGroupId === group.sameSkuGroupId);
     const source = newLinkItem ? `；补链源 ${newLinkItem.sourceProductId} ${newLinkItem.sourceProductName}` : '';
     return `${index + 1}. ${group.label}｜${group.category}｜${group.sameSkuGroupId}：待下架 ${group.items.length} 条，建议补回 ${group.items.length} 条新链；端内ID ${ids}${source}`;
   });
 
-  const confirmRequest = execution.request ? {
+  const delistOnlyRequest = delistOnlyExecution.request ? {
     toolName: 'operations.refreshActivityExecute',
     arguments: {
-      date: execution.request.date,
-      delistProductIds: execution.request.delistProductIds,
-      newLinkItems: execution.request.newLinkItems,
+      date: delistOnlyExecution.request.date,
+      delistProductIds: delistOnlyExecution.request.delistProductIds,
+      strategy: 'delist_only',
     },
-    reason: '用户要求刷新活跃度：先下架近30天零创单链接，再按同款组补回新链。',
+    reason: '用户选择活跃度刷新策略：只下架候选链接，不补链。',
+    ...(continuation ? { continuation } : {}),
+  } : null;
+  const refillRequest = refillExecution.request ? {
+    toolName: 'operations.refreshActivityExecute',
+    arguments: {
+      date: refillExecution.request.date,
+      delistProductIds: refillExecution.request.delistProductIds,
+      newLinkItems: refillExecution.request.newLinkItems,
+      strategy: 'delist_and_refill',
+    },
+    reason: '用户选择活跃度刷新策略：下架候选链接并按同款组补链。',
     ...(continuation ? { continuation } : {}),
   } : null;
 
   return {
     text: [
       `活跃度刷新计划：${report.context.date}`,
-      `筛选口径：active 链接，30日访问页数据已抓取，上线满 ${REFRESH_ACTIVITY_MIN_ONLINE_DAYS} 天，近 30 天创单为 0。`,
+      scoped.scopeLine,
+      `筛选口径：active 链接，30日访问页数据已抓取，上线满 ${REFRESH_ACTIVITY_MIN_ONLINE_DAYS} 天，${refreshActivityZeroMetricLabel(zeroMetric)}。`,
       `待下架候选：${candidates.length} 条；涉及种类/同款组 ${groups.length} 个。`,
       `本次展示：${shownCandidates.length}/${candidates.length} 条。`,
       '',
       ...(groupLines.length ? groupLines : ['没有找到符合条件的零创单 active 链接。']),
       '',
       `跳过：非 active ${skipped.inactive} 条，无日报行 ${skipped.missingRow} 条，30日访问页缺失 ${skipped.missing30dDashboard} 条，上线不足 ${REFRESH_ACTIVITY_MIN_ONLINE_DAYS} 天 ${skipped.onlineLessThan30d} 条，上线天数未知 ${skipped.onlineDaysUnknown} 条。`,
-      execution.request ? '已生成执行确认卡；确认前不会下架或补链。' : '未生成执行确认卡；请先处理以下阻断项。',
-      ...(!execution.request && execution.blockers.length ? ['', ...execution.blockers.map((blocker) => `- ${blocker}`)] : []),
+      delistOnlyRequest ? '已生成执行策略选择卡；确认前不会下架或补链。' : '未生成执行策略选择卡；请先处理以下阻断项。',
+      ...(refillExecution.skippedBlockers.length ? [`已跳过 blocker：${refillExecution.skippedGroups.join('、')}`] : []),
+      ...(!delistOnlyRequest && delistOnlyExecution.blockers.length ? ['', ...delistOnlyExecution.blockers.map((blocker) => `- ${blocker}`)] : []),
     ].join('\n'),
-    ...(confirmRequest ? { card: buildAgentToolConfirmCard(confirmRequest) } : {}),
+    ...(delistOnlyRequest ? { card: buildRefreshActivityStrategyCard({ date: report.context.date, delistOnlyRequest, ...(refillRequest ? { delistAndRefillRequest: refillRequest } : {}), skippedGroups: refillExecution.skippedGroups }) } : {}),
     metadata: {
       toolName: 'operations.refreshActivityPlan',
       date: report.context.date,
       candidateCount: candidates.length,
       shownCandidateCount: shownCandidates.length,
       skipped,
-      executeRequest: execution.request ?? null,
-      blockers: execution.blockers,
+      scope: scoped.scopeLine ?? null,
+      zeroMetric,
+      executeRequest: null,
+      strategyRequests: { delistOnly: delistOnlyExecution.request ?? null, delistAndRefill: refillExecution.request ?? null },
+      blockers: [...delistOnlyExecution.blockers, ...refillExecution.blockers],
+      skippedGroups: refillExecution.skippedGroups,
     },
   };
 }
@@ -1427,7 +1528,7 @@ async function refreshActivityExecuteResponse(
   const allDelisted = delistFinished && skippedMissingDelist.length === 0;
 
   let newLinkResult: Awaited<ReturnType<typeof executeNewLinkBatchConfirmRequest>> | Awaited<ReturnType<typeof executeNewLinkBatchMultiConfirmRequest>> | null = null;
-  if (delistFinished) {
+  if (delistFinished && request.newLinkItems.length > 0) {
     const items: NewLinkBatchConfirmRequest[] = request.newLinkItems.map((item) => ({
       safetyVersion: NEW_LINK_BATCH_CONFIRMATION_VERSION,
       workflowName: NEW_LINK_BATCH_WORKFLOW_NAME,
@@ -1455,7 +1556,7 @@ async function refreshActivityExecuteResponse(
       await recordAgentToolWriteEvent(ledgerContext, newLinkResult.ok ? 'execution_succeeded' : 'execution_failed', 'operations.refreshActivityExecute', item.sourceProductId);
     }
   }
-  const overallOk = allDelisted && Boolean(newLinkResult?.ok);
+  const overallOk = request.strategy === 'delist_only' ? allDelisted : allDelisted && Boolean(newLinkResult?.ok);
 
   const auditPath = await writeRefreshActivityAudit(outputDir, {
     request,
@@ -1475,7 +1576,7 @@ async function refreshActivityExecuteResponse(
       `${overallOk ? '活跃度刷新执行完成' : delistFinished && skippedMissingDelist.length ? '活跃度刷新部分完成' : '活跃度刷新执行中断'}：${request.date}`,
       `下架：成功 ${delistSuccess.length}/${request.delistProductIds.length}`,
       ...(skippedMissingDelist.length ? [`跳过：${skippedMissingDelist.length} 个商品不存在（${skippedMissingDelist.map((result) => result.productId).join('、')}）`] : []),
-      `补链：${newLinkResult ? `${newLinkResult.ok ? '成功' : '失败'}，完成 ${newLinkResult.completedCount}/${request.newLinkItems.reduce((sum, item) => sum + item.count, 0)} 条` : '因下架未全部成功，已跳过'}`,
+      `补链：${request.strategy === 'delist_only' ? '策略为只下架，未补链' : newLinkResult ? `${newLinkResult.ok ? '成功' : '失败'}，完成 ${newLinkResult.completedCount}/${request.newLinkItems.reduce((sum, item) => sum + item.count, 0)} 条` : '因下架未全部成功，已跳过'}`,
       '',
       '处理种类：',
       ...typeLines,
@@ -1725,7 +1826,12 @@ export async function executeAgentToolRequest(
     }
     case 'product.rankBestSameSku': {
       const query = requireString(request.arguments.query, 'query');
-      return runReadOnlyAgentIntent(outputDir, { type: 'best_product_by_same_sku', query }, options);
+      return runReadOnlyAgentIntent(outputDir, {
+        type: 'best_product_by_same_sku',
+        query,
+        periodDays: readOptionalPeriodDays(request.arguments.periodDays),
+        metric: readOptionalCategoryRankingMetric(request.arguments.metric),
+      }, options);
     }
     case 'product.rankByCategory': {
       const report = await findReportContextForTool(outputDir, readOptionalDate(request.arguments.date));

@@ -426,8 +426,21 @@ describe('agent runtime tool registry', () => {
       properties: {
         date: { type: 'string' },
         maxCandidates: { type: 'number' },
+        query: { type: 'string' },
+        sameSkuGroupId: { type: 'string' },
+        zeroMetric: { type: 'string' },
       },
       additionalProperties: false,
+    });
+    expect(findAgentTool('operations.refreshActivityPlan')?.description).toContain('query');
+    expect(findAgentTool('operations.refreshActivityPlan')?.description).toContain('zeroMetric');
+    expect(findAgentTool('operations.refreshActivityPlan')?.resultMetadataSchema).toMatchObject({
+      properties: {
+        scope: { type: ['string', 'null'] },
+        zeroMetric: { type: 'string' },
+        strategyRequests: { type: 'object' },
+        skippedGroups: { type: 'array' },
+      },
     });
     expect(findAgentTool('linkRegistry.resolveProducts')?.inputSchema).toMatchObject({
       properties: {
@@ -443,8 +456,9 @@ describe('agent runtime tool registry', () => {
         date: { type: 'string' },
         delistProductIds: { type: 'array' },
         newLinkItems: { type: 'array' },
+        strategy: { type: 'string' },
       },
-      required: ['date', 'delistProductIds', 'newLinkItems'],
+      required: ['date', 'delistProductIds'],
       additionalProperties: false,
     });
     expect(findAgentTool('rental.daemonStatus')?.inputSchema).toMatchObject({

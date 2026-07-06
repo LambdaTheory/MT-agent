@@ -108,9 +108,10 @@ interface TestRegistryPaths {
 }
 
 function readAgentToolConfirmValueFromCard(card: unknown): unknown {
-  const body = (card as { body?: { elements?: Array<{ elements?: Array<{ name?: string; behaviors?: Array<{ value?: unknown }> }> }> } }).body;
+  const body = (card as { body?: { elements?: Array<{ elements?: Array<{ name?: string; text?: { content?: string }; behaviors?: Array<{ value?: unknown }> }> }> } }).body;
   const form = body?.elements?.find((element) => Array.isArray(element.elements));
-  const button = form?.elements?.find((element) => element.name === 'agent_tool_confirm_submit');
+  const button = form?.elements?.find((element) => element.text?.content === '下架+补链')
+    ?? form?.elements?.find((element) => element.name === 'agent_tool_confirm_submit');
   return button?.behaviors?.[0]?.value;
 }
 
@@ -2788,7 +2789,7 @@ describe('handleBotIntent', () => {
     expect(response.text).toContain('30日访问页缺失 1 条');
     expect(response.text).toContain('上线不足 30 天 1 条');
     expect(response.text).toContain('上线天数未知 1 条');
-    expect(response.text).toContain('已生成执行确认卡；确认前不会下架或补链');
+    expect(response.text).toContain('已生成执行策略选择卡；确认前不会下架或补链');
     expect(response.card).toBeDefined();
     const request = readAgentToolConfirmRequestFromCard(response.card);
     expect(request.toolName).toBe('operations.refreshActivityExecute');
