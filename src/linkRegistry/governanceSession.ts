@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
-import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { readdir, readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import type { FeishuCardPayload } from '../notify/feishuApp.js';
 import { buildLinkRegistryMaintenanceReport } from './maintenance.js';
 import type { LinkRegistryOverrideRisk } from './overrides.js';
@@ -8,6 +8,7 @@ import {
   loadLinkRegistryReminderState,
   saveLinkRegistryReminderState,
 } from './reminderState.js';
+import { mutateJsonFileSerialized } from './persistence.js';
 import type { LinkRegistryEntry } from './types.js';
 
 type LinkRegistryGovernanceStatus = 'open' | 'reviewing' | 'snoozed' | 'ignored' | 'completed';
@@ -111,9 +112,12 @@ async function readOptionalJson<T>(path: string, fallback: T): Promise<T> {
   }
 }
 
-async function saveSession(path: string, session: LinkRegistryGovernanceSession): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, `${JSON.stringify(session, null, 2)}\n`, 'utf8');
+async function mutateSession(path: string, fallback: LinkRegistryGovernanceSession, mutator: (current: LinkRegistryGovernanceSession) => LinkRegistryGovernanceSession): Promise<LinkRegistryGovernanceSession> {
+  return mutateJsonFileSerialized<LinkRegistryGovernanceSession>(path, fallback, mutator);
+}
+
+async function mutateOptionalSession(path: string, mutator: (current: LinkRegistryGovernanceSession | null) => LinkRegistryGovernanceSession | null): Promise<LinkRegistryGovernanceSession | null> {
+  return mutateJsonFileSerialized<LinkRegistryGovernanceSession | null>(path, null, mutator);
 }
 
 async function loadSession(outputDir: string, date: string): Promise<LinkRegistryGovernanceSession | null> {
@@ -365,40 +369,52 @@ export async function openLinkRegistryGovernancePrompt(
   if (queue.length === 0) return null;
 
   const signature = buildSessionSignature(queue);
-  const existing = await loadSession(outputDir, input.date);
-  if (existing?.signature === signature) {
-    if (!input.force) return null;
-    if (existing.status === 'reviewing' || existing.status === 'completed') return currentReviewResponse(existing, nextReviewIndex(existing));
-    existing.status = 'open';
-    existing.updatedAt = new Date().toISOString();
-    await saveSession(sessionPath(outputDir, input.date), existing);
-    await saveReminderStatus(outputDir, existing, existing.status);
-    return {
-      text: `发现 ${existing.queue.length} 个组级治理问题，建议抽空看一下。`,
-      card: buildPromptCard(existing),
-    };
-  }
-  if (!input.force && existing && (existing.status === 'open' || existing.status === 'reviewing')) return null;
-
   const reminderState = await loadLinkRegistryReminderState(outputDir, 'governance');
   if (!input.force && reminderState?.signature === signature) return null;
 
-  const now = new Date().toISOString();
-  const session: LinkRegistryGovernanceSession = {
-    date: input.date,
-    createdAt: now,
-    updatedAt: now,
-    status: 'open',
-    signature,
-    queue,
-    reviewRecords: [],
-  };
-  await saveSession(sessionPath(outputDir, input.date), session);
-  await saveReminderStatus(outputDir, session, session.status);
-  return {
-    text: `发现 ${queue.length} 个组级治理问题，建议抽空看一下。`,
-    card: buildPromptCard(session),
-  };
+  let response: LinkRegistryGovernanceResponse | null = null;
+  let reminderSession: LinkRegistryGovernanceSession | null = null;
+  await mutateOptionalSession(sessionPath(outputDir, input.date), (existing) => {
+    if (existing && (existing.status === 'reviewing' || existing.status === 'completed')) {
+      response = currentReviewResponse(existing, nextReviewIndex(existing));
+      return existing;
+    }
+    if (existing?.signature === signature) {
+      if (!input.force) return existing;
+      const updated: LinkRegistryGovernanceSession = {
+        ...existing,
+        status: 'open',
+        updatedAt: new Date().toISOString(),
+      };
+      reminderSession = updated;
+      response = {
+        text: `发现 ${updated.queue.length} 个组级治理问题，建议抽空看一下。`,
+        card: buildPromptCard(updated),
+      };
+      return updated;
+    }
+    if (!input.force && existing && (existing.status === 'open' || existing.status === 'reviewing')) return existing;
+
+    const now = new Date().toISOString();
+    const session: LinkRegistryGovernanceSession = {
+      date: input.date,
+      createdAt: now,
+      updatedAt: now,
+      status: 'open',
+      signature,
+      queue,
+      reviewRecords: [],
+    };
+    reminderSession = session;
+    response = {
+      text: `发现 ${queue.length} 个组级治理问题，建议抽空看一下。`,
+      card: buildPromptCard(session),
+    };
+    return session;
+  });
+  const sessionForReminder = reminderSession as LinkRegistryGovernanceSession | null;
+  if (sessionForReminder) await saveReminderStatus(outputDir, sessionForReminder, sessionForReminder.status);
+  return response;
 }
 
 export async function handleLinkRegistryGovernanceCardAction(
@@ -410,55 +426,76 @@ export async function handleLinkRegistryGovernanceCardAction(
   const { path, session } = resolved;
 
   if (input.action === 'snooze') {
-    session.status = 'snoozed';
-    session.updatedAt = new Date().toISOString();
-    await saveSession(path, session);
-    await saveReminderStatus(outputDir, session, session.status);
+    const updated = await mutateSession(path, session, (current) => ({
+      ...current,
+      status: 'snoozed',
+      updatedAt: new Date().toISOString(),
+    }));
+    await saveReminderStatus(outputDir, updated, updated.status);
     return {
-      text: `组级治理已暂缓 ${session.date}`,
-      card: statusCard('组级治理已暂缓', `已暂缓本次组级治理提醒，日期 ${session.date}。`, 'grey'),
+      text: `组级治理已暂缓 ${updated.date}`,
+      card: statusCard('组级治理已暂缓', `已暂缓本次组级治理提醒，日期 ${updated.date}。`, 'grey'),
     };
   }
 
   if (input.action === 'ignore') {
-    session.status = 'ignored';
-    session.updatedAt = new Date().toISOString();
-    await saveSession(path, session);
-    await saveReminderStatus(outputDir, session, session.status);
+    const updated = await mutateSession(path, session, (current) => ({
+      ...current,
+      status: 'ignored',
+      updatedAt: new Date().toISOString(),
+    }));
+    await saveReminderStatus(outputDir, updated, updated.status);
     return {
-      text: `组级治理已忽略 ${session.date}`,
-      card: statusCard('组级治理本次忽略', `已忽略本次组级治理提醒，日期 ${session.date}。`, 'grey'),
+      text: `组级治理已忽略 ${updated.date}`,
+      card: statusCard('组级治理本次忽略', `已忽略本次组级治理提醒，日期 ${updated.date}。`, 'grey'),
     };
   }
 
   if (input.action === 'start') {
-    session.status = 'reviewing';
-    session.updatedAt = new Date().toISOString();
-    await saveSession(path, session);
-    await saveReminderStatus(outputDir, session, session.status);
-    return currentReviewResponse(session, nextReviewIndex(session));
+    const updated = await mutateSession(path, session, (current) => ({
+      ...current,
+      status: 'reviewing',
+      updatedAt: new Date().toISOString(),
+    }));
+    await saveReminderStatus(outputDir, updated, updated.status);
+    return currentReviewResponse(updated, nextReviewIndex(updated));
   }
 
-  const reviewIndex = input.reviewIndex && input.reviewIndex > 0 ? input.reviewIndex : nextReviewIndex(session);
-  const item = session.queue[reviewIndex - 1];
-  if (!item) return { text: '没有找到对应的治理条目，请从最新卡片继续。' };
-
-  session.reviewRecords.push({
-    reviewIndex,
-    kind: item.kind,
-    title: item.title,
-    decision: input.action === 'advance' ? 'watch' : (input.decision ?? 'watch'),
-    ...(input.note?.trim() ? { note: input.note.trim() } : {}),
-    ...(item.sameSkuGroupId ? { sameSkuGroupId: item.sameSkuGroupId } : {}),
-    ...(item.internalProductId ? { internalProductId: item.internalProductId } : {}),
-    ...(input.reviewerId ? { reviewerId: input.reviewerId } : {}),
-    submittedAt: new Date().toISOString(),
+  let invalidResponse: LinkRegistryGovernanceResponse | null = null;
+  let nextIndex = 1;
+  const updated = await mutateSession(path, session, (current) => {
+    const reviewIndex = input.reviewIndex && input.reviewIndex > 0 ? input.reviewIndex : nextReviewIndex(current);
+    const item = current.queue[reviewIndex - 1];
+    if (!item) {
+      invalidResponse = { text: '没有找到对应的治理条目，请从最新卡片继续。' };
+      return current;
+    }
+    nextIndex = reviewIndex + 1;
+    if (current.reviewRecords.some((record) => record.reviewIndex === reviewIndex)) {
+      return current;
+    }
+    const nextSession: LinkRegistryGovernanceSession = {
+      ...current,
+      reviewRecords: [
+        ...current.reviewRecords,
+        {
+          reviewIndex,
+          kind: item.kind,
+          title: item.title,
+          decision: input.action === 'advance' ? 'watch' : (input.decision ?? 'watch'),
+          ...(input.note?.trim() ? { note: input.note.trim() } : {}),
+          ...(item.sameSkuGroupId ? { sameSkuGroupId: item.sameSkuGroupId } : {}),
+          ...(item.internalProductId ? { internalProductId: item.internalProductId } : {}),
+          ...(input.reviewerId ? { reviewerId: input.reviewerId } : {}),
+          submittedAt: new Date().toISOString(),
+        },
+      ],
+      status: nextIndex > current.queue.length ? 'completed' : 'reviewing',
+      updatedAt: new Date().toISOString(),
+    };
+    return nextSession;
   });
-
-  const nextIndex = reviewIndex + 1;
-  session.status = nextIndex > session.queue.length ? 'completed' : 'reviewing';
-  session.updatedAt = new Date().toISOString();
-  await saveSession(path, session);
-  await saveReminderStatus(outputDir, session, session.status);
-  return currentReviewResponse(session, nextIndex);
+  if (invalidResponse) return invalidResponse;
+  await saveReminderStatus(outputDir, updated, updated.status);
+  return currentReviewResponse(updated, nextIndex);
 }

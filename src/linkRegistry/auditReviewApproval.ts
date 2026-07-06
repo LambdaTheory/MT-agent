@@ -1,8 +1,8 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { readFile } from 'node:fs/promises';
 import { createLinkRegistry } from './store.js';
 import type { LinkRegistryEntry } from './types.js';
 import type { LinkRegistryEntryOverride, LinkRegistryOverrides } from './overrides.js';
+import { writeJsonAtomic } from './persistence.js';
 
 export interface LinkRegistryAuditReviewApprovalRow {
   reviewKey: string;
@@ -435,6 +435,5 @@ export function renderLinkRegistryAuditReviewApprovalResultMarkdown(result: Link
 }
 
 export async function writeLinkRegistryOverrides(path: string, overrides: LinkRegistryOverrides): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, `${JSON.stringify(overrides, null, 2)}\n`, 'utf8');
+  await writeJsonAtomic(path, overrides);
 }

@@ -1,8 +1,9 @@
 import { execFile } from 'node:child_process';
-import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { access, readFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import type { GoodsSnapshotItem } from '../publicTraffic/types.js';
+import { writeJsonAtomic } from './persistence.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -282,8 +283,7 @@ export async function loadOptionalDaemonCatalogSnapshot(path: string | undefined
 }
 
 export async function saveDaemonCatalogSnapshot(path: string, snapshot: DaemonCatalogSnapshot): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, `${JSON.stringify(snapshot, null, 2)}\n`, 'utf8');
+  await writeJsonAtomic(path, snapshot);
 }
 
 export function mergeGoodsSnapshotWithDaemon(base: GoodsSnapshotItem[], daemonEntries: DaemonCatalogEntry[]): GoodsSnapshotItem[] {

@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { loadClosedOrderRegistryContext } from '../closedOrderFeedback/runtime.js';
@@ -7,9 +7,9 @@ import {
   mergeLinkRegistryOverrides,
   readLinkRegistryAuditReviewApprovalMarkdown,
   renderLinkRegistryAuditReviewApprovalResultMarkdown,
-  writeLinkRegistryOverrides,
 } from '../linkRegistry/auditReviewApproval.js';
 import { parseLinkRegistryOverrides, type LinkRegistryOverrides } from '../linkRegistry/overrides.js';
+import { mutateJsonFileSerialized } from '../linkRegistry/persistence.js';
 
 function readArg(argv: string[], name: string): string | undefined {
   const flagIndex = argv.indexOf(name);
@@ -17,13 +17,8 @@ function readArg(argv: string[], name: string): string | undefined {
   return argv.find((item) => item.startsWith(`${name}=`))?.slice(name.length + 1);
 }
 
-async function readExistingOverrides(path: string): Promise<LinkRegistryOverrides | null> {
-  try {
-    return parseLinkRegistryOverrides(JSON.parse(await readFile(path, 'utf8')) as unknown);
-  } catch (error) {
-    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return null;
-    throw error;
-  }
+async function mergeOverridesSerialized(path: string, patch: LinkRegistryOverrides): Promise<void> {
+  await mutateJsonFileSerialized<unknown>(path, { version: 1 }, (current) => mergeLinkRegistryOverrides(parseLinkRegistryOverrides(current), patch));
 }
 
 async function writeArtifacts(resultDir: string, result: ReturnType<typeof buildLinkRegistryAuditReviewApprovalResult>): Promise<{ jsonPath: string; markdownPath: string }> {
@@ -44,8 +39,7 @@ export async function runLinkRegistryApplyAuditReviewCli(argv = process.argv.sli
   const ctx = await loadClosedOrderRegistryContext({}, process.cwd());
   const rows = await readLinkRegistryAuditReviewApprovalMarkdown(markdownPath);
   const result = buildLinkRegistryAuditReviewApprovalResult(markdownPath, rows, ctx.registry);
-  const mergedOverrides = mergeLinkRegistryOverrides(await readExistingOverrides(overridesPath), result.overrides);
-  await writeLinkRegistryOverrides(overridesPath, mergedOverrides);
+  await mergeOverridesSerialized(overridesPath, result.overrides);
   const artifacts = await writeArtifacts(artifactDir, result);
 
   console.log('链接档案审计审批已落地');

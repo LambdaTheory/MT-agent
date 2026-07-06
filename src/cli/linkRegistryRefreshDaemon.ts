@@ -1,14 +1,13 @@
-import { access, mkdir, writeFile } from 'node:fs/promises';
-import { dirname } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { loadConfig } from '../config/loadConfig.js';
 import { loadEnv } from '../config/loadEnv.js';
-import { loadOptionalJson, resolveClosedOrderRegistryPaths } from '../closedOrderFeedback/runtime.js';
+import { resolveClosedOrderRegistryPaths } from '../closedOrderFeedback/runtime.js';
 import { fetchDaemonCatalogSnapshot, mergeGoodsSnapshotWithDaemon, saveDaemonCatalogSnapshot } from '../linkRegistry/daemonCatalog.js';
+import { decideRefreshHealth } from '../linkRegistry/refreshHealth.js';
+import { writeJsonAtomic } from '../linkRegistry/persistence.js';
 import { loadProductIdMapping, type ProductIdMapping } from '../mapping/productIdMapping.js';
 import { buildPublicTrafficPaths } from '../publicTraffic/paths.js';
-import { updateGoodsLinkLifecycle, type GoodsLinkLifecycleState } from '../publicTraffic/goodsLinkLifecycle.js';
-import { updateGoodsFirstSeen, type GoodsFirstSeenIndex } from '../publicTraffic/goodsSnapshot.js';
+import { mutateGoodsSnapshotStateSerialized, updateGoodsFirstSeenStateSerialized, updateGoodsLinkLifecycleStateSerialized } from '../publicTraffic/goodsStatePersistence.js';
 import type { GoodsSnapshotItem } from '../publicTraffic/types.js';
 
 function readArg(argv: string[], name: string): string | undefined {
@@ -19,20 +18,6 @@ function readArg(argv: string[], name: string): string | undefined {
 
 function today(): string {
   return new Date().toISOString().slice(0, 10);
-}
-
-async function pathExists(path: string): Promise<boolean> {
-  try {
-    await access(path);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-async function writeJson(path: string, value: unknown): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
 }
 
 function goodsSnapshotFromMapping(mapping: ProductIdMapping): GoodsSnapshotItem[] {
@@ -57,43 +42,42 @@ export async function runLinkRegistryRefreshDaemonCli(argv = process.argv.slice(
     artifactsDir: config.outputDir,
   }, process.cwd());
 
-  const [mapping, existingSnapshot, previousFirstSeen, previousLifecycle, firstSeenExists] = await Promise.all([
-    loadProductIdMapping(resolvedPaths.productIdMapPath).catch((error) => {
-      if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return {};
-      throw error;
-    }),
-    loadOptionalJson<GoodsSnapshotItem[]>(resolvedPaths.goodsSnapshotPath, []),
-    loadOptionalJson<GoodsFirstSeenIndex>(resolvedPaths.firstSeenPath, {}),
-    loadOptionalJson<GoodsLinkLifecycleState | null>(resolvedPaths.lifecyclePath, null),
-    pathExists(resolvedPaths.firstSeenPath),
-  ]);
+  const mapping = await loadProductIdMapping(resolvedPaths.productIdMapPath).catch((error) => {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return {};
+    throw error;
+  });
 
   const daemonSnapshot = await fetchDaemonCatalogSnapshot({ cwd: process.cwd() });
   await saveDaemonCatalogSnapshot(resolvedPaths.daemonCatalogPath, daemonSnapshot);
 
-  const mergedSnapshot = mergeGoodsSnapshotWithDaemon(
-    existingSnapshot.length > 0 ? existingSnapshot : goodsSnapshotFromMapping(mapping),
+  const { previous: existingSnapshot, current: mergedSnapshot } = await mutateGoodsSnapshotStateSerialized(resolvedPaths.goodsSnapshotPath, (latestPrevious) => mergeGoodsSnapshotWithDaemon(
+    latestPrevious.length > 0 ? latestPrevious : goodsSnapshotFromMapping(mapping),
     daemonSnapshot.entries,
-  );
-  await writeJson(resolvedPaths.goodsSnapshotPath, mergedSnapshot);
-
-  const firstSeen = updateGoodsFirstSeen({
-    currentDate: referenceDate,
-    previous: previousFirstSeen,
-    current: mergedSnapshot,
-    baseline: !firstSeenExists,
+  ));
+  const refreshHealth = decideRefreshHealth({
+    previousSnapshotCount: existingSnapshot.length,
+    currentMergedSnapshotCount: mergedSnapshot.length,
+    daemonCount: daemonSnapshot.count,
+    daemonExcludedCount: daemonSnapshot.excludedCount,
+    daemonPagesScraped: daemonSnapshot.pagesScraped,
+    daemonFetchMode: 'live',
   });
-  await writeJson(resolvedPaths.firstSeenPath, firstSeen);
 
-  const lifecycle = updateGoodsLinkLifecycle({
+  const firstSeen = await updateGoodsFirstSeenStateSerialized({
+    path: resolvedPaths.firstSeenPath,
     currentDate: referenceDate,
-    previous: previousLifecycle,
     current: mergedSnapshot,
   });
-  await writeJson(resolvedPaths.lifecyclePath, lifecycle.state);
+
+  const lifecycle = await updateGoodsLinkLifecycleStateSerialized({
+    path: resolvedPaths.lifecyclePath,
+    currentDate: referenceDate,
+    current: mergedSnapshot,
+    suppressNewRemovals: refreshHealth.suppressLifecycleDrop,
+  });
 
   const datedPaths = buildPublicTrafficPaths(config.outputDir, referenceDate);
-  await writeJson(datedPaths.goodsListSnapshot, mergedSnapshot);
+  await writeJsonAtomic(datedPaths.goodsListSnapshot, mergedSnapshot);
 
   console.log(JSON.stringify({
     referenceDate,
@@ -104,6 +88,8 @@ export async function runLinkRegistryRefreshDaemonCli(argv = process.argv.slice(
     firstSeenEntries: Object.keys(firstSeen).length,
     activeLifecycleEntries: Object.keys(lifecycle.state.active).length,
     removedLifecycleEntries: lifecycle.state.removedLinks.length,
+    healthWarnings: refreshHealth.warnings,
+    lifecycleSuppressed: refreshHealth.suppressLifecycleDrop,
     daemonCatalogPath: resolvedPaths.daemonCatalogPath,
     goodsSnapshotPath: resolvedPaths.goodsSnapshotPath,
   }, null, 2));

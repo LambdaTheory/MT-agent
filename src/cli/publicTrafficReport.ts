@@ -11,6 +11,7 @@ import { buildInventorySameSkuSnapshot } from '../inventoryStatus/snapshot.js';
 import { writeInventorySameSkuSnapshot } from '../inventoryStatus/store.js';
 import { openLinkRegistryGovernancePrompt } from '../linkRegistry/governanceSession.js';
 import { openLinkRegistryMaintenancePrompt } from '../linkRegistry/maintenanceSession.js';
+import { writeJsonAtomic } from '../linkRegistry/persistence.js';
 import {
   fetchDaemonCatalogSnapshot,
   loadOptionalDaemonCatalogSnapshot,
@@ -18,6 +19,7 @@ import {
   saveDaemonCatalogSnapshot,
   type DaemonCatalogSnapshot,
 } from '../linkRegistry/daemonCatalog.js';
+import { decideRefreshHealth } from '../linkRegistry/refreshHealth.js';
 import { annotateGoodsExportWorkbookWithInternalId } from '../mapping/annotateGoodsExportWorkbook.js';
 import { parseGoodsExportSnapshot } from '../mapping/goodsExportMapping.js';
 import { loadProductIdMapping, type ProductIdMapping } from '../mapping/productIdMapping.js';
@@ -33,9 +35,10 @@ import { resolveFallbackProductId } from '../publicTraffic/extractProductIdFromI
 import { buildPublicTrafficFeishuText } from '../publicTraffic/buildPublicTrafficFeishu.js';
 import { buildPublicTrafficMarkdown } from '../publicTraffic/buildPublicTrafficMarkdown.js';
 import { writePublicTrafficWorkbookBuffer } from '../publicTraffic/buildPublicTrafficWorkbook.js';
-import { updateGoodsLinkLifecycle, type GoodsLinkLifecycleState } from '../publicTraffic/goodsLinkLifecycle.js';
+import { type GoodsLinkLifecycleState } from '../publicTraffic/goodsLinkLifecycle.js';
 import { fetchRecentGoodsManagerProducts } from '../publicTraffic/goodsManagerNewProducts.js';
-import { filterFirstSeenWithinDays, updateGoodsFirstSeen, type GoodsFirstSeenIndex } from '../publicTraffic/goodsSnapshot.js';
+import { filterFirstSeenWithinDays, type GoodsFirstSeenIndex } from '../publicTraffic/goodsSnapshot.js';
+import { mutateGoodsSnapshotStateSerialized, updateGoodsFirstSeenStateSerialized, updateGoodsLinkLifecycleStateSerialized } from '../publicTraffic/goodsStatePersistence.js';
 import { mergePublicTrafficData } from '../publicTraffic/mergePublicTrafficData.js';
 import { buildPublicTrafficPaths } from '../publicTraffic/paths.js';
 import { loadProductNameMap } from '../publicTraffic/productDisplayName.js';
@@ -523,31 +526,34 @@ export async function runPublicTrafficReportCli(): Promise<PublicTrafficReportCl
     const mapping = await loadMappingSafely(mappingPath, log);
     const goodsSnapshotFromExport = await loadGoodsSnapshotFromExport(goodsExportPath, log);
     const daemonCatalog = await refreshDaemonCatalogForReport(paths.daemonCatalogState, log);
-    const currentGoodsSnapshot = mergeGoodsSnapshotWithDaemon(
-      goodsSnapshotFromExport ?? goodsSnapshotFromMapping(mapping),
+    const { previous: previousGoodsSnapshot, current: currentGoodsSnapshot } = await mutateGoodsSnapshotStateSerialized(paths.goodsCurrentSnapshotState, (latestPrevious) => mergeGoodsSnapshotWithDaemon(
+      goodsSnapshotFromExport ?? (latestPrevious.length > 0 ? latestPrevious : goodsSnapshotFromMapping(mapping)),
       daemonCatalog?.entries ?? [],
-    ).map((item) => (item.listingState ? { ...item, observedAt: item.observedAt ?? runDate } : item));
-    await mkdir(dirname(paths.goodsCurrentSnapshotState), { recursive: true });
-    await writeFile(paths.goodsListSnapshot, JSON.stringify(currentGoodsSnapshot, null, 2), 'utf8');
-    await writeFile(paths.goodsCurrentSnapshotState, JSON.stringify(currentGoodsSnapshot, null, 2), 'utf8');
-    log.addEvent(`鍟嗗搧褰撳墠蹇収宸蹭繚瀛? ${currentGoodsSnapshot.length} 鏉? daemon=${daemonCatalog?.entries.length ?? 0}`);
-    const previousFirstSeen = await loadGoodsFirstSeenState(paths.goodsFirstSeenState);
-    const firstSeenState = updateGoodsFirstSeen({
+    ).map((item) => (item.listingState ? { ...item, observedAt: item.observedAt ?? runDate } : item)));
+    const refreshHealth = decideRefreshHealth({
+      previousSnapshotCount: previousGoodsSnapshot.length,
+      currentMergedSnapshotCount: currentGoodsSnapshot.length,
+      daemonCount: daemonCatalog?.count ?? null,
+      daemonExcludedCount: daemonCatalog?.excludedCount,
+      daemonPagesScraped: daemonCatalog?.pagesScraped,
+      daemonFetchMode: daemonCatalog ? 'live' : 'missing',
+    });
+    for (const warning of refreshHealth.warnings) log.addEvent(warning);
+    await writeJsonAtomic(paths.goodsListSnapshot, currentGoodsSnapshot);
+    log.addEvent(`商品当前快照已保存: ${currentGoodsSnapshot.length} 条, daemon=${daemonCatalog?.entries.length ?? 0}`);
+    const firstSeenState = await updateGoodsFirstSeenStateSerialized({
+      path: paths.goodsFirstSeenState,
       currentDate: runDate,
-      previous: previousFirstSeen.state,
       current: currentGoodsSnapshot,
-      baseline: !previousFirstSeen.found,
     });
     const newGoodsPlatformIds = newGoodsPlatformIdsFromFirstSeen(currentGoodsSnapshot, firstSeenState, runDate);
-    await saveGoodsFirstSeenState(paths.goodsFirstSeenState, firstSeenState);
-    const previousLinkLifecycleState = await loadGoodsLinkLifecycleState(paths.goodsLinkLifecycleState, log);
-    const linkLifecycle = updateGoodsLinkLifecycle({
+    const linkLifecycle = await updateGoodsLinkLifecycleStateSerialized({
+      path: paths.goodsLinkLifecycleState,
       currentDate: runDate,
-      previous: previousLinkLifecycleState,
       current: currentGoodsSnapshot,
+      suppressNewRemovals: refreshHealth.suppressLifecycleDrop,
+      onInvalidState: () => log.addEvent('商品链接生命周期状态损坏: 重新初始化'),
     });
-    await saveGoodsLinkLifecycleState(paths.goodsLinkLifecycleState, linkLifecycle.state);
-    log.addEvent(`商品链接生命周期: 当前=${Object.keys(linkLifecycle.state.active).length}, 近7天下架=${linkLifecycle.removedLinks.length}`);
 
     try {
       const annotatedCount = annotateGoodsExportWorkbookWithInternalId(paths.goodsExportWorkbook);
@@ -689,7 +695,14 @@ export async function runPublicTrafficReportCli(): Promise<PublicTrafficReportCl
       context.newProductPoolItems = newProductPoolItems;
       context.newProductPoolIds = newProductPoolItems.map((item) => item.productId);
     }
-    context.agentData = { ...(context.agentData ?? {}), removedLinks: linkLifecycle.removedLinks };
+    context.agentData = {
+      ...(context.agentData ?? {}),
+      removedLinks: linkLifecycle.removedLinks,
+      refreshHealth: {
+        warnings: refreshHealth.warnings,
+        lifecycleSuppressed: refreshHealth.suppressLifecycleDrop,
+      },
+    };
     log.addEvent(
       `规则分析: 曝光不足=${context.lowExposure.length}, 点击弱=${context.weakClick.length}, 转化弱=${context.weakConversion.length}, 高潜力=${context.highPotential.length}, 新品观察=${context.newProductObservation.length}, 生命周期治理=${context.lifecycleGovernance.length}, 托管异常=${context.custodyAbnormal?.length ?? 0}, 建议操作=${context.recommendedActions.length}`,
     );
