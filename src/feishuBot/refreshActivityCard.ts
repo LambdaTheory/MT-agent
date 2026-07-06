@@ -8,24 +8,13 @@ export interface RefreshActivityStrategyCardInput {
   skippedGroups: string[];
 }
 
-function strategyForm(text: string, request: AgentToolConfirmRequest, formName: string, buttonName: string): Record<string, unknown> {
-  return {
-    tag: 'form',
-    name: formName,
-    elements: [
-      {
-        tag: 'button',
-        text: { tag: 'plain_text', content: text },
-        type: text === '只下架' ? 'default' : 'primary',
-        form_action_type: 'submit',
-        name: buttonName,
-        behaviors: [{ type: 'callback', value: buildAgentToolConfirmValue(request) }],
-      },
-    ],
-  };
-}
-
 export function buildRefreshActivityStrategyCard(input: RefreshActivityStrategyCardInput): FeishuCardPayload {
+  const infoLines = [
+    `**请选择 ${input.date} 活跃度刷新执行策略**`,
+    '确认前不会下架或补链。',
+    input.skippedGroups.length ? `下架+补链将跳过以下无安全源组：${input.skippedGroups.join('、')}` : undefined,
+  ].filter((line): line is string => Boolean(line)).join('\n');
+
   return {
     schema: '2.0',
     config: { wide_screen_mode: true },
@@ -33,15 +22,31 @@ export function buildRefreshActivityStrategyCard(input: RefreshActivityStrategyC
     body: {
       elements: [
         {
-          tag: 'markdown',
-          content: [
-            `**请选择 ${input.date} 活跃度刷新执行策略**`,
-            '确认前不会下架或补链。',
-            input.skippedGroups.length ? `下架+补链将跳过 blocker：${input.skippedGroups.join('、')}` : undefined,
-          ].filter((line): line is string => Boolean(line)).join('\n'),
+          tag: 'form',
+          name: 'refresh_activity_strategy_form',
+          elements: [
+            {
+              tag: 'markdown',
+              content: infoLines,
+            },
+            {
+              tag: 'button',
+              text: { tag: 'plain_text', content: '只下架' },
+              type: 'default',
+              form_action_type: 'submit',
+              name: 'refresh_activity_delist_only_submit',
+              behaviors: [{ type: 'callback', value: buildAgentToolConfirmValue(input.delistOnlyRequest) }],
+            },
+            ...(input.delistAndRefillRequest ? [{
+              tag: 'button',
+              text: { tag: 'plain_text', content: '下架+补链' },
+              type: 'primary',
+              form_action_type: 'submit',
+              name: 'refresh_activity_delist_refill_submit',
+              behaviors: [{ type: 'callback', value: buildAgentToolConfirmValue(input.delistAndRefillRequest) }],
+            }] : []),
+          ],
         },
-        strategyForm('只下架', input.delistOnlyRequest, 'refresh_activity_delist_only_form', 'refresh_activity_delist_only_submit'),
-        ...(input.delistAndRefillRequest ? [strategyForm('下架+补链', input.delistAndRefillRequest, 'refresh_activity_delist_refill_form', 'refresh_activity_delist_refill_submit')] : []),
       ],
     },
   };
