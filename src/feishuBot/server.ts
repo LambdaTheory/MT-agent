@@ -141,6 +141,8 @@ function expectedActionForButtonName(name: string | undefined): string | undefin
   if (!name) return undefined;
   const exact: Record<string, string> = {
     agent_tool_confirm_submit: 'agent_tool_confirm',
+    refresh_activity_delist_only_submit: 'agent_tool_confirm',
+    refresh_activity_delist_refill_submit: 'agent_tool_confirm',
     agent_tool_cancel_submit: 'agent_tool_cancel',
     new_link_batch_confirm_submit: 'new_link_batch_confirm',
     new_link_batch_multi_confirm_submit: 'new_link_batch_multi_confirm',

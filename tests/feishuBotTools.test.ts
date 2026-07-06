@@ -111,7 +111,9 @@ function readAgentToolConfirmValueFromCard(card: unknown): unknown {
   type El = { name?: string; text?: { content?: string }; behaviors?: Array<{ value?: unknown }>; elements?: El[] };
   const body = (card as { body?: { elements?: El[] } }).body;
   const allButtons = (body?.elements ?? []).flatMap((el) => (Array.isArray(el.elements) ? el.elements : []));
-  const button = allButtons.find((element) => element.text?.content === '下架+补链')
+  const button = allButtons.find((element) => element.name === 'refresh_activity_delist_refill_submit')
+    ?? allButtons.find((element) => element.text?.content === '下架+补链')
+    ?? allButtons.find((element) => element.name === 'refresh_activity_delist_only_submit')
     ?? allButtons.find((element) => element.name === 'agent_tool_confirm_submit');
   return button?.behaviors?.[0]?.value;
 }

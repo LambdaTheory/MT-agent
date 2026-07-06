@@ -8,7 +8,7 @@ export interface RefreshActivityStrategyCardInput {
   skippedGroups: string[];
 }
 
-function strategyForm(text: string, request: AgentToolConfirmRequest, formName: string): Record<string, unknown> {
+function strategyForm(text: string, request: AgentToolConfirmRequest, formName: string, buttonName: string): Record<string, unknown> {
   return {
     tag: 'form',
     name: formName,
@@ -18,7 +18,7 @@ function strategyForm(text: string, request: AgentToolConfirmRequest, formName: 
         text: { tag: 'plain_text', content: text },
         type: text === '只下架' ? 'default' : 'primary',
         form_action_type: 'submit',
-        name: 'agent_tool_confirm_submit',
+        name: buttonName,
         behaviors: [{ type: 'callback', value: buildAgentToolConfirmValue(request) }],
       },
     ],
@@ -40,8 +40,8 @@ export function buildRefreshActivityStrategyCard(input: RefreshActivityStrategyC
             input.skippedGroups.length ? `下架+补链将跳过 blocker：${input.skippedGroups.join('、')}` : undefined,
           ].filter((line): line is string => Boolean(line)).join('\n'),
         },
-        strategyForm('只下架', input.delistOnlyRequest, 'refresh_activity_delist_only_form'),
-        ...(input.delistAndRefillRequest ? [strategyForm('下架+补链', input.delistAndRefillRequest, 'refresh_activity_delist_refill_form')] : []),
+        strategyForm('只下架', input.delistOnlyRequest, 'refresh_activity_delist_only_form', 'refresh_activity_delist_only_submit'),
+        ...(input.delistAndRefillRequest ? [strategyForm('下架+补链', input.delistAndRefillRequest, 'refresh_activity_delist_refill_form', 'refresh_activity_delist_refill_submit')] : []),
       ],
     },
   };
