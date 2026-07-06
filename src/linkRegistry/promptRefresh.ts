@@ -1,5 +1,3 @@
-import { access, mkdir, writeFile } from 'node:fs/promises';
-import { dirname } from 'node:path';
 import { loadConfig } from '../config/loadConfig.js';
 import { loadEnv } from '../config/loadEnv.js';
 import {
@@ -9,13 +7,14 @@ import {
   type ClosedOrderRegistryContext,
 } from '../closedOrderFeedback/runtime.js';
 import { downloadGoodsExport } from '../crawler/goodsExportCrawler.js';
+import { decideRefreshHealth } from './refreshHealth.js';
+import { writeJsonAtomic } from './persistence.js';
 import { buildLinkRegistryMaintenanceReport, isLinkRegistryMaintenanceIgnoredEntry } from './maintenance.js';
 import { fetchDaemonCatalogSnapshot, loadOptionalDaemonCatalogSnapshot, mergeGoodsSnapshotWithDaemon, saveDaemonCatalogSnapshot } from './daemonCatalog.js';
 import { parseGoodsExportSnapshot } from '../mapping/goodsExportMapping.js';
 import { loadProductIdMapping, type ProductIdMapping } from '../mapping/productIdMapping.js';
 import { writeProductIdMappingFromExport } from '../mapping/refreshProductIdMapping.js';
-import { updateGoodsLinkLifecycle, type GoodsLinkLifecycleState } from '../publicTraffic/goodsLinkLifecycle.js';
-import { updateGoodsFirstSeen, type GoodsFirstSeenIndex } from '../publicTraffic/goodsSnapshot.js';
+import { mutateGoodsSnapshotStateSerialized, updateGoodsFirstSeenStateSerialized, updateGoodsLinkLifecycleStateSerialized } from '../publicTraffic/goodsStatePersistence.js';
 import { buildPublicTrafficPaths } from '../publicTraffic/paths.js';
 import type { GoodsSnapshotItem } from '../publicTraffic/types.js';
 import type { LinkRegistryEntry } from './types.js';
@@ -46,9 +45,6 @@ export interface LinkRegistryRefreshResult {
   summary: LinkRegistryRefreshSummary;
 }
 
-function exists(path: string): Promise<boolean> {
-  return access(path).then(() => true).catch(() => false);
-}
 
 function goodsSnapshotFromMapping(mapping: ProductIdMapping): GoodsSnapshotItem[] {
   const seen = new Set<string>();
@@ -144,12 +140,7 @@ export async function refreshLinkRegistryForPrompt(
   const paths = buildPublicTrafficPaths(outputDir, referenceDate);
   const warnings: string[] = [];
 
-  const [previousSnapshot, previousFirstSeen, previousLifecycle, firstSeenExists] = await Promise.all([
-    loadOptionalJson<GoodsSnapshotItem[]>(resolvedPaths.goodsSnapshotPath, []),
-    loadOptionalJson<GoodsFirstSeenIndex>(resolvedPaths.firstSeenPath, {}),
-    loadOptionalJson<GoodsLinkLifecycleState | null>(resolvedPaths.lifecyclePath, null),
-    exists(resolvedPaths.firstSeenPath),
-  ]);
+  const previousSnapshot = await loadOptionalJson<GoodsSnapshotItem[]>(resolvedPaths.goodsSnapshotPath, []);
 
   let goodsExportRefreshed = false;
   let daemonRefreshed = false;
@@ -167,7 +158,6 @@ export async function refreshLinkRegistryForPrompt(
   }
 
   const mapping = await loadProductIdMapping(resolvedPaths.productIdMapPath).catch(() => ({}));
-  const baseSnapshot = goodsSnapshotFromExport ?? (previousSnapshot.length > 0 ? previousSnapshot : goodsSnapshotFromMapping(mapping));
 
   const daemonSnapshot = await (async () => {
     try {
@@ -181,29 +171,34 @@ export async function refreshLinkRegistryForPrompt(
     }
   })();
 
-  const mergedSnapshot = mergeGoodsSnapshotWithDaemon(baseSnapshot, daemonSnapshot?.entries ?? [])
-    .map((item) => (item.listingState ? { ...item, observedAt: item.observedAt ?? referenceDate } : item));
-  await mkdir(dirname(resolvedPaths.goodsSnapshotPath), { recursive: true });
-  await writeFile(resolvedPaths.goodsSnapshotPath, `${JSON.stringify(mergedSnapshot, null, 2)}\n`, 'utf8');
-  await mkdir(dirname(paths.goodsListSnapshot), { recursive: true });
-  await writeFile(paths.goodsListSnapshot, `${JSON.stringify(mergedSnapshot, null, 2)}\n`, 'utf8');
-
-  const firstSeen = updateGoodsFirstSeen({
-    currentDate: referenceDate,
-    previous: previousFirstSeen,
-    current: mergedSnapshot,
-    baseline: !firstSeenExists,
+  const { previous: latestPreviousSnapshot, current: mergedSnapshot } = await mutateGoodsSnapshotStateSerialized(resolvedPaths.goodsSnapshotPath, (latestPrevious) => {
+    const latestBaseSnapshot = goodsSnapshotFromExport ?? (latestPrevious.length > 0 ? latestPrevious : goodsSnapshotFromMapping(mapping));
+    return mergeGoodsSnapshotWithDaemon(latestBaseSnapshot, daemonSnapshot?.entries ?? [])
+      .map((item) => (item.listingState ? { ...item, observedAt: item.observedAt ?? referenceDate } : item));
   });
-  await mkdir(dirname(resolvedPaths.firstSeenPath), { recursive: true });
-  await writeFile(resolvedPaths.firstSeenPath, `${JSON.stringify(firstSeen, null, 2)}\n`, 'utf8');
+  const refreshHealth = decideRefreshHealth({
+    previousSnapshotCount: latestPreviousSnapshot.length,
+    currentMergedSnapshotCount: mergedSnapshot.length,
+    daemonCount: daemonSnapshot?.count ?? null,
+    daemonExcludedCount: daemonSnapshot?.excludedCount,
+    daemonPagesScraped: daemonSnapshot?.pagesScraped,
+    daemonFetchMode: daemonRefreshed ? 'live' : (daemonSnapshot ? 'fallback' : 'missing'),
+  });
+  warnings.push(...refreshHealth.warnings);
+  await writeJsonAtomic(paths.goodsListSnapshot, mergedSnapshot);
 
-  const lifecycle = updateGoodsLinkLifecycle({
+  const firstSeen = await updateGoodsFirstSeenStateSerialized({
+    path: resolvedPaths.firstSeenPath,
     currentDate: referenceDate,
-    previous: previousLifecycle,
     current: mergedSnapshot,
   });
-  await mkdir(dirname(resolvedPaths.lifecyclePath), { recursive: true });
-  await writeFile(resolvedPaths.lifecyclePath, `${JSON.stringify(lifecycle.state, null, 2)}\n`, 'utf8');
+
+  const lifecycle = await updateGoodsLinkLifecycleStateSerialized({
+    path: resolvedPaths.lifecyclePath,
+    currentDate: referenceDate,
+    current: mergedSnapshot,
+    suppressNewRemovals: refreshHealth.suppressLifecycleDrop,
+  });
 
   const registryContext = await loadClosedOrderRegistryContext(registryInput);
   const summaryBase = summarizeNewEntries(beforeContext?.registry ?? [], registryContext.registry, referenceDate);

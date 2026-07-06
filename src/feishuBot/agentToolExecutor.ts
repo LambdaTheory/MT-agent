@@ -1478,11 +1478,12 @@ async function refreshActivityPlanResponse(
       ...(groupLines.length ? groupLines : ['没有找到符合条件的零创单 active 链接。']),
       '',
       `跳过：非 active ${skipped.inactive} 条，无日报行 ${skipped.missingRow} 条，30日访问页缺失 ${skipped.missing30dDashboard} 条，上线不足 ${REFRESH_ACTIVITY_MIN_ONLINE_DAYS} 天 ${skipped.onlineLessThan30d} 条，上线天数未知 ${skipped.onlineDaysUnknown} 条。`,
-      delistOnlyRequest ? '已生成执行策略选择卡；确认前不会下架或补链。' : '未生成执行策略选择卡；请先处理以下阻断项。',
+      delistOnlyExecution.request
+        ? `计划已生成，执行入口正在完善中（待下架 ${delistOnlyExecution.request.delistProductIds.length} 条：端内ID ${delistOnlyExecution.request.delistProductIds.join('、')}）。请稍等新版本发布后再执行。`
+        : '未能生成执行计划；请先处理以下阻断项。',
       ...(refillExecution.skippedBlockers.length ? [`已跳过 blocker：${refillExecution.skippedGroups.join('、')}`] : []),
-      ...(!delistOnlyRequest && delistOnlyExecution.blockers.length ? ['', ...delistOnlyExecution.blockers.map((blocker) => `- ${blocker}`)] : []),
+      ...(!delistOnlyExecution.request && delistOnlyExecution.blockers.length ? ['', ...delistOnlyExecution.blockers.map((blocker) => `- ${blocker}`)] : []),
     ].join('\n'),
-    ...(delistOnlyRequest ? { card: buildRefreshActivityStrategyCard({ date: report.context.date, delistOnlyRequest, ...(refillRequest ? { delistAndRefillRequest: refillRequest } : {}), skippedGroups: refillExecution.skippedGroups }) } : {}),
     metadata: {
       toolName: 'operations.refreshActivityPlan',
       date: report.context.date,

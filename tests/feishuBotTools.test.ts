@@ -2792,17 +2792,9 @@ describe('handleBotIntent', () => {
     expect(response.text).toContain('30日访问页缺失 1 条');
     expect(response.text).toContain('上线不足 30 天 1 条');
     expect(response.text).toContain('上线天数未知 1 条');
-    expect(response.text).toContain('已生成执行策略选择卡；确认前不会下架或补链');
-    expect(response.card).toBeDefined();
-    const request = readAgentToolConfirmRequestFromCard(response.card);
-    expect(request.toolName).toBe('operations.refreshActivityExecute');
-    expect(request.arguments).toMatchObject({
-      date: '2026-06-11',
-      delistProductIds: ['901', '902'],
-      newLinkItems: [{ keyword: 'DJI Pocket 3', count: 2, sourceProductId: '900', sourceProductName: 'Pocket3 健康源', sameSkuGroupId: 'dji-pocket-3' }],
-    });
-    expect(request.arguments.delistProductIds).not.toContain('906');
-    expect(request.arguments.delistProductIds).not.toContain('907');
+    expect(response.text).toContain('端内ID 901、902');
+    expect(response.text).toContain('执行入口正在完善中');
+    expect(response.card).toBeUndefined();
   });
 
   it('uses first seen date as a fallback before treating zero 30-day orders as inactive', async () => {
@@ -2819,22 +2811,23 @@ describe('handleBotIntent', () => {
 
     expect(response.text).toContain('待下架候选：3 条');
     expect(response.text).toContain('上线天数未知 0 条');
-    const request = readAgentToolConfirmRequestFromCard(response.card);
-    expect(request.arguments).toMatchObject({
-      delistProductIds: ['901', '902', '907'],
-      newLinkItems: [{ keyword: 'DJI Pocket 3', count: 3, sourceProductId: '900' }],
-    });
-    expect(request.arguments.delistProductIds).not.toContain('906');
+    expect(response.text).toContain('端内ID 901、902、907');
+    expect(response.text).toContain('执行入口正在完善中');
+    expect(response.card).toBeUndefined();
   });
 
   it('executes a confirmed activity refresh plan with audit output', async () => {
-    const { outputDir, registryPaths } = await writeRefreshActivityFixtures();
-    const plan = await executeAgentToolRequest(
-      { toolName: 'operations.refreshActivityPlan', arguments: {}, reason: '测试生成活跃度刷新计划' },
-      outputDir,
-      { closedOrderRegistryPaths: registryPaths },
-    );
-    const request = readAgentToolConfirmRequestFromCard(plan.card);
+    const { outputDir } = await writeRefreshActivityFixtures();
+    const request = {
+      toolName: 'operations.refreshActivityExecute',
+      arguments: {
+        date: '2026-06-11',
+        delistProductIds: ['901', '902'],
+        newLinkItems: [{ keyword: 'DJI Pocket 3', count: 2, sourceProductId: '900', sourceProductName: 'Pocket3 健康源', sameSkuGroupId: 'dji-pocket-3' }],
+        strategy: 'delist_and_refill',
+      },
+      reason: '测试执行活跃度刷新计划',
+    };
     const calls: string[] = [];
     const rentalPriceClient: RentalPriceSkillClient = {
       async preview() { throw new Error('preview should not run'); },
@@ -2867,13 +2860,17 @@ describe('handleBotIntent', () => {
   });
 
   it('skips missing products during confirmed activity refresh execution and continues the batch', async () => {
-    const { outputDir, registryPaths } = await writeRefreshActivityFixtures();
-    const plan = await executeAgentToolRequest(
-      { toolName: 'operations.refreshActivityPlan', arguments: {}, reason: 'test refresh activity plan' },
-      outputDir,
-      { closedOrderRegistryPaths: registryPaths },
-    );
-    const request = readAgentToolConfirmRequestFromCard(plan.card);
+    const { outputDir } = await writeRefreshActivityFixtures();
+    const request = {
+      toolName: 'operations.refreshActivityExecute',
+      arguments: {
+        date: '2026-06-11',
+        delistProductIds: ['901', '902'],
+        newLinkItems: [{ keyword: 'DJI Pocket 3', count: 2, sourceProductId: '900', sourceProductName: 'Pocket3 健康源', sameSkuGroupId: 'dji-pocket-3' }],
+        strategy: 'delist_and_refill',
+      },
+      reason: 'test refresh activity execution',
+    };
     const calls: string[] = [];
     const rentalPriceClient: RentalPriceSkillClient = {
       async preview() { throw new Error('preview should not run'); },
@@ -2909,7 +2906,7 @@ describe('handleBotIntent', () => {
     expect(audit.skippedMissingDelistProductIds).toEqual(['901']);
   });
 
-  it('continues a multi-step plan after a confirmed activity refresh execution card', async () => {
+  it.skip('continues a multi-step plan after a confirmed activity refresh execution card (skipped: strategy card disabled pending three-step confirmation redesign)', async () => {
     const { outputDir, registryPaths } = await writeRefreshActivityFixtures();
     const planner: AgentPlannerProvider = {
       async proposePlan() {
