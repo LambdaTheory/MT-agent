@@ -108,10 +108,11 @@ interface TestRegistryPaths {
 }
 
 function readAgentToolConfirmValueFromCard(card: unknown): unknown {
-  const body = (card as { body?: { elements?: Array<{ elements?: Array<{ name?: string; text?: { content?: string }; behaviors?: Array<{ value?: unknown }> }> }> } }).body;
-  const form = body?.elements?.find((element) => Array.isArray(element.elements));
-  const button = form?.elements?.find((element) => element.text?.content === '下架+补链')
-    ?? form?.elements?.find((element) => element.name === 'agent_tool_confirm_submit');
+  type El = { name?: string; text?: { content?: string }; behaviors?: Array<{ value?: unknown }>; elements?: El[] };
+  const body = (card as { body?: { elements?: El[] } }).body;
+  const allButtons = (body?.elements ?? []).flatMap((el) => (Array.isArray(el.elements) ? el.elements : []));
+  const button = allButtons.find((element) => element.text?.content === '下架+补链')
+    ?? allButtons.find((element) => element.name === 'agent_tool_confirm_submit');
   return button?.behaviors?.[0]?.value;
 }
 
