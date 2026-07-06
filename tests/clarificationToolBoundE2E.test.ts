@@ -75,13 +75,13 @@ describe('tool-bound clarification E2E', () => {
       },
     };
 
-    const response = await handleBotIntent({ type: 'unknown', text: '帮我处理 648' }, outputDir, { agentPlannerProvider: planner });
+    const response = await handleBotIntent({ type: 'unknown', text: '帮我处理编号六四八' }, outputDir, { agentPlannerProvider: planner });
     const selectValue = buttonValue(response.card, 'agent_clarify_select_2');
     const clarificationRef = String(selectValue.clarificationRef);
     const context = await loadClarificationContext(outputDir, clarificationRef);
 
     expect(context).toMatchObject({
-      originalMessage: '帮我处理 648',
+      originalMessage: '帮我处理编号六四八',
       candidates: [
         { toolName: 'product.query', arguments: { keyword: '648' }, label: '查询 648' },
         { toolName: 'rental.delist', arguments: { productId: '648' }, label: '下架 648' },

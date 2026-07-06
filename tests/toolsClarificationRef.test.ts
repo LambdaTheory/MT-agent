@@ -56,7 +56,7 @@ describe('tools clarification reference cards', () => {
       },
     };
 
-    const response = await handleBotIntent({ type: 'unknown', text: '帮我处理 648' }, outputDir, { agentPlannerProvider: planner });
+    const response = await handleBotIntent({ type: 'unknown', text: '帮我处理编号六四八' }, outputDir, { agentPlannerProvider: planner });
     const selectValue = buttonValue(response.card, 'agent_clarify_select_1');
     const raw = JSON.stringify(response.card);
 
@@ -67,7 +67,7 @@ describe('tools clarification reference cards', () => {
 
     const loaded = await loadClarificationContext(outputDir, String(selectValue.clarificationRef));
     expect(loaded).toMatchObject({
-      originalMessage: '帮我处理 648',
+      originalMessage: '帮我处理编号六四八',
       question: '你想怎么处理 648？',
       depth: 1,
       confidence: 0.4,

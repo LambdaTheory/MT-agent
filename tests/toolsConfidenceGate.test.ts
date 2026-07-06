@@ -51,7 +51,7 @@ describe('tools confidence gate', () => {
       async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
     };
 
-    const response = await handleBotIntent({ type: 'unknown', text: '帮我处理 648' }, outputDir, { agentPlannerProvider: planner, rentalPriceClient });
+    const response = await handleBotIntent({ type: 'unknown', text: '帮我把 648 下架' }, outputDir, { agentPlannerProvider: planner, rentalPriceClient });
     const selectValue = buttonValue(response.card, 'agent_clarify_select_1');
 
     expect(response.text).toContain('需要你确认');
@@ -59,7 +59,7 @@ describe('tools confidence gate', () => {
     expect(JSON.stringify(response.card)).not.toContain('agent_tool_confirm');
     const loaded = await loadClarificationContext(outputDir, String(selectValue.clarificationRef));
     expect(loaded).toMatchObject({
-      originalMessage: '帮我处理 648',
+      originalMessage: '帮我把 648 下架',
       confidence: 0.4,
       candidates: [{ toolName: 'rental.delist', arguments: { productId: '648' }, label: '执行 rental.delist' }],
     });
@@ -88,7 +88,7 @@ describe('tools confidence gate', () => {
       async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
     };
 
-    const response = await handleBotIntent({ type: 'unknown', text: '帮我处理 648' }, outputDir, {
+    const response = await handleBotIntent({ type: 'unknown', text: '帮我把 648 下架' }, outputDir, {
       agentPlannerProvider: planner,
       rentalPriceClient,
       confidenceExecuteThreshold: 0.8,
@@ -113,7 +113,7 @@ describe('tools confidence gate', () => {
       },
     };
 
-    const response = await handleBotIntent({ type: 'unknown', text: '补充说明：还是帮我处理 648' }, outputDir, {
+    const response = await handleBotIntent({ type: 'unknown', text: '补充说明：还是帮我把 648 下架' }, outputDir, {
       agentPlannerProvider: planner,
       clarificationDepth: MAX_CLARIFY_DEPTH,
     });

@@ -54,6 +54,11 @@ function parseShortMultiProductQuery(text: string): string | null {
   return productIds.length > 0 ? productIds.join(', ') : null;
 }
 
+function looksLikeInternalProductIdQuery(text: string): string | null {
+  const match = /^(?:查询商品|查商品|查询|查|商品)\s*(\d{3,6})$/.exec(text);
+  return match?.[1] ?? null;
+}
+
 interface DateHint {
   date: string;
   raw: string;
@@ -141,6 +146,9 @@ function parseDatedReadIntent(text: string): BotIntent | null {
   const idLookup = /^(?:查\s*ID|ID\s*查询)\s*(\d+)$/i.exec(rest);
   if (idLookup?.[1]) return { type: 'lookup_product_id', query: idLookup[1], date: hint.date };
 
+  const internalProductIdQuery = looksLikeInternalProductIdQuery(rest);
+  if (internalProductIdQuery) return { type: 'query_product', keyword: internalProductIdQuery, date: hint.date };
+
   const query = /^(?:查询商品|查商品|查询|查|商品)\s+(.+)$/.exec(rest);
   if (query?.[1]) {
     const keyword = cleanDatedProductKeyword(query[1]);
@@ -205,6 +213,9 @@ export function parseExactBotIntent(input: string): BotIntent {
   if (/^(组级治理|链接治理|开始组级治理|打开组级治理|呼出组级治理卡)$/.test(canonicalText)) return { type: 'link_registry_governance_prompt' };
   if (/^(链接档案维护|维护链接档案|链接维护卡|链接档案治理)$/.test(canonicalText)) return { type: 'link_registry_maintenance_hub' };
   if (/^(?:商品)?ID(?:查询|互查|转换|换算)$|^打开(?:商品)?ID(?:查询|互查|转换|换算)$|^查ID$/i.test(canonicalText)) return { type: 'lookup_product_id_card' };
+
+  const internalProductIdQuery = looksLikeInternalProductIdQuery(canonicalText);
+  if (internalProductIdQuery) return { type: 'query_product', keyword: internalProductIdQuery };
 
   if (/^(链接维护|开始链接维护|打开链接维护|呼出链接维护卡)\s+daemon$/i.test(canonicalText)) {
     return { type: 'link_registry_maintenance_prompt', sourceMode: 'daemon_only' };

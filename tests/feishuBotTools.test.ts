@@ -3664,7 +3664,7 @@ describe('handleBotIntent', () => {
       async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run for low-confidence proposal'); },
     };
 
-    const response = await handleBotIntent({ type: 'unknown', text: '帮我处理 761' }, 'output', { llmIntentProposalProvider: proposalProvider, rentalPriceClient });
+    const response = await handleBotIntent({ type: 'unknown', text: '帮我把 761 下架' }, 'output', { llmIntentProposalProvider: proposalProvider, rentalPriceClient });
 
     expect(response.text).toContain('我没理解你的意图');
     expect(response.metadata).toMatchObject({ ok: false, declined: true });

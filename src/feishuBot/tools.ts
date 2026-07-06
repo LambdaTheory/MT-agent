@@ -65,6 +65,44 @@ const NEW_LINK_WRITE_INTENT_PLAN_FAILED =
   '这像是新链批量铺设写操作，但 Agent planner 没有生成有效的新链批量铺设计划。为避免误执行或误答只读新链接池，本次不执行；请换个说法或检查 LLM 输出。';
 const LEGACY_WORKFLOW_PLAN_REJECTED =
   'Agent planner 返回了 legacy workflow 格式（selectedWorkflow），但当前飞书路径只接受 registered tool 或 steps 多步骤计划。未执行任何操作；请让 LLM 改为 selectedTool 或 steps。';
+
+const AMBIGUOUS_WRITE_ACTION_PATTERN = /(处理|操作|弄|搞|看着办|整一下|整一整)/;
+const EXPLICIT_ACTION_PATTERN = /(下架|复制|改价|补链|铺链|新链|租期|规格|查|查询|库存|状态|ID查询|(?<!着)看(?!着办))/;
+
+export function shouldForceClarificationBeforePlanner(text: string): boolean {
+  const compact = text.replace(/\s+/g, '');
+  const internalIds = compact.match(/(?<!\d)\d{3,6}(?!\d)/g) ?? [];
+  return internalIds.length >= 1
+    && AMBIGUOUS_WRITE_ACTION_PATTERN.test(compact)
+    && !EXPLICIT_ACTION_PATTERN.test(compact);
+}
+
+function forcedClarificationProductId(text: string): string | null {
+  const compact = text.replace(/\s+/g, '');
+  const internalIds = compact.match(/(?<!\d)\d{3,6}(?!\d)/g) ?? [];
+  return internalIds.length >= 1 ? internalIds.join('/') : null;
+}
+
+function forcedPrePlannerClarification(text: string, outputDir: string, priorDepth = 0): Promise<BotResponse> {
+  const productId = forcedClarificationProductId(text) ?? '该商品';
+  return clarificationResponse({
+    originalMessage: text,
+    question: `你想对 ${productId} 做什么？`,
+    reason: '用户给了明确商品ID，但动作是模糊高风险操作，需要先澄清，不能由 planner 猜业务工具。',
+    options: [
+      { label: '下架', message: `把 ${productId} 下架`, description: '进入下架确认流程' },
+      { label: '复制', message: `复制 ${productId}`, description: '进入复制确认流程' },
+      { label: '改价', message: `修改 ${productId} 价格`, description: '进入改价确认流程' },
+      { label: '先查看信息', message: `查 ${productId}`, description: '只读查看商品状态' },
+    ],
+  }, [
+    { toolName: 'agent.clarifiedMessage', arguments: { message: `把 ${productId} 下架` }, label: '下架', description: '进入下架确认流程' },
+    { toolName: 'agent.clarifiedMessage', arguments: { message: `复制 ${productId}` }, label: '复制', description: '进入复制确认流程' },
+    { toolName: 'agent.clarifiedMessage', arguments: { message: `修改 ${productId} 价格` }, label: '改价', description: '进入改价确认流程' },
+    { toolName: 'agent.clarifiedMessage', arguments: { message: `查 ${productId}` }, label: '先查看信息', description: '只读查看商品状态' },
+  ], 0.3, outputDir, priorDepth);
+}
+
 function declineUnknownIntent(): BotResponse {
   return {
     text: `我没理解你的意图，请换种说法或用精确命令。\n${UNKNOWN_GUIDANCE}`,
@@ -829,6 +867,10 @@ export async function handleBotIntent(intent: BotIntent, outputDir = 'output', o
           closedOrderRegistryPaths: options.closedOrderRegistryPaths,
         },
       });
+    }
+
+    if (shouldForceClarificationBeforePlanner(intent.text)) {
+      return forcedPrePlannerClarification(intent.text, outputDir, options.clarificationDepth);
     }
 
     const plannedResponse = await agentPlannerResponse(intent.text, outputDir, options);
