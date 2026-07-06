@@ -33,6 +33,44 @@ describe('goods link lifecycle', () => {
     expect(Object.keys(result.state.active)).toEqual(['702']);
   });
 
+  it('suppresses newly removed links when refresh health requires lifecycle suppression', () => {
+    const result = updateGoodsLinkLifecycle({
+      currentDate: '2026-07-06',
+      previous: {
+        active: {
+          '701': { platformProductId: 'p701', productName: '商品701' },
+        },
+        removedLinks: [],
+      },
+      current: [],
+      suppressNewRemovals: true,
+    });
+
+    expect(result.removedLinks).toEqual([]);
+    expect(result.state.removedLinks).toEqual([]);
+    expect(result.state.active['701']).toEqual({ platformProductId: 'p701', productName: '商品701' });
+  });
+
+  it('preserves prior active baseline while merging current snapshot during lifecycle suppression', () => {
+    const result = updateGoodsLinkLifecycle({
+      currentDate: '2026-07-06',
+      previous: {
+        active: {
+          '701': { platformProductId: 'p701-old', productName: '商品701旧' },
+          '702': { platformProductId: 'p702', productName: '商品702' },
+        },
+        removedLinks: [],
+      },
+      current: goods(['701', '703']),
+      suppressNewRemovals: true,
+    });
+
+    expect(result.removedLinks).toEqual([]);
+    expect(result.state.active['701']).toEqual({ platformProductId: 'platform-701', productName: '商品 701' });
+    expect(result.state.active['702']).toEqual({ platformProductId: 'p702', productName: '商品702' });
+    expect(result.state.active['703']).toEqual({ platformProductId: 'platform-703', productName: '商品 703' });
+  });
+
   it('keeps only removed links in the 7 day window and deduplicates by latest removal', () => {
     const previous: GoodsLinkLifecycleState = {
       active: {

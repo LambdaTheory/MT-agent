@@ -424,7 +424,7 @@ const refreshActivityExecuteArgumentsSchema = {
     delistProductIds: { type: 'array', minItems: 1, items: { type: 'string' } },
     newLinkItems: {
       type: 'array',
-      minItems: 1,
+      minItems: 0,
       items: {
         type: 'object',
         properties: {

@@ -208,6 +208,172 @@ describe('link registry maintenance session', () => {
     ]));
   });
 
+  it('serializes concurrent maintenance override submissions without changing payload shape', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-link-maintenance-serialized-'));
+    const overridesPath = join(outputDir, 'config', 'link-registry-overrides.json');
+
+    await openLinkRegistryMaintenancePrompt(outputDir, {
+      date: '2026-06-24',
+      registry: registryEntries,
+      referenceDate: '2026-06-24',
+      overridesPath,
+    });
+    await handleLinkRegistryMaintenanceCardAction(outputDir, {
+      date: '2026-06-24',
+      action: 'start',
+    });
+
+    await Promise.all([
+      handleLinkRegistryMaintenanceCardAction(outputDir, {
+        date: '2026-06-24',
+        action: 'submit',
+        internalProductId: '702',
+        reviewIndex: 1,
+        decision: 'accept_with_edit',
+        sameSkuGroupId: 'dji-pocket-3',
+        categoryId: 'camera',
+        categoryName: '相机',
+        productType: 'gimbal-camera',
+        shortName: 'DJI Pocket 3',
+        reviewerId: 'ou_test_1',
+      }),
+      handleLinkRegistryMaintenanceCardAction(outputDir, {
+        date: '2026-06-24',
+        action: 'submit',
+        internalProductId: '703',
+        reviewIndex: 2,
+        decision: 'accept_with_edit',
+        sameSkuGroupId: 'instax-wide300',
+        categoryId: 'camera',
+        categoryName: '相机',
+        productType: 'instant-camera',
+        shortName: 'Wide300',
+        reviewerId: 'ou_test_2',
+      }),
+    ]);
+
+    const overrides = JSON.parse(await readFile(overridesPath, 'utf8')) as {
+      version: 1;
+      entries: Array<{ internalProductId: string; sameSkuGroupId?: string; categoryId?: string; productType?: string; shortName?: string }>;
+    };
+    expect(overrides.version).toBe(1);
+    expect(overrides.entries).toEqual([
+      expect.objectContaining({
+        internalProductId: '702',
+        sameSkuGroupId: 'dji-pocket-3',
+        categoryId: 'camera',
+        productType: 'gimbal-camera',
+        shortName: 'DJI Pocket 3',
+      }),
+      expect.objectContaining({
+        internalProductId: '703',
+        sameSkuGroupId: 'instax-wide300',
+        categoryId: 'camera',
+        productType: 'instant-camera',
+        shortName: 'Wide300',
+      }),
+    ]);
+    const session = JSON.parse(await readFile(join(outputDir, '2026-06-24', 'link-registry-maintenance-session.json'), 'utf8')) as {
+      status: string;
+      reviewRecords: Array<{ internalProductId: string }>;
+    };
+    expect(session.status).toBe('completed');
+    expect(session.reviewRecords.map((record) => record.internalProductId).sort()).toEqual(['702', '703']);
+  });
+
+  it('treats duplicate maintenance submissions for one item as idempotent', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-link-maintenance-idempotent-'));
+    const overridesPath = join(outputDir, 'config', 'link-registry-overrides.json');
+
+    await openLinkRegistryMaintenancePrompt(outputDir, {
+      date: '2026-06-24',
+      registry: registryEntries,
+      referenceDate: '2026-06-24',
+      overridesPath,
+    });
+    await handleLinkRegistryMaintenanceCardAction(outputDir, { date: '2026-06-24', action: 'start' });
+
+    const action = {
+      date: '2026-06-24',
+      action: 'submit' as const,
+      internalProductId: '702',
+      reviewIndex: 1,
+      decision: 'accept_with_edit' as const,
+      sameSkuGroupId: 'dji-pocket-3',
+      categoryId: 'camera',
+      categoryName: '相机',
+      productType: 'gimbal-camera',
+      shortName: 'DJI Pocket 3',
+      reviewerId: 'ou_test_duplicate',
+    };
+    await Promise.all([
+      handleLinkRegistryMaintenanceCardAction(outputDir, action),
+      handleLinkRegistryMaintenanceCardAction(outputDir, action),
+    ]);
+
+    const session = JSON.parse(await readFile(join(outputDir, '2026-06-24', 'link-registry-maintenance-session.json'), 'utf8')) as {
+      reviewRecords: Array<{ internalProductId: string }>;
+    };
+    expect(session.reviewRecords.map((record) => record.internalProductId)).toEqual(['702']);
+  });
+
+  it('does not let a forced prompt reset overwrite an active maintenance review', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-link-maintenance-force-race-'));
+    const overridesPath = join(outputDir, 'config', 'link-registry-overrides.json');
+
+    await openLinkRegistryMaintenancePrompt(outputDir, {
+      date: '2026-06-24',
+      registry: registryEntries,
+      referenceDate: '2026-06-24',
+      overridesPath,
+    });
+    await handleLinkRegistryMaintenanceCardAction(outputDir, { date: '2026-06-24', action: 'start' });
+
+    const changedRegistry = [
+      ...registryEntries,
+      {
+        internalProductId: '705',
+        platformProductId: 'platform-705',
+        productName: 'Ace Pro 2 单机身',
+        status: 'active',
+        firstSeenDate: '2026-06-24',
+        updatedAt: '2026-06-24',
+        source: ['goods_first_seen'],
+      } satisfies LinkRegistryEntry,
+    ];
+    await Promise.all([
+      openLinkRegistryMaintenancePrompt(outputDir, {
+        date: '2026-06-24',
+        registry: changedRegistry,
+        referenceDate: '2026-06-24',
+        overridesPath,
+        force: true,
+      }),
+      handleLinkRegistryMaintenanceCardAction(outputDir, {
+        date: '2026-06-24',
+        action: 'submit',
+        internalProductId: '702',
+        reviewIndex: 1,
+        decision: 'accept_with_edit',
+        sameSkuGroupId: 'dji-pocket-3',
+        categoryId: 'camera',
+        categoryName: '相机',
+        productType: 'gimbal-camera',
+        shortName: 'DJI Pocket 3',
+        reviewerId: 'ou_force_race',
+      }),
+    ]);
+
+    const session = JSON.parse(await readFile(join(outputDir, '2026-06-24', 'link-registry-maintenance-session.json'), 'utf8')) as {
+      status: string;
+      queue: Array<{ internalProductId: string }>;
+      reviewRecords: Array<{ internalProductId: string }>;
+    };
+    expect(session.status).toBe('reviewing');
+    expect(session.queue.map((item) => item.internalProductId)).toEqual(['702', '703']);
+    expect(session.reviewRecords.map((record) => record.internalProductId)).toEqual(['702']);
+  });
+
   it('suppresses duplicate reminders for the same maintenance signature after snooze', async () => {
     const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-link-maintenance-throttle-'));
     const overridesPath = join(outputDir, 'config', 'link-registry-overrides.json');

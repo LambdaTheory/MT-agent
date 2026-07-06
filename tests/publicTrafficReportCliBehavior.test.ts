@@ -390,6 +390,43 @@ describe('runPublicTrafficReportCli public traffic sequencing', () => {
     await expect(readFile(todayPaths.markdown, 'utf8')).resolves.not.toContain('已下架链接');
   });
 
+  it('reports daemon-empty health warnings in report context', async () => {
+    mocks.loadProductIdMapping.mockResolvedValueOnce({ p701: '701' });
+    mocks.fetchDaemonCatalogSnapshot.mockResolvedValueOnce({
+      generatedAt: '2026-06-10T12:00:00Z',
+      count: 0,
+      excludedCount: 0,
+      pagesScraped: 0,
+      entries: [],
+    });
+    const todayPaths = buildPublicTrafficPaths(mocks.outputDir, '2026-06-10');
+    await mkdir(join(mocks.outputDir, 'state'), { recursive: true });
+    await writeFile(todayPaths.goodsCurrentSnapshotState, JSON.stringify([
+      { internalProductId: '701', platformProductId: 'p701', productName: '保留链接' },
+      { internalProductId: '702', platformProductId: 'p702', productName: '疑似误删链接' },
+    ]), 'utf8');
+    await writeFile(todayPaths.goodsLinkLifecycleState, JSON.stringify({
+      active: {
+        '701': { platformProductId: 'p701', productName: '保留链接' },
+        '702': { platformProductId: 'p702', productName: '疑似误删链接' },
+      },
+      removedLinks: [],
+    }), 'utf8');
+    const { runPublicTrafficReportCli } = await import('../src/cli/publicTrafficReport.js');
+
+    await runPublicTrafficReportCli();
+
+    const context = JSON.parse(await readFile(todayPaths.reportContext, 'utf8')) as PublicTrafficDataReportContext & {
+      agentData?: { refreshHealth?: { warnings: string[]; lifecycleSuppressed: boolean } };
+    };
+    expect(context.agentData?.removedLinks).toEqual([]);
+    expect(context.agentData?.refreshHealth).toEqual({
+      warnings: ['daemon snapshot is empty; suppress destructive lifecycle transitions'],
+      lifecycleSuppressed: true,
+    });
+    await expect(readFile(todayPaths.log, 'utf8')).resolves.toContain('daemon snapshot is empty; suppress destructive lifecycle transitions');
+  });
+
   it('keeps first-run daily delta empty while historical deltas still feed report summaries and rows', async () => {
     const { runPublicTrafficReportCli } = await import('../src/cli/publicTrafficReport.js');
 
