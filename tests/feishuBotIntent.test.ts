@@ -140,8 +140,8 @@ describe('parseBotIntent', () => {
     expect(parseBotIntent('这个商品 721 数据如何')).toEqual({ type: 'query_product', keyword: '721' });
   });
 
-  it('leaves vague natural lookup questions for fallback handling', () => {
-    expect(parseBotIntent('查 721')).toEqual({ type: 'unknown', text: '查 721' });
+  it('parses simple single-id lookup while leaving vague natural lookup questions for fallback handling', () => {
+    expect(parseBotIntent('查 721')).toEqual({ type: 'query_product', keyword: '721' });
     expect(parseBotIntent('721怎么样')).toEqual({ type: 'unknown', text: '721怎么样' });
     expect(parseBotIntent('查一下721')).toEqual({ type: 'unknown', text: '查一下721' });
     expect(parseBotIntent('帮我看下 Pocket 3')).toEqual({ type: 'unknown', text: '帮我看下 Pocket 3' });

@@ -208,11 +208,31 @@ describe('agentExploreResponse', () => {
       }],
     }));
 
-    const response = await agentExploreResponse('分析 648', 'output', { provider });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    let response: Awaited<ReturnType<typeof agentExploreResponse>>;
+    try {
+      response = await agentExploreResponse('分析 648', 'output', { provider });
+    } finally {
+      warn.mockRestore();
+    }
 
     expect(response.card).toBeUndefined();
-    expect(response.metadata).toMatchObject({ ok: false, stopReason: 'invalid' });
-    expect(response.text).toContain('探索未形成有效结论');
+    expect(response.metadata).toMatchObject({ ok: false, stopReason: 'invalid', invalidReason: 'invalid_finish' });
+    expect(response.text).toContain('模型完成探索时输出格式无效');
+  });
+
+  it('surfaces invalid explore loop diagnostics in logs and user text', async () => {
+    const provider = new FakeLlmProvider('{"action":"unknown","note":"not executable"}');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const response = await agentExploreResponse('分析 648', 'output', { provider });
+
+      expect(response.metadata).toMatchObject({ ok: false, stopReason: 'invalid', invalidReason: 'unknown_action' });
+      expect(response.text).toContain('模型未按要求输出可执行动作');
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('unknown_action'), expect.stringContaining('not executable'));
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it('routes explicit explore commands from the Feishu unknown branch', async () => {

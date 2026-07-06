@@ -71,6 +71,16 @@ function hasInvalidDecisions(decisions: unknown[] | undefined): boolean {
   return decisions !== undefined && !decisions.every(isValidDecisionRecord);
 }
 
+function invalidExploreText(reason: string | undefined): string {
+  if (reason === 'non_json') return '模型未按要求输出 JSON 动作，请重试或换种说法。';
+  if (reason === 'unknown_action') return '模型未按要求输出可执行动作，请重试或换种说法。';
+  if (reason === 'unknown_tool') return '模型选择了不可用的探索工具，请重试或换种说法。';
+  if (reason === 'bad_args') return '模型给出的探索工具参数不完整，请重试或换种说法。';
+  if (reason === 'tool_error') return '探索工具执行失败，请重试或换种说法。';
+  if (reason === 'invalid_finish') return '模型完成探索时输出格式无效，请重试或换种说法。';
+  return '探索未形成有效结论。';
+}
+
 export async function agentExploreResponse(
   instruction: string,
   outputDir: string,
@@ -91,11 +101,14 @@ export async function agentExploreResponse(
       metadata: { toolName: 'agentExplore', ok: false, stopReason: 'invalid', stepCount: result.steps.length },
     };
   }
+  if (result.stopReason === 'invalid' && (result.invalidReason || result.rawFirstOutput)) {
+    console.warn(`Agent explore invalid: ${result.invalidReason ?? 'unknown'}`, result.rawFirstOutput ?? '');
+  }
 
   const approvals = (result.decisions ?? []).filter(isConfirmableExploreWrite);
   const card = buildExploreConfirmCard(approvals);
   const text = [
-    result.answer || (result.stopReason === 'max_steps' ? '探索达到最大步数，已停止。' : '探索未形成有效结论。'),
+    result.answer || (result.stopReason === 'max_steps' ? '探索达到最大步数，已停止。' : invalidExploreText(result.invalidReason)),
     formatSteps(result.steps),
     ...(approvals.length ? [`待确认执行：${approvals.length} 项`] : []),
   ].join('\n');
@@ -103,6 +116,6 @@ export async function agentExploreResponse(
   return {
     text,
     ...(card ? { card } : {}),
-    metadata: { toolName: 'agentExplore', ok: result.stopReason !== 'invalid', stopReason: result.stopReason, stepCount: result.steps.length },
+    metadata: { toolName: 'agentExplore', ok: result.stopReason !== 'invalid', stopReason: result.stopReason, stepCount: result.steps.length, ...(result.invalidReason ? { invalidReason: result.invalidReason } : {}) },
   };
 }

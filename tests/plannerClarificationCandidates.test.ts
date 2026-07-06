@@ -85,4 +85,44 @@ describe('planner clarification candidates', () => {
       },
     });
   });
+
+  it('binds write-tool clarification options even when only known partial arguments are present', () => {
+    const result = validateAgentPlannerClarificationProposal(JSON.stringify({
+      goal: '澄清商品操作',
+      needsClarification: true,
+      originalMessage: '帮我处理 648',
+      question: '你想怎么处理 648？',
+      options: [
+        {
+          label: '下架 648',
+          message: '把 648 下架',
+          toolName: 'rental.delist',
+          arguments: { productId: '648' },
+        },
+        {
+          label: '改价 648',
+          message: '给 648 改价',
+          toolName: 'rental.priceChange',
+          arguments: { productId: '648' },
+        },
+        {
+          label: '文字兜底',
+          message: '重新说明怎么处理 648',
+        },
+      ],
+      confidence: 0.42,
+      reason: '动作不明确',
+    }));
+
+    expect(result).toMatchObject({
+      ok: true,
+      proposal: {
+        candidates: [
+          { toolName: 'rental.delist', arguments: { productId: '648' }, label: '下架 648' },
+          { toolName: 'rental.priceChange', arguments: { productId: '648' }, label: '改价 648' },
+          { toolName: 'agent.clarifiedMessage', arguments: { message: '重新说明怎么处理 648' }, label: '文字兜底' },
+        ],
+      },
+    });
+  });
 });

@@ -1921,7 +1921,12 @@ export async function executeAgentToolRequest(
     }
     case 'rental.newLinkBatchPlan': {
       const workflowRequests = readNewLinkBatchWorkflowRequests(request.arguments);
-      if (!workflowRequests) return { text: '新链批量铺设参数无效：需要 keyword 和 count，或 items 数组。' };
+      if (!workflowRequests) {
+        return {
+          text: '补链需要：关键词 + 数量，例如「给<关键词>补3条」；也可以提供 items 数组。若你其实想对该商品做别的（下架/改价/查看），请直接说明。',
+          metadata: { toolName: 'rental.newLinkBatchPlan', ok: false, needsMoreInput: true },
+        };
+      }
       const [latest, registryContext] = await Promise.all([
         findLatestReportContext(outputDir),
         loadClosedOrderRegistryContext(options.closedOrderRegistryPaths),
