@@ -72,6 +72,21 @@ describe('link registry overrides', () => {
     expect(result.risks).toEqual([]);
   });
 
+  it('applies group-level classification fields from same sku group rules to all matching entries', () => {
+    const result = applyLinkRegistryOverrides([
+      { internalProductId: '901', shortName: 'R50', sameSkuGroupId: 'canon-eos-r50', categoryId: 'lens', categoryName: '镜头', productType: 'lens-accessory', status: 'active', source: ['daemon_catalog'] },
+      { internalProductId: '902', shortName: 'R50', sameSkuGroupId: 'canon-eos-r50', status: 'active', source: ['daemon_catalog'] },
+    ], {
+      version: 1,
+      sameSkuGroupRules: [{ matchSameSkuGroupId: 'canon-eos-r50', categoryId: 'camera', categoryName: '相机', productType: 'camera', shortName: 'R50' }],
+    });
+
+    expect(result.entries).toEqual(expect.arrayContaining([
+      expect.objectContaining({ internalProductId: '901', sameSkuGroupId: 'canon-eos-r50', categoryId: 'camera', categoryName: '相机', productType: 'camera' }),
+      expect.objectContaining({ internalProductId: '902', sameSkuGroupId: 'canon-eos-r50', categoryId: 'camera', categoryName: '相机', productType: 'camera' }),
+    ]));
+  });
+
   it('keeps manually reviewed same sku group short names instead of re-normalizing them back', () => {
     const result = applyLinkRegistryOverrides([
       { internalProductId: '801', productName: '富士 mini link3 手机照片打印机短租', shortName: 'Mini Link 3', sameSkuGroupId: 'fujifilm-instax-mini-link-3', status: 'active', source: ['daemon_catalog'] },
@@ -87,6 +102,7 @@ describe('link registry overrides', () => {
       classificationSource: 'manual_override',
     });
   });
+
 
   it('fails fast for duplicate manual overrides', () => {
     expect(() => applyLinkRegistryOverrides(entries, {

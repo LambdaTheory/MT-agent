@@ -2808,6 +2808,9 @@
     },
     {
       "matchSameSkuGroupId": "canon r50",
+      "categoryId": "camera",
+      "categoryName": "相机",
+      "productType": "camera",
       "shortName": "R50",
       "aliases": [
         "R50",
@@ -3167,6 +3170,9 @@
     },
     {
       "matchSameSkuGroupId": "canon-eos-r50",
+      "categoryId": "camera",
+      "categoryName": "相机",
+      "productType": "camera",
       "shortName": "R50",
       "aliases": [
         "R50",
@@ -3421,7 +3427,7 @@
       "updatedAt": "2026-06-27"
     },
     {
-      "matchSameSkuGroupId": "fujifilm-in-ta-mini90一次成像-婚礼聚",
+      "matchSameSkuGroupId": "fujifilm-insta-mini90一次成像-婚礼聚会旅游立即出片-相纸可选",
       "shortName": "Mini 90",
       "aliases": [
         "Mini 90",
@@ -4036,6 +4042,9 @@
     },
     {
       "matchSameSkuGroupId": "vivo x300 pro",
+      "categoryId": "phone",
+      "categoryName": "手机",
+      "productType": "smartphone",
       "shortName": "vivo X300 Pro",
       "aliases": [
         "vivo X300 Pro",
@@ -4050,6 +4059,9 @@
     },
     {
       "matchSameSkuGroupId": "vivo x301 pro",
+      "categoryId": "phone",
+      "categoryName": "手机",
+      "productType": "smartphone",
       "shortName": "vivo X300 Pro",
       "aliases": [
         "vivo X300 Pro",
@@ -4064,6 +4076,9 @@
     },
     {
       "matchSameSkuGroupId": "vivo x302 pro",
+      "categoryId": "phone",
+      "categoryName": "手机",
+      "productType": "smartphone",
       "shortName": "vivo X300 Pro",
       "aliases": [
         "vivo X300 Pro",
@@ -4078,6 +4093,9 @@
     },
     {
       "matchSameSkuGroupId": "vivo x303 pro",
+      "categoryId": "phone",
+      "categoryName": "手机",
+      "productType": "smartphone",
       "shortName": "vivo X300 Pro",
       "aliases": [
         "vivo X300 Pro",
@@ -4092,6 +4110,9 @@
     },
     {
       "matchSameSkuGroupId": "vivo x304 pro",
+      "categoryId": "phone",
+      "categoryName": "手机",
+      "productType": "smartphone",
       "shortName": "vivo X300 Pro",
       "aliases": [
         "vivo X300 Pro",
@@ -4122,6 +4143,9 @@
     },
     {
       "matchSameSkuGroupId": "vivo-x300-pro",
+      "categoryId": "phone",
+      "categoryName": "手机",
+      "productType": "smartphone",
       "shortName": "vivo X300 Pro",
       "aliases": [
         "vivo X300 Pro",
@@ -4181,6 +4205,21 @@
       "reason": "daemon_live_group_alignment",
       "maintainer": "codex_daemon_refresh",
       "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "fujifilm-in-ta-mini90一次成像-婚礼聚",
+      "shortName": "Mini 90",
+      "aliases": [
+        "Mini 90",
+        "Mini90",
+        "mini 90",
+        "mini90"
+      ],
+      "sameSkuGroupId": "fujifilm-instax-mini-90",
+      "confidence": 0.95,
+      "reason": "mini90_promo_slug_variant_remap",
+      "maintainer": "taxonomy_governance",
+      "updatedAt": "2026-07-06"
     }
   ]
 }

@@ -197,4 +197,41 @@ describe('linkRegistryGroupReview', () => {
     expect(guide).toContain('# 商品组审批说明');
     expect(guide).toContain('已审核完，请读取审批清单');
   });
+
+  it('surfaces promo-title slug leaks and missing group classification in group review risks', () => {
+    const leakedGroupId = 'fujifilm-instax-mini90一次成像-婚礼聚会旅游立即出片-相纸可选';
+    const report = buildLinkRegistryGroupReviewReport({
+      entries: [
+        {
+          internalProductId: '1001',
+          platformProductId: 'p1001',
+          productName: 'Mini 90 一次成像',
+          shortName: 'Mini 90',
+          sameSkuGroupId: leakedGroupId,
+          categoryId: 'camera',
+          categoryName: '相机',
+          productType: 'instant-camera',
+          status: 'active',
+          source: ['goods_first_seen'],
+        },
+        {
+          internalProductId: '1002',
+          platformProductId: 'p1002',
+          productName: 'vivo X300 Pro',
+          shortName: 'X300 Pro',
+          sameSkuGroupId: 'vivo-x300-pro',
+          status: 'active',
+          source: ['goods_first_seen'],
+        },
+      ],
+      generatedAt: '2026-06-26T10:00:00.000Z',
+    });
+
+    expect(report.groups.find((item) => item.sameSkuGroupId === leakedGroupId)?.risks).toEqual(expect.arrayContaining([
+      expect.stringContaining(leakedGroupId),
+    ]));
+    expect(report.groups.find((item) => item.sameSkuGroupId === 'vivo-x300-pro')?.risks).toEqual(expect.arrayContaining([
+      expect.stringContaining('missing group-level classification'),
+    ]));
+  });
 });

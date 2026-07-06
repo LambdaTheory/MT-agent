@@ -6,6 +6,7 @@ import type { ExposureCumulativeProduct, GoodsSnapshotItem } from '../publicTraf
 import { canonicalProductShortName, type ProductNameMap } from '../publicTraffic/productDisplayName.js';
 import type { LinkListingState, LinkRegistryEntry, LinkRegistrySource, LinkRegistryStatus } from './types.js';
 import { arbitrateListingState, listingStateToStatus, parseListingStateFromText, type ListingStateObservation } from './listingState.js';
+import { sameSkuGroupRules } from './overrides.js';
 
 const LISTING_STATE_FRESHNESS_OVERRIDE_MS = 24 * 60 * 60 * 1000;
 
@@ -548,6 +549,28 @@ function normalizedClassificationOverride(draft: DraftEntry): InferredClassifica
   return undefined;
 }
 
+function applyGroupLevelClassification(drafts: Map<string, DraftEntry>): void {
+  const groups = new Map<string, DraftEntry[]>();
+  for (const draft of drafts.values()) {
+    const sameSkuGroupId = draft.sameSkuGroupId?.trim();
+    if (!sameSkuGroupId) continue;
+    const existing = groups.get(sameSkuGroupId) ?? [];
+    existing.push(draft);
+    groups.set(sameSkuGroupId, existing);
+  }
+
+  for (const [groupId, groupDrafts] of groups) {
+    const rule = sameSkuGroupRules.find((item) => item.matchSameSkuGroupId === groupId);
+    if (!rule?.categoryId || !rule?.categoryName || !rule?.productType) continue;
+    for (const draft of groupDrafts) {
+      draft.sameSkuGroupId = rule.sameSkuGroupId ?? groupId;
+      draft.categoryId = rule.categoryId;
+      draft.categoryName = rule.categoryName;
+      draft.productType = rule.productType;
+    }
+  }
+}
+
 function inferDraftMetadata(drafts: Map<string, DraftEntry>): void {
   for (const draft of drafts.values()) {
     draft.shortName = normalizedShortName(draft.shortName) ?? draft.shortName;
@@ -652,6 +675,8 @@ export function buildLinkRegistry(input: BuildLinkRegistryInput): LinkRegistryEn
   if (input.lifecycle) addLifecycle(drafts, input.lifecycle);
   if (input.daemonCatalog) addDaemonCatalog(drafts, input.daemonCatalog);
   assignSameSkuGroupIds(drafts);
+  inferDraftMetadata(drafts);
+  applyGroupLevelClassification(drafts);
   inferDraftMetadata(drafts);
 
   return [...drafts.values()].map(finalizeEntry).sort(compareInternalProductId);

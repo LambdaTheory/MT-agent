@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildLinkRegistry } from '../src/linkRegistry/buildRegistry.js';
+import { parseLinkRegistryOverrides } from '../src/linkRegistry/overrides.js';
 import type { GoodsLinkLifecycleState } from '../src/publicTraffic/goodsLinkLifecycle.js';
 import type { GoodsFirstSeenIndex } from '../src/publicTraffic/goodsSnapshot.js';
 
@@ -493,5 +494,112 @@ describe('link registry build', () => {
       expect.objectContaining({ internalProductId: '1303', categoryId: 'camera', categoryName: '运动相机', productType: 'action-camera' }),
       expect.objectContaining({ internalProductId: '1304', categoryId: 'camera', categoryName: '相机', productType: 'camera' }),
     ]));
+  });
+
+  it('propagates one group-level classification to all members of canon-eos-r50', () => {
+    const registry = buildLinkRegistry({
+      daemonCatalog: {
+        generatedAt: '2026-07-06T10:00:00.000Z',
+        count: 2,
+        excludedCount: 0,
+        entries: [
+          { internalProductId: '1401', productName: '佳能 EOS R50 微单相机', discoveredAt: '2026-07-06T10:00:00.000Z' },
+          { internalProductId: '1402', productName: '佳能 EOS R50 RF-S 18-45mm 套机', discoveredAt: '2026-07-06T10:00:00.000Z' },
+        ],
+      },
+      productNameMap: {
+        '1401': 'R50',
+        '1402': 'R50',
+      },
+    });
+
+    expect(registry).toEqual(expect.arrayContaining([
+      expect.objectContaining({ internalProductId: '1401', sameSkuGroupId: 'canon-eos-r50', categoryId: 'camera', categoryName: '相机', productType: 'camera' }),
+      expect.objectContaining({ internalProductId: '1402', sameSkuGroupId: 'canon-eos-r50', categoryId: 'camera', categoryName: '相机', productType: 'camera' }),
+    ]));
+  });
+
+  it('propagates one group-level classification to all members of insta360-ace-pro-2', () => {
+    const registry = buildLinkRegistry({
+      daemonCatalog: {
+        generatedAt: '2026-07-06T10:00:00.000Z',
+        count: 2,
+        excludedCount: 0,
+        entries: [
+          { internalProductId: '1411', productName: 'Insta360 Ace Pro 2 运动相机', discoveredAt: '2026-07-06T10:00:00.000Z' },
+          { internalProductId: '1412', productName: '影石 Ace Pro 2 兔笼套餐', discoveredAt: '2026-07-06T10:00:00.000Z' },
+        ],
+      },
+      productNameMap: {
+        '1411': 'Ace Pro 2',
+        '1412': 'Ace Pro 2',
+      },
+    });
+
+    expect(registry).toEqual(expect.arrayContaining([
+      expect.objectContaining({ internalProductId: '1411', sameSkuGroupId: 'insta360-ace-pro-2', categoryId: 'camera', categoryName: '运动相机', productType: 'action-camera' }),
+      expect.objectContaining({ internalProductId: '1412', sameSkuGroupId: 'insta360-ace-pro-2', categoryId: 'camera', categoryName: '运动相机', productType: 'action-camera' }),
+    ]));
+  });
+
+  it('propagates one group-level classification to all members of vivo-x300-pro', () => {
+    const registry = buildLinkRegistry({
+      daemonCatalog: {
+        generatedAt: '2026-07-06T10:00:00.000Z',
+        count: 2,
+        excludedCount: 0,
+        entries: [
+          { internalProductId: '1421', productName: 'vivo X300 Pro 手机', discoveredAt: '2026-07-06T10:00:00.000Z' },
+          { internalProductId: '1422', productName: 'vivo X300 Pro 蔡司影像旗舰', discoveredAt: '2026-07-06T10:00:00.000Z' },
+        ],
+      },
+      productNameMap: {
+        '1421': 'vivo X300 Pro',
+        '1422': 'vivo X300 Pro',
+      },
+    });
+
+    expect(registry).toEqual(expect.arrayContaining([
+      expect.objectContaining({ internalProductId: '1421', sameSkuGroupId: 'vivo-x300-pro', categoryId: 'phone', categoryName: '手机', productType: 'smartphone' }),
+      expect.objectContaining({ internalProductId: '1422', sameSkuGroupId: 'vivo-x300-pro', categoryId: 'phone', categoryName: '手机', productType: 'smartphone' }),
+    ]));
+  });
+
+  it('normalizes the known mini90 promo-title product name to the canonical fujifilm-instax-mini-90 group id', () => {
+    const registry = buildLinkRegistry({
+      daemonCatalog: {
+        generatedAt: '2026-07-06T10:00:00.000Z',
+        count: 2,
+        excludedCount: 0,
+        entries: [
+          { internalProductId: '1501', productName: '富士 instax mini90一次成像 婚礼聚会旅游立即出片 相纸可选', discoveredAt: '2026-07-06T10:00:00.000Z' },
+          { internalProductId: '1502', productName: '富士 instax mini 90 一次成像相机 演唱会追星神器', discoveredAt: '2026-07-06T10:00:00.000Z' },
+        ],
+      },
+    });
+
+    expect(registry).toEqual(expect.arrayContaining([
+      expect.objectContaining({ internalProductId: '1501', sameSkuGroupId: 'fujifilm-instax-mini-90' }),
+      expect.objectContaining({ internalProductId: '1502', sameSkuGroupId: 'fujifilm-instax-mini-90' }),
+    ]));
+    // Neither entry should carry the promo-title leak slug
+    for (const entry of registry) {
+      expect(entry.sameSkuGroupId ?? '').not.toContain('一次成像');
+    }
+  });
+
+  it('parses overrides with the known mini90 promo-title sameSkuGroupId via canonical remap', () => {
+    const promoSlug = 'fujifilm-instax-mini90一次成像-婚礼聚会旅游立即出片-相纸可选';
+    // The parse step should normalize (remap) the known promo-title slug to the canonical form
+    const parsed = parseLinkRegistryOverrides({
+      version: 1,
+      entries: [
+        {
+          internalProductId: '1601',
+          sameSkuGroupId: promoSlug,
+        },
+      ],
+    });
+    expect(parsed.entries?.[0]?.sameSkuGroupId).toBe('fujifilm-instax-mini-90');
   });
 });
