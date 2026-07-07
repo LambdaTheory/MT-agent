@@ -251,7 +251,6 @@ export function buildLinkRegistryAudit(entries: LinkRegistryEntry[], overrideRis
     ...activeQueryLeakRisks(entries),
     ...sameSkuGroups.flatMap((group) => group.risks),
   ];
-  const unknownEntries = entries.filter((entry) => !entry.categoryId || !entry.productType);
   return {
     categories,
     unknownEntries,
