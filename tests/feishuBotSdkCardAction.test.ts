@@ -20,6 +20,8 @@ import {
 import { buildRentalOperationConfirmCard, buildRentalPricePreviewCard, type RentalPriceSkillClient } from '../src/feishuBot/rentalPrice.js';
 import { buildNewLinkBatchConfirmCard, type NewLinkBatchPlan } from '../src/newLinkWorkflow/batch.js';
 import { saveAgentToolConfirmRequest } from '../src/feishuBot/agentToolConfirmStore.js';
+import { buildRefreshActivityStrategyCard } from '../src/feishuBot/refreshActivityCard.js';
+import { refreshActivityPlanConfirmationKey, saveRefreshActivityPlan, type RefreshActivityPlan } from '../src/feishuBot/refreshActivityPlanStore.js';
 import { openLinkRegistryGovernancePrompt } from '../src/linkRegistry/governanceSession.js';
 import type { LinkRegistryEntry } from '../src/linkRegistry/types.js';
 import { openLinkRegistryMaintenancePrompt } from '../src/linkRegistry/maintenanceSession.js';
@@ -939,6 +941,64 @@ describe('createFeishuSdkBot card.action.trigger', () => {
     const duplicateCard = (duplicate as { card?: { data?: { header?: { template?: string }; body?: unknown } } }).card?.data;
     expect(duplicateCard?.header?.template).toBe('red');
     expect(JSON.stringify(duplicateCard)).toContain('已经执行失败');
+  });
+
+  it('blocks cross-strategy SDK refresh activity selections from the same plan card', async () => {
+    const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
+    const sent: unknown[] = [];
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-sdk-refresh-strategy-claim-'));
+    const plan: RefreshActivityPlan = {
+      date: '2026-06-11',
+      delistProductIds: ['901', '902'],
+      delistProductIdsForRefill: ['901', '902'],
+      newLinkItemsForRefill: [{ keyword: 'DJI Pocket 3', count: 2, sourceProductId: '900', sourceProductName: 'Pocket3 健康源', sameSkuGroupId: 'dji-pocket-3' }],
+      skippedGroups: [],
+      canRefill: true,
+    };
+    const planRef = await saveRefreshActivityPlan(outputDir, plan);
+    const strategyCard = buildRefreshActivityStrategyCard({
+      date: plan.date,
+      planRef,
+      confirmationKeyDelistOnly: refreshActivityPlanConfirmationKey(plan, 'delist_only'),
+      confirmationKeyDelistAndRefill: refreshActivityPlanConfirmationKey(plan, 'delist_and_refill'),
+      delistCount: 2,
+      newLinkCount: 2,
+      skippedGroups: [],
+    });
+    const delistValue = readButtonValue(strategyCard, 'refresh_activity_delist_only_submit');
+    const refillValue = readButtonValue(strategyCard, 'refresh_activity_delist_refill_submit');
+    const bot = createFeishuSdkBot({
+      appId: 'app',
+      appSecret: 'x',
+      outputDir,
+      sdk: fakeSdk(sent, registered),
+    });
+
+    bot.start();
+    const first = await registered['card.action.trigger']({
+      event: {
+        context: { open_message_id: 'om-refresh-strategy-select' },
+        action: {
+          tag: 'button',
+          name: 'refresh_activity_delist_only_submit',
+          behaviors: [{ type: 'callback', value: delistValue }],
+        },
+      },
+    });
+    const second = await registered['card.action.trigger']({
+      event: {
+        context: { open_message_id: 'om-refresh-strategy-select' },
+        action: {
+          tag: 'button',
+          name: 'refresh_activity_delist_refill_submit',
+          behaviors: [{ type: 'callback', value: refillValue }],
+        },
+      },
+    });
+
+    expect(JSON.stringify(first)).toContain('即将下架端内ID：901、902');
+    expect(JSON.stringify(second)).toContain('已经执行完成');
+    expect(JSON.stringify(second)).not.toContain('即将下架端内ID');
   });
 
   it('passes registry paths into SDK Agent continuation steps after a confirmed product action', async () => {

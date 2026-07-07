@@ -2,8 +2,9 @@ import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { parseAgentToolConfirmRequest } from '../src/agentRuntime/approvalCard.js';
+import { loadAgentToolConfirmRequestFromValue } from '../src/feishuBot/agentToolConfirmStore.js';
 import { executeAgentToolRequest } from '../src/feishuBot/agentToolExecutor.js';
+import { handleRefreshActivityStrategySelect } from '../src/feishuBot/refreshActivityStrategySelect.js';
 import type { RentalPriceSkillClient } from '../src/feishuBot/rentalPrice.js';
 import type { PublicTrafficPeriodMetrics } from '../src/publicTraffic/types.js';
 
@@ -112,9 +113,17 @@ describe('targeted refresh activity execute strategy', () => {
     );
 
     const values = confirmValues(response.card);
-    const delistOnly = parseAgentToolConfirmRequest(values.find((item) => item.text === '只下架')?.value);
-    const refill = parseAgentToolConfirmRequest(values.find((item) => item.text === '下架+补链')?.value);
+    const delistOnlyValue = values.find((item) => item.text === '只下架')?.value;
+    const refillValue = values.find((item) => item.text === '下架+补链')?.value;
+    const delistOnlyResponse = await handleRefreshActivityStrategySelect(outputDir, delistOnlyValue);
+    const refillResponse = await handleRefreshActivityStrategySelect(outputDir, refillValue);
+    const delistOnlyConfirmValue = confirmValues(delistOnlyResponse.card).find((item) => item.text === '确认执行')?.value;
+    const refillConfirmValue = confirmValues(refillResponse.card).find((item) => item.text === '确认执行')?.value;
+    const delistOnly = await loadAgentToolConfirmRequestFromValue(outputDir, delistOnlyConfirmValue);
+    const refill = await loadAgentToolConfirmRequestFromValue(outputDir, refillConfirmValue);
 
+    expect(JSON.stringify(delistOnlyValue)).toContain('refresh_activity_strategy_select');
+    expect(JSON.stringify(delistOnlyValue)).not.toContain('request');
     expect(delistOnly?.arguments.strategy).toBe('delist_only');
     expect(new Set(delistOnly?.arguments.delistProductIds as string[])).toEqual(new Set(['681', '901', '903']));
     expect(delistOnly?.arguments).not.toHaveProperty('newLinkItems');

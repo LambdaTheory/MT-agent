@@ -11,6 +11,7 @@ import { recordAgentLearningEvent } from '../src/agentLearning/store.js';
 import { executeAgentToolRequestWithContinuation } from '../src/feishuBot/agentToolContinuation.js';
 import { executeAgentToolRequest } from '../src/feishuBot/agentToolExecutor.js';
 import { loadAgentToolConfirmRequestFromValue } from '../src/feishuBot/agentToolConfirmStore.js';
+import { handleRefreshActivityStrategySelect } from '../src/feishuBot/refreshActivityStrategySelect.js';
 import { handleBotIntent } from '../src/feishuBot/tools.js';
 
 const mocks = vi.hoisted(() => ({
@@ -2793,8 +2794,10 @@ describe('handleBotIntent', () => {
     expect(response.text).toContain('上线不足 30 天 1 条');
     expect(response.text).toContain('上线天数未知 1 条');
     expect(response.text).toContain('端内ID 901、902');
-    expect(response.text).toContain('执行入口正在完善中');
-    expect(response.card).toBeUndefined();
+    expect(response.text).toContain('计划已生成，请在策略卡选择执行策略');
+    expect(response.card).toBeDefined();
+    expect(JSON.stringify(response.card)).toContain('refresh_activity_strategy_select');
+    expect(JSON.stringify(response.card)).not.toContain('agent_tool_confirm');
   });
 
   it('uses first seen date as a fallback before treating zero 30-day orders as inactive', async () => {
@@ -2812,8 +2815,10 @@ describe('handleBotIntent', () => {
     expect(response.text).toContain('待下架候选：3 条');
     expect(response.text).toContain('上线天数未知 0 条');
     expect(response.text).toContain('端内ID 901、902、907');
-    expect(response.text).toContain('执行入口正在完善中');
-    expect(response.card).toBeUndefined();
+    expect(response.text).toContain('计划已生成，请在策略卡选择执行策略');
+    expect(response.card).toBeDefined();
+    expect(JSON.stringify(response.card)).toContain('refresh_activity_strategy_select');
+    expect(JSON.stringify(response.card)).not.toContain('agent_tool_confirm');
   });
 
   it('executes a confirmed activity refresh plan with audit output', async () => {
@@ -2906,7 +2911,7 @@ describe('handleBotIntent', () => {
     expect(audit.skippedMissingDelistProductIds).toEqual(['901']);
   });
 
-  it.skip('continues a multi-step plan after a confirmed activity refresh execution card (skipped: strategy card disabled pending three-step confirmation redesign)', async () => {
+  it('continues a multi-step plan after a confirmed activity refresh execution card', async () => {
     const { outputDir, registryPaths } = await writeRefreshActivityFixtures();
     const planner: AgentPlannerProvider = {
       async proposePlan() {
@@ -2943,12 +2948,13 @@ describe('handleBotIntent', () => {
       rentalPriceClient,
       closedOrderRegistryPaths: registryPaths,
     });
-    const request = readAgentToolConfirmRequestFromCard(response.card);
+    const confirmResponse = await handleRefreshActivityStrategySelect(outputDir, readAgentToolConfirmValueFromCard(response.card));
+    const request = await loadAgentToolConfirmRequestFromCard(outputDir, confirmResponse.card);
 
-    expect(request.toolName).toBe('operations.refreshActivityExecute');
+    expect(request?.toolName).toBe('operations.refreshActivityExecute');
     expect(request.continuation?.steps).toHaveLength(1);
 
-    const executed = await executeAgentToolRequestWithContinuation(request, outputDir, {
+    const executed = await executeAgentToolRequestWithContinuation(request!, outputDir, {
       rentalPriceClient,
       closedOrderRegistryPaths: registryPaths,
     });
@@ -4011,9 +4017,9 @@ describe('handleBotIntent', () => {
           closeId: 'close-1',
           internalProductId: '560',
           rawRemark: '价格太低，不接单',
-          closedAt: '2026-06-30T01:00:00.000Z',
-          firstIngestedAt: '2026-06-30T01:05:00.000Z',
-          lastIngestedAt: '2026-06-30T01:05:00.000Z',
+          closedAt: '2026-07-06T01:00:00.000Z',
+          firstIngestedAt: '2026-07-06T01:05:00.000Z',
+          lastIngestedAt: '2026-07-06T01:05:00.000Z',
           seenCount: 1,
         },
         {
@@ -4021,9 +4027,9 @@ describe('handleBotIntent', () => {
           closeId: 'close-2',
           internalProductId: '561',
           rawRemark: '库存不足',
-          closedAt: '2026-06-29T08:00:00.000Z',
-          firstIngestedAt: '2026-06-29T08:05:00.000Z',
-          lastIngestedAt: '2026-06-29T08:05:00.000Z',
+          closedAt: '2026-07-05T08:00:00.000Z',
+          firstIngestedAt: '2026-07-05T08:05:00.000Z',
+          lastIngestedAt: '2026-07-05T08:05:00.000Z',
           seenCount: 1,
         },
       ],

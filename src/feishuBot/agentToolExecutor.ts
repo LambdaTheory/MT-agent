@@ -90,6 +90,7 @@ import { inferPriceMultiplierFromText, readPriceMultiplierArgument } from './pri
 import { runPublicTrafficReportDateComparison, runPublicTrafficReportQuery, type PublicTrafficReportQueryArguments } from './reportQuery.js';
 import { findLatestReportContext, findReportContextByDate, formatConversionSummary, formatLatestSummary, formatProductRows, parseNumericProductIdList, queryProductRows } from './reportStore.js';
 import { saveAgentToolConfirmRequest } from './agentToolConfirmStore.js';
+import { refreshActivityPlanConfirmationKey, saveRefreshActivityPlan, type RefreshActivityPlan } from './refreshActivityPlanStore.js';
 import type { RentalWriteLedgerContext } from './rentalWriteOperationHandlers.js';
 import { rentalPerSpecPriceApplyResponse, rentalPerSpecPricePlanResponse } from './rentalPerSpecPriceHandlers.js';
 import { rentalSpecDimApplyResponse, rentalSpecDimPlanResponse } from './rentalSpecDimHandlers.js';
@@ -1445,27 +1446,25 @@ async function refreshActivityPlanResponse(
     return `${index + 1}. ${group.label}｜${group.category}｜${group.sameSkuGroupId}：待下架 ${group.items.length} 条，建议补回 ${group.items.length} 条新链；端内ID ${ids}${source}`;
   });
 
-  const delistOnlyRequest = delistOnlyExecution.request ? {
-    toolName: 'operations.refreshActivityExecute',
-    arguments: {
-      date: delistOnlyExecution.request.date,
-      delistProductIds: delistOnlyExecution.request.delistProductIds,
-      strategy: 'delist_only',
-    },
-    reason: '用户选择活跃度刷新策略：只下架候选链接，不补链。',
+  const refreshPlan: RefreshActivityPlan | null = delistOnlyExecution.request ? {
+    date: report.context.date,
+    delistProductIds: delistOnlyExecution.request.delistProductIds,
+    ...(refillExecution.request ? { delistProductIdsForRefill: refillExecution.request.delistProductIds } : {}),
+    newLinkItemsForRefill: refillExecution.request?.newLinkItems ?? [],
+    skippedGroups: refillExecution.skippedGroups,
+    canRefill: Boolean(refillExecution.request),
     ...(continuation ? { continuation } : {}),
   } : null;
-  const refillRequest = refillExecution.request ? {
-    toolName: 'operations.refreshActivityExecute',
-    arguments: {
-      date: refillExecution.request.date,
-      delistProductIds: refillExecution.request.delistProductIds,
-      newLinkItems: refillExecution.request.newLinkItems,
-      strategy: 'delist_and_refill',
-    },
-    reason: '用户选择活跃度刷新策略：下架候选链接并按同款组补链。',
-    ...(continuation ? { continuation } : {}),
-  } : null;
+  const planRef = refreshPlan ? await saveRefreshActivityPlan(outputDir, refreshPlan) : null;
+  const strategyCard = refreshPlan && planRef ? buildRefreshActivityStrategyCard({
+    date: report.context.date,
+    planRef,
+    confirmationKeyDelistOnly: refreshActivityPlanConfirmationKey(refreshPlan, 'delist_only'),
+    ...(refreshPlan.canRefill ? { confirmationKeyDelistAndRefill: refreshActivityPlanConfirmationKey(refreshPlan, 'delist_and_refill') } : {}),
+    delistCount: refreshPlan.delistProductIds.length,
+    newLinkCount: refreshPlan.newLinkItemsForRefill.reduce((sum, item) => sum + item.count, 0),
+    skippedGroups: refreshPlan.skippedGroups,
+  }) : undefined;
 
   return {
     text: [
@@ -1479,7 +1478,7 @@ async function refreshActivityPlanResponse(
       '',
       `跳过：非 active ${skipped.inactive} 条，无日报行 ${skipped.missingRow} 条，30日访问页缺失 ${skipped.missing30dDashboard} 条，上线不足 ${REFRESH_ACTIVITY_MIN_ONLINE_DAYS} 天 ${skipped.onlineLessThan30d} 条，上线天数未知 ${skipped.onlineDaysUnknown} 条。`,
       delistOnlyExecution.request
-        ? `计划已生成，执行入口正在完善中（待下架 ${delistOnlyExecution.request.delistProductIds.length} 条：端内ID ${delistOnlyExecution.request.delistProductIds.join('、')}）。请稍等新版本发布后再执行。`
+        ? `计划已生成，请在策略卡选择执行策略（待下架 ${delistOnlyExecution.request.delistProductIds.length} 条：端内ID ${delistOnlyExecution.request.delistProductIds.join('、')}）。`
         : '未能生成执行计划；请先处理以下阻断项。',
       ...(refillExecution.skippedBlockers.length ? [`已跳过 blocker：${refillExecution.skippedGroups.join('、')}`] : []),
       ...(!delistOnlyExecution.request && delistOnlyExecution.blockers.length ? ['', ...delistOnlyExecution.blockers.map((blocker) => `- ${blocker}`)] : []),
@@ -1497,6 +1496,7 @@ async function refreshActivityPlanResponse(
       blockers: [...delistOnlyExecution.blockers, ...refillExecution.blockers],
       skippedGroups: refillExecution.skippedGroups,
     },
+    ...(strategyCard ? { card: strategyCard } : {}),
   };
 }
 
