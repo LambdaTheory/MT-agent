@@ -78,7 +78,10 @@ export type AgentRankingMetric = 'shippedOrders' | 'amount' | 'exposure';
 export type AgentIntent =
   | { type: 'overview' }
   | { type: 'product'; keyword: string }
-  | { type: 'best_product_by_same_sku'; query: string; periodDays?: 1 | 7 | 30; metric?: AgentRankingMetric }
+  | { type: 'best_product_by_same_sku'; query: string; periodDays?: number; metric?: AgentRankingMetric }
+  | { type: 'refresh_candidate_explain'; query?: string; sameSkuGroupId?: string; zeroMetric: 'created_orders' | 'amount' }
+  | { type: 'safe_source_resolve'; query?: string; sameSkuGroupId?: string }
+  | { type: 'safe_source_groups' }
   | { type: 'tasks' }
   | { type: 'problem_products'; problemType: AgentProblemType }
   | { type: 'new_product_pool' }

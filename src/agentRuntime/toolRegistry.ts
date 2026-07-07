@@ -3,6 +3,37 @@ import type { AgentToolDefinition } from './tool.js';
 const noArgumentsSchema = { type: 'object', additionalProperties: false };
 const reportDateSchema = { type: 'string', pattern: '^(?:\\d{4}-\\d{2}-\\d{2}|\\d{2,4}[./-]\\d{1,2}[./-]\\d{1,2}|\\d{1,2}[./-]\\d{1,2}|\\d{1,2}月\\d{1,2}日)$' };
 const optionalReportDateArgumentsSchema = { type: 'object', properties: { date: reportDateSchema }, additionalProperties: false };
+const windowAggregateArgumentsSchema = {
+  type: 'object',
+  properties: {
+    date: reportDateSchema,
+    endDate: reportDateSchema,
+    windowDays: { type: ['integer', 'string'], pattern: '^[1-9]\\d*$', minimum: 1 },
+  },
+  required: ['windowDays'],
+  additionalProperties: false,
+};
+const safeSourceResolveArgumentsSchema = {
+  type: 'object',
+  properties: {
+    date: reportDateSchema,
+    sameSkuGroupId: { type: 'string' },
+    excludedProductIds: { type: 'array', items: { type: 'string' } },
+  },
+  required: ['sameSkuGroupId'],
+  additionalProperties: false,
+};
+const refreshCandidateExplainArgumentsSchema = {
+  type: 'object',
+  properties: {
+    date: reportDateSchema,
+    query: { type: 'string' },
+    sameSkuGroupId: { type: 'string' },
+    zeroMetric: { type: 'string', enum: ['created_orders', 'amount'] },
+  },
+  required: ['zeroMetric'],
+  additionalProperties: false,
+};
 const reportPeriodSchema = { type: 'string', enum: ['1d', '7d', '30d'] };
 const reportMetricSchema = {
   type: 'string',
@@ -118,7 +149,7 @@ const productRankingArgumentsSchema = {
   properties: {
     query: { type: 'string' },
     metric: { type: 'string', enum: ['shippedOrders', 'amount', 'exposure'] },
-    periodDays: { type: ['integer', 'string'], enum: [1, 7, 30, '1', '7', '30'] },
+    periodDays: { type: ['integer', 'string'], pattern: '^[1-9]\\d*$', minimum: 1 },
   },
   required: ['query'],
   additionalProperties: false,
@@ -629,7 +660,7 @@ const agentTools: AgentToolDefinition[] = [
   },
   {
     name: 'product.rankBestSameSku',
-    description: '按链接维护档案解析商品名、别名、端内ID或同款组，并返回同款组里公域数据表现最好的端内ID。适用于“s23最好的链接是哪条”“数据最好的 pocket3 的端内id是多少”“近30天金额最好的 r50 是哪条”。metric 支持 shippedOrders/amount/exposure，periodDays 支持 1/7/30。',
+    description: '按链接维护档案解析商品名、别名、端内ID或同款组，并返回同款组里公域数据表现最好的端内ID。适用于“s23最好的链接是哪条”“数据最好的 pocket3 的端内id是多少”“近20天金额最好的 r50 是哪条”。metric 支持 shippedOrders/amount/exposure，periodDays 支持 1/7/15/20/30 等正整数；非 1/7/30 窗口会回到逐日 1d 数据聚合。',
     risk: 'read',
     requiresConfirmation: false,
     inputSchema: productRankingArgumentsSchema,
@@ -796,6 +827,34 @@ const agentTools: AgentToolDefinition[] = [
     risk: 'read',
     requiresConfirmation: false,
     inputSchema: windowedFindingsArgumentsSchema,
+  },
+  {
+    name: 'publicTraffic.windowAggregate',
+    description: '从逐日公域数据上下文按 1d 明细聚合任意窗口商品指标，支持 7/15/20/30 等 windowDays；不使用既有 30d 汇总倒推。',
+    risk: 'read',
+    requiresConfirmation: false,
+    inputSchema: windowAggregateArgumentsSchema,
+  },
+  {
+    name: 'system.dataHealth',
+    description: '读取指定日期日报上下文、订单分析和曝光无ID样本，返回数据健康摘要和缺失说明；只读，不触发补抓。',
+    risk: 'read',
+    requiresConfirmation: false,
+    inputSchema: optionalReportDateArgumentsSchema,
+  },
+  {
+    name: 'strategy.safeSourceResolve',
+    description: '解析同款组是否有可用于补链的安全源商品，返回源端内ID或 blocker 原因；只读，不复制、不下架。',
+    risk: 'read',
+    requiresConfirmation: false,
+    inputSchema: safeSourceResolveArgumentsSchema,
+  },
+  {
+    name: 'strategy.refreshCandidateExplain',
+    description: '独立解释活跃度刷新候选数量，说明为什么某查询或同款组 0 候选，包括 inactive、无日报行、30d 访问缺失、上线天数不足或未知。',
+    risk: 'read',
+    requiresConfirmation: false,
+    inputSchema: refreshCandidateExplainArgumentsSchema,
   },
   {
     name: 'publicTraffic.runReport',

@@ -13,13 +13,10 @@ function cleanupRankingQuery(value: string): string | null {
   return query ? query : null;
 }
 
-function parsePeriodDays(text: string): 1 | 7 | 30 | undefined {
+function parsePeriodDays(text: string): number | undefined {
   const match = /近\s*(\d+)\s*天/u.exec(text);
   if (!match) return undefined;
-  const days = Number(match[1]);
-  if (days <= 1) return 1;
-  if (days <= 7) return 7;
-  return 30;
+  return Number(match[1]);
 }
 
 function parseRankingMetric(text: string): SameSkuBestIntent['metric'] | undefined {
@@ -66,6 +63,10 @@ function parseBestProductBySameSkuQuery(text: string): SameSkuBestIntent | null 
 export function parseAgentDataIntent(input: string): AgentIntent {
   const text = input.replace(/\s+/g, ' ').trim();
   if (/^(今天|今日|最新).*(怎么样|概况|数据)/.test(text)) return { type: 'overview' };
+  const refreshExplain = parseRefreshCandidateExplain(text);
+  if (refreshExplain) return refreshExplain;
+  const safeSource = parseSafeSourceIntent(text);
+  if (safeSource) return safeSource;
   const bestProductIntent = parseBestProductBySameSkuQuery(text);
   if (bestProductIntent) return bestProductIntent;
   const product = /^(查询|商品|查)\s*(.+)$/.exec(text);
@@ -79,4 +80,20 @@ export function parseAgentDataIntent(input: string): AgentIntent {
   if (/高潜力|继续放量|可以继续放量/.test(text)) return { type: 'problem_products', problemType: 'high_potential' };
   if (/订单|发货|归还|关单|履约/.test(text)) return { type: 'order_summary' };
   return { type: 'unknown', text };
+}
+
+function parseRefreshCandidateExplain(text: string): AgentIntent | null {
+  if (!/(为什么|为何|原因|解释)/u.test(text) || !/(候选|candidate)/iu.test(text)) return null;
+  const queryMatch = /(?:为什么|为何)?\s*(.+?)\s*(?:一个|0|零)?\s*候选/u.exec(text);
+  const query = cleanupRankingQuery(queryMatch?.[1] ?? '');
+  const zeroMetric = /金额|订单金额/u.test(text) ? 'amount' : 'created_orders';
+  return { type: 'refresh_candidate_explain', ...(query ? { query } : {}), zeroMetric };
+}
+
+function parseSafeSourceIntent(text: string): AgentIntent | null {
+  if (!/(安全源|源商品|补链源)/u.test(text)) return null;
+  if (/(哪些|没有|缺少).*组/u.test(text) || /组.*(没有|缺少)/u.test(text)) return { type: 'safe_source_groups' };
+  const queryMatch = /^(.+?)\s*(?:这个组|该组|这个同款组|该同款组|同款组|可不可以|能不能|可以|能|是否)/u.exec(text);
+  const query = cleanupRankingQuery(queryMatch?.[1] ?? '');
+  return { type: 'safe_source_resolve', ...(query ? { query } : {}) };
 }

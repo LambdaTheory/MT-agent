@@ -93,13 +93,13 @@ describe('same-sku best product routing', () => {
     expect(parseAgentDataIntent('近20天数据最好r50是哪个id')).toEqual({
       type: 'best_product_by_same_sku',
       query: 'r50',
-      periodDays: 30,
+      periodDays: 20,
       metric: 'amount',
     });
     expect(parseAgentDataIntent('近20天数据最好pocket3是哪个id')).toEqual({
       type: 'best_product_by_same_sku',
       query: 'pocket3',
-      periodDays: 30,
+      periodDays: 20,
       metric: 'amount',
     });
     expect(parseAgentDataIntent('r50 近30天金额最好的链接是哪条')).toEqual({

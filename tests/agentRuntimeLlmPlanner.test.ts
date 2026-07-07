@@ -46,6 +46,10 @@ describe('agent runtime LLM planner', () => {
     expect(system).toContain('aggregation count/sum/avg/min/max');
     expect(system).toContain('target sourceCoverage');
     expect(system).toContain('coverageStatus missing');
+    expect(system).toContain('use publicTraffic.windowAggregate');
+    expect(system).toContain('use strategy.refreshCandidateExplain');
+    expect(system).toContain('use strategy.safeSourceResolve');
+    expect(system).toContain('Do not jump directly to operations.refreshActivityPlan');
     expect(system).toContain('target orderDerived');
     expect(system).toContain('orderDerivedMetric closeRateStatus');
     expect(system).toContain('target productDetail');
@@ -59,6 +63,9 @@ describe('agent runtime LLM planner', () => {
     expect(system).not.toContain('For composite flows, return selectedWorkflow');
     expect(user.tools.map((tool) => tool.name)).toContain('rental.newLinkBatchPlan');
     expect(user.tools.map((tool) => tool.name)).toContain('publicTraffic.reportQuery');
+    expect(user.tools.map((tool) => tool.name)).toContain('publicTraffic.windowAggregate');
+    expect(user.tools.map((tool) => tool.name)).toContain('strategy.refreshCandidateExplain');
+    expect(user.tools.map((tool) => tool.name)).toContain('strategy.safeSourceResolve');
     expect(user.tools.map((tool) => tool.name)).toContain('linkRegistry.resolveProducts');
     expect(user.tools.map((tool) => tool.name)).toContain('rental.pricePreview');
     expect(user.tools.find((tool) => tool.name === 'product.rankBestSameSku')?.resultMetadataSchema).toMatchObject({

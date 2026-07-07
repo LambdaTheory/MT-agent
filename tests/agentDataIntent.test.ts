@@ -42,4 +42,10 @@ describe('parseAgentDataIntent', () => {
     expect(parseAgentDataIntent('最近下架了哪些')).toEqual({ type: 'removed_links' });
     expect(parseAgentDataIntent('履约情况')).toEqual({ type: 'order_summary' });
   });
+
+  it('maps data and strategy capability questions before workflow-like routing', () => {
+    expect(parseAgentDataIntent('为什么 R50 一个候选都没有')).toEqual({ type: 'refresh_candidate_explain', query: 'R50', zeroMetric: 'created_orders' });
+    expect(parseAgentDataIntent('最近哪些组没有安全源商品')).toEqual({ type: 'safe_source_groups' });
+    expect(parseAgentDataIntent('r50 这个组可不可以补链，源商品是谁')).toEqual({ type: 'safe_source_resolve', query: 'r50' });
+  });
 });

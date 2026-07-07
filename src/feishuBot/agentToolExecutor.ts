@@ -11,7 +11,11 @@ import { buildClosedOrderObservationReport, writeClosedOrderObservationReportArt
 import { loadClosedOrderRegistryContext, type ClosedOrderRegistryPathsInput } from '../closedOrderFeedback/runtime.js';
 import type { AgentIntent, AgentProblemType } from '../agentData/types.js';
 import { rankProductsByCategory, type CategoryRankingMetric } from '../agentData/categoryRanking.js';
+import { buildDataHealthReport } from '../agentData/dataHealth.js';
+import { explainRefreshCandidates } from '../agentData/refreshCandidateExplain.js';
+import { resolveSafeSourceForSameSkuGroup } from '../agentData/safeSource.js';
 import { findWindowedProducts, type WindowedPredicate } from '../agentData/windowedFindings.js';
+import { aggregateWindowProducts } from '../agentData/windowAggregate.js';
 import { openLinkRegistryGovernancePrompt } from '../linkRegistry/governanceSession.js';
 import { openLinkRegistryMaintenancePrompt } from '../linkRegistry/maintenanceSession.js';
 import { createLinkRegistry } from '../linkRegistry/store.js';
@@ -262,9 +266,11 @@ function readPeriodDays(value: unknown): 1 | 7 | 30 {
   throw new Error('periodDays must be 1, 7, or 30');
 }
 
-function readOptionalPeriodDays(value: unknown): 1 | 7 | 30 | undefined {
+function readOptionalPeriodDays(value: unknown): number | undefined {
   if (value === undefined) return undefined;
-  return readPeriodDays(value);
+  const parsed = typeof value === 'string' ? Number(value) : value;
+  if (Number.isInteger(parsed) && typeof parsed === 'number' && parsed > 0) return parsed;
+  throw new Error('periodDays must be a positive integer');
 }
 
 function readOptionalLimit(value: unknown): number | undefined {
@@ -302,6 +308,47 @@ function formatWindowedFindingsResponse(result: Awaited<ReturnType<typeof findWi
   return {
     text: [`窗口发现：${result.startDate} 至 ${result.endDate}`, ...lines].join('\n'),
     metadata: { toolName: 'publicTraffic.windowedFindings', predicate: result.predicate, startDate: result.startDate, endDate: result.endDate, items: result.items },
+  };
+}
+
+function formatWindowAggregateResponse(result: Awaited<ReturnType<typeof aggregateWindowProducts>>, endDate: string, windowDays: number): BotResponse {
+  const lines = result.slice(0, 10).map((item, index) => `${index + 1}. ${item.productName}（端内ID ${item.internalProductId}）覆盖 ${item.daysCovered}/${windowDays} 天，曝光 ${item.exposure}，访问 ${item.publicVisits}，金额 ${item.amount}`);
+  return {
+    text: [`公域窗口聚合：截至 ${endDate}，近 ${windowDays} 天`, ...lines].join('\n'),
+    metadata: { toolName: 'publicTraffic.windowAggregate', endDate, windowDays, productCount: result.length, items: result },
+  };
+}
+
+function formatDataHealthResponse(result: Awaited<ReturnType<typeof buildDataHealthReport>>): BotResponse {
+  return {
+    text: [
+      `数据健康摘要：${result.date}`,
+      `日报上下文：${result.hasReportContext ? '有' : '无'}`,
+      `数据质量备注：${result.dataQualityNotes.length ? result.dataQualityNotes.join('；') : '无'}`,
+      `曝光无ID样本：${result.missingIdSampleCount} 条`,
+      result.orderAnalysisDate ? `订单分析数据日期：${result.orderAnalysisDate}` : undefined,
+    ].filter((line): line is string => Boolean(line)).join('\n'),
+    metadata: { toolName: 'system.dataHealth', ...result },
+  };
+}
+
+function readStringArrayArgument(value: unknown, fieldName: string): string[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) throw new Error(`${fieldName} must be an array`);
+  return value.map((item) => requireString(item, fieldName));
+}
+
+function formatSafeSourceResponse(result: ReturnType<typeof resolveSafeSourceForSameSkuGroup>): BotResponse {
+  const text = result.status === 'found'
+    ? `同款组 ${result.sameSkuGroupId} 可补链，安全源商品：${result.sourceProductId} ${result.sourceProductName ?? ''}`.trim()
+    : `同款组 ${result.sameSkuGroupId} 暂不可补链：${result.reason ?? result.status}`;
+  return { text, metadata: { toolName: 'strategy.safeSourceResolve', ...result } };
+}
+
+function formatRefreshCandidateExplainResponse(result: ReturnType<typeof explainRefreshCandidates>, zeroMetric: 'created_orders' | 'amount'): BotResponse {
+  return {
+    text: [result.scopeLine, ...result.reasonSummary].join('\n'),
+    metadata: { toolName: 'strategy.refreshCandidateExplain', zeroMetric, candidateCount: result.candidateCount, skipped: result.skipped, scopeLine: result.scopeLine, reasonSummary: result.reasonSummary },
   };
 }
 
@@ -1609,10 +1656,10 @@ async function runReadOnlyAgentIntent(
   if (!latest) return { text: '还没有找到公域日报上下文。' };
   const tool = findReadOnlyTool(intent);
   if (!tool) return { text: '暂无匹配工具。' };
-  if (intent.type !== 'best_product_by_same_sku') return tool.run(latest.context, intent);
+  if (intent.type !== 'best_product_by_same_sku' && intent.type !== 'safe_source_resolve' && intent.type !== 'safe_source_groups' && intent.type !== 'refresh_candidate_explain') return tool.run(latest.context, intent);
 
   const registryContext = await loadClosedOrderRegistryContext(options.closedOrderRegistryPaths);
-  return tool.run(latest.context, intent, { linkRegistryStore: createLinkRegistry(registryContext.registry) });
+  return tool.run(latest.context, intent, { linkRegistryStore: createLinkRegistry(registryContext.registry), registryEntries: registryContext.registry, outputDir });
 }
 
 function closedOrderIngestStatePath(outputDir: string): string {
@@ -1909,6 +1956,42 @@ export async function executeAgentToolRequest(
         ...(typeof request.arguments.endDate === 'string' ? { endDate: request.arguments.endDate } : {}),
       });
       return formatWindowedFindingsResponse(result);
+    }
+    case 'publicTraffic.windowAggregate': {
+      const windowDays = readOptionalLimit(request.arguments.windowDays);
+      if (!windowDays) throw new Error('windowDays is required');
+      const explicitEndDate = readOptionalDate(request.arguments.endDate ?? request.arguments.date);
+      const latest = explicitEndDate ? null : await findLatestReportContext(outputDir);
+      const endDate = explicitEndDate ?? latest?.context.date;
+      if (!endDate) return { text: '还没有找到公域日报上下文。' };
+      const result = await aggregateWindowProducts({ outputDir, endDate, windowDays });
+      return formatWindowAggregateResponse(result, endDate, windowDays);
+    }
+    case 'system.dataHealth': {
+      const explicitDate = readOptionalDate(request.arguments.date);
+      const latest = explicitDate ? null : await findLatestReportContext(outputDir);
+      const date = explicitDate ?? latest?.context.date ?? today();
+      return formatDataHealthResponse(await buildDataHealthReport(outputDir, date));
+    }
+    case 'strategy.safeSourceResolve': {
+      const date = readOptionalDate(request.arguments.date);
+      const report = await findReportContextForTool(outputDir, date);
+      if (!report) return { text: missingReportContextText(date) };
+      const registryContext = await loadClosedOrderRegistryContext(options.closedOrderRegistryPaths);
+      const sameSkuGroupId = requireString(request.arguments.sameSkuGroupId, 'sameSkuGroupId');
+      const excludedProductIds = new Set(readStringArrayArgument(request.arguments.excludedProductIds, 'excludedProductIds'));
+      return formatSafeSourceResponse(resolveSafeSourceForSameSkuGroup(registryContext.registry, report.context, sameSkuGroupId, excludedProductIds));
+    }
+    case 'strategy.refreshCandidateExplain': {
+      const date = readOptionalDate(request.arguments.date);
+      const report = await findReportContextForTool(outputDir, date);
+      if (!report) return { text: missingReportContextText(date) };
+      const registryContext = await loadClosedOrderRegistryContext(options.closedOrderRegistryPaths);
+      const zeroMetric = readRefreshActivityZeroMetric(request.arguments.zeroMetric);
+      const query = readString(request.arguments.query) ?? undefined;
+      const sameSkuGroupId = readString(request.arguments.sameSkuGroupId) ?? undefined;
+      const result = explainRefreshCandidates(registryContext.registry, report.context, { ...(query ? { query } : {}), ...(sameSkuGroupId ? { sameSkuGroupId } : {}), zeroMetric, date: report.context.date });
+      return formatRefreshCandidateExplainResponse(result, zeroMetric);
     }
     case 'publicTraffic.runReport':
       if (publicTrafficReportRunning) return { text: '公域日报正在运行中，请稍后再试。' };
