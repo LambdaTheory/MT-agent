@@ -21,7 +21,7 @@ const metric: PublicTrafficPeriodMetrics = {
   hasDashboardData: true,
 };
 
-async function writeTargetedRefreshFixtures(options: { includeWindowOnlineCandidate?: boolean } = {}) {
+async function writeTargetedRefreshFixtures(options: { includeWindowOnlineCandidate?: boolean; includeWindowCreatedOrdersCandidate?: boolean } = {}) {
   const rootDir = await mkdtemp(join(tmpdir(), 'mt-agent-targeted-refresh-'));
   const outputDir = join(rootDir, 'output');
   const configDir = join(rootDir, 'config');
@@ -46,6 +46,7 @@ async function writeTargetedRefreshFixtures(options: { includeWindowOnlineCandid
         { productName: 'R50 金额为0', platformProductId: 'p681', displayProductId: '端内ID 681', custodyDays: 45, periods: { '1d': { ...metric, exposure: 2, publicVisits: 1, dashboardVisits: 1, createdOrders: 1, amount: 1, hasDashboardData: true }, '7d': metric, '30d': zeroAmount30d } },
         { productName: 'R50 创单为0', platformProductId: 'p682', displayProductId: '端内ID 682', custodyDays: 45, periods: { '1d': { ...metric, exposure: 3, publicVisits: 1, dashboardVisits: 1, createdOrders: 0, amount: 0, hasDashboardData: true }, '7d': metric, '30d': zeroCreatedOrders30d } },
         ...(options.includeWindowOnlineCandidate ? [{ productName: 'R50 上线20天窗口候选', platformProductId: 'p683', displayProductId: '端内ID 683', custodyDays: 20, periods: { '1d': { ...metric, exposure: 4, publicVisits: 1, dashboardVisits: 1, createdOrders: 0, amount: 0, hasDashboardData: true }, '7d': metric, '30d': zeroCreatedOrders30d } }] : []),
+        ...(options.includeWindowCreatedOrdersCandidate ? [{ productName: 'R50 窗口创单为0', platformProductId: 'p684', displayProductId: '端内ID 684', custodyDays: 45, periods: { '1d': { ...metric, exposure: 5, publicVisits: 1, dashboardVisits: 1, createdOrders: 0, amount: 10, hasDashboardData: true }, '7d': metric, '30d': active30d } }] : []),
       ],
       lowExposure: [],
       weakClick: [],
@@ -70,6 +71,7 @@ async function writeTargetedRefreshFixtures(options: { includeWindowOnlineCandid
       { productName: 'R50 金额为0', platformProductId: 'p681', displayProductId: '端内ID 681', custodyDays: 45, periods: { '1d': metric, '7d': metric, '30d': zeroAmount30d } },
       { productName: 'R50 创单为0', platformProductId: 'p682', displayProductId: '端内ID 682', custodyDays: 45, periods: { '1d': metric, '7d': metric, '30d': zeroCreatedOrders30d } },
       ...(options.includeWindowOnlineCandidate ? [{ productName: 'R50 上线20天窗口候选', platformProductId: 'p683', displayProductId: '端内ID 683', custodyDays: 20, periods: { '1d': metric, '7d': metric, '30d': zeroCreatedOrders30d } }] : []),
+      ...(options.includeWindowCreatedOrdersCandidate ? [{ productName: 'R50 窗口创单为0', platformProductId: 'p684', displayProductId: '端内ID 684', custodyDays: 45, periods: { '1d': metric, '7d': metric, '30d': active30d } }] : []),
       { productName: 'Pocket 3 全局零金额', platformProductId: 'p901', displayProductId: '端内ID 901', custodyDays: 45, periods: { '1d': metric, '7d': metric, '30d': globalZero30d } },
       { productName: 'SQ1 全局零金额', platformProductId: 'p903', displayProductId: '端内ID 903', custodyDays: 45, periods: { '1d': metric, '7d': metric, '30d': globalZero30d } },
     ],
@@ -83,8 +85,8 @@ async function writeTargetedRefreshFixtures(options: { includeWindowOnlineCandid
     emptySectionNotes: {},
   }), 'utf8');
 
-  await writeFile(join(configDir, 'product-id-map.json'), JSON.stringify({ p680: '680', p681: '681', p682: '682', ...(options.includeWindowOnlineCandidate ? { p683: '683' } : {}), p901: '901', p903: '903' }), 'utf8');
-  await writeFile(join(configDir, 'product-name-map.json'), JSON.stringify({ '680': 'R50 健康源', '681': 'R50 金额为0', '682': 'R50 创单为0', ...(options.includeWindowOnlineCandidate ? { '683': 'R50 上线20天窗口候选' } : {}), '901': 'Pocket 3 全局零金额', '903': 'SQ1 全局零金额' }), 'utf8');
+  await writeFile(join(configDir, 'product-id-map.json'), JSON.stringify({ p680: '680', p681: '681', p682: '682', ...(options.includeWindowOnlineCandidate ? { p683: '683' } : {}), ...(options.includeWindowCreatedOrdersCandidate ? { p684: '684' } : {}), p901: '901', p903: '903' }), 'utf8');
+  await writeFile(join(configDir, 'product-name-map.json'), JSON.stringify({ '680': 'R50 健康源', '681': 'R50 金额为0', '682': 'R50 创单为0', ...(options.includeWindowOnlineCandidate ? { '683': 'R50 上线20天窗口候选' } : {}), ...(options.includeWindowCreatedOrdersCandidate ? { '684': 'R50 窗口创单为0' } : {}), '901': 'Pocket 3 全局零金额', '903': 'SQ1 全局零金额' }), 'utf8');
   await writeFile(join(configDir, 'link-registry-overrides.json'), JSON.stringify({
     version: 1,
     entries: [
@@ -92,6 +94,7 @@ async function writeTargetedRefreshFixtures(options: { includeWindowOnlineCandid
       { internalProductId: '681', shortName: 'R50', aliases: ['r50'], sameSkuGroupId: 'canon-eos-r50', categoryName: '相机', status: 'active' },
       { internalProductId: '682', shortName: 'R50', aliases: ['r50'], sameSkuGroupId: 'canon-eos-r50', categoryName: '相机', status: 'active' },
       ...(options.includeWindowOnlineCandidate ? [{ internalProductId: '683', shortName: 'R50', aliases: ['r50'], sameSkuGroupId: 'canon-eos-r50', categoryName: '相机', status: 'active' }] : []),
+      ...(options.includeWindowCreatedOrdersCandidate ? [{ internalProductId: '684', shortName: 'R50', aliases: ['r50'], sameSkuGroupId: 'canon-eos-r50', categoryName: '相机', status: 'active' }] : []),
       { internalProductId: '901', shortName: 'Pocket 3', aliases: ['pocket3'], sameSkuGroupId: 'dji-pocket-3', categoryName: '云台相机', status: 'active' },
       { internalProductId: '903', shortName: 'SQ1', sameSkuGroupId: 'instax-sq1', categoryName: '拍立得', status: 'active' },
     ],
@@ -182,6 +185,20 @@ describe('targeted refresh activity plan', () => {
     );
 
     expect(response.text).toContain('端内ID 682、683');
+    expect(response.metadata?.candidateCount).toBe(2);
+  });
+
+  it('uses the selected window metric when zeroMetric is created_orders', async () => {
+    const { outputDir, registryPaths } = await writeTargetedRefreshFixtures({ includeWindowCreatedOrdersCandidate: true });
+
+    const response = await executeAgentToolRequest(
+      { toolName: 'operations.refreshActivityPlan', arguments: { query: 'r50', zeroMetric: 'created_orders', windowDays: 15 }, reason: '帮我下架r50近15天创单为0的链接' },
+      outputDir,
+      { closedOrderRegistryPaths: registryPaths },
+    );
+
+    expect(response.text).toContain('端内ID 682、684');
+    expect(response.text).not.toContain('端内ID 681');
     expect(response.metadata?.candidateCount).toBe(2);
   });
 });
