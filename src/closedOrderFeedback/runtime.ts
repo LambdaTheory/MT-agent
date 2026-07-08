@@ -8,7 +8,7 @@ import type { LinkRegistryEntry } from '../linkRegistry/types.js';
 import { loadProductIdMapping, type ProductIdMapping } from '../mapping/productIdMapping.js';
 import type { GoodsLinkLifecycleState } from '../publicTraffic/goodsLinkLifecycle.js';
 import type { GoodsFirstSeenIndex } from '../publicTraffic/goodsSnapshot.js';
-import type { GoodsSnapshotItem } from '../publicTraffic/types.js';
+import type { ExposureCumulativeProduct, GoodsSnapshotItem } from '../publicTraffic/types.js';
 import { buildPublicTrafficPaths } from '../publicTraffic/paths.js';
 import { loadProductNameMap } from '../publicTraffic/productDisplayName.js';
 
@@ -166,6 +166,14 @@ async function collectArtifactProductNameHints(outputRoot: string, productIdMapp
   return Object.fromEntries([...hints.entries()].map(([internalProductId, values]) => [internalProductId, [...values]]));
 }
 
+async function loadLatestExposureCumulativeProducts(outputRoot: string): Promise<ExposureCumulativeProduct[]> {
+  const latestDate = (await datedOutputDirs(outputRoot))[0];
+  if (!latestDate) return [];
+  const paths = buildPublicTrafficPaths(outputRoot, latestDate);
+  const rows = await loadOptionalArtifactJson(paths.exposureCumulativeProducts);
+  return Array.isArray(rows) ? rows as ExposureCumulativeProduct[] : [];
+}
+
 export async function resolveClosedOrderRegistryPaths(
   input: ClosedOrderRegistryPathsInput = {},
   cwd = process.cwd(),
@@ -226,8 +234,9 @@ export async function loadClosedOrderRegistryContext(
     loadOptionalJson<GoodsFirstSeenIndex>(resolvedPaths.firstSeenPath, {}),
     loadOptionalJson<GoodsLinkLifecycleState | null>(resolvedPaths.lifecyclePath, null),
   ]);
-  const [productNameHints, daemonCatalog, rawOverrides] = await Promise.all([
+  const [productNameHints, exposureCumulativeProducts, daemonCatalog, rawOverrides] = await Promise.all([
     collectArtifactProductNameHints(resolvedPaths.artifactsDir, productIdMapping),
+    loadLatestExposureCumulativeProducts(resolvedPaths.artifactsDir),
     loadOptionalDaemonCatalogSnapshot(resolvedPaths.daemonCatalogPath),
     loadOptionalJson<unknown | null>(resolvedPaths.overridesPath, null),
   ]);
@@ -235,6 +244,7 @@ export async function loadClosedOrderRegistryContext(
     productIdMapping,
     productNameMap,
     productNameHints,
+    exposureCumulativeProducts,
     goodsSnapshot,
     firstSeen,
     lifecycle,

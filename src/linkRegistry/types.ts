@@ -1,6 +1,8 @@
 export type LinkRegistryStatus = 'active' | 'removed' | 'unknown';
 
-export type LinkRegistrySource = 'product_id_mapping' | 'product_name_map' | 'goods_snapshot' | 'goods_first_seen' | 'goods_link_lifecycle' | 'daemon_catalog' | 'link_registry_override' | 'short_name_rule' | 'same_sku_group_rule' | 'same_sku_group_alias_rule';
+export type LinkListingState = 'on_sale' | 'delisted' | 'gone' | 'unknown';
+
+export type LinkRegistrySource = 'product_id_mapping' | 'product_name_map' | 'goods_snapshot' | 'goods_first_seen' | 'goods_link_lifecycle' | 'daemon_catalog' | 'exposure' | 'link_registry_override' | 'short_name_rule' | 'same_sku_group_rule' | 'same_sku_group_alias_rule';
 
 export type LinkRegistryClassificationSource = 'manual_override' | 'short_name_rule' | 'existing_field' | 'unknown';
 
@@ -15,6 +17,9 @@ export interface LinkRegistryEntry {
   aliases?: string[];
   sameSkuGroupId?: string;
   status: LinkRegistryStatus;
+  listingState?: LinkListingState;
+  statusSource?: string;
+  statusObservedAt?: string;
   currentPrice?: number;
   firstSeenDate?: string;
   lastSeenDate?: string;

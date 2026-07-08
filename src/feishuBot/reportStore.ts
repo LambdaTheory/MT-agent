@@ -90,7 +90,7 @@ export function parseNumericProductIdList(keyword: string): string[] {
     .replace(/[;；。]+$/g, '')
     .split(/[,\uFF0C\u3001\s;；]+/)
     .filter(Boolean);
-  if (tokens.length < 2 || tokens.some((token) => !/^\d+$/.test(token))) return [];
+  if (tokens.length < 1 || tokens.some((token) => !/^\d+$/.test(token))) return [];
   return tokens;
 }
 

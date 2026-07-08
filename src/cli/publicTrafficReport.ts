@@ -1,10 +1,11 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { basename, dirname, isAbsolute, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { loadConfig } from '../config/loadConfig.js';
 import { loadEnv } from '../config/loadEnv.js';
 import { loadClosedOrderRegistryContext, type ClosedOrderRegistryContext } from '../closedOrderFeedback/runtime.js';
 import { crawlPublicTrafficSources } from '../crawler/publicTrafficCrawler.js';
+import type { MissingProductIdSample } from '../crawler/exposureCrawler.js';
 import { normalizeRowsForPeriod } from '../extractor/normalizeRows.js';
 import { buildInventorySameSkuSnapshot } from '../inventoryStatus/snapshot.js';
 import { writeInventorySameSkuSnapshot } from '../inventoryStatus/store.js';
@@ -142,6 +143,7 @@ interface ExposurePaginationStatsLike {
   maxRepeatedSignatureAttempts: number;
   duplicateProductRows: number;
   skippedProductIdRows: number;
+  missingProductIdSamples?: MissingProductIdSample[];
 }
 
 function exposurePaginationStatsOrEmpty(stats: Partial<ExposurePaginationStatsLike> | undefined): ExposurePaginationStatsLike {
@@ -152,7 +154,22 @@ function exposurePaginationStatsOrEmpty(stats: Partial<ExposurePaginationStatsLi
     maxRepeatedSignatureAttempts: stats?.maxRepeatedSignatureAttempts ?? 0,
     duplicateProductRows: stats?.duplicateProductRows ?? 0,
     skippedProductIdRows: stats?.skippedProductIdRows ?? 0,
+    missingProductIdSamples: stats?.missingProductIdSamples ?? [],
   };
+}
+
+export async function writeExposureMissingProductIdSamplesArtifact(
+  outputDir: string,
+  date: string,
+  samples: MissingProductIdSample[],
+  log?: Pick<ReturnType<typeof createRunLog>, 'addEvent'>,
+): Promise<string | null> {
+  if (samples.length === 0) return null;
+  const artifactPath = join(buildPublicTrafficPaths(outputDir, date).dir, `曝光无ID样本_${date}.json`);
+  await mkdir(dirname(artifactPath), { recursive: true });
+  await writeFile(artifactPath, JSON.stringify(samples, null, 2), 'utf8');
+  log?.addEvent(`无ID样本已落盘: ${artifactPath}`);
+  return artifactPath;
 }
 
 export function parsePreviousCumulativeSnapshot(text: string): ExposureCumulativeProduct[] {
@@ -509,7 +526,7 @@ export async function runPublicTrafficReportCli(): Promise<PublicTrafficReportCl
     const currentGoodsSnapshot = mergeGoodsSnapshotWithDaemon(
       goodsSnapshotFromExport ?? goodsSnapshotFromMapping(mapping),
       daemonCatalog?.entries ?? [],
-    );
+    ).map((item) => (item.listingState ? { ...item, observedAt: item.observedAt ?? runDate } : item));
     await mkdir(dirname(paths.goodsCurrentSnapshotState), { recursive: true });
     await writeFile(paths.goodsListSnapshot, JSON.stringify(currentGoodsSnapshot, null, 2), 'utf8');
     await writeFile(paths.goodsCurrentSnapshotState, JSON.stringify(currentGoodsSnapshot, null, 2), 'utf8');
@@ -554,6 +571,7 @@ export async function runPublicTrafficReportCli(): Promise<PublicTrafficReportCl
     log.addEvent(
       `曝光商品分页: 页数=${paginationStats.pageRowCounts.length}, 每页=${paginationStats.pageRowCounts.join('/')}, 唯一页=${paginationStats.uniquePageSignatures.length}, 重复页签名=${paginationStats.duplicatePageSignatures}, 最大连续重复=${paginationStats.maxRepeatedSignatureAttempts}, 重复商品行=${paginationStats.duplicateProductRows}, 跳过无ID行=${paginationStats.skippedProductIdRows}`,
     );
+    await writeExposureMissingProductIdSamplesArtifact(config.outputDir, runDate, paginationStats.missingProductIdSamples ?? [], log);
 
     const orderAnalysis = { ...orderAnalysisCapture, runDate };
     await writeFile(paths.orderAnalysis, JSON.stringify(orderAnalysis, null, 2), 'utf8');

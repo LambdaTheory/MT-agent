@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { MAX_CLARIFY_DEPTH } from '../src/agentRuntime/intentResolution.js';
 import type { AgentRequest } from '../src/agentRuntime/types.js';
 import { createFeishuMessageDispatcher, MAX_SEEN_MESSAGE_IDS } from '../src/feishuBot/dispatcher.js';
 import type { BotIntent } from '../src/feishuBot/types.js';
@@ -120,6 +121,33 @@ describe('createFeishuMessageDispatcher', () => {
 
     await expect(dispatcher.dispatch({ messageId: 'mid-agent-first-resolver', text: '查询 565', source: 'sdk' })).resolves.toEqual({ text: 'unknown', skipped: false });
     expect(intents).toEqual([{ type: 'unknown', text: '查询 565' }]);
+  });
+
+  it('passes clarification depth metadata into default Agent planner handling', async () => {
+    const dispatcher = createFeishuMessageDispatcher({
+      agentPlannerProvider: {
+        async proposePlan() {
+          return JSON.stringify({
+            goal: '下架租赁商品',
+            selectedTool: 'rental.delist',
+            arguments: { productId: '648' },
+            confidence: 0.4,
+            reason: '补充后仍然不确定',
+          });
+        },
+      },
+    });
+
+    await expect(dispatcher.dispatch({
+      messageId: 'mid-agent-clarification-depth',
+      text: '补充说明：还是帮我处理 648',
+      source: 'sdk',
+      metadata: { clarificationDepth: MAX_CLARIFY_DEPTH },
+    })).resolves.toMatchObject({
+      text: expect.stringContaining('我还是没法确定你的意图'),
+      skipped: false,
+      metadata: { ok: false, declined: true, clarificationDepth: MAX_CLARIFY_DEPTH },
+    });
   });
 
   it('keeps exact management commands deterministic even when a planner is configured', async () => {

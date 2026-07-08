@@ -1226,6 +1226,22 @@ describe('handleBotIntent', () => {
     expect(response.text).not.toContain('没有找到匹配商品');
   });
 
+  it('keeps gone links out of resolved operation candidates', async () => {
+    const outputDir = await writeContext();
+    const registryRoot = await mkdtemp(join(tmpdir(), 'mt-agent-bot-registry-gone-'));
+    const registryPaths = await writeLinkRegistryOverviewFixtures(registryRoot);
+
+    const response = await executeAgentToolRequest(
+      { toolName: 'linkRegistry.resolveProducts', arguments: { query: '562' }, reason: '确认可操作端内ID范围' },
+      outputDir,
+      { closedOrderRegistryPaths: registryPaths },
+    );
+
+    expect(response.text).toContain('链接数量：0 条');
+    expect(response.text).toContain('可用端内ID：无');
+    expect(response.text).not.toContain('端内ID 562 DJI Pocket 3 Creator Combo');
+  });
+
   it('returns an operations learning question card', async () => {
     const outputDir = await writeContext();
     const response = await handleBotIntent({ type: 'operations_learning_quiz' }, outputDir);
@@ -1261,29 +1277,27 @@ describe('handleBotIntent', () => {
     await expect(handleBotIntent({ type: 'operations_learning_quiz' }, outputDir)).resolves.toEqual({ text: '还没有找到公域日报上下文。' });
   });
 
-  it('answers task pool questions through agent data understanding', async () => {
+  it('declines broad task pool questions instead of guessing through agent data understanding', async () => {
     const outputDir = await writeContext();
     const response = await handleBotIntent({ type: 'unknown', text: '今天要处理哪些' }, outputDir);
-    expect(response.text).toContain('端内ID 566');
-    expect(response.text).toContain('继续放量');
-    expect(response.text).toContain('701');
+    expect(response.text).toContain('我没理解你的意图');
+    expect(response.metadata).toMatchObject({ ok: false, declined: true });
   });
 
-  it('answers weak conversion questions through agent data understanding', async () => {
+  it('declines broad weak conversion questions instead of guessing through agent data understanding', async () => {
     const outputDir = await writeContext();
     const response = await handleBotIntent({ type: 'unknown', text: '转化差的有哪些' }, outputDir);
-    expect(response.text).toContain('端内ID 565');
-    expect(response.text).toContain('提转化');
-    expect(response.text).toContain('访问多成交少');
+    expect(response.text).toContain('我没理解你的意图');
+    expect(response.metadata).toMatchObject({ ok: false, declined: true });
   });
 
-  it('answers all registry-backed read-only agent data questions', async () => {
+  it('keeps exact read-only commands deterministic without broad unknown guessing', async () => {
     const outputDir = await writeContext();
-    await expect(handleBotIntent({ type: 'unknown', text: '今天怎么样' }, outputDir)).resolves.toMatchObject({ text: expect.stringContaining('公域日报 2026-06-11') });
-    await expect(handleBotIntent({ type: 'unknown', text: '查701' }, outputDir)).resolves.toMatchObject({ text: expect.stringContaining('端内ID 701') });
-    await expect(handleBotIntent({ type: 'unknown', text: '新品池有哪些' }, outputDir)).resolves.toMatchObject({ text: expect.stringContaining('大疆 Pocket 3') });
-    await expect(handleBotIntent({ type: 'unknown', text: '整理一下失活链接的id集合' }, outputDir)).resolves.toMatchObject({ text: expect.stringContaining('失活候选链接ID集合：706') });
-    await expect(handleBotIntent({ type: 'unknown', text: '订单情况' }, outputDir)).resolves.toMatchObject({ text: expect.stringContaining('发货订单：12') });
+    await expect(handleBotIntent({ type: 'unknown', text: '查询 701' }, outputDir)).resolves.toMatchObject({ text: expect.stringContaining('端内ID 701') });
+    await expect(handleBotIntent({ type: 'unknown', text: '今天怎么样' }, outputDir)).resolves.toMatchObject({ metadata: { ok: false, declined: true } });
+    await expect(handleBotIntent({ type: 'unknown', text: '新品池有哪些' }, outputDir)).resolves.toMatchObject({ metadata: { ok: false, declined: true } });
+    await expect(handleBotIntent({ type: 'unknown', text: '整理一下失活链接的id集合' }, outputDir)).resolves.toMatchObject({ metadata: { ok: false, declined: true } });
+    await expect(handleBotIntent({ type: 'unknown', text: '订单情况' }, outputDir)).resolves.toMatchObject({ metadata: { ok: false, declined: true } });
   });
 
   it('splits latest overview into exposure-page and order-analysis sources', async () => {
@@ -1311,19 +1325,19 @@ describe('handleBotIntent', () => {
     expect(response.card).toBeUndefined();
   });
 
-  it('answers removed-link questions through agent data understanding', async () => {
+  it('declines removed-link questions instead of guessing through agent data understanding', async () => {
     const outputDir = await writeContext();
     const response = await handleBotIntent({ type: 'unknown', text: '下架链接有哪些' }, outputDir);
-    expect(response.text).toContain('701');
-    expect(response.text).toContain('商品总表缺失');
-    expect(response.text).toContain('2026-06-12');
+    expect(response.text).toContain('我没理解你的意图');
+    expect(response.metadata).toMatchObject({ ok: false, declined: true });
   });
 
   it('returns read-only guidance for unsupported unknown questions', async () => {
     const outputDir = await writeContext();
-    await expect(handleBotIntent({ type: 'unknown', text: '随便聊聊' }, outputDir)).resolves.toEqual({
-      text: '我现在可以查：今日概况、商品、新链接池、待处理任务、转化差、曝光低、高潜力、失活链接、下架链接、订单情况。你可以问“新链接池怎么样”或“查一下721”。',
-    });
+    const response = await handleBotIntent({ type: 'unknown', text: '随便聊聊' }, outputDir);
+    expect(response.text).toContain('我没理解你的意图');
+    expect(response.text).toContain('我现在可以查：今日概况');
+    expect(response.metadata).toMatchObject({ ok: false, declined: true });
   });
 
   it('uses an injected LLM selector as the read-only agent fallback for unsupported unknown questions', async () => {
@@ -1339,6 +1353,21 @@ describe('handleBotIntent', () => {
     const response = await handleBotIntent({ type: 'unknown', text: '帮我看看苹果手机' }, outputDir, { llmToolSelector: selector });
 
     expect(response.text).toContain('端内ID 565 iPhone 15');
+  });
+
+  it('declines low-confidence LLM read-only selections instead of guessing', async () => {
+    const outputDir = await writeContext();
+    const selector: LlmToolSelectionProvider = {
+      async selectTool() {
+        return '{"intent":"product_lookup","tool":"query_product_performance","arguments":{"keyword":"iPhone"},"confidence":0.2,"reason":"uncertain product lookup"}';
+      },
+    };
+
+    const response = await handleBotIntent({ type: 'unknown', text: '帮我看看这个' }, outputDir, { llmToolSelector: selector });
+
+    expect(response.text).toContain('我没理解你的意图');
+    expect(response.metadata).toMatchObject({ ok: false, declined: true });
+    expect(response.text).not.toContain('端内ID 565');
   });
 
   it('uses the LLM read-only ranking tool with link registry context for unsupported natural phrasing', async () => {
@@ -1711,7 +1740,8 @@ describe('handleBotIntent', () => {
 
     const response = await handleBotIntent({ type: 'unknown', text: '查 565' }, outputDir, { agentPlannerProvider: planner });
 
-    expect(response.text).toContain('No legacy deterministic route');
+    expect(response.text).toContain('我没理解你的意图');
+    expect(response.metadata).toMatchObject({ ok: false, declined: true });
     expect(response.text).not.toContain('iPhone 15');
     expect(response.card).toBeUndefined();
   });
@@ -1725,7 +1755,8 @@ describe('handleBotIntent', () => {
 
     const response = await handleBotIntent({ type: 'unknown', text: 'rollback task_1782451929574_977a5f62' }, 'output', { agentPlannerProvider: planner });
 
-    expect(response.text).toContain('No legacy deterministic route');
+    expect(response.text).toContain('我没理解你的意图');
+    expect(response.metadata).toMatchObject({ ok: false, declined: true });
     expect(response.card).toBeUndefined();
   });
 
@@ -3202,7 +3233,8 @@ describe('handleBotIntent', () => {
     expect(response.text).toBe('你想怎么处理 pocket3？');
     expect(response.card).toBeDefined();
     expect(JSON.stringify(response.card)).toContain('agent_clarify_select');
-    expect(JSON.stringify(response.card)).toContain('帮我铺十条 pocket3 的新链');
+    expect(JSON.stringify(response.card)).toContain('clarify_');
+    expect(JSON.stringify(response.card)).not.toContain('帮我铺十条 pocket3 的新链');
     expect(JSON.stringify(response.card)).not.toContain('agent_tool_confirm');
   });
 
@@ -3614,6 +3646,29 @@ describe('handleBotIntent', () => {
     expect(JSON.stringify(response.card)).toContain('rental_operation_confirm');
     expect(JSON.stringify(response.card)).toContain('delist');
     expect(JSON.stringify(response.card)).toContain('761');
+  });
+
+  it('declines low-confidence LLM intent proposals instead of confirming guessed actions', async () => {
+    const proposalProvider: LlmIntentProposalProvider = {
+      async proposeIntent() {
+        return JSON.stringify({ intent: 'rental_delist', arguments: { productId: '761' }, confidence: 0.2, reason: 'uncertain delist guess' });
+      },
+    };
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run for low-confidence proposal'); },
+      async execute() { throw new Error('execute should not run for low-confidence proposal'); },
+      async copy() { throw new Error('copy should not run for low-confidence proposal'); },
+      async delist() { throw new Error('delist should not run for low-confidence proposal'); },
+      async tenancySet() { throw new Error('tenancySet should not run for low-confidence proposal'); },
+      async specDiscover() { throw new Error('specDiscover should not run for low-confidence proposal'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run for low-confidence proposal'); },
+    };
+
+    const response = await handleBotIntent({ type: 'unknown', text: '帮我把 761 下架' }, 'output', { llmIntentProposalProvider: proposalProvider, rentalPriceClient });
+
+    expect(response.text).toContain('我没理解你的意图');
+    expect(response.metadata).toMatchObject({ ok: false, declined: true });
+    expect(response.card).toBeUndefined();
   });
 
   it('returns a rental price preview card for LLM-proposed price changes without executing', async () => {

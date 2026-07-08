@@ -17,6 +17,14 @@ export interface ExposureCrawlResult {
   url: string;
 }
 
+export interface MissingProductIdSample {
+  page: number;
+  productTitle: string;
+  infoText: string;
+  statusLabel?: string;
+  cells: string[];
+}
+
 export interface ExposurePaginationStats {
   pageRowCounts: number[];
   uniquePageSignatures: string[];
@@ -24,12 +32,14 @@ export interface ExposurePaginationStats {
   maxRepeatedSignatureAttempts: number;
   duplicateProductRows: number;
   skippedProductIdRows: number;
+  missingProductIdSamples?: MissingProductIdSample[];
 }
 
 const EXPOSURE_URL = 'https://b.alipay.com/page/self-operation-center/custody?custodyChannel=public';
 const MIN_RELIABLE_EXPOSURE_PRODUCTS = 200;
 const MIN_RELIABLE_EXPOSURE_WINDOWS = 20;
 const MAX_EXPOSURE_COLLECTION_ATTEMPTS = 3;
+const MAX_MISSING_PRODUCT_ID_SAMPLES = 20;
 const PERIOD_LABELS: Array<{ label: string; period: ExposureOverviewMetric['period'] }> = [
   { label: '1日', period: '1d' },
 ];
@@ -342,11 +352,13 @@ async function loadExposureFallbackMapping(config: AgentConfig): Promise<Product
   }
 }
 
-async function extractProductRows(page: Page, mapping: ProductIdMapping): Promise<{ products: ExposureCumulativeProduct[]; paginationStats: ExposurePaginationStats }> {
+export async function extractProductRows(page: Page, mapping: ProductIdMapping): Promise<{ products: ExposureCumulativeProduct[]; paginationStats: ExposurePaginationStats }> {
   const productsById = new Map<string, ExposureCumulativeProduct>();
   const pageRowCounts: number[] = [];
   const uniquePageSignatures: string[] = [];
   const seenPageSignatures = new Set<string>();
+  const missingProductIdSamples: MissingProductIdSample[] = [];
+  const seenMissingProductIdSamples = new Set<string>();
   let pageNum = 0;
   let skippedProductIdRows = 0;
   let duplicateProductRows = 0;
@@ -387,6 +399,16 @@ async function extractProductRows(page: Page, mapping: ProductIdMapping): Promis
       const platformProductId = domProductId || resolveFallbackProductId(regexProductId, mapping) || regexProductId;
       if (!platformProductId) {
         skippedProductIdRows += 1;
+        if (missingProductIdSamples.length < MAX_MISSING_PRODUCT_ID_SAMPLES && !seenMissingProductIdSamples.has(infoText)) {
+          seenMissingProductIdSamples.add(infoText);
+          missingProductIdSamples.push({
+            page: pageNum,
+            productTitle,
+            infoText,
+            ...(statusLabel ? { statusLabel } : {}),
+            cells: cells.map((cell) => normalizeText(cell)),
+          });
+        }
         continue;
       }
 
@@ -430,7 +452,7 @@ async function extractProductRows(page: Page, mapping: ProductIdMapping): Promis
 
   return {
     products: Array.from(productsById.values()),
-    paginationStats: { pageRowCounts, uniquePageSignatures, duplicatePageSignatures, maxRepeatedSignatureAttempts, duplicateProductRows, skippedProductIdRows },
+    paginationStats: { pageRowCounts, uniquePageSignatures, duplicatePageSignatures, maxRepeatedSignatureAttempts, duplicateProductRows, skippedProductIdRows, missingProductIdSamples },
   };
 }
 

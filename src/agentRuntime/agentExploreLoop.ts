@@ -18,6 +18,8 @@ export interface ExploreResult {
   answer: string;
   decisions?: DecisionRecord[];
   stopReason: 'answered' | 'max_steps' | 'invalid';
+  invalidReason?: 'non_json' | 'unknown_action' | 'unknown_tool' | 'bad_args' | 'tool_error' | 'invalid_finish';
+  rawFirstOutput?: string;
 }
 
 export interface RunAgentExploreLoopInput {
@@ -67,8 +69,52 @@ function buildUserPrompt(instruction: string, steps: ExploreStep[]): string {
   return JSON.stringify({ instruction, steps });
 }
 
-function invalidResult(steps: ExploreStep[]): ExploreResult {
-  return { steps, answer: '', stopReason: 'invalid' };
+function truncatedRawOutput(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  return value.length > 300 ? value.slice(0, 300) : value;
+}
+
+function invalidResult(steps: ExploreStep[], invalidReason: NonNullable<ExploreResult['invalidReason']>, rawFirstOutput?: string): ExploreResult {
+  return { steps, answer: '', stopReason: 'invalid', invalidReason, ...(steps.length === 0 && rawFirstOutput ? { rawFirstOutput: truncatedRawOutput(rawFirstOutput) } : {}) };
+}
+
+function parseFirstJsonObject(text: string): Record<string, unknown> | null {
+  const start = text.indexOf('{');
+  if (start < 0) return null;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < text.length; index += 1) {
+    const char = text[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (char === '\\') escaped = true;
+      else if (char === '"') inString = false;
+      continue;
+    }
+    if (char === '"') {
+      inString = true;
+      continue;
+    }
+    if (char === '{') depth += 1;
+    if (char === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        try {
+          const parsed = JSON.parse(text.slice(start, index + 1)) as unknown;
+          return isRecord(parsed) ? parsed : null;
+        } catch {
+          return null;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+function resolveAction(json: Record<string, unknown>, text: string): Record<string, unknown> | null {
+  if (typeof json.action === 'string') return json;
+  return parseFirstJsonObject(text);
 }
 
 export async function runAgentExploreLoop(input: RunAgentExploreLoopInput): Promise<ExploreResult> {
@@ -78,6 +124,7 @@ export async function runAgentExploreLoop(input: RunAgentExploreLoopInput): Prom
 
   while (steps.length < maxSteps) {
     let action: Record<string, unknown>;
+    let rawOutput: string | undefined;
     try {
       const result = await input.provider.generateJson({
         messages: [
@@ -87,28 +134,32 @@ export async function runAgentExploreLoop(input: RunAgentExploreLoopInput): Prom
         temperature: 0,
         maxTokens: 1200,
       });
-      action = result.json;
+      rawOutput = result.text;
+      const resolved = resolveAction(result.json, result.text);
+      if (!resolved) return invalidResult(steps, 'non_json', rawOutput);
+      action = resolved;
     } catch {
-      return invalidResult(steps);
+      return invalidResult(steps, 'non_json', rawOutput);
     }
 
     if (action.action === 'finish') {
-      if (!hasValidFinishPayload(action)) return invalidResult(steps);
+      if (!hasValidFinishPayload(action)) return invalidResult(steps, 'invalid_finish', rawOutput);
       const answer = action.answer;
       const decisions = action.decisions;
       return { steps, answer, ...(decisions ? { decisions } : {}), stopReason: 'answered' };
     }
 
-    if (action.action !== 'call_tool' || typeof action.tool !== 'string') return invalidResult(steps);
+    if (action.action !== 'call_tool' || typeof action.tool !== 'string') return invalidResult(steps, 'unknown_action', rawOutput);
     const tool = toolsByName.get(action.tool);
     const args = readArgs(action.args);
-    if (!tool || !args) return invalidResult(steps);
+    if (!tool) return invalidResult(steps, 'unknown_tool', rawOutput);
+    if (!args) return invalidResult(steps, 'bad_args', rawOutput);
 
     let result: unknown;
     try {
       result = await tool.run(args);
     } catch {
-      return invalidResult(steps);
+      return invalidResult(steps, 'tool_error', rawOutput);
     }
     steps.push({ tool: tool.name, args, result });
   }

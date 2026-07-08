@@ -77,6 +77,7 @@ export interface FeishuBotIncomingTextMessage {
   chatType?: string;
   senderOpenId?: string;
   mentions?: FeishuBotMessageMention[];
+  metadata?: Record<string, unknown>;
 }
 
 export interface FeishuBotMessageMention {

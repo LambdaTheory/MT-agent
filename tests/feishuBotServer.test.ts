@@ -3,6 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { buildAgentToolConfirmCard } from '../src/agentRuntime/approvalCard.js';
+import { MAX_CLARIFY_DEPTH } from '../src/agentRuntime/intentResolution.js';
+import { clarificationConfirmationKey, saveClarificationContext } from '../src/feishuBot/clarificationStore.js';
 import { createDailyMissionRun, saveDailyMissionRun, transitionDailyMissionRun } from '../src/agentRuntime/dailyMissionRun.js';
 import { loadOperationLedgerJsonlEntries } from '../src/agentRuntime/operationLedger.js';
 import { agentExploreReason } from '../src/feishuBot/agentExploreAttribution.js';
@@ -674,11 +676,21 @@ describe('startFeishuBotServer', () => {
 
   it('returns replacement cards for HTTP Agent clarification cancellation and duplicate clicks', async () => {
     const replies: Array<{ messageId: string; text: string }> = [];
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-bot-http-clarify-cancel-'));
+    const context = {
+      originalMessage: '抓取访问页数据',
+      question: '你想抓取哪类访问页数据？',
+      reason: '用户目标不明确',
+      candidates: [{ toolName: 'report.fetchVisitPage', arguments: {}, label: '抓取访问页数据' }],
+      depth: 1,
+      confidence: 0.4,
+    };
+    const clarificationRef = await saveClarificationContext(outputDir, context);
     const server = startFeishuBotServer({
       port: 0,
       appId: 'app',
       appSecret: 'secret',
-      outputDir: await mkdtemp(join(tmpdir(), 'mt-agent-bot-http-clarify-cancel-')),
+      outputDir,
       replyText: async ({ messageId }, text) => {
         replies.push({ messageId, text });
         return { sent: true, channel: 'app' };
@@ -695,7 +707,7 @@ describe('startFeishuBotServer', () => {
           operator: { open_id: 'ou_http_cancel' },
           action: {
             name: 'agent_clarify_cancel',
-            behaviors: [{ type: 'callback', value: { action: 'agent_clarify_cancel', originalMessage: '抓取访问页数据' } }],
+            behaviors: [{ type: 'callback', value: { action: 'agent_clarify_cancel', clarificationRef, confirmationKey: clarificationConfirmationKey(context) } }],
           },
         },
       };
@@ -854,18 +866,33 @@ describe('startFeishuBotServer', () => {
 
   it('does not dispatch duplicate HTTP Agent clarification selections from the same card', async () => {
     const replies: Array<{ messageId: string; text: string }> = [];
+    const cards: Array<{ messageId: string; card: unknown }> = [];
     const dispatched: FeishuBotIncomingTextMessage[] = [];
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-bot-http-clarify-select-'));
+    const context = {
+      originalMessage: '抓取访问页数据',
+      question: '你想怎么处理访问页数据？',
+      reason: '动作不明确',
+      candidates: [{ toolName: 'publicTraffic.refreshDashboard', arguments: {}, label: '补抓访问页' }],
+      depth: 1,
+      confidence: 0.4,
+    };
+    const clarificationRef = await saveClarificationContext(outputDir, context);
     const server = startFeishuBotServer({
       port: 0,
       appId: 'app',
       appSecret: 'secret',
-      outputDir: await mkdtemp(join(tmpdir(), 'mt-agent-bot-http-clarify-select-')),
+      outputDir,
       dispatchMessage: async (message) => {
         dispatched.push(message);
         return { text: '澄清后结果', skipped: false };
       },
       replyText: async ({ messageId }, text) => {
         replies.push({ messageId, text });
+        return { sent: true, channel: 'app' };
+      },
+      replyCard: async ({ messageId }, card) => {
+        cards.push({ messageId, card });
         return { sent: true, channel: 'app' };
       },
     });
@@ -883,9 +910,9 @@ describe('startFeishuBotServer', () => {
               type: 'callback',
               value: {
                 action: 'agent_clarify_select',
-                originalMessage: '抓取访问页数据',
-                selectedMessage: '补抓访问页',
-                label: '补抓访问页',
+                clarificationRef,
+                candidateIndex: 0,
+                confirmationKey: clarificationConfirmationKey(context),
               },
             }],
           },
@@ -905,9 +932,146 @@ describe('startFeishuBotServer', () => {
 
       expect(first.status).toBe(200);
       expect(second.status).toBe(200);
-      expect(dispatched.map((message) => message.text)).toEqual(['补抓访问页']);
-      expect(replies).toEqual([{ messageId: 'mid-http-agent-clarify-select', text: '澄清后结果' }]);
+      expect(dispatched.map((message) => message.text)).toEqual([]);
+      expect(replies).toEqual([]);
+      expect(JSON.stringify(cards[0]?.card)).toContain('agent_tool_confirm');
       expect(JSON.stringify(await second.json())).toContain('已经执行完成');
+    } finally {
+      server.close();
+    }
+  });
+
+  it('resumes a referenced HTTP clarification candidate into the existing Agent confirmation path', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-bot-http-clarify-resume-'));
+    const replies: Array<{ messageId: string; text: string }> = [];
+    const cards: Array<{ messageId: string; card: unknown }> = [];
+    const context = {
+      originalMessage: '帮我把 648 下架',
+      question: '你想怎么处理 648？',
+      reason: '动作不明确',
+      candidates: [{ toolName: 'rental.delist', arguments: { productId: '648' }, label: '下架 648' }],
+      depth: 1,
+      confidence: 0.42,
+    };
+    const clarificationRef = await saveClarificationContext(outputDir, context);
+    const server = startFeishuBotServer({
+      port: 0,
+      appId: 'app',
+      appSecret: 'secret',
+      outputDir,
+      dispatchMessage: async () => { throw new Error('clarification select must not replay text'); },
+      replyText: async ({ messageId }, text) => {
+        replies.push({ messageId, text });
+        return { sent: true, channel: 'app' };
+      },
+      replyCard: async ({ messageId }, card) => {
+        cards.push({ messageId, card });
+        return { sent: true, channel: 'app' };
+      },
+      rentalPriceClient: {
+        async preview() { throw new Error('preview should not run'); },
+        async execute() { throw new Error('execute should not run'); },
+        async copy() { throw new Error('copy should not run'); },
+        async delist() { throw new Error('delist should not run before confirmation'); },
+        async tenancySet() { throw new Error('tenancySet should not run'); },
+        async specDiscover() { throw new Error('specDiscover should not run'); },
+        async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+      },
+    });
+    try {
+      await new Promise<void>((resolve) => server.once('listening', resolve));
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+      const response = await fetch(`http://127.0.0.1:${address.port}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          header: { event_type: 'card.action.trigger' },
+          event: {
+            context: { open_message_id: 'mid-http-agent-clarify-resume' },
+            action: {
+              name: 'agent_clarify_select_1',
+              behaviors: [{
+                type: 'callback',
+                value: {
+                  action: 'agent_clarify_select',
+                  clarificationRef,
+                  candidateIndex: 0,
+                  confirmationKey: clarificationConfirmationKey(context),
+                },
+              }],
+            },
+          },
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(replies).toEqual([]);
+      expect(JSON.stringify(cards[0]?.card)).toContain('agent_tool_confirm');
+      expect(JSON.stringify(cards[0]?.card)).toContain('rental.delist');
+    } finally {
+      server.close();
+    }
+  });
+
+  it('preserves HTTP clarification depth when a selected locked candidate needs another clarification', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-bot-http-clarify-depth-'));
+    const replies: Array<{ messageId: string; text: string }> = [];
+    const cards: Array<{ messageId: string; card: unknown }> = [];
+    const context = {
+      originalMessage: '商品 648 下调 10',
+      question: '你想怎么调整 648？',
+      reason: '商品 648 下调 10',
+      candidates: [{ toolName: 'rental.pricePreview', arguments: { productIds: ['648'] }, label: '预览调价' }],
+      depth: MAX_CLARIFY_DEPTH,
+      confidence: 0.42,
+    };
+    const clarificationRef = await saveClarificationContext(outputDir, context);
+    const server = startFeishuBotServer({
+      port: 0,
+      appId: 'app',
+      appSecret: 'secret',
+      outputDir,
+      dispatchMessage: async () => { throw new Error('clarification select must not replay text'); },
+      replyText: async ({ messageId }, text) => {
+        replies.push({ messageId, text });
+        return { sent: true, channel: 'app' };
+      },
+      replyCard: async ({ messageId }, card) => {
+        cards.push({ messageId, card });
+        return { sent: true, channel: 'app' };
+      },
+    });
+    try {
+      await new Promise<void>((resolve) => server.once('listening', resolve));
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+      const response = await fetch(`http://127.0.0.1:${address.port}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          header: { event_type: 'card.action.trigger' },
+          event: {
+            context: { open_message_id: 'mid-http-agent-clarify-depth' },
+            action: {
+              name: 'agent_clarify_select_1',
+              behaviors: [{
+                type: 'callback',
+                value: {
+                  action: 'agent_clarify_select',
+                  clarificationRef,
+                  candidateIndex: 0,
+                  confirmationKey: clarificationConfirmationKey(context),
+                },
+              }],
+            },
+          },
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(replies[0]?.text).toContain('我还是没法确定你的意图');
+      expect(cards).toEqual([]);
     } finally {
       server.close();
     }

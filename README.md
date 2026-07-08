@@ -212,6 +212,13 @@ npm run activity-automation:scout -- --pick-products --confirm-submit
 - 生成维护提醒与治理提醒。
 - 为飞书卡片和后续 Agent 决策提供链接上下文。
 
+链接档案会同时维护两个状态层级：
+
+- `status`：面向既有消费方的粗粒度状态，包含 `active / removed / unknown`。
+- `listingState`：面向上架语义的细粒度状态，包含 `on_sale / delisted / gone / unknown`。
+
+其中 `delisted` 表示来源明确提示“已下架/停售”，`gone` 表示链接已从商品总表生命周期中消失；二者都会派生为 `status=removed`，因此不会进入改价、补链、规格删除、活动刷新等需要可操作链接的候选范围。飞书侧展示时会区分“已下架（上架后可操作）”与“链接不存在（总表缺失）”，避免把可恢复上架和已消失链接混为一类。
+
 它和公域日报链路的关系比较紧密：
 
 - 日报运行后会结合商品快照识别新链接、下架链接、生命周期变化。

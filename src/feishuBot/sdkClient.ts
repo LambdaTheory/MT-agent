@@ -5,7 +5,7 @@ import { updateActivitySubmitSessionStatus } from '../activityAutomation/submitS
 import { resolveDailyMissionApproval } from '../agentRuntime/dailyMissionApprovalCallback.js';
 import { recordDailyMissionRejection } from '../agentRuntime/dailyMissionRejection.js';
 import type { AgentToolConfirmRequest } from '../agentRuntime/approvalCard.js';
-import { buildClarifiedMessage, parseAgentClarificationCustomSelection, parseAgentClarificationSelection } from '../agentRuntime/clarificationCard.js';
+import { buildClarifiedMessage, parseAgentClarificationCancelRef, parseAgentClarificationCustomRef, parseAgentClarificationSelectRef } from '../agentRuntime/clarificationCard.js';
 import type { AgentPlannerProvider } from '../agentRuntime/planner.js';
 import { recordAgentLearningEvent, type AgentLearningEventInput } from '../agentLearning/store.js';
 import type { ClosedOrderRegistryPathsInput } from '../closedOrderFeedback/runtime.js';
@@ -18,6 +18,8 @@ import { createFeishuMessageDispatcher } from './dispatcher.js';
 import { continueAgentPlannerStepsAfterResponse, executeAgentToolRequestWithContinuation } from './agentToolContinuation.js';
 import { agentExploreLedgerContextFromRequest } from './agentExploreAttribution.js';
 import { loadAgentToolConfirmRequestFromValue } from './agentToolConfirmStore.js';
+import { loadClarificationContext, verifyClarificationKey } from './clarificationStore.js';
+import { executeOrConfirmAgentToolRequest } from './tools.js';
 import {
   agentRequestFromNewLinkBatchConfirm,
   agentRequestFromNewLinkBatchMultiConfirm,
@@ -703,9 +705,15 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
         }
 
         if (actionName === 'agent_clarify_select') {
-          const selection = parseAgentClarificationSelection(value);
-          if (!selection) {
-            await replyText(client, messageId, 'Agent 澄清选择参数无效，请重新发起。');
+          const selectionRef = parseAgentClarificationSelectRef(value);
+          const context = selectionRef ? await loadClarificationContext(outputDir, selectionRef.clarificationRef) : null;
+          if (!selectionRef || !context || !verifyClarificationKey(context, selectionRef.confirmationKey)) {
+            await replyText(client, messageId, '澄清已失效，请重新发起。');
+            return;
+          }
+          const candidate = context.candidates[selectionRef.candidateIndex];
+          if (!candidate) {
+            await replyText(client, messageId, '澄清已失效，请重新发起。');
             return;
           }
           const claim = claimRentalAction(messageId, actionName, value);
@@ -716,42 +724,45 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
             type: 'clarification_selected',
             messageId,
             actorId: extractCardReviewerId(data),
-            originalMessage: selection.originalMessage,
-            selectedMessage: selection.selectedMessage,
-            label: selection.label,
+            originalMessage: context.originalMessage,
+            selectedMessage: typeof candidate.arguments.message === 'string' ? candidate.arguments.message : candidate.label,
+            label: candidate.label,
           }, messageId);
-          const clarifiedMessage = buildClarifiedMessage(selection);
-          const processingCard = statusCard('Agent 已收到你的选择', `已选择：${selection.label}\n\n正在结合原始指令继续理解：${selection.selectedMessage}`, 'blue');
-          void updateCard(client, messageId, processingCard).catch(() => false);
-          void (async () => {
-            try {
-              const response = await dispatchMessage({
-                messageId: `${messageId}:clarify:${claim.key.slice(0, 16)}`,
-                text: clarifiedMessage,
-                source: 'sdk',
-                chatType: 'p2p',
-              });
-              setRentalActionStatus(claim.key, isFailedBotResponse(response) ? 'failed' : 'completed');
-              if (!response.skipped) {
-                if (response.card) await deliverCard(client, messageId, response.card, logError);
-                else await deliverCard(client, messageId, agentClarificationResultStatusCard(response), logError);
-              }
-            } catch (error) {
-              setRentalActionStatus(claim.key, 'failed');
-              await deliverCard(client, messageId, statusCard('Agent 澄清处理失败', error instanceof Error ? error.message : String(error), 'red'), logError);
-              logError(error, { messageId, phase: 'reply' });
-            }
-          })();
-          return cardActionUpdateResponse(processingCard);
+          if (candidate.toolName === 'agent.clarifiedMessage' && typeof candidate.arguments.message === 'string') {
+            const response = await dispatchMessage({
+              messageId: `${messageId}:clarify:${claim.key.slice(0, 16)}`,
+              text: candidate.arguments.message,
+              source: 'sdk',
+              chatType: 'p2p',
+              metadata: { clarificationDepth: context.depth },
+            });
+            setRentalActionStatus(claim.key, response.skipped ? 'failed' : 'completed');
+            if (response.card) return cardActionUpdateResponse(response.card);
+            return cardActionUpdateResponse(agentClarificationResultStatusCard(response));
+          }
+          const response = await executeOrConfirmAgentToolRequest({
+            toolName: candidate.toolName,
+            arguments: candidate.arguments,
+            reason: `${context.reason}；用户选择：${candidate.label}`,
+          }, outputDir, { ...agentToolExecutionOptions, clarificationDepth: context.depth });
+          setRentalActionStatus(claim.key, isFailedBotResponse(response) ? 'failed' : 'completed');
+          if (response.card) return cardActionUpdateResponse(response.card);
+          return cardActionUpdateResponse(agentClarificationResultStatusCard(response));
         }
 
         if (actionName === 'agent_clarify_custom') {
           const customMessage = readActionFormValue(action, 'custom_message');
-          const selection = parseAgentClarificationCustomSelection(value, customMessage);
-          if (!selection) {
+          const customRef = parseAgentClarificationCustomRef(value);
+          const context = customRef ? await loadClarificationContext(outputDir, customRef.clarificationRef) : null;
+          if (!customRef || !context || !verifyClarificationKey(context, customRef.confirmationKey)) {
+            await replyText(client, messageId, '澄清已失效，请重新发起。');
+            return;
+          }
+          if (!customMessage) {
             await replyText(client, messageId, '请先在澄清输入框里补充你的真实意图。');
             return;
           }
+          const selection = { originalMessage: context.originalMessage, selectedMessage: customMessage, label: '自定义澄清' };
           const claimValue = { ...value, selectedMessage: selection.selectedMessage };
           const claim = claimRentalAction(messageId, actionName, claimValue);
           if (!claim.claimed) {
@@ -775,6 +786,7 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
                 text: clarifiedMessage,
                 source: 'sdk',
                 chatType: 'p2p',
+                metadata: { clarificationDepth: context.depth },
               });
               setRentalActionStatus(claim.key, isFailedBotResponse(response) ? 'failed' : 'completed');
               if (!response.skipped) {
@@ -791,7 +803,13 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
         }
 
         if (actionName === 'agent_clarify_cancel') {
-          const originalMessage = readString(value?.originalMessage) ?? '未知指令';
+          const cancelRef = parseAgentClarificationCancelRef(value);
+          const context = cancelRef ? await loadClarificationContext(config.outputDir ?? 'output', cancelRef.clarificationRef) : null;
+          if (!cancelRef || !context || !verifyClarificationKey(context, cancelRef.confirmationKey)) {
+            await replyText(client, messageId, 'Agent 澄清确认参数无效或已过期，请重新发起。');
+            return;
+          }
+          const originalMessage = context.originalMessage;
           const claim = claimRentalAction(messageId, actionName, value);
           if (!claim.claimed) {
             return cardActionUpdateResponse(claimStatusCard('Agent 澄清已处理', claim.claim));

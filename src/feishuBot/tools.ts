@@ -1,11 +1,13 @@
 import { basename, dirname } from 'node:path';
 import { buildAgentToolConfirmCard } from '../agentRuntime/approvalCard.js';
 import { buildAgentClarificationCard } from '../agentRuntime/clarificationCard.js';
+import type { AgentClarificationRequest } from '../agentRuntime/clarificationCard.js';
+import { decideAgentPolicy } from '../agentRuntime/policy.js';
+import { gateByConfidence, isClarifyDepthExceeded } from '../agentRuntime/intentResolution.js';
 import { isPreConfirmationPlanningTool } from '../agentRuntime/planningTools.js';
 import { listAgentPlannerTools, schemaAllowsArguments, validateAgentMultiStepPlannerProposal, validateAgentPlannerClarificationProposal, validateAgentPlannerProposal, type AgentPlannerProvider } from '../agentRuntime/planner.js';
 import { findAgentTool } from '../agentRuntime/toolRegistry.js';
 import { buildAgentLearningPlannerHints, summarizeAgentLearning } from '../agentLearning/store.js';
-import { parseAgentDataIntent } from '../agentData/intent.js';
 import { loadClosedOrderRegistryContext, type ClosedOrderRegistryPathsInput } from '../closedOrderFeedback/runtime.js';
 import { queryInventoryStatus } from '../inventoryStatus/query.js';
 import { readInventorySameSkuSnapshot } from '../inventoryStatus/store.js';
@@ -24,6 +26,7 @@ import {
 import { agentExploreResponse } from './agentExploreResponse.js';
 import { continueAgentPlannerSteps, reviewAgentToolArguments } from './agentToolContinuation.js';
 import { executeAgentToolRequest } from './agentToolExecutor.js';
+import { clarificationConfirmationKey, saveClarificationContext } from './clarificationStore.js';
 import {
   buildInventoryStatusDetailCard,
   buildInventoryStatusOverviewCard,
@@ -50,10 +53,10 @@ import {
   type RentalOperationConfirmRequest,
   type RentalPriceSkillClient,
 } from './rentalPrice.js';
-import { findReadOnlyTool } from './readOnlyToolRegistry.js';
 import type { ReadOnlyToolRunOptions } from './readOnlyToolRegistry.js';
 import { findLatestReportContext, findReportContextByDate, formatConversionSummary, formatLatestSummary, formatProductRows, parseNumericProductIdList, queryProductRows } from './reportStore.js';
 import type { BotIntent, BotResponse } from './types.js';
+import type { ResolutionCandidate } from '../agentRuntime/intentResolution.js';
 
 const UNKNOWN_GUIDANCE = '我现在可以查：今日概况、商品、新链接池、待处理任务、转化差、曝光低、高潜力、失活链接、下架链接、订单情况。你可以问“新链接池怎么样”或“查一下721”。';
 const NEW_LINK_WRITE_INTENT_NEEDS_LLM =
@@ -63,8 +66,73 @@ const NEW_LINK_WRITE_INTENT_PLAN_FAILED =
 const LEGACY_WORKFLOW_PLAN_REJECTED =
   'Agent planner 返回了 legacy workflow 格式（selectedWorkflow），但当前飞书路径只接受 registered tool 或 steps 多步骤计划。未执行任何操作；请让 LLM 改为 selectedTool 或 steps。';
 
+const AMBIGUOUS_WRITE_ACTION_PATTERN = /(处理|操作|弄|搞|看着办|整一下|整一整)/;
+const EXPLICIT_ACTION_PATTERN = /(下架|复制|改价|补链|铺链|新链|租期|规格|查|查询|库存|状态|ID查询|(?<!着)看(?!着办))/;
+
+export function shouldForceClarificationBeforePlanner(text: string): boolean {
+  const compact = text.replace(/\s+/g, '');
+  const internalIds = compact.match(/(?<!\d)\d{3,6}(?!\d)/g) ?? [];
+  return internalIds.length >= 1
+    && AMBIGUOUS_WRITE_ACTION_PATTERN.test(compact)
+    && !EXPLICIT_ACTION_PATTERN.test(compact);
+}
+
+function forcedClarificationProductId(text: string): string | null {
+  const compact = text.replace(/\s+/g, '');
+  const internalIds = compact.match(/(?<!\d)\d{3,6}(?!\d)/g) ?? [];
+  return internalIds.length >= 1 ? internalIds.join('/') : null;
+}
+
+function forcedPrePlannerClarification(text: string, outputDir: string, priorDepth = 0): Promise<BotResponse> {
+  const productId = forcedClarificationProductId(text) ?? '该商品';
+  return clarificationResponse({
+    originalMessage: text,
+    question: `你想对 ${productId} 做什么？`,
+    reason: '用户给了明确商品ID，但动作是模糊高风险操作，需要先澄清，不能由 planner 猜业务工具。',
+    options: [
+      { label: '下架', message: `把 ${productId} 下架`, description: '进入下架确认流程' },
+      { label: '复制', message: `复制 ${productId}`, description: '进入复制确认流程' },
+      { label: '改价', message: `修改 ${productId} 价格`, description: '进入改价确认流程' },
+      { label: '先查看信息', message: `查 ${productId}`, description: '只读查看商品状态' },
+    ],
+  }, [
+    { toolName: 'agent.clarifiedMessage', arguments: { message: `把 ${productId} 下架` }, label: '下架', description: '进入下架确认流程' },
+    { toolName: 'agent.clarifiedMessage', arguments: { message: `复制 ${productId}` }, label: '复制', description: '进入复制确认流程' },
+    { toolName: 'agent.clarifiedMessage', arguments: { message: `修改 ${productId} 价格` }, label: '改价', description: '进入改价确认流程' },
+    { toolName: 'agent.clarifiedMessage', arguments: { message: `查 ${productId}` }, label: '先查看信息', description: '只读查看商品状态' },
+  ], 0.3, outputDir, priorDepth);
+}
+
+function declineUnknownIntent(): BotResponse {
+  return {
+    text: `我没理解你的意图，请换种说法或用精确命令。\n${UNKNOWN_GUIDANCE}`,
+    metadata: { ok: false, declined: true },
+  };
+}
+
+function declineClarificationLoop(depth: number): BotResponse {
+  return {
+    text: '我还是没法确定你的意图，请直接说明要操作的商品、动作、数量、金额或日期；本次没有执行任何操作。',
+    metadata: { ok: false, declined: true, clarificationDepth: depth },
+  };
+}
+
+function readConfidenceThreshold(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1) return value;
+  if (typeof value !== 'string' || !value.trim()) return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 && parsed <= 1 ? parsed : undefined;
+}
+
+function confidenceGateOptions(options: HandleBotIntentOptions) {
+  return {
+    executeThreshold: options.confidenceExecuteThreshold
+      ?? readConfidenceThreshold(process.env.MT_AGENT_INTENT_CONFIDENCE_THRESHOLD),
+  };
+}
+
 function completePlannerPriceArguments(toolName: string, args: Record<string, unknown>, contextText: string): Record<string, unknown> {
-  if (toolName !== 'rental.priceChange' || args.fields !== undefined || args.discount !== undefined || args.adjustmentAmount !== undefined) {
+  if ((toolName !== 'rental.priceChange' && toolName !== 'rental.pricePreview') || args.fields !== undefined || args.discount !== undefined || args.adjustmentAmount !== undefined) {
     return args;
   }
   const fields = parseRentPriceFieldsFromText(contextText);
@@ -85,7 +153,40 @@ function requiredFieldsForTool(toolName: string): string[] {
   return schema.required.filter((item): item is string => typeof item === 'string');
 }
 
-function invalidPlannerArgumentsClarification(rawProposal: string, message: string): BotResponse | null {
+async function clarificationResponse(
+  request: AgentClarificationRequest,
+  candidates: ResolutionCandidate[],
+  confidence: number,
+  outputDir: string,
+  priorDepth = 0,
+): Promise<BotResponse> {
+  if (isClarifyDepthExceeded(priorDepth)) return declineClarificationLoop(priorDepth);
+  const depth = priorDepth + 1;
+  const candidateOptions = candidates.map((candidate) => ({
+    label: candidate.label,
+    message: request.originalMessage,
+    ...(candidate.description ? { description: candidate.description } : {}),
+  }));
+  const context = {
+    originalMessage: request.originalMessage,
+    question: request.question,
+    reason: request.reason,
+    candidates,
+    depth,
+    confidence,
+  };
+  const clarificationRef = await saveClarificationContext(outputDir, context);
+  return {
+    text: request.question,
+    card: buildAgentClarificationCard({ ...request, options: candidateOptions }, {
+      clarificationRef,
+      confirmationKey: clarificationConfirmationKey(context),
+    }),
+    metadata: { ok: false, needsClarification: true },
+  };
+}
+
+async function invalidPlannerArgumentsClarification(rawProposal: string, message: string, outputDir: string, priorDepth = 0): Promise<BotResponse | null> {
   let parsed: unknown;
   try {
     parsed = JSON.parse(rawProposal);
@@ -114,23 +215,26 @@ function invalidPlannerArgumentsClarification(rawProposal: string, message: stri
     : isRecord(fallbackStep) ? readNonEmptyString(fallbackStep.toolName) : null;
   const toolName = selectedTool ?? stepTool;
   if (!toolName) return null;
+  const selected = findAgentTool(toolName);
+  if (!selected) return null;
 
   const required = requiredFieldsForTool(toolName);
   const question = selectedTool
     ? `我理解你要调用 ${toolName}，但工具参数不完整或格式不安全，需要你确认。`
     : `我已生成多步骤计划，但 ${toolName} 的参数不完整或格式不安全，需要你确认。`;
 
-  return {
-    text: question,
-    card: buildAgentClarificationCard({
+  const args = isRecord(parsed.arguments) ? parsed.arguments : {};
+  const supplementMessage = `${message}\n补充说明：请补齐 ${toolName} 的必要参数`;
+  const supplementDescription = required.length ? `需要：${required.join('、')}` : '补充目标、对象、数量或日期等关键参数';
+  return clarificationResponse({
       originalMessage: message,
       question,
       reason: `${goal}；${reason}${required.length ? `；必填参数：${required.join('、')}` : ''}`,
       options: [
         {
           label: '补充参数',
-          message: `${message}\n补充说明：请补齐 ${toolName} 的必要参数`,
-          description: required.length ? `需要：${required.join('、')}` : '补充目标、对象、数量或日期等关键参数',
+          message: supplementMessage,
+          description: supplementDescription,
         },
         {
           label: '重新规划',
@@ -138,9 +242,10 @@ function invalidPlannerArgumentsClarification(rawProposal: string, message: stri
           description: '让 Agent 重新理解并选择工具',
         },
       ],
-    }),
-    metadata: { toolName, ok: false, needsClarification: true },
-  };
+    }, [
+      { toolName, arguments: args, label: '补充参数', description: supplementDescription },
+      { toolName: 'agent.clarifiedMessage', arguments: { message }, label: '重新规划', description: '让 Agent 重新理解并选择工具' },
+    ], 0.3, outputDir, priorDepth);
 }
 
 const HELP_TEXT = `📋 查询与分析
@@ -210,6 +315,8 @@ export interface HandleBotIntentOptions {
   activityAutomationClient?: ActivityAutomationSkillClient;
   closedOrderFetchImpl?: typeof fetch;
   closedOrderRegistryPaths?: ClosedOrderRegistryPathsInput;
+  clarificationDepth?: number;
+  confidenceExecuteThreshold?: number;
 }
 
 function parseAgentExploreInstruction(text: string): string | null {
@@ -262,6 +369,55 @@ function executeDirectAgentToolResponse(
       closedOrderRegistryPaths: options.closedOrderRegistryPaths,
     },
   );
+}
+
+export async function executeOrConfirmAgentToolRequest(
+  request: { toolName: string; arguments: Record<string, unknown>; reason: string },
+  outputDir: string,
+  options: HandleBotIntentOptions = {},
+): Promise<BotResponse> {
+  const tool = findAgentTool(request.toolName);
+  if (!tool) return { text: `Agent 工具不存在：${request.toolName}`, metadata: { toolName: request.toolName, ok: false } };
+
+  const reviewed = await reviewAgentToolArguments({
+    toolName: request.toolName,
+    args: request.arguments,
+    contextText: request.reason,
+    sourceText: request.reason,
+    reason: request.reason,
+    outputDir,
+    clarificationDepth: options.clarificationDepth,
+  });
+  if (!reviewed.ok) return reviewed.response;
+  const completedArguments = reviewed.args;
+  const completedRequest = { ...request, arguments: completedArguments };
+
+  if (request.toolName === 'rental.priceChange') {
+    const rentalRequest = rentalPriceChangeRequestFromToolArguments(completedArguments);
+    if (!rentalRequest) return { text: '租赁商品改价参数无效：需要 productId，并提供 fields 或 discount。' };
+    const rentalPriceClient = options.rentalPriceClient ?? createRentalPriceSkillClient();
+    const preview = await rentalPriceClient.preview(rentalRequest);
+    return { text: `请确认商品 ${rentalRequest.productId} 改价`, card: buildRentalPricePreviewCard(preview, { reason: request.reason }) };
+  }
+  if (isPreConfirmationPlanningTool(request.toolName)) {
+    return executeAgentToolRequest(completedRequest, outputDir, {
+      rentalPriceClient: options.rentalPriceClient,
+      closedOrderFetchImpl: options.closedOrderFetchImpl,
+      closedOrderRegistryPaths: options.closedOrderRegistryPaths,
+    });
+  }
+  const policy = decideAgentPolicy({ tool, input: completedArguments, reason: request.reason });
+  if (policy.decision === 'allow') {
+    return executeAgentToolRequest(completedRequest, outputDir, {
+      rentalPriceClient: options.rentalPriceClient,
+      closedOrderFetchImpl: options.closedOrderFetchImpl,
+      closedOrderRegistryPaths: options.closedOrderRegistryPaths,
+    });
+  }
+  return {
+    text: `请确认 Agent 操作：${request.toolName}`,
+    card: buildAgentToolConfirmCard(completedRequest),
+  };
 }
 
 async function findReportContextForIntent(outputDir: string, date?: string) {
@@ -366,13 +522,11 @@ function looksLikeNewLinkWriteIntent(text: string): boolean {
   return hasNewLink && hasWriteVerb;
 }
 
-function readOnlyIntentNeedsLinkRegistry(intent: ReturnType<typeof parseAgentDataIntent>): boolean {
-  return intent.type === 'best_product_by_same_sku';
-}
-
-function formatLinkRegistryStatus(status: LinkRegistryEntry['status']): string {
-  if (status === 'active') return '在架';
-  if (status === 'removed') return '已下架';
+function formatLinkRegistryStatus(entry: LinkRegistryEntry): string {
+  if (entry.listingState === 'delisted') return '已下架（上架后可操作）';
+  if (entry.listingState === 'gone') return '链接不存在（总表缺失）';
+  if (entry.status === 'active') return '在架';
+  if (entry.status === 'removed') return '已下架';
   return '未知';
 }
 
@@ -383,7 +537,7 @@ function formatRegistryProductRows(productIds: string[], entries: LinkRegistryEn
     if (!entry) return `端内ID ${productId}\n未在链接档案中找到`;
     const name = entry.productName ?? entry.shortName ?? '未命名商品';
     const platform = entry.platformProductId ? `平台商品ID ${entry.platformProductId}` : '平台商品ID 未记录';
-    return `端内ID ${entry.internalProductId} ${name}\n${platform}，状态 ${formatLinkRegistryStatus(entry.status)}`;
+    return `端内ID ${entry.internalProductId} ${name}\n${platform}，状态 ${formatLinkRegistryStatus(entry)}`;
   });
   return lines.join('\n\n');
 }
@@ -455,6 +609,7 @@ async function executeAgentMultiStepPlannerResponse(
     textParts,
     outputDir,
     sourceText: message,
+    clarificationDepth: options.clarificationDepth,
     options: {
       rentalPriceClient: options.rentalPriceClient,
       closedOrderFetchImpl: options.closedOrderFetchImpl,
@@ -498,55 +653,38 @@ async function agentPlannerResponse(
     const multiStepResponse = await executeAgentMultiStepPlannerResponse(rawProposal, message, outputDir, options);
     if (multiStepResponse) return multiStepResponse;
     const clarificationParsed = validateAgentPlannerClarificationProposal(rawProposal);
-    if (clarificationParsed.ok) return { text: clarificationParsed.proposal.question, card: buildAgentClarificationCard(clarificationParsed.proposal) };
-    return invalidPlannerArgumentsClarification(rawProposal, message);
+    if (clarificationParsed.ok) {
+      return clarificationResponse(clarificationParsed.proposal, clarificationParsed.proposal.candidates, clarificationParsed.proposal.confidence, outputDir, options.clarificationDepth);
+    }
+    return invalidPlannerArgumentsClarification(rawProposal, message, outputDir, options.clarificationDepth);
   }
 
   const plannerContextText = [message, parsed.proposal.reason].filter(Boolean).join('\n');
-  const initialCompletedArguments = completePlannerPriceArguments(
+  const completedArguments = completePlannerPriceArguments(
     parsed.proposal.selectedTool,
     parsed.proposal.arguments,
     plannerContextText,
   );
-  const reviewed = reviewAgentToolArguments({
-    toolName: parsed.proposal.selectedTool,
-    args: initialCompletedArguments,
-    contextText: plannerContextText,
-    sourceText: message,
-    reason: parsed.proposal.reason,
-  });
-  if (!reviewed.ok) return reviewed.response;
-  const completedArguments = reviewed.args;
-  const request = {
+  if (gateByConfidence(parsed.proposal.confidence, confidenceGateOptions(options)) === 'clarify') {
+    const candidate = {
+      toolName: parsed.proposal.selectedTool,
+      arguments: completedArguments,
+      label: `执行 ${parsed.proposal.selectedTool}`,
+      description: parsed.proposal.reason,
+    };
+    const question = `我理解你可能要调用 ${parsed.proposal.selectedTool}，但置信度不足，需要你确认。`;
+    return clarificationResponse({
+      originalMessage: message,
+      question,
+      reason: parsed.proposal.reason,
+      options: [{ label: candidate.label, message, description: candidate.description }],
+    }, [candidate], parsed.proposal.confidence, outputDir, options.clarificationDepth);
+  }
+  return executeOrConfirmAgentToolRequest({
     toolName: parsed.proposal.selectedTool,
     arguments: completedArguments,
     reason: parsed.proposal.reason,
-  };
-  if (parsed.proposal.selectedTool === 'rental.priceChange') {
-    const rentalRequest = rentalPriceChangeRequestFromToolArguments(completedArguments);
-    if (!rentalRequest) return { text: '租赁商品改价参数无效：需要 productId，并提供 fields 或 discount。' };
-    const rentalPriceClient = options.rentalPriceClient ?? createRentalPriceSkillClient();
-    const preview = await rentalPriceClient.preview(rentalRequest);
-    return { text: `请确认商品 ${rentalRequest.productId} 改价`, card: buildRentalPricePreviewCard(preview, { reason: parsed.proposal.reason }) };
-  }
-  if (isPreConfirmationPlanningTool(parsed.proposal.selectedTool)) {
-    return executeAgentToolRequest(request, outputDir, {
-      rentalPriceClient: options.rentalPriceClient,
-      closedOrderFetchImpl: options.closedOrderFetchImpl,
-      closedOrderRegistryPaths: options.closedOrderRegistryPaths,
-    });
-  }
-  if (parsed.policy.decision === 'allow') {
-    return executeAgentToolRequest(request, outputDir, {
-      rentalPriceClient: options.rentalPriceClient,
-      closedOrderFetchImpl: options.closedOrderFetchImpl,
-      closedOrderRegistryPaths: options.closedOrderRegistryPaths,
-    });
-  }
-  return {
-    text: `请确认 Agent 操作：${parsed.proposal.selectedTool}`,
-    card: buildAgentToolConfirmCard(request),
-  };
+  }, outputDir, options);
 }
 
 export async function handleBotIntent(intent: BotIntent, outputDir = 'output', options: HandleBotIntentOptions = {}): Promise<BotResponse> {
@@ -731,12 +869,16 @@ export async function handleBotIntent(intent: BotIntent, outputDir = 'output', o
       });
     }
 
+    if (shouldForceClarificationBeforePlanner(intent.text)) {
+      return forcedPrePlannerClarification(intent.text, outputDir, options.clarificationDepth);
+    }
+
     const plannedResponse = await agentPlannerResponse(intent.text, outputDir, options);
     if (plannedResponse) return plannedResponse;
 
     if (options.agentPlannerProvider) {
       if (looksLikeNewLinkWriteIntent(intent.text)) return { text: NEW_LINK_WRITE_INTENT_PLAN_FAILED };
-      return { text: 'Agent planner did not return a valid plan. No legacy deterministic route or operation was executed. Please rephrase the command or check the LLM output/config.' };
+      return declineUnknownIntent();
     }
 
     const rollbackResponse = rollbackTaskConfirmResponse(intent.text);
@@ -751,6 +893,7 @@ export async function handleBotIntent(intent: BotIntent, outputDir = 'output', o
       const rawProposal = await options.llmIntentProposalProvider.proposeIntent({ message: intent.text, intents: getSupportedLlmIntentProposals() });
       const parsedProposal = parseLlmIntentProposal(rawProposal);
       if (parsedProposal.ok && parsedProposal.proposal.intent.type !== 'unknown') {
+        if (gateByConfidence(parsedProposal.proposal.confidence, confidenceGateOptions(options)) === 'clarify') return declineUnknownIntent();
         const proposedIntent = parsedProposal.proposal.intent;
         const rentalPriceClient = options.rentalPriceClient ?? createRentalPriceSkillClient();
         if (proposedIntent.type === 'rental_price_change') {
@@ -775,6 +918,7 @@ export async function handleBotIntent(intent: BotIntent, outputDir = 'output', o
       const rawSelection = await options.llmToolSelector.selectTool({ message: intent.text, tools: getRegistryBackedLlmTools() });
       const parsed = parseLlmToolSelection(rawSelection);
       if (parsed.ok && parsed.selection.tool !== 'none' && parsed.selection.tool !== 'get_supported_questions') {
+        if (gateByConfidence(parsed.selection.confidence, confidenceGateOptions(options)) === 'clarify') return declineUnknownIntent();
         const result = await runReadOnlyToolSelection(
           latest.context,
           parsed.selection,
@@ -782,20 +926,13 @@ export async function handleBotIntent(intent: BotIntent, outputDir = 'output', o
         );
         return result.ok ? result.response : { text: UNKNOWN_GUIDANCE };
       }
-      return { text: UNKNOWN_GUIDANCE };
+      return declineUnknownIntent();
     }
 
-    if (hasLlmRouting) return { text: UNKNOWN_GUIDANCE };
+    if (hasLlmRouting) return declineUnknownIntent();
 
-    const deterministicDataIntent = parseAgentDataIntent(intent.text);
-    const tool = findReadOnlyTool(deterministicDataIntent);
-    if (tool) {
-      const latest = await findLatestReportContext(outputDir);
-      if (latest) return tool.run(latest.context, deterministicDataIntent, await buildReadOnlyToolRunOptions(options, readOnlyIntentNeedsLinkRegistry(deterministicDataIntent)));
-      return { text: '还没有找到公域日报上下文。' };
-    }
-    return { text: UNKNOWN_GUIDANCE };
+    return declineUnknownIntent();
   }
 
-  return { text: UNKNOWN_GUIDANCE };
+  return declineUnknownIntent();
 }

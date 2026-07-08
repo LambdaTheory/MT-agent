@@ -42,11 +42,21 @@ function looksLikeReportComparisonQuestion(text: string): boolean {
   return hasCompareWord && (hasRangeWord || hasTwoDates);
 }
 
+function looksLikeReportComplaint(text: string): boolean {
+  const compact = text.replace(/\s+/g, '');
+  return /日报/.test(compact) && /(不对|有问题|异常|错误|错了|差|坏了|怎么这么)/.test(compact);
+}
+
 function parseShortMultiProductQuery(text: string): string | null {
   const match = /^查\s*(.+)$/.exec(text);
   if (!match) return null;
   const productIds = parseNumericProductIdList(match[1]);
   return productIds.length > 0 ? productIds.join(', ') : null;
+}
+
+function looksLikeInternalProductIdQuery(text: string): string | null {
+  const match = /^(?:查询商品|查商品|查询|查|商品)\s*(\d{3,6})$/.exec(text);
+  return match?.[1] ?? null;
 }
 
 interface DateHint {
@@ -136,6 +146,9 @@ function parseDatedReadIntent(text: string): BotIntent | null {
   const idLookup = /^(?:查\s*ID|ID\s*查询)\s*(\d+)$/i.exec(rest);
   if (idLookup?.[1]) return { type: 'lookup_product_id', query: idLookup[1], date: hint.date };
 
+  const internalProductIdQuery = looksLikeInternalProductIdQuery(rest);
+  if (internalProductIdQuery) return { type: 'query_product', keyword: internalProductIdQuery, date: hint.date };
+
   const query = /^(?:查询商品|查商品|查询|查|商品)\s+(.+)$/.exec(rest);
   if (query?.[1]) {
     const keyword = cleanDatedProductKeyword(query[1]);
@@ -177,9 +190,11 @@ export function parseExactBotIntent(input: string): BotIntent {
   if (/^(同步|拉取|更新).*(关单|关单反馈)/.test(canonicalText)) return { type: 'sync_closed_order_feedback' };
   if (/^(跑|生成|执行).*(关单观察|关单报告|关单反馈观察)/.test(canonicalText)) return { type: 'run_closed_order_observation_report' };
   if (looksLikeReportComparisonQuestion(canonicalText)) return { type: 'unknown', text };
+  if (looksLikeReportComplaint(canonicalText)) return { type: 'unknown', text };
   const datedReadIntent = parseDatedReadIntent(canonicalText);
   if (datedReadIntent) return datedReadIntent;
-  if (/(今日|今天|现在).*(咋样|怎么样|概况|数据|日报|看下|看看)/.test(canonicalText)) return { type: 'latest_summary' };
+  if (/^(?:(?:帮我)?看(?:下|看)?|查看|可以重新看下)?\s*(?:公域)?日报(?:概况)?(?:吗)?$/.test(canonicalText)) return { type: 'latest_summary' };
+  if (/^(今日|今天|现在)(?:公域)?(?:概况|数据)$/.test(canonicalText)) return { type: 'latest_summary' };
   if (/转化率|转化数据/.test(canonicalText)) return { type: 'conversion_summary' };
   if (/^(?:Agent|agent|智能体语义|语义)(?:学习|迭代).*(?:汇总|总结|历史|统计)$|^(?:Agent|agent|智能体语义|语义)(?:学习|迭代)$/.test(canonicalText)) {
     return { type: 'agent_learning_summary' };
@@ -198,6 +213,9 @@ export function parseExactBotIntent(input: string): BotIntent {
   if (/^(组级治理|链接治理|开始组级治理|打开组级治理|呼出组级治理卡)$/.test(canonicalText)) return { type: 'link_registry_governance_prompt' };
   if (/^(链接档案维护|维护链接档案|链接维护卡|链接档案治理)$/.test(canonicalText)) return { type: 'link_registry_maintenance_hub' };
   if (/^(?:商品)?ID(?:查询|互查|转换|换算)$|^打开(?:商品)?ID(?:查询|互查|转换|换算)$|^查ID$/i.test(canonicalText)) return { type: 'lookup_product_id_card' };
+
+  const internalProductIdQuery = looksLikeInternalProductIdQuery(canonicalText);
+  if (internalProductIdQuery) return { type: 'query_product', keyword: internalProductIdQuery };
 
   if (/^(链接维护|开始链接维护|打开链接维护|呼出链接维护卡)\s+daemon$/i.test(canonicalText)) {
     return { type: 'link_registry_maintenance_prompt', sourceMode: 'daemon_only' };
@@ -249,8 +267,6 @@ export function parseBotIntent(input: string): BotIntent {
 
   const alias = resolveSemanticAlias(text);
   if (alias !== undefined) return alias;
-
-  if (/日报/.test(text)) return { type: 'latest_summary' };
 
   return { type: 'unknown', text };
 }

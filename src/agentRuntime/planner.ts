@@ -4,6 +4,7 @@ import { findAgentTool, listAgentTools } from './toolRegistry.js';
 import type { AgentWorkflowDefinition } from './workflowRegistry.js';
 import type { AgentClarificationOption, AgentClarificationRequest } from './clarificationCard.js';
 import type { AgentLearningPlannerHint } from '../agentLearning/store.js';
+import type { ResolutionCandidate } from './intentResolution.js';
 
 export type AgentPlannerToolMetadata = Pick<AgentToolDefinition, 'name' | 'description' | 'risk' | 'requiresConfirmation' | 'inputSchema' | 'resultMetadataSchema'>;
 
@@ -52,6 +53,7 @@ export type AgentMultiStepPlannerValidationResult =
 export interface AgentPlannerClarificationProposal extends AgentClarificationRequest {
   goal: string;
   confidence: number;
+  candidates: ResolutionCandidate[];
 }
 
 export type AgentPlannerClarificationValidationResult =
@@ -341,6 +343,7 @@ export function validateAgentPlannerClarificationProposal(raw: string): AgentPla
   }
 
   const normalizedOptions: AgentClarificationOption[] = [];
+  const candidates: ResolutionCandidate[] = [];
   for (const option of options.slice(0, 4)) {
     if (!isRecord(option)) return { ok: false, reason: 'invalid_options' };
     const label = readNonEmptyString(option.label, 40);
@@ -348,6 +351,19 @@ export function validateAgentPlannerClarificationProposal(raw: string): AgentPla
     const description = option.description === undefined ? undefined : readNonEmptyString(option.description, 120);
     if (!label || !message || (option.description !== undefined && !description)) return { ok: false, reason: 'invalid_options' };
     normalizedOptions.push({ label, message, ...(description ? { description } : {}) });
+    const toolName = readNonEmptyString(option.toolName, 120);
+    const args = option.arguments;
+    let hasToolCandidate = false;
+    if (toolName && isRecord(args)) {
+      const tool = findAgentTool(toolName);
+      if (tool && isPlannerSelectableTool(tool) && schemaAllowsArguments(tool.inputSchema, args, { allowPlaceholders: true })) {
+        candidates.push({ toolName, arguments: args, label, ...(description ? { description } : {}) });
+        hasToolCandidate = true;
+      }
+    }
+    if (!hasToolCandidate) {
+      candidates.push({ toolName: 'agent.clarifiedMessage', arguments: { message }, label, ...(description ? { description } : {}) });
+    }
   }
 
   if (normalizedOptions.length < 2) return { ok: false, reason: 'invalid_options' };
@@ -359,6 +375,7 @@ export function validateAgentPlannerClarificationProposal(raw: string): AgentPla
       originalMessage: normalizedOriginalMessage,
       question: normalizedQuestion,
       options: normalizedOptions,
+      candidates,
       confidence,
       reason: normalizedReason,
     },

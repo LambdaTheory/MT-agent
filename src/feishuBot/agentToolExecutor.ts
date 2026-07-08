@@ -190,9 +190,11 @@ function requireProductId(value: unknown, fieldName: string): string {
   return parsed;
 }
 
-function formatLinkRegistryStatus(status: LinkRegistryEntry['status']): string {
-  if (status === 'active') return '在架';
-  if (status === 'removed') return '已下架';
+function formatLinkRegistryStatus(entry: LinkRegistryEntry): string {
+  if (entry.listingState === 'delisted') return '已下架（上架后可操作）';
+  if (entry.listingState === 'gone') return '链接不存在（总表缺失）';
+  if (entry.status === 'active') return '在架';
+  if (entry.status === 'removed') return '已下架';
   return '未知';
 }
 
@@ -203,7 +205,7 @@ function formatRegistryProductRows(productIds: string[], entries: LinkRegistryEn
     if (!entry) return `端内ID ${productId}\n未在链接档案中找到`;
     const name = entry.productName ?? entry.shortName ?? '未命名商品';
     const platform = entry.platformProductId ? `平台商品ID ${entry.platformProductId}` : '平台商品ID 未记录';
-    return `端内ID ${entry.internalProductId} ${name}\n${platform}，状态 ${formatLinkRegistryStatus(entry.status)}`;
+    return `端内ID ${entry.internalProductId} ${name}\n${platform}，状态 ${formatLinkRegistryStatus(entry)}`;
   }).join('\n\n');
 }
 
@@ -361,7 +363,7 @@ function resolveEntriesForSingleEntry(
   return {
     ok: true,
     sameSkuGroupId: expandSingleInternalIdToSameSkuGroup ? sameSkuGroupId : null,
-    entries: entries.length ? entries : [entry],
+    entries,
     matchText,
   };
 }
@@ -483,7 +485,7 @@ async function linkRegistryResolveProductsResponse(
   const entries = includeUnknown ? resolution.entries : resolution.entries.filter((entry) => entry.status === 'active');
   const productIds = entries.map((entry) => entry.internalProductId);
   const shown = entries.slice(0, 20).map((entry, index) => {
-    const status = formatLinkRegistryStatus(entry.status);
+    const status = formatLinkRegistryStatus(entry);
     return `${index + 1}. 端内ID ${entry.internalProductId} ${compactName(entry)}（${status}）`;
   });
   const hiddenCount = entries.length - shown.length;
@@ -1919,7 +1921,12 @@ export async function executeAgentToolRequest(
     }
     case 'rental.newLinkBatchPlan': {
       const workflowRequests = readNewLinkBatchWorkflowRequests(request.arguments);
-      if (!workflowRequests) return { text: '新链批量铺设参数无效：需要 keyword 和 count，或 items 数组。' };
+      if (!workflowRequests) {
+        return {
+          text: '补链需要：关键词 + 数量，例如「给<关键词>补3条」；也可以提供 items 数组。若你其实想对该商品做别的（下架/改价/查看），请直接说明。',
+          metadata: { toolName: 'rental.newLinkBatchPlan', ok: false, needsMoreInput: true },
+        };
+      }
       const [latest, registryContext] = await Promise.all([
         findLatestReportContext(outputDir),
         loadClosedOrderRegistryContext(options.closedOrderRegistryPaths),

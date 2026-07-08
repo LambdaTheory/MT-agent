@@ -425,9 +425,9 @@ describe('known current risks — document existing parser blind spots', () => {
    * Currently treated as a read-only summary request (no side-effect danger,
    * but semantically wrong).
    */
-  it('[RISK] "日报数据不对" currently parses as latest_summary (should be a complaint)', () => {
+  it('"日报数据不对" stays unknown instead of parsing as latest_summary', () => {
     const intent = parseBotIntent('日报数据不对');
-    expect(intent.type).toBe('latest_summary');
+    expect(intent.type).toBe('unknown');
   });
 
   /**
@@ -469,9 +469,9 @@ describe('known current risks — document existing parser blind spots', () => {
    * matches the /日报/ regex on line 22 and becomes latest_summary.
    * These are complaints, not requests.
    */
-  it('[RISK] "日报有问题" currently parses as latest_summary (complaint becomes summary)', () => {
+  it('"日报有问题" stays unknown instead of parsing as latest_summary', () => {
     const intent = parseBotIntent('日报有问题');
-    expect(intent.type).toBe('latest_summary');
+    expect(intent.type).toBe('unknown');
   });
 });
 
@@ -1030,9 +1030,9 @@ describe('semantic alias baseline — natural-language phrases', () => {
   // 8g. Known risk tests remain documented
   // -----------------------------------------------------------------------
   describe('known risk tests remain documented', () => {
-    it('[RISK] "日报数据不对" still parses as latest_summary (read-only, safe)', () => {
+    it('"日报数据不对" stays unknown after removing keyword guessing', () => {
       const intent = parseBotIntent('日报数据不对');
-      expect(intent.type).toBe('latest_summary');
+      expect(intent.type).toBe('unknown');
       expect(isSideEffectIntent(intent)).toBe(false);
     });
 

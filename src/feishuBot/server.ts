@@ -4,7 +4,7 @@ import { updateActivitySubmitSessionStatus } from '../activityAutomation/submitS
 import { resolveDailyMissionApproval } from '../agentRuntime/dailyMissionApprovalCallback.js';
 import { recordDailyMissionRejection } from '../agentRuntime/dailyMissionRejection.js';
 import type { AgentToolConfirmRequest } from '../agentRuntime/approvalCard.js';
-import { buildClarifiedMessage, parseAgentClarificationCustomSelection, parseAgentClarificationSelection } from '../agentRuntime/clarificationCard.js';
+import { buildClarifiedMessage, parseAgentClarificationCancelRef, parseAgentClarificationCustomRef, parseAgentClarificationSelectRef } from '../agentRuntime/clarificationCard.js';
 import type { AgentPlannerProvider } from '../agentRuntime/planner.js';
 import { recordAgentLearningEvent } from '../agentLearning/store.js';
 import { handleLinkRegistryGovernanceCardAction } from '../linkRegistry/governanceSession.js';
@@ -34,6 +34,8 @@ import {
 import { continueAgentPlannerStepsAfterResponse, executeAgentToolRequestWithContinuation } from './agentToolContinuation.js';
 import { agentExploreLedgerContextFromRequest } from './agentExploreAttribution.js';
 import { loadAgentToolConfirmRequestFromValue } from './agentToolConfirmStore.js';
+import { loadClarificationContext, verifyClarificationKey } from './clarificationStore.js';
+import { executeOrConfirmAgentToolRequest } from './tools.js';
 import {
   agentRequestFromNewLinkBatchConfirm,
   agentRequestFromNewLinkBatchMultiConfirm,
@@ -441,9 +443,15 @@ async function handleCardActionTrigger(
   }
 
   if (actionName === 'agent_clarify_select') {
-    const selection = parseAgentClarificationSelection(value);
-    if (!selection) {
-      await replyText(replyConfig, 'Agent 澄清选择参数无效，请重新发起。');
+    const selectionRef = parseAgentClarificationSelectRef(value);
+    const context = selectionRef ? await loadClarificationContext(outputDir, selectionRef.clarificationRef) : null;
+    if (!selectionRef || !context || !verifyClarificationKey(context, selectionRef.confirmationKey)) {
+      await replyText(replyConfig, '澄清已失效，请重新发起。');
+      return;
+    }
+    const candidate = context.candidates[selectionRef.candidateIndex];
+    if (!candidate) {
+      await replyText(replyConfig, '澄清已失效，请重新发起。');
       return;
     }
     const claim = claimServerCardAction(messageId, 'agent_clarify', actionName);
@@ -454,30 +462,54 @@ async function handleCardActionTrigger(
       type: 'clarification_selected',
       messageId,
       actorId,
-      originalMessage: selection.originalMessage,
-      selectedMessage: selection.selectedMessage,
-      label: selection.label,
+      originalMessage: context.originalMessage,
+      selectedMessage: typeof candidate.arguments.message === 'string' ? candidate.arguments.message : candidate.label,
+      label: candidate.label,
     });
-    const response = await dispatchMessage({
-      messageId: `${messageId}:clarify:${Buffer.from(selection.label).toString('hex').slice(0, 16)}`,
-      text: buildClarifiedMessage(selection),
-      source: 'http',
-      chatType: 'p2p',
-    });
-    setServerCardActionStatus(claim.key, 'completed');
-    if (!response.skipped) {
-      if (response.card) await replyCard(replyConfig, response.card);
-      else await replyText(replyConfig, response.text);
+    if (candidate.toolName === 'agent.clarifiedMessage' && typeof candidate.arguments.message === 'string') {
+      const response = await dispatchMessage({
+        messageId: `${messageId}:clarify:${Buffer.from(candidate.arguments.message).toString('hex').slice(0, 16)}`,
+        text: candidate.arguments.message,
+        source: 'http',
+        chatType: 'p2p',
+        metadata: { clarificationDepth: context.depth },
+      });
+      setServerCardActionStatus(claim.key, response.skipped ? 'failed' : 'completed');
+      if (!response.skipped) {
+        if (response.card) await replyCard(replyConfig, response.card);
+        else await replyText(replyConfig, response.text);
+      }
+      return;
     }
+    const response = await executeOrConfirmAgentToolRequest({
+      toolName: candidate.toolName,
+      arguments: candidate.arguments,
+      reason: `${context.reason}；用户选择：${candidate.label}`,
+    }, outputDir, {
+      rentalPriceClient: config.rentalPriceClient,
+      closedOrderFetchImpl: config.closedOrderFetchImpl,
+      closedOrderRegistryPaths: config.closedOrderRegistryPaths,
+      clarificationDepth: context.depth,
+    });
+    setServerCardActionStatus(claim.key, response.metadata?.ok === false ? 'failed' : 'completed');
+    if (response.card) await replyCard(replyConfig, response.card);
+    else await replyText(replyConfig, response.text);
     return;
   }
 
   if (actionName === 'agent_clarify_custom') {
-    const selection = parseAgentClarificationCustomSelection(value, readActionFormValue(payload.event?.action, 'custom_message'));
-    if (!selection) {
+    const customRef = parseAgentClarificationCustomRef(value);
+    const context = customRef ? await loadClarificationContext(outputDir, customRef.clarificationRef) : null;
+    const selectedMessage = readActionFormValue(payload.event?.action, 'custom_message');
+    if (!customRef || !context || !verifyClarificationKey(context, customRef.confirmationKey)) {
+      await replyText(replyConfig, '澄清已失效，请重新发起。');
+      return;
+    }
+    if (!selectedMessage) {
       await replyText(replyConfig, '请先在澄清输入框里补充你的真实意图。');
       return;
     }
+    const selection = { originalMessage: context.originalMessage, selectedMessage, label: '自定义澄清' };
     const claim = claimServerCardAction(messageId, 'agent_clarify', actionName);
     if (!claim.claimed) {
       return claimStatusCard('Agent 澄清已处理', claim.claim);
@@ -495,6 +527,7 @@ async function handleCardActionTrigger(
       text: buildClarifiedMessage(selection),
       source: 'http',
       chatType: 'p2p',
+      metadata: { clarificationDepth: context.depth },
     });
     setServerCardActionStatus(claim.key, 'completed');
     if (!response.skipped) {
@@ -505,6 +538,12 @@ async function handleCardActionTrigger(
   }
 
   if (actionName === 'agent_clarify_cancel') {
+    const cancelRef = parseAgentClarificationCancelRef(value);
+    const context = cancelRef ? await loadClarificationContext(outputDir, cancelRef.clarificationRef) : null;
+    if (!cancelRef || !context || !verifyClarificationKey(context, cancelRef.confirmationKey)) {
+      await replyText(replyConfig, 'Agent 澄清确认参数无效或已过期，请重新发起。');
+      return;
+    }
     const claim = claimServerCardAction(messageId, 'agent_clarify', actionName);
     if (!claim.claimed) {
       return claimStatusCard('Agent 澄清已处理', claim.claim);
@@ -514,9 +553,9 @@ async function handleCardActionTrigger(
       type: 'clarification_cancelled',
       messageId,
       actorId,
-      originalMessage: readString(value?.originalMessage),
+      originalMessage: context.originalMessage,
     });
-    return statusCard('Agent 已取消', `已取消澄清：${readString(value?.originalMessage) ?? '未知指令'}`, 'grey');
+    return statusCard('Agent 已取消', `已取消澄清：${context.originalMessage}`, 'grey');
   }
 
   if (actionName === 'agent_tool_confirm') {

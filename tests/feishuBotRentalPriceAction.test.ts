@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { buildAgentToolConfirmCard } from '../src/agentRuntime/approvalCard.js';
 import { createFeishuSdkBot } from '../src/feishuBot/sdkClient.js';
+import { clarificationConfirmationKey, saveClarificationContext } from '../src/feishuBot/clarificationStore.js';
 import { buildRentalOperationConfirmCard, buildRentalPricePreviewCard, createRentalPriceSkillClient, parseRentalOperationConfirmRequest, parseRentalPriceConfirmRequest, type RentalPriceSkillClient } from '../src/feishuBot/rentalPrice.js';
 import { buildNewLinkBatchConfirmCard, type NewLinkBatchPlan } from '../src/newLinkWorkflow/batch.js';
 
@@ -294,27 +295,35 @@ describe('rental price card action', () => {
     };
     const registered: Record<string, (data: unknown) => Promise<void>> = {};
     const sent: unknown[] = [];
-    const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', outputDir: await mkdtemp(join(tmpdir(), 'mt-agent-sdk-action-')), sdk: fakeSdk(sent, registered), rentalPriceClient });
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-sdk-action-'));
+    const context = {
+      originalMessage: '帮我处理一下 875',
+      question: '你想怎么处理 875？',
+      reason: '动作不明确',
+      candidates: [{ toolName: 'rental.copy', arguments: { productId: '875' }, label: '复制商品' }],
+      depth: 1,
+      confidence: 0.4,
+    };
+    const clarificationRef = await saveClarificationContext(outputDir, context);
+    const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', outputDir, sdk: fakeSdk(sent, registered), rentalPriceClient });
 
     bot.start();
-    await registered['card.action.trigger']({
+    const callbackResult = await registered['card.action.trigger']({
       event: {
         context: { open_message_id: 'om-agent-clarify' },
         action: {
           value: {
             action: 'agent_clarify_select',
-            originalMessage: '帮我处理一下 875',
-            selectedMessage: '复制商品 875',
-            label: '复制商品',
+            clarificationRef,
+            candidateIndex: 0,
+            confirmationKey: clarificationConfirmationKey(context),
           },
         },
       },
     });
 
-    await waitFor(() => sent.some((item) => JSON.stringify(item).includes('rental_operation_confirm')));
-    expect(sent.some((item) => JSON.stringify(item).includes('Agent 已收到你的选择'))).toBe(true);
-    expect(sent.some((item) => JSON.stringify(item).includes('复制商品'))).toBe(true);
-    expect(sent.some((item) => JSON.stringify(item).includes('rental_operation_confirm'))).toBe(true);
+    expect(JSON.stringify(callbackResult)).toContain('agent_tool_confirm');
+    expect(JSON.stringify(callbackResult)).toContain('复制商品');
     expect(sent.some((item) => JSON.stringify(item).includes('复制成功'))).toBe(false);
   });
 
@@ -331,7 +340,27 @@ describe('rental price card action', () => {
     const registered: Record<string, (data: unknown) => Promise<void>> = {};
     const sent: unknown[] = [];
     const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-sdk-custom-clarify-'));
-    const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', outputDir, sdk: fakeSdk(sent, registered), rentalPriceClient });
+    const context = {
+      originalMessage: '帮我处理一下 875',
+      question: '你想怎么处理 875？',
+      reason: '动作不明确',
+      candidates: [],
+      depth: 1,
+      confidence: 0.4,
+    };
+    const clarificationRef = await saveClarificationContext(outputDir, context);
+    let dispatched: unknown;
+    const bot = createFeishuSdkBot({
+      appId: 'app',
+      appSecret: 'secret',
+      outputDir,
+      sdk: fakeSdk(sent, registered),
+      rentalPriceClient,
+      dispatchMessage: async (message) => {
+        dispatched = message;
+        return { text: '请确认复制商品', card: { schema: '2.0', body: { elements: [{ tag: 'markdown', content: 'rental_operation_confirm' }] } }, skipped: false };
+      },
+    });
 
     bot.start();
     await registered['card.action.trigger']({
@@ -341,7 +370,8 @@ describe('rental price card action', () => {
         action: {
           value: {
             action: 'agent_clarify_custom',
-            originalMessage: '帮我处理一下 875',
+            clarificationRef,
+            confirmationKey: clarificationConfirmationKey(context),
           },
           form_value: { custom_message: '复制商品 875' },
         },
@@ -352,6 +382,7 @@ describe('rental price card action', () => {
     expect(sent.some((item) => JSON.stringify(item).includes('Agent 已收到你的补充'))).toBe(true);
     expect(sent.some((item) => JSON.stringify(item).includes('rental_operation_confirm'))).toBe(true);
     expect(sent.some((item) => JSON.stringify(item).includes('复制成功'))).toBe(false);
+    expect(dispatched).toMatchObject({ text: '复制商品 875\n原始指令：帮我处理一下 875', metadata: { clarificationDepth: 1 } });
 
     let learning = '';
     await waitFor(async () => {
@@ -381,7 +412,17 @@ describe('rental price card action', () => {
     };
     const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
     const sent: unknown[] = [];
-    const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', outputDir: await mkdtemp(join(tmpdir(), 'mt-agent-sdk-rollback-clarify-')), sdk: fakeSdk(sent, registered), rentalPriceClient });
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-sdk-rollback-clarify-'));
+    const context = {
+      originalMessage: '请回滚刚才的改价',
+      question: '你要回滚哪个任务？',
+      reason: '缺少任务 ID',
+      candidates: [],
+      depth: 1,
+      confidence: 0.4,
+    };
+    const clarificationRef = await saveClarificationContext(outputDir, context);
+    const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', outputDir, sdk: fakeSdk(sent, registered), rentalPriceClient });
 
     bot.start();
     const callbackResult = await registered['card.action.trigger']({
@@ -390,7 +431,8 @@ describe('rental price card action', () => {
         action: {
           value: {
             action: 'agent_clarify_custom',
-            originalMessage: '请回滚刚才的改价',
+            clarificationRef,
+            confirmationKey: clarificationConfirmationKey(context),
           },
           form_value: { custom_message: 'task_1782451929574_977a5f62' },
         },
@@ -417,7 +459,17 @@ describe('rental price card action', () => {
     };
     const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
     const sent: unknown[] = [];
-    const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', outputDir: await mkdtemp(join(tmpdir(), 'mt-agent-sdk-rollback-clarify-fallback-')), sdk: fakeSdk(sent, registered, { failPatch: true }), rentalPriceClient });
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-sdk-rollback-clarify-fallback-'));
+    const context = {
+      originalMessage: '请回滚刚才的改价',
+      question: '你要回滚哪个任务？',
+      reason: '缺少任务 ID',
+      candidates: [],
+      depth: 1,
+      confidence: 0.4,
+    };
+    const clarificationRef = await saveClarificationContext(outputDir, context);
+    const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', outputDir, sdk: fakeSdk(sent, registered, { failPatch: true }), rentalPriceClient });
 
     bot.start();
     const callbackResult = await registered['card.action.trigger']({
@@ -426,7 +478,8 @@ describe('rental price card action', () => {
         action: {
           value: {
             action: 'agent_clarify_custom',
-            originalMessage: '请回滚刚才的改价',
+            clarificationRef,
+            confirmationKey: clarificationConfirmationKey(context),
           },
           form_value: { custom_message: '回滚任务id:task_1782454161506_5c9645c5' },
         },

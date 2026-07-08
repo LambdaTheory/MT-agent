@@ -2,15 +2,19 @@ import type { DaemonCatalogSnapshot } from './daemonCatalog.js';
 import type { ProductIdMapping } from '../mapping/productIdMapping.js';
 import type { GoodsLinkLifecycleState, GoodsRemovedLinkItem } from '../publicTraffic/goodsLinkLifecycle.js';
 import type { GoodsFirstSeenIndex } from '../publicTraffic/goodsSnapshot.js';
-import type { GoodsSnapshotItem } from '../publicTraffic/types.js';
+import type { ExposureCumulativeProduct, GoodsSnapshotItem } from '../publicTraffic/types.js';
 import { canonicalProductShortName, type ProductNameMap } from '../publicTraffic/productDisplayName.js';
-import type { LinkRegistryEntry, LinkRegistrySource, LinkRegistryStatus } from './types.js';
+import type { LinkListingState, LinkRegistryEntry, LinkRegistrySource, LinkRegistryStatus } from './types.js';
+import { arbitrateListingState, listingStateToStatus, parseListingStateFromText, type ListingStateObservation } from './listingState.js';
+
+const LISTING_STATE_FRESHNESS_OVERRIDE_MS = 24 * 60 * 60 * 1000;
 
 export interface BuildLinkRegistryInput {
   productIdMapping?: ProductIdMapping;
   productNameMap?: ProductNameMap;
   productNameHints?: Record<string, string | string[]>;
   goodsSnapshot?: GoodsSnapshotItem[];
+  exposureCumulativeProducts?: ExposureCumulativeProduct[];
   firstSeen?: GoodsFirstSeenIndex;
   lifecycle?: GoodsLinkLifecycleState | null;
   daemonCatalog?: DaemonCatalogSnapshot | null;
@@ -37,6 +41,7 @@ interface DraftEntry {
   daemonStockText?: string;
   daemonRowText?: string;
   daemonSnapshotAt?: string;
+  listingObservations: ListingStateObservation[];
   nameHints: Set<string>;
   aliases: Set<string>;
   sources: Set<LinkRegistrySource>;
@@ -60,9 +65,13 @@ function draftFor(drafts: Map<string, DraftEntry>, internalProductId: string): D
   const existing = drafts.get(internalProductId);
   if (existing) return existing;
 
-  const draft: DraftEntry = { internalProductId, nameHints: new Set<string>(), aliases: new Set<string>(), sources: new Set<LinkRegistrySource>() };
+  const draft: DraftEntry = { internalProductId, listingObservations: [], nameHints: new Set<string>(), aliases: new Set<string>(), sources: new Set<LinkRegistrySource>() };
   drafts.set(internalProductId, draft);
   return draft;
+}
+
+function addListingObservation(draft: DraftEntry, observation: ListingStateObservation): void {
+  draft.listingObservations.push(observation);
 }
 
 function setPlatformProductId(draft: DraftEntry, platformProductId: string): void {
@@ -86,6 +95,35 @@ function setStatus(draft: DraftEntry, status: LinkRegistryStatus, priority = 1):
     draft.status = status;
     draft.statusPriority = priority;
   }
+}
+
+interface ListingTextDecision {
+  state: LinkListingState;
+  rawText: string;
+}
+
+function listingStatePriority(state: LinkListingState): number {
+  if (state === 'delisted' || state === 'gone') return 3;
+  if (state === 'on_sale') return 2;
+  return 1;
+}
+
+function bestListingText(values: string[]): ListingTextDecision | null {
+  let best: ListingTextDecision | null = null;
+  for (const value of values.map((item) => item.trim()).filter(Boolean)) {
+    const candidate = { state: parseListingStateFromText(value), rawText: value };
+    if (!best || listingStatePriority(candidate.state) > listingStatePriority(best.state)) best = candidate;
+  }
+  return best;
+}
+
+function daemonListingText(syncStatus: string | undefined, listingStatusText: string | undefined): ListingTextDecision | null {
+  const delisted = bestListingText([syncStatus ?? '', listingStatusText ?? '']);
+  if (delisted?.state === 'delisted') return delisted;
+  const syncText = syncStatus?.trim();
+  if (syncText) return { state: parseListingStateFromText(syncText), rawText: syncText };
+  const listingText = listingStatusText?.trim();
+  return listingText ? { state: parseListingStateFromText(listingText), rawText: listingText } : null;
 }
 
 function addDaemonStrings(target: Set<string> | undefined, values: string[] | undefined): Set<string> | undefined {
@@ -147,7 +185,14 @@ function addGoodsSnapshot(drafts: Map<string, DraftEntry>, goodsSnapshot: GoodsS
     const draft = draftFor(drafts, internalProductId);
     setPlatformProductId(draft, item.platformProductId);
     setProductName(draft, item.productName, 3);
-    setStatus(draft, 'active', 3);
+    if (item.listingState) {
+      addListingObservation(draft, {
+        source: 'goods_snapshot',
+        state: item.listingState,
+        observedAt: item.observedAt,
+        rawText: item.listingStatusText,
+      });
+    }
     addNameHint(draft, item.productName);
     draft.sources.add('goods_snapshot');
   }
@@ -188,6 +233,7 @@ function addLifecycle(drafts: Map<string, DraftEntry>, lifecycle: GoodsLinkLifec
     setPlatformProductId(draft, entry.platformProductId);
     setProductName(draft, entry.productName, 2);
     setStatus(draft, 'active', 2);
+    addListingObservation(draft, { source: 'goods_link_lifecycle', state: 'on_sale' });
     addNameHint(draft, entry.productName);
     draft.sources.add('goods_link_lifecycle');
   }
@@ -201,6 +247,7 @@ function addLifecycle(drafts: Map<string, DraftEntry>, lifecycle: GoodsLinkLifec
       setStatus(draft, 'removed', 1);
       draft.lastSeenDate = item.removedDate;
     }
+    addListingObservation(draft, { source: 'goods_link_lifecycle', state: 'gone', observedAt: item.removedDate, rawText: item.reason });
     draft.sources.add('goods_link_lifecycle');
   }
 }
@@ -212,10 +259,49 @@ function addDaemonCatalog(drafts: Map<string, DraftEntry>, daemonCatalog: Daemon
 
     const draft = draftFor(drafts, internalProductId);
     setProductName(draft, item.productName, 4);
-    setStatus(draft, 'active', 4);
+    const listingText = daemonListingText(item.syncStatus, item.listingStatusText);
+    addListingObservation(draft, {
+      source: 'daemon_catalog',
+      state: listingText?.state ?? 'unknown',
+      observedAt: item.discoveredAt,
+      rawText: listingText?.rawText,
+    });
     addNameHint(draft, item.productName);
     addDaemonMetadata(draft, item);
     draft.sources.add('daemon_catalog');
+  }
+}
+
+function exposureStatusText(item: ExposureCumulativeProduct): string | undefined {
+  const candidates = Object.entries(item.raw ?? {})
+    .filter(([key, value]) => /状态|上架/u.test(key) && value.trim())
+    .sort(([leftKey], [rightKey]) => Number(/商品状态|上架状态/u.test(rightKey)) - Number(/商品状态|上架状态/u.test(leftKey)));
+  return bestListingText(candidates.map(([, value]) => value))?.rawText;
+}
+
+function addExposureCumulativeProducts(
+  drafts: Map<string, DraftEntry>,
+  exposureCumulativeProducts: ExposureCumulativeProduct[],
+  productIdMapping: ProductIdMapping,
+): void {
+  for (const item of exposureCumulativeProducts) {
+    const platformProductId = item.platformProductId.trim();
+    const internalProductId = validInternalId(productIdMapping[platformProductId] ?? '');
+    if (!platformProductId || !internalProductId) continue;
+
+    const draft = draftFor(drafts, internalProductId);
+    setPlatformProductId(draft, platformProductId);
+    setProductName(draft, item.productName, 1);
+    addNameHint(draft, item.productName);
+    const statusText = exposureStatusText(item);
+    if (statusText) {
+      addListingObservation(draft, {
+        source: 'exposure',
+        state: parseListingStateFromText(statusText),
+        rawText: statusText,
+      });
+    }
+    draft.sources.add('exposure');
   }
 }
 
@@ -518,6 +604,8 @@ function updatedAtFor(draft: DraftEntry): string | undefined {
 }
 
 function finalizeEntry(draft: DraftEntry): LinkRegistryEntry {
+  const listingDecision = arbitrateListingState(draft.listingObservations, { freshnessOverrideMs: LISTING_STATE_FRESHNESS_OVERRIDE_MS });
+  const status = listingDecision.state === 'unknown' && draft.status ? draft.status : listingStateToStatus(listingDecision.state);
   const aliases = [...draft.aliases]
     .map((value) => value.trim())
     .filter((value) => !!value)
@@ -533,7 +621,10 @@ function finalizeEntry(draft: DraftEntry): LinkRegistryEntry {
     ...(draft.shortName ? { shortName: draft.shortName } : {}),
     ...(aliases.length > 0 ? { aliases } : {}),
     ...(draft.sameSkuGroupId ? { sameSkuGroupId: draft.sameSkuGroupId } : {}),
-    status: draft.status ?? 'unknown',
+    status,
+    listingState: listingDecision.state,
+    ...(listingDecision.source ? { statusSource: listingDecision.source } : {}),
+    ...(listingDecision.observedAt ? { statusObservedAt: listingDecision.observedAt } : {}),
     ...(draft.firstSeenDate ? { firstSeenDate: draft.firstSeenDate } : {}),
     ...(draft.lastSeenDate ? { lastSeenDate: draft.lastSeenDate } : {}),
     ...(draft.daemonStatusText ? { daemonStatusText: draft.daemonStatusText } : {}),
@@ -555,6 +646,7 @@ export function buildLinkRegistry(input: BuildLinkRegistryInput): LinkRegistryEn
   addProductIdMapping(drafts, input.productIdMapping ?? {});
   addProductNameMap(drafts, input.productNameMap ?? {});
   addProductNameHints(drafts, input.productNameHints ?? {});
+  addExposureCumulativeProducts(drafts, input.exposureCumulativeProducts ?? [], input.productIdMapping ?? {});
   addGoodsSnapshot(drafts, input.goodsSnapshot ?? []);
   addFirstSeen(drafts, input.firstSeen ?? {});
   if (input.lifecycle) addLifecycle(drafts, input.lifecycle);

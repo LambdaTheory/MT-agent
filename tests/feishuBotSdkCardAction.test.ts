@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { buildAgentToolConfirmCard, type AgentToolConfirmContinuation } from '../src/agentRuntime/approvalCard.js';
 import { buildAgentClarificationCard } from '../src/agentRuntime/clarificationCard.js';
+import { MAX_CLARIFY_DEPTH } from '../src/agentRuntime/intentResolution.js';
+import { clarificationConfirmationKey, saveClarificationContext } from '../src/feishuBot/clarificationStore.js';
 import { loadOperationLedgerJsonlEntries } from '../src/agentRuntime/operationLedger.js';
 import { agentExploreReason } from '../src/feishuBot/agentExploreAttribution.js';
 import { createFeishuSdkBot } from '../src/feishuBot/sdkClient.js';
@@ -381,7 +383,17 @@ describe('createFeishuSdkBot card.action.trigger', () => {
   it('returns a replacement status card when cancelling an Agent clarification and suppresses duplicate text replies', async () => {
     const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
     const sent: unknown[] = [];
-    const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', outputDir: 'output', sdk: fakeSdk(sent, registered) });
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-sdk-clarify-cancel-'));
+    const context = {
+      originalMessage: '抓取访问页数据',
+      question: '你想抓取哪类访问页数据？',
+      reason: '用户目标不明确',
+      candidates: [{ toolName: 'report.fetchVisitPage', arguments: {}, label: '抓取访问页数据' }],
+      depth: 1,
+      confidence: 0.4,
+    };
+    const clarificationRef = await saveClarificationContext(outputDir, context);
+    const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', outputDir, sdk: fakeSdk(sent, registered) });
 
     bot.start();
     const event = {
@@ -391,7 +403,7 @@ describe('createFeishuSdkBot card.action.trigger', () => {
         action: {
           tag: 'button',
           name: 'agent_clarify_cancel',
-          behaviors: [{ type: 'callback', value: { action: 'agent_clarify_cancel', originalMessage: '抓取访问页数据' } }],
+          behaviors: [{ type: 'callback', value: { action: 'agent_clarify_cancel', clarificationRef, confirmationKey: clarificationConfirmationKey(context) } }],
         },
       },
     };
@@ -499,10 +511,20 @@ describe('createFeishuSdkBot card.action.trigger', () => {
   it('renders failed Agent clarification continuation as a red status card', async () => {
     const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
     const sent: unknown[] = [];
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-sdk-clarify-json-failed-'));
+    const context = {
+      originalMessage: 'RX10M4整体价格 -1',
+      question: '请确认改价方式',
+      reason: '金额或比例不明确',
+      candidates: [],
+      depth: 1,
+      confidence: 0.4,
+    };
+    const clarificationRef = await saveClarificationContext(outputDir, context);
     const bot = createFeishuSdkBot({
       appId: 'app',
       appSecret: 'secret',
-      outputDir: 'output',
+      outputDir,
       dispatchMessage: async () => ({
         text: 'Agent 暂时没有把这次指令或补充解析成可执行计划。',
         skipped: false,
@@ -520,7 +542,7 @@ describe('createFeishuSdkBot card.action.trigger', () => {
         { label: '按金额', message: 'RX10M4同款组整体价格按金额减1' },
         { label: '按比例', message: 'RX10M4同款组整体价格乘以0.9' },
       ],
-    });
+    }, { clarificationRef, confirmationKey: clarificationConfirmationKey(context) });
     const value = readButtonValue(card, 'agent_clarify_custom');
     await registered['card.action.trigger']({
       event: {
@@ -543,6 +565,109 @@ describe('createFeishuSdkBot card.action.trigger', () => {
     expect(finalCard.header?.template).toBe('red');
     expect(finalCard.header?.title?.content).toBe('Agent 澄清处理失败');
     expect(JSON.stringify(finalCard)).not.toContain('Agent 澄清处理完成');
+  });
+
+  it('resumes a referenced SDK clarification candidate into the existing Agent confirmation path', async () => {
+    const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
+    const sent: unknown[] = [];
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-sdk-clarify-resume-'));
+    const context = {
+      originalMessage: '帮我把 648 下架',
+      question: '你想怎么处理 648？',
+      reason: '动作不明确',
+      candidates: [{ toolName: 'rental.delist', arguments: { productId: '648' }, label: '下架 648' }],
+      depth: 1,
+      confidence: 0.42,
+    };
+    const clarificationRef = await saveClarificationContext(outputDir, context);
+    const bot = createFeishuSdkBot({
+      appId: 'app',
+      appSecret: 'secret',
+      outputDir,
+      dispatchMessage: async () => { throw new Error('clarification select must not replay text'); },
+      sdk: fakeSdk(sent, registered),
+      rentalPriceClient: {
+        async preview() { throw new Error('preview should not run'); },
+        async execute() { throw new Error('execute should not run'); },
+        async copy() { throw new Error('copy should not run'); },
+        async delist() { throw new Error('delist should not run before confirmation'); },
+        async tenancySet() { throw new Error('tenancySet should not run'); },
+        async specDiscover() { throw new Error('specDiscover should not run'); },
+        async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+      },
+    });
+
+    bot.start();
+    const result = await registered['card.action.trigger']({
+      event: {
+        context: { open_message_id: 'om-agent-clarify-resume' },
+        operator: { open_id: 'ou_agent' },
+        action: {
+          tag: 'button',
+          name: 'agent_clarify_select_1',
+          behaviors: [{
+            type: 'callback',
+            value: {
+              action: 'agent_clarify_select',
+              clarificationRef,
+              candidateIndex: 0,
+              confirmationKey: clarificationConfirmationKey(context),
+            },
+          }],
+        },
+      },
+    });
+
+    expect(JSON.stringify(result)).toContain('agent_tool_confirm');
+    expect(JSON.stringify(result)).toContain('rental.delist');
+    expect(sent).toEqual([]);
+  });
+
+  it('preserves SDK clarification depth when a selected locked candidate needs another clarification', async () => {
+    const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
+    const sent: unknown[] = [];
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-sdk-clarify-depth-'));
+    const context = {
+      originalMessage: '商品 648 下调 10',
+      question: '你想怎么调整 648？',
+      reason: '商品 648 下调 10',
+      candidates: [{ toolName: 'rental.pricePreview', arguments: { productIds: ['648'] }, label: '预览调价' }],
+      depth: MAX_CLARIFY_DEPTH,
+      confidence: 0.42,
+    };
+    const clarificationRef = await saveClarificationContext(outputDir, context);
+    const bot = createFeishuSdkBot({
+      appId: 'app',
+      appSecret: 'secret',
+      outputDir,
+      dispatchMessage: async () => { throw new Error('clarification select must not replay text'); },
+      sdk: fakeSdk(sent, registered),
+    });
+
+    bot.start();
+    const result = await registered['card.action.trigger']({
+      event: {
+        context: { open_message_id: 'om-agent-clarify-depth' },
+        operator: { open_id: 'ou_agent' },
+        action: {
+          tag: 'button',
+          name: 'agent_clarify_select_1',
+          behaviors: [{
+            type: 'callback',
+            value: {
+              action: 'agent_clarify_select',
+              clarificationRef,
+              candidateIndex: 0,
+              confirmationKey: clarificationConfirmationKey(context),
+            },
+          }],
+        },
+      },
+    });
+
+    expect(JSON.stringify(result)).toContain('我还是没法确定你的意图');
+    expect(JSON.stringify(result)).not.toContain('agent_clarify_select');
+    expect(sent).toEqual([]);
   });
 
   it('allows a continued Agent tool confirmation on the same message after the first write completes', async () => {

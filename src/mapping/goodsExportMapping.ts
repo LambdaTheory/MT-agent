@@ -1,4 +1,5 @@
 import XLSX from 'xlsx-js-style';
+import { parseListingStateFromText } from '../linkRegistry/listingState.js';
 import type { GoodsSnapshotItem } from '../publicTraffic/types.js';
 import type { ProductIdMapping } from './productIdMapping.js';
 
@@ -38,6 +39,26 @@ function findColumn(headers: string[], name: string): number {
   return index;
 }
 
+function findOptionalColumn(headers: string[], names: string[]): number | null {
+  const index = headers.findIndex((header) => names.includes(normalize(header)));
+  return index >= 0 ? index : null;
+}
+
+function goodsSnapshotItem(input: {
+  platformProductId: string;
+  internalProductId: string;
+  productName: string;
+  listingStatusText?: string;
+}): GoodsSnapshotItem {
+  const listingStatusText = input.listingStatusText?.trim();
+  return {
+    platformProductId: input.platformProductId,
+    internalProductId: input.internalProductId,
+    productName: input.productName,
+    ...(listingStatusText ? { listingState: parseListingStateFromText(listingStatusText), listingStatusText } : {}),
+  };
+}
+
 function parseWorkbookRows(path: string): { rows: unknown[][]; headers: string[] } {
   const workbook = XLSX.readFile(path);
   const sheetName = workbook.SheetNames[0];
@@ -55,6 +76,7 @@ export function parseGoodsExportWorkbook(path: string): GoodsExportWorkbookResul
   const productNameIndex = findColumn(headers, '商品名称');
   const merchantCodeIndex = findColumn(headers, '商家侧编码');
   const platformProductIdIndex = findColumn(headers, '平台侧编码');
+  const listingStatusIndex = findOptionalColumn(headers, ['商品状态', '上架状态']);
   const mapping: ProductIdMapping = {};
   const skippedRows: GoodsExportSkippedRow[] = [];
   const snapshotByInternalId = new Map<string, GoodsSnapshotItem>();
@@ -64,6 +86,7 @@ export function parseGoodsExportWorkbook(path: string): GoodsExportWorkbookResul
     const productName = normalize(row[productNameIndex]);
     const merchantCode = normalize(row[merchantCodeIndex]);
     const platformProductId = normalize(row[platformProductIdIndex]);
+    const listingStatusText = listingStatusIndex === null ? undefined : normalize(row[listingStatusIndex]);
 
     if (!productName && !platformProductId && !merchantCode) {
       continue;
@@ -77,20 +100,22 @@ export function parseGoodsExportWorkbook(path: string): GoodsExportWorkbookResul
 
     mapping[platformProductId] = internalProductId;
     if (!snapshotByInternalId.has(internalProductId)) {
-      snapshotByInternalId.set(internalProductId, {
+      snapshotByInternalId.set(internalProductId, goodsSnapshotItem({
         platformProductId,
         internalProductId,
         productName,
-      });
+        listingStatusText,
+      }));
       continue;
     }
 
     const current = snapshotByInternalId.get(internalProductId)!;
-    snapshotByInternalId.set(internalProductId, {
+    snapshotByInternalId.set(internalProductId, goodsSnapshotItem({
       platformProductId: current.platformProductId || platformProductId,
       internalProductId,
       productName: current.productName || productName,
-    });
+      listingStatusText: current.listingStatusText || listingStatusText,
+    }));
   }
 
   const snapshot = [...snapshotByInternalId.values()]
