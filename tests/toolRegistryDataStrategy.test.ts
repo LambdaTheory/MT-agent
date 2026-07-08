@@ -102,6 +102,45 @@ describe('data and strategy capability tools', () => {
     }
   });
 
+  it('documents stable metadata fields for data and strategy tool continuation', () => {
+    expect(findAgentTool('publicTraffic.windowAggregate')?.resultMetadataSchema).toMatchObject({
+      properties: {
+        productIds: expect.any(Object),
+        fullyCoveredProductIds: expect.any(Object),
+        partialCoveredProductIds: expect.any(Object),
+        missingDatesByProduct: expect.any(Object),
+        windowDays: expect.any(Object),
+        productCount: expect.any(Object),
+        items: expect.any(Object),
+      },
+    });
+    expect(findAgentTool('product.rankBestSameSku')?.resultMetadataSchema).toMatchObject({
+      properties: {
+        bestProductId: expect.any(Object),
+        sameSkuGroupId: expect.any(Object),
+        productIds: expect.any(Object),
+      },
+    });
+    expect(findAgentTool('strategy.safeSourceResolve')?.resultMetadataSchema).toMatchObject({
+      properties: {
+        status: expect.any(Object),
+        sameSkuGroupId: expect.any(Object),
+        sourceProductId: expect.any(Object),
+        excludedProductIds: expect.any(Object),
+        candidateSourceCount: expect.any(Object),
+      },
+    });
+    expect(findAgentTool('strategy.refreshCandidateExplain')?.resultMetadataSchema).toMatchObject({
+      properties: {
+        candidateCount: expect.any(Object),
+        candidateProductIds: expect.any(Object),
+        missing30dDashboardProductIds: expect.any(Object),
+        missingRowProductIds: expect.any(Object),
+        skippedReasons: expect.any(Object),
+      },
+    });
+  });
+
   it('dispatches window aggregation and data health tools', async () => {
     const { outputDir } = await writeFixtures();
 
@@ -120,7 +159,7 @@ describe('data and strategy capability tools', () => {
       metadata: { toolName: 'strategy.safeSourceResolve', status: 'found', sourceProductId: '680' },
     });
     await expect(executeAgentToolRequest({ toolName: 'strategy.refreshCandidateExplain', arguments: { date: '2026-07-02', query: 'r50', zeroMetric: 'amount' }, reason: '测试候选解释' }, outputDir, { closedOrderRegistryPaths: registryPaths })).resolves.toMatchObject({
-      metadata: { toolName: 'strategy.refreshCandidateExplain', candidateCount: 1 },
+      metadata: { toolName: 'strategy.refreshCandidateExplain', query: 'r50', sameSkuGroupId: 'canon-eos-r50', candidateCount: 1, candidateProductIds: ['681'] },
     });
   });
 });

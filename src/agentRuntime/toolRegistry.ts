@@ -198,9 +198,62 @@ const productRankingResultMetadataSchema = {
     query: { type: 'string' },
     bestProductId: { type: 'string', description: 'Best internal product id for follow-up actions such as rental.newLinkBatchPlan.sourceProductId.' },
     sameSkuGroupId: { type: 'string' },
+    productIds: { type: 'array', items: { type: 'string' }, description: 'Stable ranked internal product ids for later planner steps.' },
+    rankingCount: { type: 'integer', description: 'Number of ranked products available to later planner steps.' },
+    periodDays: { type: 'integer' },
+    metric: { type: 'string' },
     date: { type: 'string' },
     best: { type: 'object' },
     ranking: { type: 'array' },
+  },
+};
+const windowAggregateResultMetadataSchema = {
+  type: 'object',
+  description: 'Metadata available to later planner steps after publicTraffic.windowAggregate; use productIds instead of guessing item internals.',
+  properties: {
+    toolName: { type: 'string' },
+    status: { type: 'string' },
+    endDate: { type: 'string' },
+    windowDays: { type: 'integer', description: 'Window length used for the aggregation.' },
+    productCount: { type: 'integer', description: 'Number of aggregated products.' },
+    productIds: { type: 'array', items: { type: 'string' }, description: 'Stable internal product ids for follow-up planner steps.' },
+    fullyCoveredProductIds: { type: 'array', items: { type: 'string' }, description: 'Product ids with complete daily coverage for the requested window.' },
+    partialCoveredProductIds: { type: 'array', items: { type: 'string' }, description: 'Product ids with partial daily coverage for the requested window.' },
+    missingDatesByProduct: { type: 'object', description: 'Missing daily report dates keyed by internal product id.' },
+    items: { type: 'array' },
+  },
+};
+const safeSourceResolveResultMetadataSchema = {
+  type: 'object',
+  description: 'Metadata available to later planner steps after strategy.safeSourceResolve.',
+  properties: {
+    toolName: { type: 'string' },
+    status: { type: 'string' },
+    sameSkuGroupId: { type: 'string', description: 'Same-SKU group checked for safe refill source.' },
+    sourceProductId: { type: 'string', description: 'Safe source internal product id for follow-up refill planning when status is found.' },
+    sourceProductName: { type: 'string' },
+    excludedProductIds: { type: 'array', items: { type: 'string' }, description: 'Product ids excluded from safe-source selection.' },
+    candidateSourceCount: { type: 'integer', description: 'Number of eligible safe-source candidates after exclusions.' },
+    reason: { type: 'string' },
+  },
+};
+const refreshCandidateExplainResultMetadataSchema = {
+  type: 'object',
+  description: 'Metadata available to later planner steps after strategy.refreshCandidateExplain.',
+  properties: {
+    toolName: { type: 'string' },
+    status: { type: 'string' },
+    zeroMetric: { type: 'string' },
+    query: { type: 'string' },
+    sameSkuGroupId: { type: 'string' },
+    candidateCount: { type: 'integer', description: 'Number of refresh candidates in scope.' },
+    candidateProductIds: { type: 'array', items: { type: 'string' }, description: 'Stable internal product ids that matched the refresh candidate criteria.' },
+    missing30dDashboardProductIds: { type: 'array', items: { type: 'string' }, description: 'Product ids skipped because 30d dashboard data is missing.' },
+    missingRowProductIds: { type: 'array', items: { type: 'string' }, description: 'Product ids skipped because the saved report row is missing.' },
+    skipped: { type: 'object' },
+    skippedReasons: { type: 'array', items: { type: 'string' }, description: 'Human-readable skip reasons for follow-up planner branching.' },
+    scopeLine: { type: 'string' },
+    reasonSummary: { type: 'array', items: { type: 'string' } },
   },
 };
 const rentalCopyResultMetadataSchema = {
@@ -834,6 +887,7 @@ const agentTools: AgentToolDefinition[] = [
     risk: 'read',
     requiresConfirmation: false,
     inputSchema: windowAggregateArgumentsSchema,
+    resultMetadataSchema: windowAggregateResultMetadataSchema,
   },
   {
     name: 'system.dataHealth',
@@ -848,6 +902,7 @@ const agentTools: AgentToolDefinition[] = [
     risk: 'read',
     requiresConfirmation: false,
     inputSchema: safeSourceResolveArgumentsSchema,
+    resultMetadataSchema: safeSourceResolveResultMetadataSchema,
   },
   {
     name: 'strategy.refreshCandidateExplain',
@@ -855,6 +910,7 @@ const agentTools: AgentToolDefinition[] = [
     risk: 'read',
     requiresConfirmation: false,
     inputSchema: refreshCandidateExplainArgumentsSchema,
+    resultMetadataSchema: refreshCandidateExplainResultMetadataSchema,
   },
   {
     name: 'publicTraffic.runReport',

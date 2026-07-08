@@ -185,6 +185,8 @@ async function rankWindowAggregateAnswer(
   const best = aggregates[0];
   if (!best) return { text: `已找到“${intent.query}”的链接维护档案，但近 ${periodDays} 天没有可用于排名的逐日公域数据。` };
   const metricLabel = metric === 'shippedOrders' ? '发货' : metric === 'amount' ? '成交额' : '曝光';
+  const productIds = aggregates.map((item) => item.internalProductId);
+  const sameSkuGroupId = groupEntries.find((entry) => entry.sameSkuGroupId?.trim())?.sameSkuGroupId?.trim();
   return {
     text: [
       `近 ${periodDays} 天数据最好的 ${intent.query} 是：端内ID ${best.internalProductId}（${best.productName}）`,
@@ -192,7 +194,7 @@ async function rankWindowAggregateAnswer(
       `依据：逐日 1d 聚合，按 ${metricLabel} 排序；覆盖 ${best.daysCovered}/${periodDays} 天。`,
       `近 ${periodDays} 天：发货 ${best.shippedOrders}，成交额 ¥${formatMoney(best.amount)}，访问 ${best.publicVisits}，曝光 ${best.exposure}`,
     ].join('\n'),
-    metadata: { toolName: 'product.rankBestSameSku', status: 'ranked', query: intent.query, bestProductId: best.internalProductId, best, ranking: aggregates, date: context.date, periodDays, metric },
+    metadata: { toolName: 'product.rankBestSameSku', status: 'ranked', query: intent.query, bestProductId: best.internalProductId, best, ranking: aggregates, productIds, ...(sameSkuGroupId ? { sameSkuGroupId } : {}), rankingCount: aggregates.length, date: context.date, periodDays, metric },
   };
 }
 
@@ -295,6 +297,8 @@ export const readOnlyTools: ReadOnlyTool[] = [
                 bestProductId: result.best.internalProductId,
                 best: result.best,
                 ranking: result.ranking,
+                productIds: result.ranking.map((item) => item.internalProductId),
+                rankingCount: result.ranking.length,
                 sameSkuGroupId: result.sameSkuGroupId,
                 date: result.date,
                 periodDays: intent.periodDays,
@@ -315,7 +319,8 @@ export const readOnlyTools: ReadOnlyTool[] = [
       const registryEntries = options.registryEntries;
       if (!registryEntries) return { text: '需要先读取链接维护档案，才能解释活跃度刷新候选。' };
       const result = explainRefreshCandidates(registryEntries, context, { ...(intent.query ? { query: intent.query } : {}), ...(intent.sameSkuGroupId ? { sameSkuGroupId: intent.sameSkuGroupId } : {}), zeroMetric: intent.zeroMetric, date: context.date });
-      return { text: [result.scopeLine, ...result.reasonSummary].join('\n'), metadata: { toolName: 'strategy.refreshCandidateExplain', zeroMetric: intent.zeroMetric, candidateCount: result.candidateCount, skipped: result.skipped, scopeLine: result.scopeLine, reasonSummary: result.reasonSummary } };
+      const status = result.candidateCount > 0 ? 'found' : 'empty';
+      return { text: [result.scopeLine, ...result.reasonSummary].join('\n'), metadata: { toolName: 'strategy.refreshCandidateExplain', status, zeroMetric: intent.zeroMetric, ...(intent.query ? { query: intent.query } : {}), ...(intent.sameSkuGroupId ? { sameSkuGroupId: intent.sameSkuGroupId } : {}), ...result, skippedReasons: result.reasonSummary } };
     },
   },
   {

@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { aggregateWindowProducts } from '../src/agentData/windowAggregate.js';
+import { executeAgentToolRequest } from '../src/feishuBot/agentToolExecutor.js';
 
 const baseMetric = {
   publicVisits: 0,
@@ -95,5 +96,27 @@ describe('aggregateWindowProducts', () => {
 
     expect(result.find((item) => item.internalProductId === '648')).toMatchObject({ daysCovered: 1, missingDates: ['2026-07-02'] });
     expect(result.find((item) => item.internalProductId === '649')).toMatchObject({ daysCovered: 1, missingDates: ['2026-07-01'] });
+  });
+
+  it('exposes stable product id metadata for follow-up planner steps', async () => {
+    await writeDay(dir, '2026-07-01', [{ id: '648', name: 'R50 A', exposure: 10, amount: 0 }]);
+    await writeDay(dir, '2026-07-02', [
+      { id: '648', name: 'R50 A', exposure: 20, amount: 100 },
+      { id: '649', name: 'R50 B', exposure: 5, amount: 50 },
+    ]);
+
+    const response = await executeAgentToolRequest({
+      toolName: 'publicTraffic.windowAggregate',
+      arguments: { endDate: '2026-07-02', windowDays: 2 },
+      reason: 'test stable metadata',
+    }, dir);
+
+    expect(response.metadata).toMatchObject({
+      status: 'partial',
+      productIds: ['648', '649'],
+      fullyCoveredProductIds: ['648'],
+      partialCoveredProductIds: ['649'],
+      missingDatesByProduct: { '649': ['2026-07-01'] },
+    });
   });
 });

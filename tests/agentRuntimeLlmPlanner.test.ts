@@ -47,6 +47,11 @@ describe('agent runtime LLM planner', () => {
     expect(system).toContain('target sourceCoverage');
     expect(system).toContain('coverageStatus missing');
     expect(system).toContain('use publicTraffic.windowAggregate');
+    expect(system).toContain('windowAggregate');
+    expect(system).toContain('productIds');
+    expect(system).toContain('sameSkuGroupId');
+    expect(system).toContain('candidateProductIds');
+    expect(system).toContain('missing30dDashboardProductIds');
     expect(system).toContain('use strategy.refreshCandidateExplain');
     expect(system).toContain('use strategy.safeSourceResolve');
     expect(system).toContain('Do not jump directly to operations.refreshActivityPlan');

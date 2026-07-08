@@ -14,7 +14,11 @@ export interface RefreshCandidateExplainInput {
 
 export interface RefreshCandidateExplainResult {
   scopeLine: string;
+  sameSkuGroupId?: string;
   candidateCount: number;
+  candidateProductIds: string[];
+  missing30dDashboardProductIds: string[];
+  missingRowProductIds: string[];
   skipped: {
     inactive: number;
     missingRow: number;
@@ -69,12 +73,12 @@ function zeroMetricLabel(zeroMetric: RefreshCandidateExplainInput['zeroMetric'])
   return zeroMetric === 'amount' ? '近30天订单金额为0' : '近 30 天创单为 0';
 }
 
-function resolveScopedEntries(registryEntries: LinkRegistryEntry[], input: RefreshCandidateExplainInput): { entries: LinkRegistryEntry[]; scopeLine: string } {
+function resolveScopedEntries(registryEntries: LinkRegistryEntry[], input: RefreshCandidateExplainInput): { entries: LinkRegistryEntry[]; scopeLine: string; sameSkuGroupId?: string } {
   const sameSkuGroupId = input.sameSkuGroupId?.trim();
   if (sameSkuGroupId) {
     const entries = registryEntries.filter((entry) => entry.sameSkuGroupId?.trim() === sameSkuGroupId);
     const label = entries.find((entry) => entry.shortName?.trim())?.shortName?.trim() || sameSkuGroupId;
-    return { entries, scopeLine: `筛选范围：${label} / ${sameSkuGroupId}` };
+    return { entries, scopeLine: `筛选范围：${label} / ${sameSkuGroupId}`, sameSkuGroupId };
   }
 
   const query = input.query?.trim();
@@ -87,21 +91,21 @@ function resolveScopedEntries(registryEntries: LinkRegistryEntry[], input: Refre
     if (groupId) {
       const entries = registry.listBySameSkuGroup(groupId, { includeRemoved: true, includeUnknown: true });
       const label = entries.find((item) => item.shortName?.trim())?.shortName?.trim() || groupId;
-      return { entries, scopeLine: `筛选范围：${label} / ${groupId}` };
+      return { entries, scopeLine: `筛选范围：${label} / ${groupId}`, sameSkuGroupId: groupId };
     }
   }
 
   const directGroup = registry.listBySameSkuGroup(query, { includeRemoved: true, includeUnknown: true });
   if (directGroup.length > 0) {
     const label = directGroup.find((entry) => entry.shortName?.trim())?.shortName?.trim() || query;
-    return { entries: directGroup, scopeLine: `筛选范围：${label} / ${query}` };
+    return { entries: directGroup, scopeLine: `筛选范围：${label} / ${query}`, sameSkuGroupId: query };
   }
 
   const alias = registry.resolveAlias(query);
   if (alias.status === 'unique' && alias.sameSkuGroupId) {
     const entries = registry.listBySameSkuGroup(alias.sameSkuGroupId, { includeRemoved: true, includeUnknown: true });
     const label = entries.find((entry) => entry.shortName?.trim())?.shortName?.trim() || query;
-    return { entries, scopeLine: `筛选范围：${label} / ${alias.sameSkuGroupId}` };
+    return { entries, scopeLine: `筛选范围：${label} / ${alias.sameSkuGroupId}`, sameSkuGroupId: alias.sameSkuGroupId };
   }
 
   return { entries: [], scopeLine: `筛选范围：${query}` };
@@ -124,6 +128,9 @@ export function explainRefreshCandidates(
 ): RefreshCandidateExplainResult {
   const scoped = resolveScopedEntries(registryEntries, input);
   const skipped = { inactive: 0, missingRow: 0, missing30dDashboard: 0, onlineLessThan30d: 0, onlineDaysUnknown: 0 };
+  const candidateProductIds: string[] = [];
+  const missing30dDashboardProductIds: string[] = [];
+  const missingRowProductIds: string[] = [];
   let candidateCount = 0;
 
   for (const entry of scoped.entries) {
@@ -134,10 +141,12 @@ export function explainRefreshCandidates(
     const row = findReportRowForEntry(context, entry);
     if (!row) {
       skipped.missingRow += 1;
+      missingRowProductIds.push(entry.internalProductId);
       continue;
     }
     if (!row.periods['30d'].hasDashboardData) {
       skipped.missing30dDashboard += 1;
+      missing30dDashboardProductIds.push(entry.internalProductId);
       continue;
     }
     const onlineDays = estimateOnlineDays(row, entry, input.date);
@@ -149,14 +158,21 @@ export function explainRefreshCandidates(
       skipped.onlineLessThan30d += 1;
       continue;
     }
-    if (isZeroMetricMatch(row, input.zeroMetric)) candidateCount += 1;
+    if (isZeroMetricMatch(row, input.zeroMetric)) {
+      candidateCount += 1;
+      candidateProductIds.push(entry.internalProductId);
+    }
   }
 
   const metricLabel = zeroMetricLabel(input.zeroMetric);
   const skippedSummary = compactSkipSummary(skipped);
   return {
     scopeLine: scoped.scopeLine,
+    ...(scoped.sameSkuGroupId ? { sameSkuGroupId: scoped.sameSkuGroupId } : {}),
     candidateCount,
+    candidateProductIds,
+    missing30dDashboardProductIds,
+    missingRowProductIds,
     skipped,
     reasonSummary: [
       candidateCount > 0 ? `找到 ${candidateCount} 条符合 ${metricLabel} 的 active 链接。` : `没有找到符合 ${metricLabel} 的 active 链接。`,

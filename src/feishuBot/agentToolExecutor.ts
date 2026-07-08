@@ -313,9 +313,16 @@ function formatWindowedFindingsResponse(result: Awaited<ReturnType<typeof findWi
 
 function formatWindowAggregateResponse(result: Awaited<ReturnType<typeof aggregateWindowProducts>>, endDate: string, windowDays: number): BotResponse {
   const lines = result.slice(0, 10).map((item, index) => `${index + 1}. ${item.productName}（端内ID ${item.internalProductId}）覆盖 ${item.daysCovered}/${windowDays} 天，曝光 ${item.exposure}，访问 ${item.publicVisits}，金额 ${item.amount}`);
+  const productIds = result.map((item) => item.internalProductId);
+  const fullyCoveredProductIds = result.filter((item) => item.daysCovered === windowDays).map((item) => item.internalProductId);
+  const partialCoveredProductIds = result.filter((item) => item.daysCovered < windowDays).map((item) => item.internalProductId);
+  const missingDatesByProduct = Object.fromEntries(result
+    .filter((item) => item.missingDates.length > 0)
+    .map((item) => [item.internalProductId, item.missingDates]));
+  const status = result.length === 0 ? 'empty' : partialCoveredProductIds.length > 0 ? 'partial' : 'ok';
   return {
     text: [`公域窗口聚合：截至 ${endDate}，近 ${windowDays} 天`, ...lines].join('\n'),
-    metadata: { toolName: 'publicTraffic.windowAggregate', endDate, windowDays, productCount: result.length, items: result },
+    metadata: { toolName: 'publicTraffic.windowAggregate', status, endDate, windowDays, productCount: result.length, productIds, fullyCoveredProductIds, partialCoveredProductIds, missingDatesByProduct, items: result },
   };
 }
 
@@ -345,10 +352,11 @@ function formatSafeSourceResponse(result: ReturnType<typeof resolveSafeSourceFor
   return { text, metadata: { toolName: 'strategy.safeSourceResolve', ...result } };
 }
 
-function formatRefreshCandidateExplainResponse(result: ReturnType<typeof explainRefreshCandidates>, zeroMetric: 'created_orders' | 'amount'): BotResponse {
+function formatRefreshCandidateExplainResponse(result: ReturnType<typeof explainRefreshCandidates>, zeroMetric: 'created_orders' | 'amount', input: { query?: string; sameSkuGroupId?: string } = {}): BotResponse {
+  const status = result.candidateCount > 0 ? 'found' : 'empty';
   return {
     text: [result.scopeLine, ...result.reasonSummary].join('\n'),
-    metadata: { toolName: 'strategy.refreshCandidateExplain', zeroMetric, candidateCount: result.candidateCount, skipped: result.skipped, scopeLine: result.scopeLine, reasonSummary: result.reasonSummary },
+    metadata: { toolName: 'strategy.refreshCandidateExplain', status, zeroMetric, ...(input.query ? { query: input.query } : {}), ...(input.sameSkuGroupId ? { sameSkuGroupId: input.sameSkuGroupId } : {}), ...result, skippedReasons: result.reasonSummary },
   };
 }
 
@@ -1991,7 +1999,7 @@ export async function executeAgentToolRequest(
       const query = readString(request.arguments.query) ?? undefined;
       const sameSkuGroupId = readString(request.arguments.sameSkuGroupId) ?? undefined;
       const result = explainRefreshCandidates(registryContext.registry, report.context, { ...(query ? { query } : {}), ...(sameSkuGroupId ? { sameSkuGroupId } : {}), zeroMetric, date: report.context.date });
-      return formatRefreshCandidateExplainResponse(result, zeroMetric);
+      return formatRefreshCandidateExplainResponse(result, zeroMetric, { ...(query ? { query } : {}), ...(sameSkuGroupId ? { sameSkuGroupId } : {}) });
     }
     case 'publicTraffic.runReport':
       if (publicTrafficReportRunning) return { text: '公域日报正在运行中，请稍后再试。' };

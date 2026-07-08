@@ -6,6 +6,8 @@ export interface SafeSourceResult {
   sourceProductId?: string;
   sourceProductName?: string;
   status: 'found' | 'blocked' | 'missing_group';
+  excludedProductIds: string[];
+  candidateSourceCount: number;
   reason?: string;
 }
 
@@ -43,23 +45,27 @@ export function resolveSafeSourceForSameSkuGroup(
   excludedProductIds: Set<string>,
 ): SafeSourceResult {
   const groupEntries = registryEntries.filter((entry) => entry.sameSkuGroupId?.trim() === sameSkuGroupId);
+  const excludedProductIdsList = Array.from(excludedProductIds).sort((left, right) => Number(left) - Number(right) || left.localeCompare(right));
   if (groupEntries.length === 0) {
-    return { sameSkuGroupId, status: 'missing_group', reason: '没有找到同款组。' };
+    return { sameSkuGroupId, status: 'missing_group', excludedProductIds: excludedProductIdsList, candidateSourceCount: 0, reason: '没有找到同款组。' };
   }
 
-  const source = groupEntries
+  const candidates = groupEntries
     .filter((entry) => entry.status === 'active' && !excludedProductIds.has(entry.internalProductId))
     .map((entry) => {
       const row = findReportRowForEntry(context, entry);
       return row ? { entry, row, score: sourceScore(row) } : null;
     })
     .filter((candidate): candidate is { entry: LinkRegistryEntry; row: PublicTrafficProductDataRow; score: number } => Boolean(candidate && candidate.score > 0))
-    .sort((left, right) => right.score - left.score || Number(left.entry.internalProductId) - Number(right.entry.internalProductId))[0];
+    .sort((left, right) => right.score - left.score || Number(left.entry.internalProductId) - Number(right.entry.internalProductId));
+  const source = candidates[0];
 
   if (!source) {
     return {
       sameSkuGroupId,
       status: 'blocked',
+      excludedProductIds: excludedProductIdsList,
+      candidateSourceCount: 0,
       reason: '同款组没有可用的安全源商品；不会从即将下架或缺少有效数据的链接复制新链。',
     };
   }
@@ -69,5 +75,7 @@ export function resolveSafeSourceForSameSkuGroup(
     sourceProductId: source.entry.internalProductId,
     sourceProductName: source.row.productName || source.entry.productName || source.entry.shortName || source.entry.internalProductId,
     status: 'found',
+    excludedProductIds: excludedProductIdsList,
+    candidateSourceCount: candidates.length,
   };
 }

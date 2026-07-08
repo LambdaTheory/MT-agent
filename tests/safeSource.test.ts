@@ -66,6 +66,8 @@ describe('resolveSafeSourceForSameSkuGroup', () => {
       sourceProductId: '681',
       sourceProductName: 'R50 健康源 B',
       status: 'found',
+      excludedProductIds: ['682'],
+      candidateSourceCount: 2,
     });
   });
 
@@ -73,6 +75,8 @@ describe('resolveSafeSourceForSameSkuGroup', () => {
     expect(resolveSafeSourceForSameSkuGroup(registryEntries, context, 'missing-group', new Set())).toEqual({
       sameSkuGroupId: 'missing-group',
       status: 'missing_group',
+      excludedProductIds: [],
+      candidateSourceCount: 0,
       reason: '没有找到同款组。',
     });
   });
@@ -81,6 +85,8 @@ describe('resolveSafeSourceForSameSkuGroup', () => {
     expect(resolveSafeSourceForSameSkuGroup(registryEntries, context, 'dji-pocket-3', new Set())).toEqual({
       sameSkuGroupId: 'dji-pocket-3',
       status: 'blocked',
+      excludedProductIds: [],
+      candidateSourceCount: 0,
       reason: '同款组没有可用的安全源商品；不会从即将下架或缺少有效数据的链接复制新链。',
     });
   });

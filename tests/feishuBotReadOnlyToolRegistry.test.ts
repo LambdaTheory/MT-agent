@@ -149,7 +149,7 @@ describe('readOnlyTools', () => {
 
     await expect(findReadOnlyTool({ type: 'refresh_candidate_explain', query: 'Pocket3', zeroMetric: 'created_orders' })?.run(rankingContext, { type: 'refresh_candidate_explain', query: 'Pocket3', zeroMetric: 'created_orders' }, { registryEntries: blockedRegistry })).resolves.toMatchObject({
       text: expect.stringContaining('筛选范围'),
-      metadata: { toolName: 'strategy.refreshCandidateExplain' },
+      metadata: { toolName: 'strategy.refreshCandidateExplain', query: 'Pocket3', sameSkuGroupId: 'dji-pocket-3', candidateProductIds: [] },
     });
 
     await expect(findReadOnlyTool({ type: 'safe_source_resolve', query: 'Pocket3' })?.run(rankingContext, { type: 'safe_source_resolve', query: 'Pocket3' }, { registryEntries: blockedRegistry, linkRegistryStore: createLinkRegistry(blockedRegistry) })).resolves.toMatchObject({

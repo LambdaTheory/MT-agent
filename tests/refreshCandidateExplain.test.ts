@@ -68,7 +68,11 @@ describe('explainRefreshCandidates', () => {
   it('explains why a same-sku group has zero created-order candidates', () => {
     expect(explainRefreshCandidates(registryEntries, context, { sameSkuGroupId: 'canon-eos-r50', zeroMetric: 'created_orders', date: '2026-07-06' })).toEqual({
       scopeLine: '筛选范围：R50 / canon-eos-r50',
+      sameSkuGroupId: 'canon-eos-r50',
       candidateCount: 0,
+      candidateProductIds: [],
+      missing30dDashboardProductIds: ['682'],
+      missingRowProductIds: ['685'],
       skipped: {
         inactive: 1,
         missingRow: 1,
@@ -87,6 +91,10 @@ describe('explainRefreshCandidates', () => {
     const result = explainRefreshCandidates(registryEntries, context, { query: 'r50', zeroMetric: 'amount', date: '2026-07-06' });
 
     expect(result.candidateCount).toBe(1);
+    expect(result.candidateProductIds).toEqual(['681']);
+    expect(result.missing30dDashboardProductIds).toEqual(['682']);
+    expect(result.missingRowProductIds).toEqual(['685']);
+    expect(result.sameSkuGroupId).toBe('canon-eos-r50');
     expect(result.scopeLine).toBe('筛选范围：R50 / canon-eos-r50');
     expect(result.reasonSummary[0]).toBe('找到 1 条符合 近30天订单金额为0 的 active 链接。');
   });
