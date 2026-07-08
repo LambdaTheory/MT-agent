@@ -238,6 +238,7 @@ function overrideRiskToAuditRisk(risk: LinkRegistryOverrideRisk): LinkRegistryAu
 
 export function buildLinkRegistryAudit(entries: LinkRegistryEntry[], overrideRisks: LinkRegistryOverrideRisk[] = []): LinkRegistryAudit {
   const counts = countsFor(entries);
+  const unknownEntries = entries.filter((entry) => !entry.categoryId || !entry.productType);
   const categories = [...groupedBy(entries, categoryKey).entries()]
     .sort(([left], [right]) => compareText(left, right))
     .map(([categoryId, categoryEntries]) => buildCategoryAudit(entries, categoryId, categoryEntries));
@@ -250,7 +251,6 @@ export function buildLinkRegistryAudit(entries: LinkRegistryEntry[], overrideRis
     ...activeQueryLeakRisks(entries),
     ...sameSkuGroups.flatMap((group) => group.risks),
   ];
-  const unknownEntries = entries.filter((entry) => !entry.categoryId || !entry.productType);
   return {
     categories,
     unknownEntries,

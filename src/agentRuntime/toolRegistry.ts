@@ -3,6 +3,37 @@ import type { AgentToolDefinition } from './tool.js';
 const noArgumentsSchema = { type: 'object', additionalProperties: false };
 const reportDateSchema = { type: 'string', pattern: '^(?:\\d{4}-\\d{2}-\\d{2}|\\d{2,4}[./-]\\d{1,2}[./-]\\d{1,2}|\\d{1,2}[./-]\\d{1,2}|\\d{1,2}月\\d{1,2}日)$' };
 const optionalReportDateArgumentsSchema = { type: 'object', properties: { date: reportDateSchema }, additionalProperties: false };
+const windowAggregateArgumentsSchema = {
+  type: 'object',
+  properties: {
+    date: reportDateSchema,
+    endDate: reportDateSchema,
+    windowDays: { type: ['integer', 'string'], pattern: '^[1-9]\\d*$', minimum: 1 },
+  },
+  required: ['windowDays'],
+  additionalProperties: false,
+};
+const safeSourceResolveArgumentsSchema = {
+  type: 'object',
+  properties: {
+    date: reportDateSchema,
+    sameSkuGroupId: { type: 'string' },
+    excludedProductIds: { type: 'array', items: { type: 'string' } },
+  },
+  required: ['sameSkuGroupId'],
+  additionalProperties: false,
+};
+const refreshCandidateExplainArgumentsSchema = {
+  type: 'object',
+  properties: {
+    date: reportDateSchema,
+    query: { type: 'string' },
+    sameSkuGroupId: { type: 'string' },
+    zeroMetric: { type: 'string', enum: ['created_orders', 'amount'] },
+  },
+  required: ['zeroMetric'],
+  additionalProperties: false,
+};
 const reportPeriodSchema = { type: 'string', enum: ['1d', '7d', '30d'] };
 const reportMetricSchema = {
   type: 'string',
@@ -118,7 +149,7 @@ const productRankingArgumentsSchema = {
   properties: {
     query: { type: 'string' },
     metric: { type: 'string', enum: ['shippedOrders', 'amount', 'exposure'] },
-    periodDays: { type: ['integer', 'string'], enum: [1, 7, 30, '1', '7', '30'] },
+    periodDays: { type: ['integer', 'string'], pattern: '^[1-9]\\d*$', minimum: 1 },
   },
   required: ['query'],
   additionalProperties: false,
@@ -167,9 +198,62 @@ const productRankingResultMetadataSchema = {
     query: { type: 'string' },
     bestProductId: { type: 'string', description: 'Best internal product id for follow-up actions such as rental.newLinkBatchPlan.sourceProductId.' },
     sameSkuGroupId: { type: 'string' },
+    productIds: { type: 'array', items: { type: 'string' }, description: 'Stable ranked internal product ids for later planner steps.' },
+    rankingCount: { type: 'integer', description: 'Number of ranked products available to later planner steps.' },
+    periodDays: { type: 'integer' },
+    metric: { type: 'string' },
     date: { type: 'string' },
     best: { type: 'object' },
     ranking: { type: 'array' },
+  },
+};
+const windowAggregateResultMetadataSchema = {
+  type: 'object',
+  description: 'Metadata available to later planner steps after publicTraffic.windowAggregate; use productIds instead of guessing item internals.',
+  properties: {
+    toolName: { type: 'string' },
+    status: { type: 'string' },
+    endDate: { type: 'string' },
+    windowDays: { type: 'integer', description: 'Window length used for the aggregation.' },
+    productCount: { type: 'integer', description: 'Number of aggregated products.' },
+    productIds: { type: 'array', items: { type: 'string' }, description: 'Stable internal product ids for follow-up planner steps.' },
+    fullyCoveredProductIds: { type: 'array', items: { type: 'string' }, description: 'Product ids with complete daily coverage for the requested window.' },
+    partialCoveredProductIds: { type: 'array', items: { type: 'string' }, description: 'Product ids with partial daily coverage for the requested window.' },
+    missingDatesByProduct: { type: 'object', description: 'Missing daily report dates keyed by internal product id.' },
+    items: { type: 'array' },
+  },
+};
+const safeSourceResolveResultMetadataSchema = {
+  type: 'object',
+  description: 'Metadata available to later planner steps after strategy.safeSourceResolve.',
+  properties: {
+    toolName: { type: 'string' },
+    status: { type: 'string' },
+    sameSkuGroupId: { type: 'string', description: 'Same-SKU group checked for safe refill source.' },
+    sourceProductId: { type: 'string', description: 'Safe source internal product id for follow-up refill planning when status is found.' },
+    sourceProductName: { type: 'string' },
+    excludedProductIds: { type: 'array', items: { type: 'string' }, description: 'Product ids excluded from safe-source selection.' },
+    candidateSourceCount: { type: 'integer', description: 'Number of eligible safe-source candidates after exclusions.' },
+    reason: { type: 'string' },
+  },
+};
+const refreshCandidateExplainResultMetadataSchema = {
+  type: 'object',
+  description: 'Metadata available to later planner steps after strategy.refreshCandidateExplain.',
+  properties: {
+    toolName: { type: 'string' },
+    status: { type: 'string' },
+    zeroMetric: { type: 'string' },
+    query: { type: 'string' },
+    sameSkuGroupId: { type: 'string' },
+    candidateCount: { type: 'integer', description: 'Number of refresh candidates in scope.' },
+    candidateProductIds: { type: 'array', items: { type: 'string' }, description: 'Stable internal product ids that matched the refresh candidate criteria.' },
+    missing30dDashboardProductIds: { type: 'array', items: { type: 'string' }, description: 'Product ids skipped because 30d dashboard data is missing.' },
+    missingRowProductIds: { type: 'array', items: { type: 'string' }, description: 'Product ids skipped because the saved report row is missing.' },
+    skipped: { type: 'object' },
+    skippedReasons: { type: 'array', items: { type: 'string' }, description: 'Human-readable skip reasons for follow-up planner branching.' },
+    scopeLine: { type: 'string' },
+    reasonSummary: { type: 'array', items: { type: 'string' } },
   },
 };
 const rentalCopyResultMetadataSchema = {
@@ -629,7 +713,7 @@ const agentTools: AgentToolDefinition[] = [
   },
   {
     name: 'product.rankBestSameSku',
-    description: '按链接维护档案解析商品名、别名、端内ID或同款组，并返回同款组里公域数据表现最好的端内ID。适用于“s23最好的链接是哪条”“数据最好的 pocket3 的端内id是多少”“近30天金额最好的 r50 是哪条”。metric 支持 shippedOrders/amount/exposure，periodDays 支持 1/7/30。',
+    description: '按链接维护档案解析商品名、别名、端内ID或同款组，并返回同款组里公域数据表现最好的端内ID。适用于“s23最好的链接是哪条”“数据最好的 pocket3 的端内id是多少”“近20天金额最好的 r50 是哪条”。metric 支持 shippedOrders/amount/exposure，periodDays 支持 1/7/15/20/30 等正整数；非 1/7/30 窗口会回到逐日 1d 数据聚合。',
     risk: 'read',
     requiresConfirmation: false,
     inputSchema: productRankingArgumentsSchema,
@@ -796,6 +880,37 @@ const agentTools: AgentToolDefinition[] = [
     risk: 'read',
     requiresConfirmation: false,
     inputSchema: windowedFindingsArgumentsSchema,
+  },
+  {
+    name: 'publicTraffic.windowAggregate',
+    description: '从逐日公域数据上下文按 1d 明细聚合任意窗口商品指标，支持 7/15/20/30 等 windowDays；不使用既有 30d 汇总倒推。',
+    risk: 'read',
+    requiresConfirmation: false,
+    inputSchema: windowAggregateArgumentsSchema,
+    resultMetadataSchema: windowAggregateResultMetadataSchema,
+  },
+  {
+    name: 'system.dataHealth',
+    description: '读取指定日期日报上下文、订单分析和曝光无ID样本，返回数据健康摘要和缺失说明；只读，不触发补抓。',
+    risk: 'read',
+    requiresConfirmation: false,
+    inputSchema: optionalReportDateArgumentsSchema,
+  },
+  {
+    name: 'strategy.safeSourceResolve',
+    description: '解析同款组是否有可用于补链的安全源商品，返回源端内ID或 blocker 原因；只读，不复制、不下架。',
+    risk: 'read',
+    requiresConfirmation: false,
+    inputSchema: safeSourceResolveArgumentsSchema,
+    resultMetadataSchema: safeSourceResolveResultMetadataSchema,
+  },
+  {
+    name: 'strategy.refreshCandidateExplain',
+    description: '独立解释活跃度刷新候选数量，说明为什么某查询或同款组 0 候选，包括 inactive、无日报行、30d 访问缺失、上线天数不足或未知。',
+    risk: 'read',
+    requiresConfirmation: false,
+    inputSchema: refreshCandidateExplainArgumentsSchema,
+    resultMetadataSchema: refreshCandidateExplainResultMetadataSchema,
   },
   {
     name: 'publicTraffic.runReport',

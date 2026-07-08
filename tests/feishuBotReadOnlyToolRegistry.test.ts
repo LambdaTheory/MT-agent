@@ -1,4 +1,7 @@
 import { readFileSync } from 'node:fs';
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { findReadOnlyTool, readOnlyTools } from '../src/feishuBot/readOnlyToolRegistry.js';
 import { createLinkRegistry } from '../src/linkRegistry/store.js';
@@ -69,6 +72,9 @@ describe('readOnlyTools', () => {
       'overview',
       'product',
       'best_product_by_same_sku',
+      'refresh_candidate_explain',
+      'safe_source_resolve',
+      'safe_source_groups',
       'new_product_pool',
       'tasks',
       'problem_products',
@@ -108,6 +114,51 @@ describe('readOnlyTools', () => {
 
     await expect(findReadOnlyTool({ type: 'best_product_by_same_sku', query: 'Pocket3' })?.run(rankingContext, { type: 'best_product_by_same_sku', query: 'Pocket3' })).resolves.toMatchObject({
       text: expect.stringContaining('需要先读取链接维护档案'),
+    });
+  });
+
+  it('answers arbitrary-window same-sku ranking through daily window aggregation', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-read-only-window-'));
+    for (const [date, amount701, amount702] of [
+      ['2026-06-14', 500, 0],
+      ['2026-06-15', 0, 900],
+    ] as const) {
+      const dayDir = join(outputDir, date);
+      await mkdir(dayDir, { recursive: true });
+      await writeFile(join(dayDir, `公域数据上下文_${date}.json`), JSON.stringify({
+        date,
+        rows: [
+          { productName: '大疆 Pocket 3', platformProductId: 'p701', displayProductId: '端内ID 701', periods: { '1d': { ...metric, amount: amount701 } } },
+          { productName: '大疆 Pocket 3 高转化套装', platformProductId: 'p702', displayProductId: '端内ID 702', periods: { '1d': { ...metric, amount: amount702 } } },
+        ],
+      }), 'utf8');
+    }
+
+    await expect(findReadOnlyTool({ type: 'best_product_by_same_sku', query: 'Pocket3', periodDays: 2, metric: 'amount' })?.run(rankingContext, { type: 'best_product_by_same_sku', query: 'Pocket3', periodDays: 2, metric: 'amount' }, { linkRegistryStore: createLinkRegistry(registry), registryEntries: registry, outputDir })).resolves.toMatchObject({
+      text: expect.stringContaining('端内ID 702'),
+      metadata: { toolName: 'product.rankBestSameSku', periodDays: 2, metric: 'amount' },
+    });
+  });
+
+  it('answers parsed strategy capability intents as executable read-only tools', async () => {
+    const blockedRegistry: LinkRegistryEntry[] = [
+      { internalProductId: '701', platformProductId: 'p701', shortName: 'DJI Pocket 3', sameSkuGroupId: 'dji-pocket-3', status: 'active', source: ['product_name_map'] },
+      { internalProductId: '702', platformProductId: 'p702', shortName: 'DJI Pocket 3', sameSkuGroupId: 'dji-pocket-3', status: 'active', source: ['product_name_map'] },
+      { internalProductId: '801', platformProductId: 'p801', shortName: 'Empty Group', aliases: ['empty'], sameSkuGroupId: 'empty-group', status: 'active', source: ['product_name_map'] },
+    ];
+
+    await expect(findReadOnlyTool({ type: 'refresh_candidate_explain', query: 'Pocket3', zeroMetric: 'created_orders' })?.run(rankingContext, { type: 'refresh_candidate_explain', query: 'Pocket3', zeroMetric: 'created_orders' }, { registryEntries: blockedRegistry })).resolves.toMatchObject({
+      text: expect.stringContaining('筛选范围'),
+      metadata: { toolName: 'strategy.refreshCandidateExplain', query: 'Pocket3', sameSkuGroupId: 'dji-pocket-3', candidateProductIds: [] },
+    });
+
+    await expect(findReadOnlyTool({ type: 'safe_source_resolve', query: 'Pocket3' })?.run(rankingContext, { type: 'safe_source_resolve', query: 'Pocket3' }, { registryEntries: blockedRegistry, linkRegistryStore: createLinkRegistry(blockedRegistry) })).resolves.toMatchObject({
+      text: expect.stringContaining('安全源商品'),
+      metadata: { toolName: 'strategy.safeSourceResolve', status: 'found' },
+    });
+
+    await expect(findReadOnlyTool({ type: 'safe_source_groups' })?.run(rankingContext, { type: 'safe_source_groups' }, { registryEntries: blockedRegistry })).resolves.toMatchObject({
+      text: expect.stringContaining('empty-group'),
     });
   });
 });

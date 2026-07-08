@@ -38,6 +38,10 @@ describe('agent runtime tool registry', () => {
       'publicTraffic.removedLinks',
       'publicTraffic.orderSummary',
       'publicTraffic.windowedFindings',
+      'publicTraffic.windowAggregate',
+      'system.dataHealth',
+      'strategy.safeSourceResolve',
+      'strategy.refreshCandidateExplain',
       'publicTraffic.runReport',
       'publicTraffic.resendLatestReport',
       'publicTraffic.pushLatestReportToGroup',
@@ -94,7 +98,7 @@ describe('agent runtime tool registry', () => {
 
     const tools = listAgentTools();
     tools.pop();
-    expect(listAgentTools()).toHaveLength(73);
+    expect(listAgentTools()).toHaveLength(77);
   });
 
   it('returns defensive copies of tool metadata', () => {
@@ -177,6 +181,10 @@ describe('agent runtime tool registry', () => {
     expect(findAgentTool('publicTraffic.inactiveLinks')).toMatchObject({ risk: 'read', requiresConfirmation: false });
     expect(findAgentTool('publicTraffic.removedLinks')).toMatchObject({ risk: 'read', requiresConfirmation: false });
     expect(findAgentTool('publicTraffic.orderSummary')).toMatchObject({ risk: 'read', requiresConfirmation: false });
+    expect(findAgentTool('publicTraffic.windowAggregate')).toMatchObject({ risk: 'read', requiresConfirmation: false });
+    expect(findAgentTool('system.dataHealth')).toMatchObject({ risk: 'read', requiresConfirmation: false });
+    expect(findAgentTool('strategy.safeSourceResolve')).toMatchObject({ risk: 'read', requiresConfirmation: false });
+    expect(findAgentTool('strategy.refreshCandidateExplain')).toMatchObject({ risk: 'read', requiresConfirmation: false });
     expect(findAgentTool('publicTraffic.runReport')).toMatchObject({ risk: 'write', requiresConfirmation: true });
     expect(findAgentTool('publicTraffic.resendLatestReport')).toMatchObject({ risk: 'write', requiresConfirmation: false });
     expect(findAgentTool('publicTraffic.pushLatestReportToGroup')).toMatchObject({ risk: 'write', requiresConfirmation: false });
@@ -301,6 +309,10 @@ describe('agent runtime tool registry', () => {
       'publicTraffic.removedLinks',
       'publicTraffic.orderSummary',
       'publicTraffic.windowedFindings',
+      'publicTraffic.windowAggregate',
+      'system.dataHealth',
+      'strategy.safeSourceResolve',
+      'strategy.refreshCandidateExplain',
       'publicTraffic.runReport',
       'publicTraffic.resendLatestReport',
       'publicTraffic.pushLatestReportToGroup',

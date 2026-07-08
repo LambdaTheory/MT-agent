@@ -1,8 +1,13 @@
+import { explainRefreshCandidates } from '../agentData/refreshCandidateExplain.js';
+import { resolveSafeSourceForSameSkuGroup } from '../agentData/safeSource.js';
+import { aggregateWindowProducts, type WindowProductAggregate } from '../agentData/windowAggregate.js';
 import { getInactiveLinks, getNewProductPool, getProblemProducts, getProductPerformance, getRemovedLinks } from '../agentData/publicTrafficQueries.js';
 import { rankBestProductByRegistryQuery, type ProductRankingResult } from '../agentData/productRanking.js';
 import { buildAgentTaskPool } from '../agentData/taskPool.js';
 import type { AgentIntent, AgentProblemType } from '../agentData/types.js';
+import { createLinkRegistry } from '../linkRegistry/store.js';
 import type { LinkRegistryStore } from '../linkRegistry/store.js';
+import type { LinkRegistryEntry } from '../linkRegistry/types.js';
 import type { PublicTrafficDataReportContext } from '../publicTraffic/types.js';
 import type { LlmReadOnlyToolName } from './llmProvider.js';
 import { formatLatestSummary } from './reportStore.js';
@@ -20,6 +25,8 @@ export interface ReadOnlyToolLlmMetadata {
 
 export interface ReadOnlyToolRunOptions {
   linkRegistryStore?: LinkRegistryStore;
+  registryEntries?: LinkRegistryEntry[];
+  outputDir?: string;
 }
 
 export interface ReadOnlyTool {
@@ -39,7 +46,7 @@ const productRankingArgumentsSchema = {
   properties: {
     query: { type: 'string' },
     metric: { type: 'string', enum: ['shippedOrders', 'amount', 'exposure'] },
-    periodDays: { type: ['integer', 'string'], enum: [1, 7, 30, '1', '7', '30'] },
+    periodDays: { type: ['integer', 'string'], pattern: '^[1-9]\\d*$', minimum: 1 },
   },
   required: ['query'],
   additionalProperties: false,
@@ -64,9 +71,9 @@ function readRankingMetric(value: unknown): 'shippedOrders' | 'amount' | 'exposu
   return value === 'shippedOrders' || value === 'amount' || value === 'exposure' ? value : undefined;
 }
 
-function readRankingPeriodDays(value: unknown): 1 | 7 | 30 | undefined {
+function readRankingPeriodDays(value: unknown): number | undefined {
   const numeric = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN;
-  return numeric === 1 || numeric === 7 || numeric === 30 ? numeric : undefined;
+  return Number.isInteger(numeric) && numeric > 0 ? numeric : undefined;
 }
 
 function formatTaskLines(items: Array<{ productId: string; suggestedAction: string; reason: string }>): string {
@@ -135,6 +142,84 @@ function formatRankingAnswer(result: ProductRankingResult): string {
   }
 }
 
+function rankingAggregateMetricValue(item: WindowProductAggregate, metric: 'shippedOrders' | 'amount' | 'exposure'): number {
+  if (metric === 'shippedOrders') return item.shippedOrders;
+  if (metric === 'amount') return item.amount;
+  return item.exposure;
+}
+
+function resolveSameSkuGroupEntries(registry: LinkRegistryStore, query: string): LinkRegistryEntry[] {
+  const trimmed = query.trim();
+  if (!trimmed) return [];
+  if (/^\d+$/.test(trimmed)) {
+    const entry = registry.getByInternalId(trimmed);
+    const groupId = entry?.sameSkuGroupId?.trim();
+    return groupId ? registry.listBySameSkuGroup(groupId, { includeRemoved: true, includeUnknown: true }) : entry ? [entry] : [];
+  }
+
+  const directGroup = registry.listBySameSkuGroup(trimmed, { includeRemoved: true, includeUnknown: true });
+  if (directGroup.length > 0) return directGroup;
+
+  const alias = registry.resolveAlias(trimmed);
+  if (alias.status !== 'unique') return [];
+  return alias.sameSkuGroupId ? registry.listBySameSkuGroup(alias.sameSkuGroupId, { includeRemoved: true, includeUnknown: true }) : alias.entries;
+}
+
+async function rankWindowAggregateAnswer(
+  context: PublicTrafficDataReportContext,
+  intent: Extract<AgentIntent, { type: 'best_product_by_same_sku' }>,
+  registry: LinkRegistryStore,
+  options: ReadOnlyToolRunOptions,
+): Promise<BotResponse | null> {
+  const periodDays = intent.periodDays;
+  const metric = intent.metric;
+  if (!periodDays || periodDays === 1 || periodDays === 7 || periodDays === 30 || !metric) return null;
+  if (!options.outputDir) return { text: '需要 outputDir 才能按逐日数据聚合任意窗口。' };
+
+  const groupEntries = resolveSameSkuGroupEntries(registry, intent.query).filter((entry) => entry.status !== 'removed');
+  if (groupEntries.length === 0) return { text: `链接维护档案未匹配到“${intent.query}”，我不会猜测端内ID。` };
+  const allowedIds = new Set(groupEntries.map((entry) => entry.internalProductId));
+  const aggregates = (await aggregateWindowProducts({ outputDir: options.outputDir, endDate: context.date, windowDays: periodDays }))
+    .filter((item) => allowedIds.has(item.internalProductId))
+    .sort((left, right) => rankingAggregateMetricValue(right, metric) - rankingAggregateMetricValue(left, metric) || Number(left.internalProductId) - Number(right.internalProductId));
+  const best = aggregates[0];
+  if (!best) return { text: `已找到“${intent.query}”的链接维护档案，但近 ${periodDays} 天没有可用于排名的逐日公域数据。` };
+  const metricLabel = metric === 'shippedOrders' ? '发货' : metric === 'amount' ? '成交额' : '曝光';
+  const productIds = aggregates.map((item) => item.internalProductId);
+  const sameSkuGroupId = groupEntries.find((entry) => entry.sameSkuGroupId?.trim())?.sameSkuGroupId?.trim();
+  return {
+    text: [
+      `近 ${periodDays} 天数据最好的 ${intent.query} 是：端内ID ${best.internalProductId}（${best.productName}）`,
+      `数据日期：${context.date}`,
+      `依据：逐日 1d 聚合，按 ${metricLabel} 排序；覆盖 ${best.daysCovered}/${periodDays} 天。`,
+      `近 ${periodDays} 天：发货 ${best.shippedOrders}，成交额 ¥${formatMoney(best.amount)}，访问 ${best.publicVisits}，曝光 ${best.exposure}`,
+    ].join('\n'),
+    metadata: { toolName: 'product.rankBestSameSku', status: 'ranked', query: intent.query, bestProductId: best.internalProductId, best, ranking: aggregates, productIds, ...(sameSkuGroupId ? { sameSkuGroupId } : {}), rankingCount: aggregates.length, date: context.date, periodDays, metric },
+  };
+}
+
+function resolveSameSkuGroupIdForIntent(intent: Extract<AgentIntent, { type: 'safe_source_resolve' }>, registry: LinkRegistryStore): string | undefined {
+  const explicit = intent.sameSkuGroupId?.trim();
+  if (explicit) return explicit;
+  const query = intent.query?.trim();
+  if (!query) return undefined;
+  if (/^\d+$/.test(query)) return registry.getByInternalId(query)?.sameSkuGroupId?.trim();
+  const direct = registry.listBySameSkuGroup(query, { includeRemoved: true, includeUnknown: true });
+  if (direct.length > 0) return query;
+  const alias = registry.resolveAlias(query);
+  return alias.status === 'unique' ? alias.sameSkuGroupId?.trim() : undefined;
+}
+
+function formatSafeSourceGroups(context: PublicTrafficDataReportContext, registryEntries: LinkRegistryEntry[]): string {
+  const groupIds = [...new Set(registryEntries.map((entry) => entry.sameSkuGroupId?.trim()).filter((value): value is string => Boolean(value)))].sort();
+  const blocked = groupIds
+    .map((groupId) => resolveSafeSourceForSameSkuGroup(registryEntries, context, groupId, new Set()))
+    .filter((result) => result.status !== 'found');
+  return blocked.length > 0
+    ? ['没有安全源商品的同款组：', ...blocked.map((item, index) => `${index + 1}. ${item.sameSkuGroupId}：${item.reason ?? item.status}`)].join('\n')
+    : '所有已知同款组都有可用安全源商品。';
+}
+
 function getProductPerformanceForBot(context: PublicTrafficDataReportContext, keyword: string): ReturnType<typeof getProductPerformance> {
   return getProductPerformance(context, keyword) ?? (/^\d+$/.test(keyword) ? getProductPerformance(context, `端内ID ${keyword}`) : null);
 }
@@ -197,7 +282,10 @@ export const readOnlyTools: ReadOnlyTool[] = [
       if (intent.type !== 'best_product_by_same_sku') return { text: '暂无匹配商品。' };
       const registry = options.linkRegistryStore;
       if (!registry) return { text: '需要先读取链接维护档案，才能安全判断同款组里哪个端内ID数据最好。' };
-      const result = rankBestProductByRegistryQuery(context, registry, intent.query, { periodDays: intent.periodDays, metric: intent.metric });
+      const windowResponse = await rankWindowAggregateAnswer(context, intent, registry, options);
+      if (windowResponse) return windowResponse;
+      const periodDays = intent.periodDays === 1 || intent.periodDays === 7 || intent.periodDays === 30 ? intent.periodDays : undefined;
+      const result = rankBestProductByRegistryQuery(context, registry, intent.query, { periodDays, metric: intent.metric });
       return {
         text: formatRankingAnswer(result),
         metadata: {
@@ -209,6 +297,8 @@ export const readOnlyTools: ReadOnlyTool[] = [
                 bestProductId: result.best.internalProductId,
                 best: result.best,
                 ranking: result.ranking,
+                productIds: result.ranking.map((item) => item.internalProductId),
+                rankingCount: result.ranking.length,
                 sameSkuGroupId: result.sameSkuGroupId,
                 date: result.date,
                 periodDays: intent.periodDays,
@@ -218,6 +308,45 @@ export const readOnlyTools: ReadOnlyTool[] = [
           result,
         },
       };
+    },
+  },
+  {
+    name: 'refresh_candidate_explain',
+    description: '解释某查询或同款组为什么活跃度刷新候选为 0',
+    intentType: 'refresh_candidate_explain',
+    async run(context, intent, options = {}) {
+      if (intent.type !== 'refresh_candidate_explain') return { text: '暂无匹配工具。' };
+      const registryEntries = options.registryEntries;
+      if (!registryEntries) return { text: '需要先读取链接维护档案，才能解释活跃度刷新候选。' };
+      const result = explainRefreshCandidates(registryEntries, context, { ...(intent.query ? { query: intent.query } : {}), ...(intent.sameSkuGroupId ? { sameSkuGroupId: intent.sameSkuGroupId } : {}), zeroMetric: intent.zeroMetric, date: context.date });
+      const status = result.candidateCount > 0 ? 'found' : 'empty';
+      return { text: [result.scopeLine, ...result.reasonSummary].join('\n'), metadata: { toolName: 'strategy.refreshCandidateExplain', status, zeroMetric: intent.zeroMetric, ...(intent.query ? { query: intent.query } : {}), ...(intent.sameSkuGroupId ? { sameSkuGroupId: intent.sameSkuGroupId } : {}), ...result, skippedReasons: result.reasonSummary } };
+    },
+  },
+  {
+    name: 'safe_source_resolve',
+    description: '解析某同款组是否有可补链安全源商品',
+    intentType: 'safe_source_resolve',
+    async run(context, intent, options = {}) {
+      if (intent.type !== 'safe_source_resolve') return { text: '暂无匹配工具。' };
+      const registryEntries = options.registryEntries;
+      const registry = options.linkRegistryStore ?? (registryEntries ? createLinkRegistry(registryEntries) : undefined);
+      if (!registryEntries || !registry) return { text: '需要先读取链接维护档案，才能解析安全源商品。' };
+      const sameSkuGroupId = resolveSameSkuGroupIdForIntent(intent, registry);
+      if (!sameSkuGroupId) return { text: `链接维护档案未匹配到“${intent.query ?? intent.sameSkuGroupId ?? ''}”，无法判断安全源。` };
+      const result = resolveSafeSourceForSameSkuGroup(registryEntries, context, sameSkuGroupId, new Set());
+      const text = result.status === 'found'
+        ? `同款组 ${result.sameSkuGroupId} 可补链，安全源商品：${result.sourceProductId} ${result.sourceProductName ?? ''}`.trim()
+        : `同款组 ${result.sameSkuGroupId} 暂不可补链：${result.reason ?? result.status}`;
+      return { text, metadata: { toolName: 'strategy.safeSourceResolve', ...result } };
+    },
+  },
+  {
+    name: 'safe_source_groups',
+    description: '列出没有可用安全源商品的同款组',
+    intentType: 'safe_source_groups',
+    async run(context, _intent, options = {}) {
+      return { text: options.registryEntries ? formatSafeSourceGroups(context, options.registryEntries) : '需要先读取链接维护档案，才能解析安全源商品。' };
     },
   },
   {

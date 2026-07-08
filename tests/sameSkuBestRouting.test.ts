@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseAgentDataIntent } from '../src/agentData/intent.js';
 import { rankBestProductByRegistryQuery } from '../src/agentData/productRanking.js';
+import { findReadOnlyTool } from '../src/feishuBot/readOnlyToolRegistry.js';
 import { createLinkRegistry } from '../src/linkRegistry/store.js';
 import type { LinkRegistryEntry } from '../src/linkRegistry/types.js';
 import type { PublicTrafficDataReportContext, PublicTrafficPeriodMetrics, PublicTrafficProductDataRow } from '../src/publicTraffic/types.js';
@@ -89,17 +90,30 @@ describe('same-sku best product routing', () => {
     expect(result.status === 'ranked' ? result.rationale : '').toContain('曝光');
   });
 
+  it('exposes stable same-sku ranking metadata for follow-up steps', async () => {
+    await expect(findReadOnlyTool({ type: 'best_product_by_same_sku', query: 'r50', periodDays: 30, metric: 'amount' })?.run(context, { type: 'best_product_by_same_sku', query: 'r50', periodDays: 30, metric: 'amount' }, { linkRegistryStore: createLinkRegistry(registryEntries) })).resolves.toMatchObject({
+      metadata: {
+        bestProductId: '681',
+        sameSkuGroupId: 'canon-eos-r50',
+        productIds: ['681', '682'],
+        rankingCount: 2,
+        periodDays: 30,
+        metric: 'amount',
+      },
+    });
+  });
+
   it('routes recent best same-sku questions without product-specific special cases', () => {
     expect(parseAgentDataIntent('近20天数据最好r50是哪个id')).toEqual({
       type: 'best_product_by_same_sku',
       query: 'r50',
-      periodDays: 30,
+      periodDays: 20,
       metric: 'amount',
     });
     expect(parseAgentDataIntent('近20天数据最好pocket3是哪个id')).toEqual({
       type: 'best_product_by_same_sku',
       query: 'pocket3',
-      periodDays: 30,
+      periodDays: 20,
       metric: 'amount',
     });
     expect(parseAgentDataIntent('r50 近30天金额最好的链接是哪条')).toEqual({
