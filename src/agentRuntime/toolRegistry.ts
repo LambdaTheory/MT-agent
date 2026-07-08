@@ -308,6 +308,7 @@ const refreshActivityPlanResultMetadataSchema = {
     skippedGroups: { type: 'array', items: { type: 'string' } },
     scope: { type: ['string', 'null'] },
     zeroMetric: { type: 'string', enum: ['created_orders', 'amount'] },
+    windowDays: { type: 'integer' },
   },
 };
 const refreshActivityExecuteResultMetadataSchema = {
@@ -498,6 +499,7 @@ const refreshActivityPlanArgumentsSchema = {
     query: { type: 'string' },
     sameSkuGroupId: { type: 'string' },
     zeroMetric: { type: 'string', enum: ['created_orders', 'amount'] },
+    windowDays: { type: ['integer', 'string'], pattern: '^[1-9]\\d*$', minimum: 1 },
   },
   additionalProperties: false,
 };

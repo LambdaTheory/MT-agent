@@ -118,6 +118,7 @@ const RENTAL_SPEC_REMOVE_PLAN_MAX_PRODUCTS = 60;
 const RENTAL_SPEC_REMOVE_PLAN_MAX_ITEMS = 50;
 const REFRESH_ACTIVITY_DEFAULT_MAX_CANDIDATES = 20;
 const REFRESH_ACTIVITY_MIN_ONLINE_DAYS = 30;
+const REFRESH_ACTIVITY_DEFAULT_WINDOW_DAYS = 30;
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const NON_RENT_PRICE_FIELD_LABELS: Record<string, string[]> = {
   marketPrice: ['marketPrice', '市场价', '市场价格'],
@@ -1115,6 +1116,13 @@ function readMaxCandidates(value: unknown): number {
   return Math.min(Math.floor(numeric), 100);
 }
 
+function readRefreshActivityWindowDays(value: unknown): number {
+  if (value === undefined) return REFRESH_ACTIVITY_DEFAULT_WINDOW_DAYS;
+  const numeric = typeof value === 'number' ? value : Number(value);
+  if (!Number.isInteger(numeric) || numeric < 1) throw new Error('windowDays must be a positive integer');
+  return numeric;
+}
+
 function parseDateToUtcDay(value: string | undefined): number | null {
   if (!value) return null;
   const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value.trim());
@@ -1194,8 +1202,8 @@ function readRefreshActivityZeroMetric(value: unknown): RefreshActivityZeroMetri
   throw new Error('zeroMetric must be created_orders or amount');
 }
 
-function refreshActivityZeroMetricLabel(zeroMetric: RefreshActivityZeroMetric): string {
-  return zeroMetric === 'amount' ? '近30天订单金额为0' : '近 30 天创单为 0';
+function refreshActivityZeroMetricLabel(zeroMetric: RefreshActivityZeroMetric, windowDays = REFRESH_ACTIVITY_DEFAULT_WINDOW_DAYS): string {
+  return zeroMetric === 'amount' ? `近${windowDays}天订单金额为0` : `近 ${windowDays} 天创单为 0`;
 }
 
 function isRefreshActivityZeroMetricMatch(thirty: PublicTrafficProductDataRow['periods']['30d'], zeroMetric: RefreshActivityZeroMetric): boolean {
@@ -1452,6 +1460,7 @@ async function refreshActivityPlanResponse(
   const registryContext = await loadClosedOrderRegistryContext(options.closedOrderRegistryPaths);
   const maxCandidates = readMaxCandidates(args.maxCandidates);
   const zeroMetric = readRefreshActivityZeroMetric(args.zeroMetric);
+  const windowDays = readRefreshActivityWindowDays(args.windowDays);
   const scoped = scopedRefreshActivityEntries(args, registryContext.registry);
   if ('text' in scoped) return { text: scoped.text, metadata: { toolName: 'operations.refreshActivityPlan', ok: false } };
 
@@ -1525,7 +1534,7 @@ async function refreshActivityPlanResponse(
     text: [
       `活跃度刷新计划：${report.context.date}`,
       scoped.scopeLine,
-      `筛选口径：active 链接，30日访问页数据已抓取，上线满 ${REFRESH_ACTIVITY_MIN_ONLINE_DAYS} 天，${refreshActivityZeroMetricLabel(zeroMetric)}。`,
+      `筛选口径：active 链接，${windowDays}日访问页数据已抓取，上线满 ${windowDays} 天，${refreshActivityZeroMetricLabel(zeroMetric, windowDays)}。`,
       `待下架候选：${candidates.length} 条；涉及种类/同款组 ${groups.length} 个。`,
       `本次展示：${shownCandidates.length}/${candidates.length} 条。`,
       '',
@@ -1546,6 +1555,7 @@ async function refreshActivityPlanResponse(
       skipped,
       scope: scoped.scopeLine ?? null,
       zeroMetric,
+      windowDays,
       executeRequest: null,
       strategyRequests: { delistOnly: delistOnlyExecution.request ?? null, delistAndRefill: refillExecution.request ?? null },
       blockers: [...delistOnlyExecution.blockers, ...refillExecution.blockers],

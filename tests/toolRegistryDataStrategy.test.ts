@@ -139,6 +139,16 @@ describe('data and strategy capability tools', () => {
         skippedReasons: expect.any(Object),
       },
     });
+    expect(findAgentTool('operations.refreshActivityPlan')?.inputSchema).toMatchObject({
+      properties: {
+        windowDays: expect.any(Object),
+      },
+    });
+    expect(findAgentTool('operations.refreshActivityPlan')?.resultMetadataSchema).toMatchObject({
+      properties: {
+        windowDays: expect.any(Object),
+      },
+    });
   });
 
   it('dispatches window aggregation and data health tools', async () => {

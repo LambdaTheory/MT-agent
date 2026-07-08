@@ -116,4 +116,17 @@ describe('targeted refresh activity plan', () => {
     expect(response.text).not.toContain('端内ID 682');
     expect(response.metadata?.candidateCount).toBe(1);
   });
+
+  it('accepts a configurable windowDays value at the plan layer', async () => {
+    const { outputDir, registryPaths } = await writeTargetedRefreshFixtures();
+
+    const response = await executeAgentToolRequest(
+      { toolName: 'operations.refreshActivityPlan', arguments: { query: 'r50', zeroMetric: 'amount', windowDays: 15 }, reason: '帮我下架r50近15天产生订单金额为0的链接' },
+      outputDir,
+      { closedOrderRegistryPaths: registryPaths },
+    );
+
+    expect(response.text).toContain('筛选口径：active 链接，15日访问页数据已抓取，上线满 15 天，近15天订单金额为0。');
+    expect(response.metadata).toMatchObject({ toolName: 'operations.refreshActivityPlan', windowDays: 15 });
+  });
 });
