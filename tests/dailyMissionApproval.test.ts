@@ -33,6 +33,17 @@ describe('dailyMissionApproval', () => {
     expect(buildDailyMissionApprovalCards([decision])).toHaveLength(1);
   });
 
+  it('adds visible run and decision semantics to the approval card', () => {
+    const [card] = buildDailyMissionApprovalCards([decision]);
+    const text = JSON.stringify(card);
+
+    expect(text).toContain('来源：Daily Mission');
+    expect(text).toContain('Phase：waiting_approval');
+    expect(text).toContain('Run：run-1');
+    expect(text).toContain('Decision：dec-1');
+    expect(text).toContain('作用范围：product:648');
+  });
+
   it('skips decisions without proposedTool', () => {
     expect(buildDailyMissionApprovalCards([{ ...decision, proposedTool: undefined }])).toHaveLength(0);
   });

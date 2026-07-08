@@ -222,7 +222,7 @@ export function parseExactBotIntent(input: string): BotIntent {
   if (specDiscover) return { type: 'rental_spec_discover', productId: specDiscover };
 
   const specAdd = parseSpecAddCommand(canonicalText);
-  if (specAdd) return { type: 'rental_spec_add', productId: specAdd.productId, itemTitle: specAdd.itemTitle };
+  if (specAdd) return { type: 'rental_spec_add', productId: specAdd.productId, specDimId: specAdd.specDimId, itemTitle: specAdd.itemTitle };
 
   const idLookup = /^(?:查ID|ID查询)\s*(\d+)$/.exec(canonicalText)
     ?? /^(端内(?:ID)?\s*\d+)(?:对应平台|的平台ID)?$/.exec(canonicalText)

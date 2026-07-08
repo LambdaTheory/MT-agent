@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -6,6 +6,7 @@ import { recordOperationEvent } from '../src/agentRuntime/operationLedger.js';
 import {
   collectDailyMissionContext,
   collectRecentOperations,
+  createTrackRecordCollector,
   type ContextCollector,
 } from '../src/agentRuntime/dailyMissionContext.js';
 
@@ -96,5 +97,37 @@ describe('collectRecentOperations', () => {
     const entries = await collectRecentOperations(dir, '2026-07-01', 2);
 
     expect(entries.map((entry) => entry.decisionId)).toEqual(['dec-current', 'dec-previous']);
+  });
+});
+
+describe('createTrackRecordCollector', () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'mt-track-context-'));
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('injects built trackRecord into collected context patches', async () => {
+    const missionDir = join(dir, 'daily-mission', '2026-07-01');
+    await mkdir(missionDir, { recursive: true });
+    await writeFile(join(missionDir, 'outcomes.json'), JSON.stringify([{
+      decisionId: 'dec-1',
+      runId: 'run-1',
+      operationType: 'price_down',
+      subject: { kind: 'product', id: '648' },
+      executedAt: '2026-07-01T00:00:00.000Z',
+      measuredAt: '2026-07-02T00:00:00.000Z',
+      before: { exposure: 1 },
+      after: { exposure: 2 },
+      outcome: 'positive',
+    }]), 'utf8');
+
+    const patch = await createTrackRecordCollector(dir).collect({ runId: 'run-2', date: '2026-07-02', outputDir: dir });
+
+    expect(patch.trackRecord).toEqual([{ key: 'price_down', operationType: 'price_down', samples: 1, positive: 1, neutral: 0, negative: 0, successRate: 1 }]);
   });
 });

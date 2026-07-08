@@ -34,7 +34,7 @@ export type BotIntent =
   | { type: 'rental_delist'; productId: string }
   | { type: 'rental_tenancy_set'; productId: string; days: string }
   | { type: 'rental_spec_discover'; productId: string }
-  | { type: 'rental_spec_add'; productId: string; itemTitle: string }
+  | { type: 'rental_spec_add'; productId: string; specDimId: string; itemTitle: string }
   | { type: 'unknown'; text: string };
 
 export interface BotResponse {

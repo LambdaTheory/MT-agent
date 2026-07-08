@@ -7,6 +7,7 @@ import type { DecisionBuilder } from './decisionBuilder.js';
 import { classifyDecisions, type ClassifiedDecisions } from './decisionPolicy.js';
 import type { DecisionRecord } from './decisionRecord.js';
 import { writeDailyJournal } from './dailyJournalWriter.js';
+import { assessDataFreshness, type FreshnessOptions } from './dataFreshnessGate.js';
 import {
   addDailyMissionArtifact,
   createDailyMissionRun,
@@ -26,6 +27,7 @@ export interface RunDailyMissionPlanInput {
   trigger: DailyMissionRunTrigger;
   collectors: ContextCollector[];
   decisionBuilder: DecisionBuilder;
+  freshness?: FreshnessOptions;
 }
 
 export interface RunDailyMissionPlanResult {
@@ -92,6 +94,33 @@ export async function runDailyMissionPlan(input: RunDailyMissionPlanInput): Prom
       decisionId: `${input.runId}:data_collected`,
       subject,
     });
+
+    const freshness = assessDataFreshness(context, input.freshness);
+    if (!freshness.fresh) {
+      await recordOperationEvent(input.outputDir, {
+        planId: input.runId,
+        at: eventAt(),
+        event: 'data_not_ready',
+        runId: input.runId,
+        decisionId: `${input.runId}:data_not_ready`,
+        subject,
+      });
+      run = transitionDailyMissionRun(run, 'skipped_stale_data', now());
+      run = await saveDailyMissionRun(input.outputDir, run);
+      const classified: ClassifiedDecisions = { approvals: [], observations: [] };
+      await writeDailyJournal({
+        outputDir: input.outputDir,
+        date: input.date,
+        runId: input.runId,
+        context,
+        decisions: [],
+        classified,
+        failure: { stage: 'freshness_gate', message: freshness.reasons.join(',') },
+      }).catch((journalError) => {
+        console.warn('Failed to write stale-data Daily Mission journal.', journalError);
+      });
+      return { run, context, decisions: [], classified };
+    }
 
     stage = 'planning';
     run = transitionDailyMissionRun(run, 'planning', now());

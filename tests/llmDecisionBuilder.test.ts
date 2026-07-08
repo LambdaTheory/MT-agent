@@ -23,6 +23,20 @@ describe('LlmDecisionBuilder', () => {
     expect(system).not.toContain('rental.priceApply');
   });
 
+  it('includes track record success summaries in the system prompt', async () => {
+    const provider = new FakeLlmProvider(JSON.stringify({ decisions: [] }));
+
+    await new LlmDecisionBuilder({ provider }).build({
+      ...context,
+      trackRecord: [{ key: 'price_down', operationType: 'price_down', samples: 4, positive: 3, neutral: 0, negative: 1, successRate: 0.75 }],
+    });
+
+    const system = provider.lastInput?.messages.find((message) => message.role === 'system')?.content ?? '';
+    expect(system).toContain('同类操作历史成功率');
+    expect(system).toContain('price_down');
+    expect(system).toContain('75.0%');
+  });
+
   it('parses valid decisions and forces runId', async () => {
     const provider = new FakeLlmProvider(JSON.stringify({
       decisions: [

@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createExposureCollector, createSalesCollector } from '../agentRuntime/dailyMissionCollectors.js';
-import { collectRecentOperations, type ContextCollector } from '../agentRuntime/dailyMissionContext.js';
+import { collectRecentOperations, createTrackRecordCollector, type ContextCollector } from '../agentRuntime/dailyMissionContext.js';
 import { runDailyMissionPlan } from '../agentRuntime/dailyMissionOrchestrator.js';
 import { writeDailyJournal } from '../agentRuntime/dailyJournalWriter.js';
 import { createDecisionBuilder, resolveLlmProviderFromEnv } from '../agentRuntime/decisionBuilderFactory.js';
@@ -29,6 +29,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     createSalesCollector(outputDir),
     createMarketPriceCollector(outputDir),
     { name: 'recentOperations', collect: async () => ({ recentOperations: await collectRecentOperations(outputDir, date, 7) }) },
+    createTrackRecordCollector(outputDir),
     { name: 'hotspots', collect: async () => ({ hotspots: await hotspotProvider.listEvents({ date, lookaheadDays: 7 }) }) },
   ];
 
@@ -40,14 +41,16 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     collectors,
     decisionBuilder: createDecisionBuilder({ provider: resolveLlmProviderFromEnv() }),
   });
-  await writeDailyJournal({
-    outputDir,
-    date,
-    runId,
-    context: result.context,
-    decisions: result.decisions,
-    classified: result.classified,
-  });
+  if (result.run.status !== 'skipped_stale_data') {
+    await writeDailyJournal({
+      outputDir,
+      date,
+      runId,
+      context: result.context,
+      decisions: result.decisions,
+      classified: result.classified,
+    });
+  }
   console.log(`Daily Mission plan 完成：${date}，状态 ${result.run.status}，待审批 ${result.classified.approvals.length} 项，观察 ${result.classified.observations.length} 项。`);
 }
 

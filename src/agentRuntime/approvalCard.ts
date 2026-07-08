@@ -145,6 +145,9 @@ export function buildAgentToolConfirmCard(request: AgentToolConfirmRequest, opti
   const confirmValue = options.requestRef
     ? { action: 'agent_tool_confirm', requestRef: options.requestRef, confirmationKey: key }
     : { action: 'agent_tool_confirm', request, confirmationKey: key };
+  const cancelValue = options.requestRef
+    ? { action: 'agent_tool_cancel', requestRef: options.requestRef, confirmationKey: key }
+    : { action: 'agent_tool_cancel', toolName: request.toolName, arguments: request.arguments, reason: request.reason, confirmationKey: key };
   return {
     schema: '2.0',
     config: { wide_screen_mode: true },
@@ -179,7 +182,7 @@ export function buildAgentToolConfirmCard(request: AgentToolConfirmRequest, opti
               type: 'default',
               form_action_type: 'submit',
               name: 'agent_tool_cancel_submit',
-              behaviors: [{ type: 'callback', value: { action: 'agent_tool_cancel', toolName: request.toolName, arguments: request.arguments, reason: request.reason, confirmationKey: key } }],
+              behaviors: [{ type: 'callback', value: cancelValue }],
             },
           ],
         },

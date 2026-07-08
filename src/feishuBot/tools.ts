@@ -21,6 +21,7 @@ import {
   buildCancelDifferentialPricingCardResult,
   type ActivityAutomationSkillClient,
 } from './activityAutomation.js';
+import { agentExploreResponse } from './agentExploreResponse.js';
 import { continueAgentPlannerSteps, reviewAgentToolArguments } from './agentToolContinuation.js';
 import { executeAgentToolRequest } from './agentToolExecutor.js';
 import {
@@ -39,6 +40,7 @@ import { runReadOnlyToolSelection } from './llmReadOnlyToolAdapter.js';
 import { parseLlmToolSelection, type LlmReadOnlyToolName, type LlmToolSelectionProvider } from './llmProvider.js';
 import { getRegistryBackedLlmTools } from './llmToolSelector.js';
 import { parseExactBotIntent } from './intent.js';
+import type { LlmProvider } from '../llm/provider.js';
 import {
   buildRentalOperationConfirmCard,
   buildRentalPricePreviewCard,
@@ -189,7 +191,7 @@ const HELP_TEXT = `📋 查询与分析
   下架商品 761 — 下架商品
   设置租期 761 1,10,30 — 设置租期天数
   查看规格 761 — 查看商品规格维度与项目
-  添加规格 761 128G — 添加规格项
+  添加规格 761 1355 128G — 添加规格项
 
 🛡️ 安全规则
   涉及商品修改的操作会先弹确认卡；取消后不会执行
@@ -203,10 +205,16 @@ export interface HandleBotIntentOptions {
   llmToolSelector?: LlmToolSelectionProvider;
   llmIntentProposalProvider?: LlmIntentProposalProvider;
   agentPlannerProvider?: AgentPlannerProvider;
+  agentExploreProvider?: LlmProvider;
   rentalPriceClient?: RentalPriceSkillClient;
   activityAutomationClient?: ActivityAutomationSkillClient;
   closedOrderFetchImpl?: typeof fetch;
   closedOrderRegistryPaths?: ClosedOrderRegistryPathsInput;
+}
+
+function parseAgentExploreInstruction(text: string): string | null {
+  const match = /^(?:探索|分析)\s+(.+)$/.exec(text.trim());
+  return match?.[1]?.trim() || null;
 }
 
 function rentalIntentToConfirmRequest(intent: BotIntent): RentalOperationConfirmRequest | null {
@@ -220,7 +228,7 @@ function rentalIntentToConfirmRequest(intent: BotIntent): RentalOperationConfirm
     case 'rental_spec_discover':
       return { action: 'spec-discover', productId: intent.productId };
     case 'rental_spec_add':
-      return { action: 'spec-add-and-refresh', productId: intent.productId, itemTitle: intent.itemTitle };
+      return { action: 'spec-add-and-refresh', productId: intent.productId, specDimId: intent.specDimId, itemTitle: intent.itemTitle };
     default:
       return null;
   }
@@ -652,7 +660,7 @@ export async function handleBotIntent(intent: BotIntent, outputDir = 'output', o
   }
 
   if (intent.type === 'rental_spec_add') {
-    return rentalOperationConfirmResponse({ action: 'spec-add-and-refresh', productId: intent.productId, itemTitle: intent.itemTitle }, '明确飞书命令需要二次确认后才能添加规格。');
+    return rentalOperationConfirmResponse({ action: 'spec-add-and-refresh', productId: intent.productId, specDimId: intent.specDimId, itemTitle: intent.itemTitle }, '明确飞书命令需要二次确认后才能添加规格。');
   }
 
   if (intent.type === 'operations_learning_quiz') {
@@ -711,6 +719,18 @@ export async function handleBotIntent(intent: BotIntent, outputDir = 'output', o
   }
 
   if (intent.type === 'unknown') {
+    const exploreInstruction = parseAgentExploreInstruction(intent.text);
+    if (exploreInstruction) {
+      return agentExploreResponse(exploreInstruction, outputDir, {
+        provider: options.agentExploreProvider,
+        executionOptions: {
+          rentalPriceClient: options.rentalPriceClient,
+          closedOrderFetchImpl: options.closedOrderFetchImpl,
+          closedOrderRegistryPaths: options.closedOrderRegistryPaths,
+        },
+      });
+    }
+
     const plannedResponse = await agentPlannerResponse(intent.text, outputDir, options);
     if (plannedResponse) return plannedResponse;
 

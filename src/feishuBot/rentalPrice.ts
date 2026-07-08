@@ -123,6 +123,21 @@ export interface RentalPriceSpecAddResult {
   lines: string[];
 }
 
+export interface RentalPriceSpecRefreshResult {
+  productId: string;
+  ok: boolean;
+  lines: string[];
+}
+
+export type RentalApplyCurrentChanges = Record<string, unknown> | Record<string, Record<string, unknown>>;
+
+export interface RentalApplyCurrentResult {
+  productId: string;
+  ok: boolean;
+  changesFile: string;
+  lines: string[];
+}
+
 export interface RentalPriceSpecRemoveResult {
   productId: string;
   ok: boolean;
@@ -210,7 +225,11 @@ export interface RentalPriceSkillClient {
   delist(productId: string): Promise<RentalPriceDelistResult>;
   tenancySet(productId: string, days: string): Promise<RentalPriceTenancySetResult>;
   specDiscover(productId: string): Promise<RentalPriceSpecDiscoverResult>;
-  specAddAndRefresh(productId: string, itemTitle: string): Promise<RentalPriceSpecAddResult>;
+  specAddAndRefresh(productId: string, specDimId: string, itemTitle: string): Promise<RentalPriceSpecAddResult>;
+  specAddItem?(productId: string, specDimId: string, itemTitle: string): Promise<RentalPriceSpecAddResult>;
+  specRefresh?(productId: string): Promise<RentalPriceSpecRefreshResult>;
+  applyCurrent?(expectedProductId: string, changes: RentalApplyCurrentChanges): Promise<RentalApplyCurrentResult>;
+  submitCurrent?(expectedProductId: string): Promise<RentalPriceSpecRefreshResult>;
   specAddDim?(productId: string, title: string): Promise<RentalPriceSpecAddResult>;
   specRemoveDim?(request: { productId: string; specDimId: string }): Promise<RentalPriceSpecRemoveResult>;
   specRemoveItem?(request: { productId: string; specDimId: string; itemId?: string; itemTitle: string }): Promise<RentalPriceSpecRemoveResult>;
@@ -230,7 +249,11 @@ export type RentalOperationConfirmRequest = (
   | { action: 'delist'; productId: string }
   | { action: 'tenancy-set'; productId: string; days: string }
   | { action: 'spec-discover'; productId: string }
-  | { action: 'spec-add-and-refresh'; productId: string; itemTitle: string }
+  | { action: 'spec-add-and-refresh'; productId: string; specDimId: string; itemTitle: string }
+  | { action: 'spec-add-item'; productId: string; specDimId: string; itemTitle: string }
+  | { action: 'spec-refresh'; productId: string }
+  | { action: 'apply-current'; productId: string; changes: RentalApplyCurrentChanges }
+  | { action: 'submit-current'; productId: string }
   | { action: 'spec-remove-items'; productId: string; query?: string; keyword: string; sameSkuGroupId?: string; items: RentalSpecRemoveItemConfirmRequest[] }
 ) & RentalOperationConfirmMetadata;
 
@@ -403,6 +426,14 @@ function rentalOperationTitle(request: RentalOperationConfirmRequest): string {
       return `查看商品 ${request.productId} 规格`;
     case 'spec-add-and-refresh':
       return `给商品 ${request.productId} 添加规格 ${request.itemTitle}`;
+    case 'spec-add-item':
+      return `给商品 ${request.productId} 的维度 ${request.specDimId} 添加规格项 ${request.itemTitle}`;
+    case 'spec-refresh':
+      return `刷新商品 ${request.productId} 规格结构`;
+    case 'apply-current':
+      return `在商品 ${request.productId} 当前表单页应用变更`;
+    case 'submit-current':
+      return `提交商品 ${request.productId} 当前表单页`;
     case 'spec-remove-items':
       return `删除 ${request.items.length} 个规格项（关键词 ${request.keyword}）`;
   }
@@ -1250,10 +1281,38 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
       const dimensions = Array.isArray(result.dimensions) ? result.dimensions as RentalPriceSpecDiscoverResult['dimensions'] : [];
       return { productId, ok: status === 'ok', dimensions, lines: [`spec-discover: ${status}`, `${dimensions.length} dimensions`] };
     },
-    async specAddAndRefresh(productId, itemTitle) {
-      const result = await send({ action: 'spec-add-and-refresh', productId, itemTitle });
+    async specAddAndRefresh(productId, specDimId, itemTitle) {
+      const result = await send({ action: 'spec-add-and-refresh', productId, specDimId, itemTitle });
       const status = commandStatus(result);
       return { productId, ok: status === 'ok', itemTitle, lines: [`spec-add-and-refresh: ${status}`] };
+    },
+    async specAddItem(productId, specDimId, itemTitle) {
+      const result = await send({ action: 'spec-add-item', productId, specDimId, itemTitle });
+      const status = commandStatus(result);
+      return { productId, ok: status === 'ok', itemTitle, lines: [`spec-add-item: ${status}`] };
+    },
+    async specRefresh(productId) {
+      const result = await send({ action: 'spec-refresh', productId });
+      const status = commandStatus(result);
+      return { productId, ok: status === 'ok', lines: [`spec-refresh: ${status}`] };
+    },
+    async applyCurrent(expectedProductId, changes) {
+      const safeProductId = readProductId(expectedProductId);
+      if (!safeProductId) throw new Error('expectedProductId must be a numeric string');
+      const tasksDir = join(rootDir, 'tasks');
+      await mkdir(tasksDir, { recursive: true });
+      const changesFile = join(tasksDir, `mt-agent-apply-current-${safeProductId}-${timestampToken()}.json`);
+      await writeJsonFile(changesFile, changes);
+      const result = await send({ action: 'apply-current', changesFile, allowCurrentPage: true, expectedProductId: safeProductId });
+      const status = commandStatus(result);
+      return { productId: safeProductId, ok: status === 'ok', changesFile, lines: [`apply-current: ${status}`, `changesFile: ${changesFile}`] };
+    },
+    async submitCurrent(expectedProductId) {
+      const safeProductId = readProductId(expectedProductId);
+      if (!safeProductId) throw new Error('expectedProductId must be a numeric string');
+      const result = await send({ action: 'submit' });
+      const status = commandStatus(result);
+      return { productId: safeProductId, ok: status === 'ok', lines: [`submit: ${status}`] };
     },
     async specAddDim(productId, title) {
       const safeProductId = readProductId(productId);
@@ -1421,10 +1480,10 @@ export function parseSpecDiscoverCommand(text: string): string | null {
   return match ? match[1] : null;
 }
 
-export function parseSpecAddCommand(text: string): { productId: string; itemTitle: string } | null {
+export function parseSpecAddCommand(text: string): { productId: string; specDimId: string; itemTitle: string } | null {
   const normalized = text.replace(/\s+/g, ' ').trim();
-  const match = /^(?:添加规格|规格添加)\s*(\d+)\s+(.+)$/.exec(normalized);
-  return match ? { productId: match[1], itemTitle: match[2].trim() } : null;
+  const match = /^(?:添加规格|规格添加)\s*(\d+)\s+(\S+)\s+(.+)$/.exec(normalized);
+  return match ? { productId: match[1], specDimId: match[2].trim(), itemTitle: match[3].trim() } : null;
 }
 
 export function parseRentalPriceConfirmRequest(value: unknown): Extract<RentalPriceChangeRequest, { mode: 'explicit_fields' }> | null {
@@ -1601,9 +1660,20 @@ function readRentalOperationConfirmRequestRecord(request: Record<string, unknown
     return days && /^\d+(?:,\d+)*$/.test(days) ? { action, productId, days, ...metadata } : null;
   }
   if (action === 'spec-add-and-refresh') {
+    const specDimId = readString(request.specDimId);
     const itemTitle = readString(request.itemTitle);
-    return itemTitle ? { action, productId, itemTitle, ...metadata } : null;
+    return specDimId && itemTitle ? { action, productId, specDimId, itemTitle, ...metadata } : null;
   }
+  if (action === 'spec-add-item') {
+    const specDimId = readString(request.specDimId);
+    const itemTitle = readString(request.itemTitle);
+    return specDimId && itemTitle ? { action, productId, specDimId, itemTitle, ...metadata } : null;
+  }
+  if (action === 'spec-refresh') return { action, productId, ...metadata };
+  if (action === 'apply-current') {
+    return isRecord(request.changes) ? { action, productId, changes: request.changes, ...metadata } : null;
+  }
+  if (action === 'submit-current') return { action, productId, ...metadata };
   if (action === 'spec-remove-items') {
     const keyword = readString(request.keyword);
     const items = parseSpecRemoveItems(request.items);
@@ -1674,8 +1744,28 @@ export async function executeRentalOperationConfirmRequest(client: RentalPriceSk
       return { ok: true, text: `规格查看成功：商品 ${result.productId}\n${dims || '（无规格维度）'}` };
     }
     case 'spec-add-and-refresh': {
-      const result = await client.specAddAndRefresh(request.productId, request.itemTitle);
+      const result = await client.specAddAndRefresh(request.productId, request.specDimId, request.itemTitle);
       return { ok: result.ok, text: result.ok ? `规格添加成功：商品 ${result.productId}，新增 ${result.itemTitle}` : `规格添加失败：商品 ${result.productId}\n${result.lines.join('\n')}` };
+    }
+    case 'spec-add-item': {
+      if (!client.specAddItem) return { ok: false, text: '当前租赁商品客户端不支持规格项添加。' };
+      const result = await client.specAddItem(request.productId, request.specDimId, request.itemTitle);
+      return { ok: result.ok, text: result.ok ? `规格项添加成功：商品 ${result.productId}，新增 ${result.itemTitle}` : `规格项添加失败：商品 ${result.productId}\n${result.lines.join('\n')}` };
+    }
+    case 'spec-refresh': {
+      if (!client.specRefresh) return { ok: false, text: '当前租赁商品客户端不支持规格刷新。' };
+      const result = await client.specRefresh(request.productId);
+      return { ok: result.ok, text: result.ok ? `规格刷新成功：商品 ${result.productId}` : `规格刷新失败：商品 ${result.productId}\n${result.lines.join('\n')}` };
+    }
+    case 'apply-current': {
+      if (!client.applyCurrent) return { ok: false, text: '当前租赁商品客户端不支持当前页应用变更。' };
+      const result = await client.applyCurrent(request.productId, request.changes);
+      return { ok: result.ok, text: result.ok ? `当前页应用成功：商品 ${result.productId}\nchangesFile: ${result.changesFile}` : `当前页应用失败：商品 ${result.productId}\n${result.lines.join('\n')}` };
+    }
+    case 'submit-current': {
+      if (!client.submitCurrent) return { ok: false, text: '当前租赁商品客户端不支持当前页提交。' };
+      const result = await client.submitCurrent(request.productId);
+      return { ok: result.ok, text: result.ok ? `当前页提交成功：商品 ${result.productId}` : `当前页提交失败：商品 ${result.productId}\n${result.lines.join('\n')}` };
     }
     case 'spec-remove-items': {
       if (!client.specRemoveItem) return { ok: false, text: '当前租赁商品客户端不支持规格项删除。' };

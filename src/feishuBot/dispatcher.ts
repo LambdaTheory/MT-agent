@@ -138,7 +138,7 @@ function canonicalizeIntent(intent: BotIntent): BotIntent {
     case 'rental_spec_discover':
       return { type: intent.type, productId: intent.productId };
     case 'rental_spec_add':
-      return { type: intent.type, productId: intent.productId, itemTitle: intent.itemTitle };
+      return { type: intent.type, productId: intent.productId, specDimId: intent.specDimId, itemTitle: intent.itemTitle };
     case 'unknown':
       return { type: intent.type, text: intent.text };
   }

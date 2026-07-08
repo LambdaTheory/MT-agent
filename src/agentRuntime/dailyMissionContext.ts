@@ -1,6 +1,7 @@
 import type { HotspotEvent } from './hotspotEvents.js';
 import type { OperationPlanJournalEntry } from './operationPlan.js';
 import { loadOperationLedgerJsonlEntries } from './operationLedger.js';
+import { buildTrackRecord, type TrackRecord } from './trackRecord.js';
 
 export interface CollectedContext {
   runId: string;
@@ -12,6 +13,7 @@ export interface CollectedContext {
   hotspots?: HotspotEvent[];
   marketPrice?: unknown;
   recentOperations?: OperationPlanJournalEntry[];
+  trackRecord?: TrackRecord[];
   missingSources: string[];
 }
 
@@ -58,4 +60,11 @@ export async function collectRecentOperations(
   const dates = Array.from({ length: lookbackDays }, (_, index) => shiftDate(date, -index));
   const entries = await Promise.all(dates.map((item) => loadOperationLedgerJsonlEntries(outputDir, item)));
   return entries.flat().sort((a, b) => b.at.localeCompare(a.at));
+}
+
+export function createTrackRecordCollector(outputDir: string): ContextCollector {
+  return {
+    name: 'trackRecord',
+    collect: async () => ({ trackRecord: await buildTrackRecord(outputDir) }),
+  };
 }

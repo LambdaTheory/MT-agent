@@ -1485,7 +1485,7 @@ async function executeCommand(cmd) {
       // Apply changes on current page without navigation
       if (!allowCurrentPage || !expectedProductId) return { status: "error", message: "apply-current requires allowCurrentPage=true and expectedProductId" };
       return await actionApplyOnPage(changesFile, expectedProductId);
-    case "submit":  return await actionSubmit();
+    case "submit": return await actionSubmit();
     case "spec-discover":
     case "spec-add-item":
     case "spec-add-dim":

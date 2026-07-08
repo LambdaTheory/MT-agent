@@ -10,6 +10,8 @@ import { loadClosedOrderIngestState } from '../closedOrderFeedback/ingest.js';
 import { buildClosedOrderObservationReport, writeClosedOrderObservationReportArtifacts } from '../closedOrderFeedback/observation.js';
 import { loadClosedOrderRegistryContext, type ClosedOrderRegistryPathsInput } from '../closedOrderFeedback/runtime.js';
 import type { AgentIntent, AgentProblemType } from '../agentData/types.js';
+import { rankProductsByCategory, type CategoryRankingMetric } from '../agentData/categoryRanking.js';
+import { findWindowedProducts, type WindowedPredicate } from '../agentData/windowedFindings.js';
 import { openLinkRegistryGovernancePrompt } from '../linkRegistry/governanceSession.js';
 import { openLinkRegistryMaintenancePrompt } from '../linkRegistry/maintenanceSession.js';
 import { createLinkRegistry } from '../linkRegistry/store.js';
@@ -75,6 +77,8 @@ import {
 } from './rentalPrice.js';
 import { executeRentalReadOnlyOperationHandler } from './rentalReadOnlyOperationHandlers.js';
 import { executeRentalWriteOperationHandler } from './rentalWriteOperationHandlers.js';
+import { executeRentalBatchTool } from './rentalBatchHandlers.js';
+import { executeRentalMirrorTool } from './rentalMirrorHandlers.js';
 import { findReadOnlyTool } from './readOnlyToolRegistry.js';
 import { inferPriceAdjustmentAmountFromText, readPriceAdjustmentAmountArgument } from './priceAdjustment.js';
 import {
@@ -236,6 +240,55 @@ async function inventoryStatusToolResponse(
 function readProblemType(value: unknown): AgentProblemType {
   if (value === 'low_exposure' || value === 'weak_conversion' || value === 'high_potential' || value === 'new_product_pool' || value === 'recommended_action') return value;
   throw new Error('problemType must be low_exposure, weak_conversion, high_potential, new_product_pool, or recommended_action');
+}
+
+function readCategoryRankingMetric(value: unknown): CategoryRankingMetric {
+  if (value === 'shippedOrders' || value === 'amount' || value === 'exposure') return value;
+  throw new Error('metric must be shippedOrders, amount, or exposure');
+}
+
+function readPeriodDays(value: unknown): 1 | 7 | 30 {
+  const parsed = typeof value === 'string' ? Number(value) : value;
+  if (parsed === 1 || parsed === 7 || parsed === 30) return parsed;
+  throw new Error('periodDays must be 1, 7, or 30');
+}
+
+function readOptionalLimit(value: unknown): number | undefined {
+  if (value === undefined) return undefined;
+  const parsed = typeof value === 'string' ? Number(value) : value;
+  if (Number.isInteger(parsed) && typeof parsed === 'number' && parsed > 0) return parsed;
+  throw new Error('limit must be a positive integer');
+}
+
+function formatCategoryRankingMetric(metric: CategoryRankingMetric): string {
+  if (metric === 'shippedOrders') return '发货';
+  if (metric === 'amount') return '金额';
+  return '曝光';
+}
+
+function formatCategoryRankingResponse(result: ReturnType<typeof rankProductsByCategory>): BotResponse {
+  const label = formatCategoryRankingMetric(result.metric);
+  const lines = result.items.map((item, index) => `${index + 1}. ${item.productName}（端内ID ${item.internalProductId}，${item.category}）${label} ${item.value}`);
+  return {
+    text: [
+      `品类排名：${result.category ?? '全部'} ${result.period} ${label}`,
+      ...lines,
+    ].join('\n'),
+    metadata: { toolName: 'product.rankByCategory', date: result.date, category: result.category, metric: result.metric, period: result.period, items: result.items },
+  };
+}
+
+function readWindowedPredicate(value: unknown): WindowedPredicate {
+  if (value === 'exposure_without_orders') return value;
+  throw new Error('predicate must be exposure_without_orders');
+}
+
+function formatWindowedFindingsResponse(result: Awaited<ReturnType<typeof findWindowedProducts>>): BotResponse {
+  const lines = result.items.map((item, index) => `${index + 1}. ${item.productName}（端内ID ${item.productId}）命中 ${item.daysMatched} 天，曝光 ${item.exposure}，金额 ${item.amount}`);
+  return {
+    text: [`窗口发现：${result.startDate} 至 ${result.endDate}`, ...lines].join('\n'),
+    metadata: { toolName: 'publicTraffic.windowedFindings', predicate: result.predicate, startDate: result.startDate, endDate: result.endDate, items: result.items },
+  };
 }
 
 function queryableEntries(entries: LinkRegistryEntry[]): LinkRegistryEntry[] {
@@ -1672,6 +1725,18 @@ export async function executeAgentToolRequest(
       const query = requireString(request.arguments.query, 'query');
       return runReadOnlyAgentIntent(outputDir, { type: 'best_product_by_same_sku', query }, options);
     }
+    case 'product.rankByCategory': {
+      const report = await findReportContextForTool(outputDir, readOptionalDate(request.arguments.date));
+      if (!report) return { text: missingReportContextText(readOptionalDate(request.arguments.date)) };
+      const registryContext = await loadClosedOrderRegistryContext(options.closedOrderRegistryPaths);
+      const result = rankProductsByCategory(report.context, registryContext.registry, {
+        ...(typeof request.arguments.category === 'string' ? { category: request.arguments.category } : {}),
+        metric: readCategoryRankingMetric(request.arguments.metric),
+        periodDays: readPeriodDays(request.arguments.periodDays),
+        limit: readOptionalLimit(request.arguments.limit),
+      });
+      return formatCategoryRankingResponse(result);
+    }
     case 'productId.lookup': {
       const date = readOptionalDate(request.arguments.date);
       const report = await findReportContextForTool(outputDir, date);
@@ -1728,6 +1793,14 @@ export async function executeAgentToolRequest(
       return runReadOnlyAgentIntent(outputDir, { type: 'removed_links' }, options);
     case 'publicTraffic.orderSummary':
       return runReadOnlyAgentIntent(outputDir, { type: 'order_summary' }, options);
+    case 'publicTraffic.windowedFindings': {
+      const result = await findWindowedProducts(outputDir, {
+        lookbackDays: readOptionalLimit(request.arguments.lookbackDays) ?? 1,
+        predicate: readWindowedPredicate(request.arguments.predicate),
+        ...(typeof request.arguments.endDate === 'string' ? { endDate: request.arguments.endDate } : {}),
+      });
+      return formatWindowedFindingsResponse(result);
+    }
     case 'publicTraffic.runReport':
       if (publicTrafficReportRunning) return { text: '公域日报正在运行中，请稍后再试。' };
       publicTrafficReportRunning = true;
@@ -1791,6 +1864,10 @@ export async function executeAgentToolRequest(
     case 'rental.tenancySet':
     case 'rental.specDiscover':
     case 'rental.specAddAndRefresh':
+    case 'rental.specAddItem':
+    case 'rental.specRefresh':
+    case 'rental.applyCurrent':
+    case 'rental.submitCurrent':
       return executeRentalWriteOperationHandler(request, options.rentalPriceClient ?? createRentalPriceSkillClient(), options.ledgerContext);
     case 'rental.delist': {
       const productIds = readDelistProductIds(request.arguments);
@@ -1884,6 +1961,16 @@ export async function executeAgentToolRequest(
       const result = await client.rollback(rollbackRequest);
       return { text: `${result.ok ? '改价回滚成功' : '改价回滚失败'}：商品 ${result.productId}\n${result.lines.join('\n')}`, metadata: { toolName: 'rental.priceRollback', ok: result.ok, productId: result.productId, taskId: result.audit?.taskId, rollbackFile: result.audit?.rollbackFile } };
     }
+    case 'rental.batchPreview':
+    case 'rental.batchExecute':
+    case 'rental.batchStatus':
+    case 'rental.batchResume':
+    case 'rental.batchReport':
+    case 'rental.batchRollback':
+      return executeRentalBatchTool(request.toolName, request.arguments, options.ledgerContext);
+    case 'rental.mirrorSearch':
+    case 'rental.mirrorBatchSpec':
+      return executeRentalMirrorTool(request.toolName, request.arguments);
     case 'closedOrder.syncFeedback': {
       const result = await syncClosedOrderFeedbackFromApi(
         closedOrderIngestStatePath(outputDir),

@@ -44,13 +44,22 @@ function buildToolCatalogPrompt(): string {
   ].join('\n');
 }
 
+function buildTrackRecordPrompt(context: CollectedContext): string {
+  if (!context.trackRecord?.length) return '';
+  return [
+    '同类操作历史成功率：',
+    ...context.trackRecord.map((record) => `- ${record.key}: 样本 ${record.samples}，正向 ${record.positive}，中性 ${record.neutral}，负向 ${record.negative}，成功率 ${(record.successRate * 100).toFixed(1)}%`),
+  ].join('\n');
+}
+
 export class LlmDecisionBuilder implements DecisionBuilder {
   constructor(private readonly options: { provider: LlmProvider }) {}
 
   async build(context: CollectedContext): Promise<DecisionRecord[]> {
+    const trackRecordPrompt = buildTrackRecordPrompt(context);
     const result = await this.options.provider.generateJson({
       messages: [
-        { role: 'system', content: `${DECISION_SYSTEM_PROMPT}\n\n${buildToolCatalogPrompt()}` },
+        { role: 'system', content: [DECISION_SYSTEM_PROMPT, buildToolCatalogPrompt(), trackRecordPrompt].filter(Boolean).join('\n\n') },
         { role: 'user', content: JSON.stringify(context) },
       ],
       temperature: 0,

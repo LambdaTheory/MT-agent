@@ -8,6 +8,13 @@ import type { ContextCollector } from '../src/agentRuntime/dailyMissionContext.j
 import type { DecisionBuilder } from '../src/agentRuntime/decisionBuilder.js';
 import { loadOperationLedgerJsonlEntries } from '../src/agentRuntime/operationLedger.js';
 
+function freshDataCollectors(date = '2026-07-01'): ContextCollector[] {
+  return [
+    { name: 'exposure', collect: async () => ({ exposure: { context: { date, rows: [{ id: '1' }] } } }) },
+    { name: 'sales', collect: async () => ({ sales: { date } }) },
+  ];
+}
+
 describe('runDailyMissionPlan', () => {
   let dir: string;
 
@@ -21,6 +28,7 @@ describe('runDailyMissionPlan', () => {
 
   it('runs collect-plan-waiting_approval and writes artifacts plus events without execution', async () => {
     const collectors: ContextCollector[] = [
+      ...freshDataCollectors(),
       {
         name: 'hotspots',
         collect: async () => ({
@@ -85,7 +93,7 @@ describe('runDailyMissionPlan', () => {
       date: '2026-07-01',
       runId: 'run-1',
       trigger: 'manual',
-      collectors: [],
+      collectors: freshDataCollectors(),
       decisionBuilder: builder,
     });
 

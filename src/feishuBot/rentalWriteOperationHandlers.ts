@@ -33,6 +33,11 @@ function requireProductId(value: unknown, fieldName: string): string {
   return parsed;
 }
 
+function requireRecord(value: unknown, fieldName: string): Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new Error(`${fieldName} must be an object`);
+  return value as Record<string, unknown>;
+}
+
 function requireTenancyDays(value: unknown, fieldName: string): string {
   const parsed = requireString(value, fieldName);
   if (!/^\d+(?:,\d+)*$/.test(parsed)) throw new Error(`${fieldName} must be comma-separated day numbers`);
@@ -57,8 +62,26 @@ function rentalAgentToolRequest(toolName: string, args: Record<string, unknown>)
       return {
         action: 'spec-add-and-refresh',
         productId: requireProductId(args.productId, 'productId'),
+        specDimId: requireString(args.specDimId, 'specDimId'),
         itemTitle: requireString(args.itemTitle, 'itemTitle'),
       };
+    case 'rental.specAddItem':
+      return {
+        action: 'spec-add-item',
+        productId: requireProductId(args.productId, 'productId'),
+        specDimId: requireString(args.specDimId, 'specDimId'),
+        itemTitle: requireString(args.itemTitle, 'itemTitle'),
+      };
+    case 'rental.specRefresh':
+      return { action: 'spec-refresh', productId: requireProductId(args.productId, 'productId') };
+    case 'rental.applyCurrent':
+      return {
+        action: 'apply-current',
+        productId: requireProductId(args.expectedProductId, 'expectedProductId'),
+        changes: requireRecord(args.changes, 'changes'),
+      };
+    case 'rental.submitCurrent':
+      return { action: 'submit-current', productId: requireProductId(args.expectedProductId, 'expectedProductId') };
     default:
       return null;
   }

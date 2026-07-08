@@ -9,7 +9,8 @@ export type DailyMissionRunStatus =
   | 'executing'
   | 'completed'
   | 'failed'
-  | 'cancelled';
+  | 'cancelled'
+  | 'skipped_stale_data';
 
 export type DailyMissionRunTrigger = 'manual' | 'scheduled' | 'retry';
 
@@ -38,16 +39,17 @@ export interface CreateDailyMissionRunInput {
   artifactRefs?: DailyMissionArtifactRef[];
 }
 
-const TERMINAL_STATUSES = new Set<DailyMissionRunStatus>(['completed', 'failed', 'cancelled']);
+const TERMINAL_STATUSES = new Set<DailyMissionRunStatus>(['completed', 'failed', 'cancelled', 'skipped_stale_data']);
 
 const ALLOWED_TRANSITIONS: Record<DailyMissionRunStatus, DailyMissionRunStatus[]> = {
-  collecting: ['planning', 'failed', 'cancelled'],
+  collecting: ['planning', 'failed', 'cancelled', 'skipped_stale_data'],
   planning: ['waiting_approval', 'failed', 'cancelled'],
   waiting_approval: ['executing', 'failed', 'cancelled'],
   executing: ['completed', 'failed', 'cancelled'],
   completed: [],
   failed: [],
   cancelled: [],
+  skipped_stale_data: [],
 };
 
 export function isDailyMissionTerminalStatus(status: DailyMissionRunStatus): boolean {

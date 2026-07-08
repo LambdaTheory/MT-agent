@@ -1,10 +1,13 @@
 import { buildAgentToolConfirmCard, type AgentToolConfirmRequest } from '../agentRuntime/approvalCard.js';
+import { recordOperationEvent } from '../agentRuntime/operationLedger.js';
 import { saveAgentToolConfirmRequest } from './agentToolConfirmStore.js';
 import type { BotResponse } from './types.js';
 import type { RentalPriceSkillClient } from './rentalPrice.js';
+import type { RentalWriteLedgerContext } from './rentalWriteOperationHandlers.js';
 
 type SpecDimAction = 'add' | 'remove';
-type LedgerContext = { runId?: string; decisionId?: string; subject?: string };
+type LedgerContext = Partial<RentalWriteLedgerContext> & { subject?: string };
+type RentalWriteEvent = 'execution_started' | 'execution_succeeded' | 'execution_failed';
 
 function readString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
@@ -33,6 +36,33 @@ function readSpecDimArgs(args: Record<string, unknown>): { productId: string; ac
 
 function executionEvent(toolName: string, productId: string, ok: boolean, action: SpecDimAction, ledgerContext?: LedgerContext): Record<string, unknown> | undefined {
   return ledgerContext ? { type: 'execution', toolName, productId, ok, action, ...ledgerContext } : undefined;
+}
+
+async function recordWriteEvent(
+  context: LedgerContext | undefined,
+  event: RentalWriteEvent,
+  toolName: string,
+  productId: string,
+): Promise<void> {
+  if (!context?.outputDir) return;
+  await recordOperationEvent(context.outputDir, {
+    planId: context.decisionId ?? context.runId ?? 'ad-hoc',
+    at: context.missionDate ? `${context.missionDate}T00:00:00.000Z` : new Date().toISOString(),
+    event,
+    toolName,
+    ...(context.runId ? { runId: context.runId } : {}),
+    ...(context.decisionId ? { decisionId: context.decisionId } : {}),
+    subject: { kind: 'product', id: productId },
+    ...(context.missionDate ? { metadata: { missionDate: context.missionDate } } : {}),
+  });
+}
+
+async function recordFailedWriteEvent(context: LedgerContext | undefined, toolName: string, productId: string): Promise<void> {
+  try {
+    await recordWriteEvent(context, 'execution_failed', toolName, productId);
+  } catch (ledgerError) {
+    console.warn('Failed to record rental spec-dim failure event.', ledgerError);
+  }
 }
 
 export async function rentalSpecDimPlanResponse(
@@ -75,14 +105,30 @@ export async function rentalSpecDimApplyResponse(args: Record<string, unknown>, 
   if (!request) throw new Error('规格维度变更执行参数无效，请重新发起预览。');
   if (request.action === 'add') {
     if (!client.specAddDim) throw new Error('当前租赁商品客户端不支持规格维度添加。');
-    const result = await client.specAddDim(request.productId, request.title!);
+    await recordWriteEvent(ledgerContext, 'execution_started', 'rental.specDimApply', request.productId);
+    let result: Awaited<ReturnType<NonNullable<RentalPriceSkillClient['specAddDim']>>>;
+    try {
+      result = await client.specAddDim(request.productId, request.title!);
+      await recordWriteEvent(ledgerContext, result.ok ? 'execution_succeeded' : 'execution_failed', 'rental.specDimApply', result.productId);
+    } catch (error) {
+      await recordFailedWriteEvent(ledgerContext, 'rental.specDimApply', request.productId);
+      throw error;
+    }
     return {
       text: `${result.ok ? '规格维度添加成功' : '规格维度添加失败'}：商品 ${result.productId}，${result.itemTitle}\n${result.lines.join('\n')}`,
       metadata: { toolName: 'rental.specDimApply', ok: result.ok, productId: result.productId, action: request.action, ...(ledgerContext ? { ledgerContext, executionEvent: executionEvent('rental.specDimApply', result.productId, result.ok, request.action, ledgerContext) } : {}) },
     };
   }
   if (!client.specRemoveDim) throw new Error('当前租赁商品客户端不支持规格维度删除。');
-  const result = await client.specRemoveDim({ productId: request.productId, specDimId: request.specDimId! });
+  await recordWriteEvent(ledgerContext, 'execution_started', 'rental.specDimApply', request.productId);
+  let result: Awaited<ReturnType<NonNullable<RentalPriceSkillClient['specRemoveDim']>>>;
+  try {
+    result = await client.specRemoveDim({ productId: request.productId, specDimId: request.specDimId! });
+    await recordWriteEvent(ledgerContext, result.ok ? 'execution_succeeded' : 'execution_failed', 'rental.specDimApply', result.productId);
+  } catch (error) {
+    await recordFailedWriteEvent(ledgerContext, 'rental.specDimApply', request.productId);
+    throw error;
+  }
   return {
     text: `${result.ok ? '规格维度删除成功' : '规格维度删除失败'}：商品 ${result.productId}，维度 ${result.specDimId}\n${result.lines.join('\n')}`,
     metadata: { toolName: 'rental.specDimApply', ok: result.ok, productId: result.productId, action: request.action, ...(ledgerContext ? { ledgerContext, executionEvent: executionEvent('rental.specDimApply', result.productId, result.ok, request.action, ledgerContext) } : {}) },
