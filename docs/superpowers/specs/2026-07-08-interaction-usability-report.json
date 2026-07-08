@@ -1,0 +1,338 @@
+{
+  "generatedAt": "2026-07-08T00:00:00.000Z",
+  "scope": "interaction-usability-convergence-audit",
+  "failureLayers": ["capability", "metadata", "routing", "workflow", "data_health", "reply_channel"],
+  "responseTypes": ["text", "clarification_card", "strategy_card", "execute_confirm_card", "none"],
+  "summary": {
+    "totalCases": 16,
+    "totalDetails": 32,
+    "capabilityPassed": [
+      "query-status-956",
+      "best-r50-20d",
+      "daily-summary",
+      "zero-exposure-15d",
+      "zero-amount-20d",
+      "zero-orders-30d",
+      "why-zero-candidates",
+      "can-refill-same-sku",
+      "who-is-safe-source",
+      "refresh-r50-zero-amount",
+      "refresh-pocket3-zero-amount",
+      "global-refresh-plan",
+      "execute-delist-only",
+      "execute-delist-and-refill",
+      "lookup-then-copy",
+      "window-then-delist-refill"
+    ],
+    "routingPassed": ["query-status-956", "daily-summary"],
+    "blockedByCapability": [],
+    "blockedByRouting": [
+      "best-r50-20d",
+      "zero-exposure-15d",
+      "zero-amount-20d",
+      "zero-orders-30d",
+      "why-zero-candidates",
+      "refresh-r50-zero-amount",
+      "refresh-pocket3-zero-amount"
+    ],
+    "blockedByMetadata": [
+      "can-refill-same-sku",
+      "who-is-safe-source",
+      "lookup-then-copy",
+      "window-then-delist-refill"
+    ],
+    "blockedByWorkflow": ["global-refresh-plan", "execute-delist-only", "execute-delist-and-refill"],
+    "blockedByDataHealth": [],
+    "blockedByReplyChannel": []
+  },
+  "cases": [
+    {
+      "caseId": "query-status-956",
+      "category": "query",
+      "utterance": "查956",
+      "capability": {
+        "ok": true,
+        "toolName": "product.query",
+        "responseType": "text",
+        "evidenceSummary": "Direct product.query lookup can resolve the single internal product ID status."
+      },
+      "routing": {
+        "ok": true,
+        "matchedCapability": "product.query",
+        "responseType": "text",
+        "failureLayer": null,
+        "evidenceSummary": "parseBotIntent reaches query_product and handleBotIntent returns text."
+      }
+    },
+    {
+      "caseId": "best-r50-20d",
+      "category": "query",
+      "utterance": "近20天数据最好r50是哪个id",
+      "capability": {
+        "ok": true,
+        "toolName": "product.rankBestSameSku",
+        "responseType": "text",
+        "evidenceSummary": "Direct same-SKU ranking can identify the best R50 link by 20-day amount metadata."
+      },
+      "routing": {
+        "ok": false,
+        "matchedCapability": null,
+        "responseType": "none",
+        "failureLayer": "routing",
+        "evidenceSummary": "The existing ability passes, but the natural-language bot surface does not reliably dispatch this query without planner routing."
+      }
+    },
+    {
+      "caseId": "daily-summary",
+      "category": "query",
+      "utterance": "日报概况",
+      "capability": {
+        "ok": true,
+        "toolName": "publicTraffic.reportQuery",
+        "responseType": "text",
+        "evidenceSummary": "Direct reportQuery can read the summary report context."
+      },
+      "routing": {
+        "ok": true,
+        "matchedCapability": "publicTraffic.reportQuery",
+        "responseType": "text",
+        "failureLayer": null,
+        "evidenceSummary": "parseBotIntent reaches latest_summary and handleBotIntent returns text when report context exists."
+      }
+    },
+    {
+      "caseId": "zero-exposure-15d",
+      "category": "window",
+      "utterance": "近15天曝光为0的有哪些?",
+      "capability": {
+        "ok": true,
+        "toolName": "publicTraffic.windowAggregate",
+        "responseType": "text",
+        "evidenceSummary": "Direct windowAggregate can aggregate the 15-day exposure window."
+      },
+      "routing": {
+        "ok": false,
+        "matchedCapability": null,
+        "responseType": "none",
+        "failureLayer": "routing",
+        "evidenceSummary": "Capability passes, but the natural-language entrypoint does not reliably route zero-exposure window questions to the aggregate tool."
+      }
+    },
+    {
+      "caseId": "zero-amount-20d",
+      "category": "window",
+      "utterance": "近20天金额为0的有哪些?",
+      "capability": {
+        "ok": true,
+        "toolName": "publicTraffic.windowAggregate",
+        "responseType": "text",
+        "evidenceSummary": "Direct windowAggregate can aggregate the 20-day amount window."
+      },
+      "routing": {
+        "ok": false,
+        "matchedCapability": null,
+        "responseType": "none",
+        "failureLayer": "routing",
+        "evidenceSummary": "Capability passes, but NL routing does not reliably map the amount-zero window wording to the aggregate tool."
+      }
+    },
+    {
+      "caseId": "zero-orders-30d",
+      "category": "window",
+      "utterance": "近30天订单为0的有哪些?",
+      "capability": {
+        "ok": true,
+        "toolName": "publicTraffic.windowAggregate",
+        "responseType": "text",
+        "evidenceSummary": "Direct windowAggregate can aggregate the 30-day order window."
+      },
+      "routing": {
+        "ok": false,
+        "matchedCapability": null,
+        "responseType": "none",
+        "failureLayer": "routing",
+        "evidenceSummary": "Capability passes, but the bot surface does not reliably map order-zero phrasing to the correct window metric."
+      }
+    },
+    {
+      "caseId": "why-zero-candidates",
+      "category": "strategy",
+      "utterance": "为什么R50一个候选都没有",
+      "capability": {
+        "ok": true,
+        "toolName": "strategy.refreshCandidateExplain",
+        "responseType": "text",
+        "evidenceSummary": "Direct candidate explanation can report skip and candidate reasons for R50."
+      },
+      "routing": {
+        "ok": false,
+        "matchedCapability": null,
+        "responseType": "none",
+        "failureLayer": "routing",
+        "evidenceSummary": "Capability passes, but NL routing may choose a broader workflow or reject instead of the explanation tool."
+      }
+    },
+    {
+      "caseId": "can-refill-same-sku",
+      "category": "strategy",
+      "utterance": "这个同款组能不能补链",
+      "capability": {
+        "ok": true,
+        "toolName": "strategy.safeSourceResolve",
+        "responseType": "clarification_card",
+        "evidenceSummary": "Direct safeSourceResolve can evaluate refill safety when sameSkuGroupId and excluded IDs are supplied."
+      },
+      "routing": {
+        "ok": false,
+        "matchedCapability": null,
+        "responseType": "clarification_card",
+        "failureLayer": "metadata",
+        "evidenceSummary": "The utterance depends on prior same-SKU context; missing metadata blocks reliable NL dispatch."
+      }
+    },
+    {
+      "caseId": "who-is-safe-source",
+      "category": "strategy",
+      "utterance": "安全源是谁",
+      "capability": {
+        "ok": true,
+        "toolName": "strategy.safeSourceResolve",
+        "responseType": "clarification_card",
+        "evidenceSummary": "Direct safeSourceResolve can identify a safe source when group and exclusion metadata are known."
+      },
+      "routing": {
+        "ok": false,
+        "matchedCapability": null,
+        "responseType": "clarification_card",
+        "failureLayer": "metadata",
+        "evidenceSummary": "The short phrase lacks the same-SKU group and excluded product metadata required for routing."
+      }
+    },
+    {
+      "caseId": "refresh-r50-zero-amount",
+      "category": "plan",
+      "utterance": "帮我下架r50近30天产生订单金额为0的链接",
+      "capability": {
+        "ok": true,
+        "toolName": "operations.refreshActivityPlan",
+        "responseType": "strategy_card",
+        "evidenceSummary": "Direct refreshActivityPlan can produce a targeted R50 strategy card without executing writes."
+      },
+      "routing": {
+        "ok": false,
+        "matchedCapability": null,
+        "responseType": "none",
+        "failureLayer": "routing",
+        "evidenceSummary": "Capability passes, but natural language without planner support does not reliably produce the refresh plan."
+      }
+    },
+    {
+      "caseId": "refresh-pocket3-zero-amount",
+      "category": "plan",
+      "utterance": "帮我下架pocket3近30天产生订单金额为0的链接",
+      "capability": {
+        "ok": true,
+        "toolName": "operations.refreshActivityPlan",
+        "responseType": "strategy_card",
+        "evidenceSummary": "Direct refreshActivityPlan can produce a Pocket 3 targeted strategy card."
+      },
+      "routing": {
+        "ok": false,
+        "matchedCapability": null,
+        "responseType": "none",
+        "failureLayer": "routing",
+        "evidenceSummary": "Capability passes, but alias and group resolution are not stable through the current NL route."
+      }
+    },
+    {
+      "caseId": "global-refresh-plan",
+      "category": "plan",
+      "utterance": "帮我下架近30天产生订单金额为0的链接",
+      "capability": {
+        "ok": true,
+        "toolName": "operations.refreshActivityPlan",
+        "responseType": "strategy_card",
+        "evidenceSummary": "Direct refreshActivityPlan can prepare a global strategy-card plan."
+      },
+      "routing": {
+        "ok": false,
+        "matchedCapability": null,
+        "responseType": "strategy_card",
+        "failureLayer": "workflow",
+        "evidenceSummary": "The broad natural-language request must remain a bounded planning workflow and not bypass confirmation."
+      }
+    },
+    {
+      "caseId": "execute-delist-only",
+      "category": "execute",
+      "utterance": "只下架近30天产生订单金额为0的链接",
+      "capability": {
+        "ok": true,
+        "toolName": "operations.refreshActivityPlan",
+        "responseType": "strategy_card",
+        "evidenceSummary": "Direct refreshActivityPlan can prepare a delist-only strategy-card confirmation entry."
+      },
+      "routing": {
+        "ok": false,
+        "matchedCapability": null,
+        "responseType": "strategy_card",
+        "failureLayer": "workflow",
+        "evidenceSummary": "Execution wording must not skip strategy selection and confirmation workflow boundaries."
+      }
+    },
+    {
+      "caseId": "execute-delist-and-refill",
+      "category": "execute",
+      "utterance": "帮我下架所有近30天产生订单金额为0的链接,除了没有可用的安全源商品,并且下掉一个补链一个",
+      "capability": {
+        "ok": true,
+        "toolName": "operations.refreshActivityPlan",
+        "responseType": "strategy_card",
+        "evidenceSummary": "Direct refreshActivityPlan can prepare a delist-and-refill strategy card without executing writes."
+      },
+      "routing": {
+        "ok": false,
+        "matchedCapability": null,
+        "responseType": "strategy_card",
+        "failureLayer": "workflow",
+        "evidenceSummary": "The compound execution intent must remain bounded by planning and confirmation; direct NL execution is not dependable."
+      }
+    },
+    {
+      "caseId": "lookup-then-copy",
+      "category": "multistep",
+      "utterance": "先查一下2026013022000994654214的端内id是多少,然后根据这个id铺四条链接",
+      "capability": {
+        "ok": true,
+        "toolName": "linkRegistry.resolveProducts",
+        "responseType": "execute_confirm_card",
+        "evidenceSummary": "Direct product resolution can find the ID needed before a copy-link planning step."
+      },
+      "routing": {
+        "ok": false,
+        "matchedCapability": null,
+        "responseType": "execute_confirm_card",
+        "failureLayer": "metadata",
+        "evidenceSummary": "The cross-tool reference from resolved ID to later copy-link action is not reliably preserved."
+      }
+    },
+    {
+      "caseId": "window-then-delist-refill",
+      "category": "multistep",
+      "utterance": "近15天曝光为0的有哪些?下架,并且补链这些id",
+      "capability": {
+        "ok": true,
+        "toolName": "publicTraffic.windowAggregate",
+        "responseType": "execute_confirm_card",
+        "evidenceSummary": "Direct window aggregation can produce the candidate set needed before a refresh plan."
+      },
+      "routing": {
+        "ok": false,
+        "matchedCapability": null,
+        "responseType": "execute_confirm_card",
+        "failureLayer": "metadata",
+        "evidenceSummary": "The aggregate-result-to-execution candidate handoff is a metadata continuity risk."
+      }
+    }
+  ]
+}
