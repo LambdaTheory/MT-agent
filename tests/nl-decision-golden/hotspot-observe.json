@@ -1,0 +1,24 @@
+{
+  "name": "热点临近产出观察",
+  "context": {
+    "runId": "g1",
+    "date": "2026-07-02",
+    "outputDir": "/x",
+    "collectedAt": "x",
+    "missingSources": [],
+    "hotspots": [
+      {
+        "eventId": "e1",
+        "source": "manual",
+        "title": "演唱会A",
+        "startsAt": "2026-07-04T00:00:00.000Z",
+        "affectedCategories": ["相机"],
+        "confidence": "high"
+      }
+    ]
+  },
+  "expect": {
+    "minDecisions": 1,
+    "recommendation": "observe"
+  }
+}

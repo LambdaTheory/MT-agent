@@ -196,7 +196,7 @@ describe('agent runtime planner proposal validation', () => {
 
   it('rejects all planner-hidden tools even when they exist in the internal registry', () => {
     const hiddenTools = listAgentTools().filter((tool) => tool.plannerVisible === false);
-    expect(hiddenTools.map((tool) => tool.name)).toEqual(['operations.refreshActivityExecute', 'rental.priceApply', 'rental.operationConfirmRequest']);
+    expect(hiddenTools.map((tool) => tool.name)).toEqual(['operations.refreshActivityExecute', 'rental.priceApply', 'rental.operationConfirmRequest', 'rental.perSpecPriceApply', 'rental.specDimApply']);
 
     for (const tool of hiddenTools) {
       expect(validateAgentPlannerProposal(JSON.stringify({
@@ -276,6 +276,24 @@ describe('agent runtime planner proposal validation', () => {
       arguments: { items: [{ keyword: 'wide 300', count: 0, sourceProductId: '900' }] },
       confidence: 0.9,
       reason: 'count must be positive',
+    }))).toEqual({ ok: false, reason: 'invalid_arguments' });
+
+    expect(validateAgentPlannerProposal(JSON.stringify({
+      goal: 'batch delist explicit ids',
+      selectedTool: 'rental.delistBatch',
+      arguments: { productIds: ['251', '467', '252'] },
+      confidence: 0.9,
+      reason: 'user provided explicit internal ids to delist',
+      requiresConfirmation: true,
+    }))).toMatchObject({ ok: true });
+
+    expect(validateAgentPlannerProposal(JSON.stringify({
+      goal: 'batch delist missing ids',
+      selectedTool: 'rental.delistBatch',
+      arguments: {},
+      confidence: 0.9,
+      reason: 'missing productIds',
+      requiresConfirmation: true,
     }))).toEqual({ ok: false, reason: 'invalid_arguments' });
   });
 

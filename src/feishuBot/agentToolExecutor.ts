@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { buildAgentToolConfirmCard } from '../agentRuntime/approvalCard.js';
+import { recordOperationEvent } from '../agentRuntime/operationLedger.js';
 import { runPublicTrafficReportCli } from '../cli/publicTrafficReport.js';
 import type { AgentToolConfirmRequest } from '../agentRuntime/approvalCard.js';
 import { loadConfig } from '../config/loadConfig.js';
@@ -61,9 +62,7 @@ import {
   buildRentalPricePreviewCard,
   compactAuditReference,
   createRentalPriceSkillClient,
-  executeRentalOperationConfirmRequest,
   parseRentPriceFieldsFromText,
-  rentalOperationConfirmRequestFromToolArguments,
   rentalPriceChangeRequestFromToolArguments,
   rentalPriceRollbackRequestFromToolArguments,
   type RentalPriceAuditReference,
@@ -74,6 +73,8 @@ import {
   type RentalPriceReadResult,
   type RentalPriceSkillClient,
 } from './rentalPrice.js';
+import { executeRentalReadOnlyOperationHandler } from './rentalReadOnlyOperationHandlers.js';
+import { executeRentalWriteOperationHandler } from './rentalWriteOperationHandlers.js';
 import { findReadOnlyTool } from './readOnlyToolRegistry.js';
 import { inferPriceAdjustmentAmountFromText, readPriceAdjustmentAmountArgument } from './priceAdjustment.js';
 import {
@@ -85,12 +86,18 @@ import { inferPriceMultiplierFromText, readPriceMultiplierArgument } from './pri
 import { runPublicTrafficReportDateComparison, runPublicTrafficReportQuery, type PublicTrafficReportQueryArguments } from './reportQuery.js';
 import { findLatestReportContext, findReportContextByDate, formatConversionSummary, formatLatestSummary, formatProductRows, parseNumericProductIdList, queryProductRows } from './reportStore.js';
 import { saveAgentToolConfirmRequest } from './agentToolConfirmStore.js';
+import type { RentalWriteLedgerContext } from './rentalWriteOperationHandlers.js';
+import { rentalPerSpecPriceApplyResponse, rentalPerSpecPricePlanResponse } from './rentalPerSpecPriceHandlers.js';
+import { rentalSpecDimApplyResponse, rentalSpecDimPlanResponse } from './rentalSpecDimHandlers.js';
 
 export interface AgentToolExecutionOptions {
   rentalPriceClient?: RentalPriceSkillClient;
   closedOrderFetchImpl?: typeof fetch;
   closedOrderRegistryPaths?: ClosedOrderRegistryPathsInput;
+  ledgerContext?: RentalWriteLedgerContext;
 }
+
+type AgentToolWriteEvent = 'execution_started' | 'execution_succeeded' | 'execution_failed';
 
 let publicTrafficReportRunning = false;
 
@@ -110,6 +117,7 @@ const NON_RENT_PRICE_FIELD_LABELS: Record<string, string[]> = {
   finalPayment: ['finalPayment', '尾款'],
 };
 const REFRESH_ACTIVITY_EXECUTION_MAX_PRODUCTS = 20;
+const RENTAL_DELIST_BATCH_MAX_PRODUCTS = 80;
 const RENT_FIELD_ORDER: Array<{ field: string; label: string }> = [
   { field: 'rent1day', label: '1天' },
   { field: 'rent2day', label: '2天' },
@@ -620,6 +628,16 @@ function readProductIdArray(value: unknown, maxItems: number): string[] | null {
   return [...new Set(ids)];
 }
 
+function readDelistProductIds(args: Record<string, unknown>): string[] | null {
+  const fromArray = readProductIdArray(args.productIds, RENTAL_DELIST_BATCH_MAX_PRODUCTS);
+  const fromString = readString(args.productId);
+  const parsedStringIds = fromString ? parseNumericProductIdList(fromString) : [];
+  const ids = [...(fromArray ?? []), ...parsedStringIds].filter((id) => /^\d+$/.test(id));
+  const unique = [...new Set(ids)];
+  if (unique.length === 0 || unique.length > RENTAL_DELIST_BATCH_MAX_PRODUCTS) return null;
+  return unique;
+}
+
 async function rentalPricePreviewResponse(
   args: Record<string, unknown>,
   reason: string,
@@ -746,9 +764,29 @@ function readPriceApplyItems(value: unknown): Array<{ productId: string; fields:
   return items;
 }
 
+async function recordAgentToolWriteEvent(
+  context: RentalWriteLedgerContext | undefined,
+  event: AgentToolWriteEvent,
+  toolName: string,
+  productId: string,
+): Promise<void> {
+  if (!context) return;
+  await recordOperationEvent(context.outputDir, {
+    planId: context.decisionId ?? context.runId ?? 'ad-hoc',
+    at: context.missionDate ? `${context.missionDate}T00:00:00.000Z` : new Date().toISOString(),
+    event,
+    toolName,
+    ...(context.runId ? { runId: context.runId } : {}),
+    ...(context.decisionId ? { decisionId: context.decisionId } : {}),
+    subject: { kind: 'product', id: productId },
+    ...(context.missionDate ? { metadata: { missionDate: context.missionDate } } : {}),
+  });
+}
+
 async function rentalPriceApplyResponse(
   args: Record<string, unknown>,
   client: RentalPriceSkillClient,
+  ledgerContext?: RentalWriteLedgerContext,
 ): Promise<BotResponse> {
   const items = readPriceApplyItems(args.items);
   if (!items) throw new Error('改价执行参数无效，请重新发起预览。');
@@ -761,8 +799,12 @@ async function rentalPriceApplyResponse(
       ...(item.audit ? { audit: item.audit } : {}),
     };
     try {
-      results.push(await client.execute(request));
+      await recordAgentToolWriteEvent(ledgerContext, 'execution_started', 'rental.priceApply', item.productId);
+      const result = await client.execute(request);
+      await recordAgentToolWriteEvent(ledgerContext, result.ok ? 'execution_succeeded' : 'execution_failed', 'rental.priceApply', item.productId);
+      results.push(result);
     } catch (error) {
+      await recordAgentToolWriteEvent(ledgerContext, 'execution_failed', 'rental.priceApply', item.productId);
       results.push({ productId: item.productId, ok: false, lines: [error instanceof Error ? error.message : String(error)] });
     }
   }
@@ -1142,6 +1184,71 @@ async function writeRefreshActivityAudit(outputDir: string, value: unknown): Pro
   return path;
 }
 
+function isSafeMissingDelistResult(result: Awaited<ReturnType<RentalPriceSkillClient['delist']>>): boolean {
+  if (result.ok) return false;
+  return /Product not found/i.test(result.lines.join('\n'));
+}
+
+async function rentalDelistBatchResponse(
+  args: Record<string, unknown>,
+  client: RentalPriceSkillClient,
+  toolName: 'rental.delist' | 'rental.delistBatch' = 'rental.delistBatch',
+): Promise<BotResponse> {
+  const productIds = readDelistProductIds(args);
+  if (!productIds) {
+    return {
+      text: `批量下架参数无效：请提供 1 到 ${RENTAL_DELIST_BATCH_MAX_PRODUCTS} 个端内ID。`,
+      metadata: { toolName, ok: false },
+    };
+  }
+
+  const results: Awaited<ReturnType<RentalPriceSkillClient['delist']>>[] = [];
+  for (const productId of productIds) {
+    try {
+      const result = await client.delist(productId);
+      results.push(result);
+    } catch (error) {
+      results.push({ productId, ok: false, lines: [error instanceof Error ? error.message : String(error)] });
+      break;
+    }
+  }
+
+  const success = results.filter((result) => result.ok);
+  const skippedMissing = results.filter((result) => isSafeMissingDelistResult(result));
+  const failed = results.filter((result) => !result.ok && !isSafeMissingDelistResult(result));
+  const pending = productIds.slice(results.length);
+  const allAttempted = pending.length === 0;
+  const ok = allAttempted && failed.length === 0 && skippedMissing.length === 0;
+  const title = ok ? '批量下架完成' : allAttempted ? '批量下架部分完成' : '批量下架中断';
+  const detailLines = results.map((result, index) => {
+    const status = result.ok ? '成功' : isSafeMissingDelistResult(result) ? '跳过' : '失败';
+    const detail = result.lines.length ? `｜${result.lines.slice(0, 4).join('；')}` : '';
+    return `${index + 1}. ${status}：商品 ${result.productId}${detail}`;
+  });
+
+  return {
+    text: [
+      `${title}：成功 ${success.length}/${productIds.length}`,
+      skippedMissing.length ? `跳过：${skippedMissing.length} 个商品不存在（${skippedMissing.map((result) => result.productId).join('、')}）` : undefined,
+      failed.length ? `失败：${failed.length} 个（${failed.map((result) => result.productId).join('、')}）` : undefined,
+      pending.length ? `未执行：${pending.length} 个（${pending.join('、')}）` : undefined,
+      '',
+      '下架明细：',
+      ...detailLines,
+    ].filter((line): line is string => Boolean(line)).join('\n'),
+    metadata: {
+      toolName,
+      ok,
+      productIds,
+      delistedProductIds: success.map((result) => result.productId),
+      skippedMissingProductIds: skippedMissing.map((result) => result.productId),
+      failedProductIds: failed.map((result) => result.productId),
+      pendingProductIds: pending,
+      completedCount: success.length,
+    },
+  };
+}
+
 async function refreshActivityPlanResponse(
   outputDir: string,
   args: Record<string, unknown>,
@@ -1240,20 +1347,32 @@ async function refreshActivityExecuteResponse(
   outputDir: string,
   args: Record<string, unknown>,
   client: RentalPriceSkillClient,
+  ledgerContext?: RentalWriteLedgerContext,
 ): Promise<BotResponse> {
   const request = readRefreshActivityExecuteRequest(args);
   const delistResults = [];
   for (const productId of request.delistProductIds) {
-    const result = await client.delist(productId);
+    await recordAgentToolWriteEvent(ledgerContext, 'execution_started', 'operations.refreshActivityExecute', productId);
+    let result;
+    try {
+      result = await client.delist(productId);
+    } catch (error) {
+      await recordAgentToolWriteEvent(ledgerContext, 'execution_failed', 'operations.refreshActivityExecute', productId);
+      throw error;
+    }
+    await recordAgentToolWriteEvent(ledgerContext, result.ok ? 'execution_succeeded' : 'execution_failed', 'operations.refreshActivityExecute', productId);
     delistResults.push(result);
-    if (!result.ok) break;
+    if (!result.ok && !isSafeMissingDelistResult(result)) break;
   }
 
   const delistSuccess = delistResults.filter((result) => result.ok);
-  const allDelisted = delistResults.length === request.delistProductIds.length && delistSuccess.length === request.delistProductIds.length;
+  const skippedMissingDelist = delistResults.filter((result) => isSafeMissingDelistResult(result));
+  const blockingDelistFailures = delistResults.filter((result) => !result.ok && !isSafeMissingDelistResult(result));
+  const delistFinished = delistResults.length === request.delistProductIds.length && blockingDelistFailures.length === 0;
+  const allDelisted = delistFinished && skippedMissingDelist.length === 0;
 
   let newLinkResult: Awaited<ReturnType<typeof executeNewLinkBatchConfirmRequest>> | Awaited<ReturnType<typeof executeNewLinkBatchMultiConfirmRequest>> | null = null;
-  if (allDelisted) {
+  if (delistFinished) {
     const items: NewLinkBatchConfirmRequest[] = request.newLinkItems.map((item) => ({
       safetyVersion: NEW_LINK_BATCH_CONFIRMATION_VERSION,
       workflowName: NEW_LINK_BATCH_WORKFLOW_NAME,
@@ -1264,6 +1383,9 @@ async function refreshActivityExecuteResponse(
       dataDate: request.date,
       reason: '活跃度刷新计划确认执行',
     }));
+    for (const item of items) {
+      await recordAgentToolWriteEvent(ledgerContext, 'execution_started', 'operations.refreshActivityExecute', item.sourceProductId);
+    }
     newLinkResult = items.length === 1
       ? await executeNewLinkBatchConfirmRequest(client, items[0]!)
       : await executeNewLinkBatchMultiConfirmRequest(client, {
@@ -1274,13 +1396,19 @@ async function refreshActivityExecuteResponse(
         dataDate: request.date,
         reason: '活跃度刷新计划确认执行',
       });
+    for (const item of items) {
+      await recordAgentToolWriteEvent(ledgerContext, newLinkResult.ok ? 'execution_succeeded' : 'execution_failed', 'operations.refreshActivityExecute', item.sourceProductId);
+    }
   }
+  const overallOk = allDelisted && Boolean(newLinkResult?.ok);
 
   const auditPath = await writeRefreshActivityAudit(outputDir, {
     request,
     delistResults,
+    skippedMissingDelistProductIds: skippedMissingDelist.map((result) => result.productId),
+    blockingDelistFailureProductIds: blockingDelistFailures.map((result) => result.productId),
     newLinkResult,
-    ok: allDelisted && Boolean(newLinkResult?.ok),
+    ok: overallOk,
     createdAt: new Date().toISOString(),
   });
 
@@ -1289,8 +1417,9 @@ async function refreshActivityExecuteResponse(
   const delistLines = delistResults.map((result) => `- ${result.ok ? '成功' : '失败'}：商品 ${result.productId}${result.lines.length ? `｜${result.lines.join('；')}` : ''}`);
   return {
     text: [
-      `${allDelisted && newLinkResult?.ok ? '活跃度刷新执行完成' : '活跃度刷新执行中断'}：${request.date}`,
+      `${overallOk ? '活跃度刷新执行完成' : delistFinished && skippedMissingDelist.length ? '活跃度刷新部分完成' : '活跃度刷新执行中断'}：${request.date}`,
       `下架：成功 ${delistSuccess.length}/${request.delistProductIds.length}`,
+      ...(skippedMissingDelist.length ? [`跳过：${skippedMissingDelist.length} 个商品不存在（${skippedMissingDelist.map((result) => result.productId).join('、')}）`] : []),
       `补链：${newLinkResult ? `${newLinkResult.ok ? '成功' : '失败'}，完成 ${newLinkResult.completedCount}/${request.newLinkItems.reduce((sum, item) => sum + item.count, 0)} 条` : '因下架未全部成功，已跳过'}`,
       '',
       '处理种类：',
@@ -1306,8 +1435,10 @@ async function refreshActivityExecuteResponse(
       toolName: 'operations.refreshActivityExecute',
       auditPath,
       delistedProductIds: delistSuccess.map((result) => result.productId),
+      skippedMissingDelistProductIds: skippedMissingDelist.map((result) => result.productId),
+      blockingDelistFailureProductIds: blockingDelistFailures.map((result) => result.productId),
       newProductIds: newLinkResult?.newProductIds ?? [],
-      ok: allDelisted && Boolean(newLinkResult?.ok),
+      ok: overallOk,
     },
   };
 }
@@ -1325,39 +1456,6 @@ async function runReadOnlyAgentIntent(
 
   const registryContext = await loadClosedOrderRegistryContext(options.closedOrderRegistryPaths);
   return tool.run(latest.context, intent, { linkRegistryStore: createLinkRegistry(registryContext.registry) });
-}
-
-function requireTenancyDays(value: unknown, fieldName: string): string {
-  const parsed = requireString(value, fieldName);
-  if (!/^\d+(?:,\d+)*$/.test(parsed)) throw new Error(`${fieldName} must be comma-separated day numbers`);
-  return parsed;
-}
-
-function rentalAgentToolRequest(toolName: string, args: Record<string, unknown>): RentalOperationConfirmRequest | null {
-  switch (toolName) {
-    case 'rental.copy':
-      return { action: 'copy', productId: requireProductId(args.productId, 'productId') };
-    case 'rental.delist':
-      return { action: 'delist', productId: requireProductId(args.productId, 'productId') };
-    case 'rental.tenancySet':
-      return {
-        action: 'tenancy-set',
-        productId: requireProductId(args.productId, 'productId'),
-        days: requireTenancyDays(args.days, 'days'),
-      };
-    case 'rental.specDiscover':
-      return { action: 'spec-discover', productId: requireProductId(args.productId, 'productId') };
-    case 'rental.specAddAndRefresh':
-      return {
-        action: 'spec-add-and-refresh',
-        productId: requireProductId(args.productId, 'productId'),
-        itemTitle: requireString(args.itemTitle, 'itemTitle'),
-      };
-    case 'rental.specRemovePlan':
-      return null;
-    default:
-      return null;
-  }
 }
 
 function closedOrderIngestStatePath(outputDir: string): string {
@@ -1681,36 +1779,35 @@ export async function executeAgentToolRequest(
     case 'operations.refreshActivityPlan':
       return refreshActivityPlanResponse(outputDir, request.arguments, options, request.continuation);
     case 'operations.refreshActivityExecute':
-      return refreshActivityExecuteResponse(outputDir, request.arguments, options.rentalPriceClient ?? createRentalPriceSkillClient());
+      return refreshActivityExecuteResponse(outputDir, request.arguments, options.rentalPriceClient ?? createRentalPriceSkillClient(), options.ledgerContext);
+    case 'rental.daemonStatus':
+    case 'rental.platformSearch':
+    case 'rental.platformSearchAll':
+    case 'rental.batchRead':
+    case 'rental.specDiscoverFull':
+    case 'rental.readRaw':
+      return executeRentalReadOnlyOperationHandler(request, options.rentalPriceClient ?? createRentalPriceSkillClient());
     case 'rental.copy':
-    case 'rental.delist':
     case 'rental.tenancySet':
     case 'rental.specDiscover':
-    case 'rental.specAddAndRefresh': {
-      const rentalRequest = rentalAgentToolRequest(request.toolName, request.arguments);
-      if (!rentalRequest) throw new Error('租赁商品操作参数无效，请重新发起。');
-      const result = await executeRentalOperationConfirmRequest(options.rentalPriceClient ?? createRentalPriceSkillClient(), rentalRequest);
-      return {
-        text: result.text,
-        metadata: {
-          ...(result.metadata ?? {}),
-          toolName: request.toolName,
-          ok: result.ok,
-          productId: rentalRequest.productId,
-        },
-      };
+    case 'rental.specAddAndRefresh':
+      return executeRentalWriteOperationHandler(request, options.rentalPriceClient ?? createRentalPriceSkillClient(), options.ledgerContext);
+    case 'rental.delist': {
+      const productIds = readDelistProductIds(request.arguments);
+      if (request.arguments.productIds !== undefined || (productIds && productIds.length > 1)) {
+        return rentalDelistBatchResponse(request.arguments, options.rentalPriceClient ?? createRentalPriceSkillClient(), request.toolName);
+      }
+      return executeRentalWriteOperationHandler(request, options.rentalPriceClient ?? createRentalPriceSkillClient(), options.ledgerContext);
     }
+    case 'rental.delistBatch':
+      return rentalDelistBatchResponse(request.arguments, options.rentalPriceClient ?? createRentalPriceSkillClient(), request.toolName);
     case 'rental.specRemovePlan': {
       const query = requireString(request.arguments.query, 'query');
       const keyword = requireString(request.arguments.keyword, 'keyword');
       return rentalSpecRemovePlanResponse(query, keyword, request.reason, options.rentalPriceClient ?? createRentalPriceSkillClient(), options, request.continuation);
     }
-    case 'rental.operationConfirmRequest': {
-      const rentalRequest = rentalOperationConfirmRequestFromToolArguments(request.arguments);
-      if (!rentalRequest) throw new Error('租赁商品操作参数无效，请重新发起。');
-      const result = await executeRentalOperationConfirmRequest(options.rentalPriceClient ?? createRentalPriceSkillClient(), rentalRequest);
-      return { text: result.text };
-    }
+    case 'rental.operationConfirmRequest':
+      return executeRentalWriteOperationHandler(request, options.rentalPriceClient ?? createRentalPriceSkillClient(), options.ledgerContext);
     case 'rental.priceChange': {
       const inferredFields = isRecord(request.arguments.fields) ? undefined : parseRentPriceFieldsFromText(request.reason);
       const rawFields = isRecord(request.arguments.fields)
@@ -1730,7 +1827,15 @@ export async function executeAgentToolRequest(
     case 'rental.pricePreview':
       return rentalPricePreviewResponse(request.arguments, request.reason, options.rentalPriceClient ?? createRentalPriceSkillClient(), outputDir, request.continuation);
     case 'rental.priceApply':
-      return rentalPriceApplyResponse(request.arguments, options.rentalPriceClient ?? createRentalPriceSkillClient());
+      return rentalPriceApplyResponse(request.arguments, options.rentalPriceClient ?? createRentalPriceSkillClient(), options.ledgerContext);
+    case 'rental.perSpecPricePlan':
+      return rentalPerSpecPricePlanResponse(request.arguments, request.reason, options.rentalPriceClient ?? createRentalPriceSkillClient(), outputDir, request.continuation);
+    case 'rental.perSpecPriceApply':
+      return rentalPerSpecPriceApplyResponse(request.arguments, options.rentalPriceClient ?? createRentalPriceSkillClient(), options.ledgerContext);
+    case 'rental.specDimPlan':
+      return rentalSpecDimPlanResponse(request.arguments, request.reason, options.rentalPriceClient ?? createRentalPriceSkillClient(), outputDir, request.continuation);
+    case 'rental.specDimApply':
+      return rentalSpecDimApplyResponse(request.arguments, options.rentalPriceClient ?? createRentalPriceSkillClient(), options.ledgerContext);
     case 'rental.priceSnapshot': {
       const query = requireString(request.arguments.query, 'query');
       return rentalPriceSnapshotResponse(query, options.rentalPriceClient ?? createRentalPriceSkillClient(), options);

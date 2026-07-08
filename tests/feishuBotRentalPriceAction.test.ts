@@ -2,6 +2,7 @@ import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { buildAgentToolConfirmCard } from '../src/agentRuntime/approvalCard.js';
 import { createFeishuSdkBot } from '../src/feishuBot/sdkClient.js';
 import { buildRentalOperationConfirmCard, buildRentalPricePreviewCard, createRentalPriceSkillClient, parseRentalOperationConfirmRequest, parseRentalPriceConfirmRequest, type RentalPriceSkillClient } from '../src/feishuBot/rentalPrice.js';
 import { buildNewLinkBatchConfirmCard, type NewLinkBatchPlan } from '../src/newLinkWorkflow/batch.js';
@@ -259,18 +260,17 @@ describe('rental price card action', () => {
     const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', outputDir: await mkdtemp(join(tmpdir(), 'mt-agent-sdk-action-')), sdk: fakeSdk(sent, registered), rentalPriceClient });
 
     bot.start();
+    const value = readButtonValue(buildAgentToolConfirmCard({
+      toolName: 'rental.delist',
+      arguments: { productId: '761' },
+      reason: '用户要求下架商品 761',
+    }), 'agent_tool_confirm_submit');
+
     await registered['card.action.trigger']({
       event: {
         context: { open_message_id: 'om-agent-tool-confirm' },
         action: {
-          value: {
-            action: 'agent_tool_confirm',
-            request: {
-              toolName: 'rental.delist',
-              arguments: { productId: '761' },
-              reason: '用户要求下架商品 761',
-            },
-          },
+          value,
         },
       },
     });

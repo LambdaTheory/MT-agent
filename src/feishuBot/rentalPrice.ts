@@ -133,6 +133,54 @@ export interface RentalPriceSpecRemoveResult {
   audit?: { resultFile?: string };
 }
 
+export interface RentalDaemonStatusResult {
+  ok: boolean;
+  status: string;
+  pong?: boolean;
+  message?: string;
+  lines: string[];
+}
+
+export interface RentalPlatformSearchResult {
+  ok: boolean;
+  status: string;
+  keyword: string;
+  count: number;
+  rows: unknown[];
+  lines: string[];
+}
+
+export interface RentalPlatformSearchAllResult {
+  ok: boolean;
+  status: string;
+  count: number;
+  rows: unknown[];
+  pagesScraped?: number;
+  excludedCount?: number;
+  truncated: boolean;
+  lines: string[];
+}
+
+export interface RentalBatchReadResult {
+  ok: boolean;
+  status: string;
+  count: number;
+  results: Record<string, unknown>;
+  errors: unknown[];
+  warnings: unknown[];
+  lines: string[];
+}
+
+export interface RentalRawReadResult extends RentalPriceReadResult {
+  status: string;
+  requestedCount?: number;
+  readCount?: number;
+}
+
+export interface RentalSpecDiscoverFullResult extends RentalPriceSpecDiscoverResult {
+  status: string;
+}
+
 interface RentalOperationConfirmMetadata {
   continuation?: AgentToolConfirmContinuation;
   plannerToolName?: 'rental.copy' | 'rental.delist' | 'rental.tenancySet' | 'rental.specDiscover' | 'rental.specAddAndRefresh' | 'rental.specRemovePlan' | 'rental.operationConfirmRequest';
@@ -147,8 +195,15 @@ export interface RentalOperationExecutionResult {
 }
 
 export interface RentalPriceSkillClient {
+  daemonStatus?(): Promise<RentalDaemonStatusResult>;
+  platformSearch?(keyword: string): Promise<RentalPlatformSearchResult>;
+  platformSearchAll?(limit?: number): Promise<RentalPlatformSearchAllResult>;
+  batchRead?(productIds: string[]): Promise<RentalBatchReadResult>;
+  specDiscoverFull?(productId: string): Promise<RentalSpecDiscoverFullResult>;
+  readRaw?(productId: string, fields?: string[]): Promise<RentalRawReadResult>;
   preview(request: RentalPriceChangeRequest): Promise<RentalPricePreview>;
   execute(request: Extract<RentalPriceChangeRequest, { mode: 'explicit_fields' }>): Promise<RentalPriceExecutionResult>;
+  applyPerSpec?(productId: string, specFields: Record<string, Record<string, string>>): Promise<RentalPriceExecutionResult>;
   rollback?(request: RentalPriceRollbackRequest): Promise<RentalPriceRollbackResult>;
   read?(productId: string): Promise<RentalPriceReadResult>;
   copy(productId: string): Promise<RentalPriceCopyResult>;
@@ -156,6 +211,8 @@ export interface RentalPriceSkillClient {
   tenancySet(productId: string, days: string): Promise<RentalPriceTenancySetResult>;
   specDiscover(productId: string): Promise<RentalPriceSpecDiscoverResult>;
   specAddAndRefresh(productId: string, itemTitle: string): Promise<RentalPriceSpecAddResult>;
+  specAddDim?(productId: string, title: string): Promise<RentalPriceSpecAddResult>;
+  specRemoveDim?(request: { productId: string; specDimId: string }): Promise<RentalPriceSpecRemoveResult>;
   specRemoveItem?(request: { productId: string; specDimId: string; itemId?: string; itemTitle: string }): Promise<RentalPriceSpecRemoveResult>;
 }
 
@@ -189,6 +246,8 @@ const AUDIT_TASK_ID_PATTERN = /^task_\d+_[a-f0-9]+$/i;
 const SPEC_REMOVE_CONFIRM_DISPLAY_LIMIT = 30;
 const SPEC_REMOVE_CONFIRM_MAX_ITEMS = 50;
 const SPEC_REMOVE_BULK_WARNING_ITEMS = 12;
+const PLATFORM_SEARCH_ALL_DEFAULT_LIMIT = 100;
+const PLATFORM_SEARCH_ALL_MAX_LIMIT = 200;
 
 function money(value: string | number): string {
   return Number(value).toFixed(2);
@@ -443,6 +502,35 @@ function optionalBoolean(response: Record<string, unknown>, key: string): boolea
   return typeof value === 'boolean' ? value : undefined;
 }
 
+function optionalNumber(response: Record<string, unknown>, key: string): number | undefined {
+  const value = response[key];
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function firstStringField(value: unknown, keys: string[]): string | null {
+  if (!isRecord(value)) return null;
+  for (const key of keys) {
+    const item = value[key];
+    if (typeof item === 'string' && item.trim()) return item.trim();
+  }
+  return null;
+}
+
+function summarizeRows(rows: unknown[]): string[] {
+  return rows.slice(0, 5).map((row) => {
+    const id = firstStringField(row, ['productId', 'internalProductId', 'id']) ?? 'unknown';
+    const title = firstStringField(row, ['title', 'name', 'productName']) ?? '';
+    return title ? `${id} ${title}` : id;
+  });
+}
+
+function summarizeBatchReadResults(results: Record<string, unknown>): string[] {
+  return Object.entries(results).slice(0, 10).map(([productId, result]) => {
+    const status = isRecord(result) ? commandStatus(result) : 'unknown';
+    return `${productId} ${status}`;
+  });
+}
+
 function readableValues(response: Record<string, unknown>): Record<string, unknown> {
   const values = isRecord(response.values) ? response.values : {};
   const firstSpec = Object.values(values).find(isRecord) as Record<string, unknown> | undefined;
@@ -452,6 +540,26 @@ function readableValues(response: Record<string, unknown>): Record<string, unkno
 function verifiedFields(response: Record<string, unknown>, fields: Record<string, string>): boolean {
   const values = readableValues(response);
   return Object.entries(fields).every(([field, value]) => moneyValue(values[field]) === value);
+}
+
+function normalizePerSpecPriceFields(specFields: Record<string, Record<string, string>>): Record<string, Record<string, string>> {
+  const normalized: Record<string, Record<string, string>> = {};
+  for (const [specId, fields] of Object.entries(specFields)) {
+    const clean: Record<string, string> = {};
+    for (const [field, value] of Object.entries(fields)) {
+      if (PRICE_FIELD_NAMES.has(field) && Number.isFinite(Number(value))) clean[field] = money(value);
+    }
+    if (Object.keys(clean).length) normalized[specId] = clean;
+  }
+  return normalized;
+}
+
+function verifiedPerSpecFields(response: Record<string, unknown>, specFields: Record<string, Record<string, string>>): boolean {
+  const values = normalizeReadValues(response.values);
+  return Object.entries(specFields).every(([specId, fields]) => {
+    const actual = values[specId] ?? {};
+    return Object.entries(fields).every(([field, value]) => moneyValue(actual[field]) === value);
+  });
 }
 
 function moneyValue(value: unknown): string | null {
@@ -763,6 +871,116 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
   }
 
   return {
+    async daemonStatus() {
+      const result = await send({ action: 'ping' });
+      const status = commandStatus(result);
+      const pong = optionalBoolean(result, 'pong');
+      const message = optionalString(result, 'message');
+      return {
+        ok: status === 'ok',
+        status,
+        ...(pong !== undefined ? { pong } : {}),
+        ...(message ? { message } : {}),
+        lines: [`ping: ${status}`, ...(pong !== undefined ? [`pong: ${pong}`] : []), ...(message ? [`message: ${message}`] : [])],
+      };
+    },
+    async platformSearch(keyword) {
+      const result = await send({ action: 'platform-search', keyword });
+      const status = commandStatus(result);
+      const rows = Array.isArray(result.products)
+        ? result.products
+        : Array.isArray(result.rows)
+          ? result.rows
+          : Array.isArray(result.results)
+            ? result.results
+            : Array.isArray(result.items)
+              ? result.items
+              : [];
+      const count = optionalNumber(result, 'count') ?? rows.length;
+      return {
+        ok: status === 'ok' || status === 'partial',
+        status,
+        keyword,
+        count,
+        rows,
+        lines: [`platform-search: ${status}`, `keyword: ${keyword}`, `count: ${count}`, ...summarizeRows(rows)],
+      };
+    },
+    async platformSearchAll(limit = PLATFORM_SEARCH_ALL_DEFAULT_LIMIT) {
+      const cappedLimit = Math.max(1, Math.min(Math.trunc(limit), PLATFORM_SEARCH_ALL_MAX_LIMIT));
+      const result = await send({ action: 'platform-search-all' });
+      const status = commandStatus(result);
+      const allRows = Array.isArray(result.products)
+        ? result.products
+        : Array.isArray(result.rows)
+          ? result.rows
+          : Array.isArray(result.results)
+            ? result.results
+            : Array.isArray(result.items)
+              ? result.items
+              : [];
+      const rows = allRows.slice(0, cappedLimit);
+      const count = optionalNumber(result, 'count') ?? allRows.length;
+      const pagesScraped = optionalNumber(result, 'pagesScraped');
+      const excludedCount = optionalNumber(result, 'excludedCount');
+      const truncated = allRows.length > rows.length;
+      return {
+        ok: status === 'ok' || status === 'partial',
+        status,
+        count,
+        rows,
+        ...(pagesScraped !== undefined ? { pagesScraped } : {}),
+        ...(excludedCount !== undefined ? { excludedCount } : {}),
+        truncated,
+        lines: [`platform-search-all: ${status}`, `count: ${count}`, `returned: ${rows.length}`, ...(pagesScraped !== undefined ? [`pagesScraped: ${pagesScraped}`] : []), ...summarizeRows(rows)],
+      };
+    },
+    async batchRead(productIds) {
+      const result = await send({ action: 'batch-read', productIds });
+      const status = commandStatus(result);
+      const results = isRecord(result.results) ? result.results : {};
+      const errors = Array.isArray(result.errors) ? result.errors : [];
+      const warnings = Array.isArray(result.warnings) ? result.warnings : [];
+      const count = optionalNumber(result, 'count') ?? Object.keys(results).length;
+      return {
+        ok: status === 'ok' || status === 'partial',
+        status,
+        count,
+        results,
+        errors,
+        warnings,
+        lines: [`batch-read: ${status}`, `count: ${count}`, ...summarizeBatchReadResults(results)],
+      };
+    },
+    async specDiscoverFull(productId) {
+      const result = await send({ action: 'spec-discover', productId });
+      const status = commandStatus(result);
+      const dimensions = Array.isArray(result.dimensions) ? result.dimensions as RentalPriceSpecDiscoverResult['dimensions'] : [];
+      return { productId, ok: status === 'ok', status, dimensions, lines: [`spec-discover: ${status}`, `${dimensions.length} dimensions`] };
+    },
+    async readRaw(productId, fields) {
+      const result = await send({ action: 'read', productId, ...(fields && fields.length > 0 ? { fields } : {}) });
+      const status = commandStatus(result);
+      const specs = normalizeReadSpecs(result.specs);
+      const values = normalizeReadValues(result.values);
+      const warnings = normalizeReadDiagnostics(result.warnings);
+      const missingFields = normalizeReadDiagnostics(result.missingFields);
+      const requestedCount = optionalNumber(result, 'requestedCount');
+      const readCount = optionalNumber(result, 'readCount');
+      const message = optionalString(result, 'message');
+      return {
+        productId,
+        ok: status === 'ok' || status === 'partial',
+        status,
+        specs,
+        values,
+        lines: [`read: ${status}`, `${specs.length} specs`, ...(requestedCount !== undefined ? [`requestedCount: ${requestedCount}`] : []), ...(readCount !== undefined ? [`readCount: ${readCount}`] : []), ...(message ? [message] : [])],
+        ...(warnings ? { warnings } : {}),
+        ...(missingFields ? { missingFields } : {}),
+        ...(requestedCount !== undefined ? { requestedCount } : {}),
+        ...(readCount !== undefined ? { readCount } : {}),
+      };
+    },
     async read(productId) {
       const result = await send({ action: 'read', productId });
       const status = commandStatus(result);
@@ -880,6 +1098,54 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
         ...(audit ? { audit: { ...(audit.taskId ? { taskId: audit.taskId } : {}), status: audit.taskId ? auditStatus : 'untracked', resultFile, ...(audit.rollbackFile ? { rollbackFile: audit.rollbackFile } : {}) } } : {}),
       };
     },
+    async applyPerSpec(productId, specFields) {
+      const safeProductId = readProductId(productId);
+      if (!safeProductId) throw new Error('productId must be a numeric string');
+      const tasksDir = join(rootDir, 'tasks');
+      await mkdir(tasksDir, { recursive: true });
+      const normalized = normalizePerSpecPriceFields(specFields);
+      if (!Object.keys(normalized).length) {
+        return { productId: safeProductId, ok: false, lines: ['apply: skipped', 'submit: skipped', 'verify: skipped', 'fields: empty'] };
+      }
+      const changesFile = join(tasksDir, `mt-agent-per-spec-changes-${safeProductId}-${timestampToken()}.json`);
+      await writeJsonFile(changesFile, normalized);
+
+      const apply = await send({ action: 'apply', productId: safeProductId, changesFile });
+      const applyStatus = commandStatus(apply);
+      if (applyStatus !== 'ok') {
+        return { productId: safeProductId, ok: false, lines: [`apply: ${applyStatus}`, 'submit: skipped', 'verify: skipped', `changesFile: ${changesFile}`] };
+      }
+
+      const submit = await send({ action: 'submit' });
+      const submitStatus = commandStatus(submit);
+      if (submitStatus !== 'ok') {
+        return { productId: safeProductId, ok: false, lines: [`apply: ${applyStatus}`, `submit: ${submitStatus}`, 'verify: skipped', `changesFile: ${changesFile}`] };
+      }
+
+      const verified = await send({ action: 'read', productId: safeProductId });
+      const verifyStatus = commandStatus(verified);
+      const fieldsMatch = verifiedPerSpecFields(verified, normalized);
+      const ok = verifyStatus !== 'error' && fieldsMatch;
+      const resultFile = join(tasksDir, `per-spec-verify-${safeProductId}-${timestampToken()}.json`);
+      await writeJsonFile(resultFile, {
+        productId: safeProductId,
+        ok,
+        expectedSpecFields: normalized,
+        applyStatus,
+        submitStatus,
+        verifyStatus,
+        fieldsMatch,
+        verified,
+        changesFile,
+        createdAt: new Date().toISOString(),
+      });
+      return {
+        productId: safeProductId,
+        ok,
+        lines: [`apply: ${applyStatus}`, `submit: ${submitStatus}`, `verify: ${verifyStatus}`, `fields: ${fieldsMatch ? 'matched' : 'mismatch'}`, `changesFile: ${changesFile}`, `verifyFile: ${resultFile}`],
+        audit: { status: ok ? 'completed' : 'verify_failed', resultFile },
+      };
+    },
     async rollback(request) {
       const tasksDir = join(rootDir, 'tasks');
       await mkdir(tasksDir, { recursive: true });
@@ -988,6 +1254,48 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
       const result = await send({ action: 'spec-add-and-refresh', productId, itemTitle });
       const status = commandStatus(result);
       return { productId, ok: status === 'ok', itemTitle, lines: [`spec-add-and-refresh: ${status}`] };
+    },
+    async specAddDim(productId, title) {
+      const safeProductId = readProductId(productId);
+      if (!safeProductId) throw new Error('productId must be a numeric string');
+      const result = await send({ action: 'spec-add-dim', productId: safeProductId, itemTitle: title });
+      const status = commandStatus(result);
+      const submit = await send({ action: 'submit' });
+      const submitStatus = commandStatus(submit);
+      const discovered = await send({ action: 'spec-discover', productId: safeProductId });
+      const discoverStatus = commandStatus(discovered);
+      const dimensions = Array.isArray(discovered.dimensions) ? discovered.dimensions as RentalPriceSpecDiscoverResult['dimensions'] : [];
+      const verified = dimensions.some((dimension) => dimension.title.replace(/\s+/g, ' ').trim() === title.replace(/\s+/g, ' ').trim());
+      return {
+        productId: safeProductId,
+        ok: status === 'ok' && submitStatus === 'ok' && discoverStatus === 'ok' && verified,
+        itemTitle: title,
+        lines: [`spec-add-dim: ${status}`, `submit: ${submitStatus}`, `spec-discover: ${discoverStatus}`, `verified: ${verified}`],
+      };
+    },
+    async specRemoveDim(request) {
+      const safeProductId = readProductId(request.productId);
+      if (!safeProductId) throw new Error('productId must be a numeric string');
+      const remove = await send({
+        action: 'spec-remove-dim',
+        productId: safeProductId,
+        specDimId: request.specDimId,
+        expectedProductId: safeProductId,
+      });
+      const removeStatus = commandStatus(remove);
+      const submit = await send({ action: 'submit' });
+      const submitStatus = commandStatus(submit);
+      const discovered = await send({ action: 'spec-discover', productId: safeProductId });
+      const discoverStatus = commandStatus(discovered);
+      const dimensions = Array.isArray(discovered.dimensions) ? discovered.dimensions as RentalPriceSpecDiscoverResult['dimensions'] : [];
+      const verified = !dimensions.some((dimension) => String(dimension.specId) === String(request.specDimId));
+      return {
+        productId: safeProductId,
+        ok: removeStatus === 'ok' && submitStatus === 'ok' && discoverStatus === 'ok' && verified,
+        specDimId: request.specDimId,
+        itemTitle: request.specDimId,
+        lines: [`spec-remove-dim: ${removeStatus}`, `submit: ${submitStatus}`, `spec-discover: ${discoverStatus}`, `verified: ${verified}`],
+      };
     },
     async specRemoveItem(request) {
       const before = await send({ action: 'spec-discover', productId: request.productId });

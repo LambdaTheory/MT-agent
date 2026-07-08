@@ -19,6 +19,7 @@ export async function runFeishuBotCli(): Promise<void> {
     botMentionName: process.env.FEISHU_BOT_MENTION_NAME,
     verificationToken: process.env.FEISHU_BOT_VERIFICATION_TOKEN,
     encryptKey: process.env.FEISHU_BOT_ENCRYPT_KEY,
+    callbackSignatureSecret: process.env.FEISHU_BOT_CALLBACK_SIGNATURE_SECRET,
     outputDir: process.env.MT_AGENT_OUTPUT_DIR ?? 'output',
     ...(llmProvider ? { agentPlannerProvider: createAgentPlannerProvider(llmProvider) } : {}),
   });

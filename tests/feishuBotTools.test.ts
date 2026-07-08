@@ -2253,6 +2253,221 @@ describe('handleBotIntent', () => {
     expect(response.text).not.toContain('超过单次定价快照上限');
   });
 
+  it('executes rental.daemonStatus as a read-only agent tool', async () => {
+    const response = await executeAgentToolRequest(
+      { toolName: 'rental.daemonStatus', arguments: {}, reason: 'check daemon status' },
+      'output',
+      {
+        rentalPriceClient: {
+          async daemonStatus() {
+            return { ok: true, status: 'ok', pong: true, lines: ['ping: ok'] };
+          },
+          async preview() { throw new Error('preview should not run'); },
+          async execute() { throw new Error('execute should not run'); },
+          async copy() { throw new Error('copy should not run'); },
+          async delist() { throw new Error('delist should not run'); },
+          async tenancySet() { throw new Error('tenancySet should not run'); },
+          async specDiscover() { throw new Error('specDiscover should not run'); },
+          async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+        },
+      },
+    );
+
+    expect(response.text).toContain('ok');
+    expect(response.card).toBeUndefined();
+  });
+
+  it('executes rental.platformSearch as a read-only agent tool without calling write methods', async () => {
+    const response = await executeAgentToolRequest(
+      { toolName: 'rental.platformSearch', arguments: { keyword: 'x200u' }, reason: 'search rental platform' },
+      'output',
+      {
+        rentalPriceClient: {
+          async platformSearch(keyword) {
+            return {
+              ok: true,
+              status: 'ok',
+              keyword,
+              count: 1,
+              rows: [{ productId: '761', title: 'vivo X200 Ultra' }],
+              lines: ['platform-search: ok', 'keyword: x200u', '761 vivo X200 Ultra'],
+            };
+          },
+          async preview() { throw new Error('preview should not run'); },
+          async execute() { throw new Error('execute should not run'); },
+          async copy() { throw new Error('copy should not run'); },
+          async delist() { throw new Error('delist should not run'); },
+          async tenancySet() { throw new Error('tenancySet should not run'); },
+          async specDiscover() { throw new Error('specDiscover should not run'); },
+          async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+        },
+      },
+    );
+
+    expect(response.text).toContain('x200u');
+    expect(response.text).toContain('761');
+    expect(response.card).toBeUndefined();
+  });
+
+  it('executes rental.platformSearchAll as a capped read-only agent tool', async () => {
+    const response = await executeAgentToolRequest(
+      { toolName: 'rental.platformSearchAll', arguments: { limit: 2 }, reason: 'search all rental platform products' },
+      'output',
+      {
+        rentalPriceClient: {
+          async platformSearchAll(limit) {
+            const rows = Array.from({ length: 12 }, (_, index) => ({
+              productId: String(761 + index),
+              title: `vivo X200 ${index + 1}`,
+            }));
+            return {
+              ok: true,
+              status: 'ok',
+              count: 12,
+              rows,
+              pagesScraped: 2,
+              excludedCount: 1,
+              truncated: limit === 2,
+              lines: ['platform-search-all: ok', '761 vivo X200 1', '772 vivo X200 12'],
+            };
+          },
+          async preview() { throw new Error('preview should not run'); },
+          async execute() { throw new Error('execute should not run'); },
+          async copy() { throw new Error('copy should not run'); },
+          async delist() { throw new Error('delist should not run'); },
+          async tenancySet() { throw new Error('tenancySet should not run'); },
+          async specDiscover() { throw new Error('specDiscover should not run'); },
+          async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+        },
+      },
+    );
+
+    expect(response.text).toContain('761');
+    expect(response.text).toContain('772');
+    expect(response.text).toContain('vivo X200 12');
+    expect(response.text).toContain('截断：是');
+    expect(response.card).toBeUndefined();
+  });
+
+  it('executes rental.batchRead as a read-only agent tool', async () => {
+    const readCalls: string[][] = [];
+    const response = await executeAgentToolRequest(
+      { toolName: 'rental.batchRead', arguments: { productIds: ['761', '762'] }, reason: 'batch read rental prices' },
+      'output',
+      {
+        rentalPriceClient: {
+          async batchRead(productIds) {
+            readCalls.push(productIds);
+            return {
+              ok: true,
+              status: 'ok',
+              count: 2,
+              results: {
+                '761': { status: 'ok', productId: '761', specs: [], values: {} },
+                '762': { status: 'ok', productId: '762', specs: [], values: {} },
+              },
+              errors: [],
+              warnings: [],
+              lines: ['batch-read: ok', '761 ok', '762 ok'],
+            };
+          },
+          async preview() { throw new Error('preview should not run'); },
+          async execute() { throw new Error('execute should not run'); },
+          async copy() { throw new Error('copy should not run'); },
+          async delist() { throw new Error('delist should not run'); },
+          async tenancySet() { throw new Error('tenancySet should not run'); },
+          async specDiscover() { throw new Error('specDiscover should not run'); },
+          async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+        },
+      },
+    );
+
+    expect(readCalls).toEqual([['761', '762']]);
+    expect(response.text).toContain('761');
+    expect(response.text).toContain('762');
+    expect(response.card).toBeUndefined();
+  });
+
+  it('executes rental.specDiscoverFull as a read-only agent tool', async () => {
+    const response = await executeAgentToolRequest(
+      { toolName: 'rental.specDiscoverFull', arguments: { productId: '761' }, reason: 'discover rental specs' },
+      'output',
+      {
+        rentalPriceClient: {
+          async specDiscoverFull(productId) {
+            return { productId, ok: true, status: 'ok', dimensions: [{ specId: '1355', title: '颜色', items: [{ id: '1', title: '黑色' }] }], lines: ['spec-discover: ok', '1 dimensions'] };
+          },
+          async preview() { throw new Error('preview should not run'); },
+          async execute() { throw new Error('execute should not run'); },
+          async copy() { throw new Error('copy should not run'); },
+          async delist() { throw new Error('delist should not run'); },
+          async tenancySet() { throw new Error('tenancySet should not run'); },
+          async specDiscover() { throw new Error('specDiscover should not run'); },
+          async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+        },
+      },
+    );
+
+    expect(response.text).toContain('761');
+    expect(response.text).toContain('颜色');
+    expect(response.text).toContain('1 黑色');
+    expect(response.card).toBeUndefined();
+  });
+
+  it('executes rental.readRaw as a read-only agent tool with optional fields', async () => {
+    const response = await executeAgentToolRequest(
+      { toolName: 'rental.readRaw', arguments: { productId: '761', fields: ['rent1day'] }, reason: 'read raw rental fields' },
+      'output',
+      {
+        rentalPriceClient: {
+          async readRaw(productId, fields) {
+            return { productId, ok: true, status: 'ok', specs: [{ specId: 's1', title: '黑色' }], values: { s1: { rent1day: '22.00' } }, warnings: [], missingFields: [], requestedCount: fields?.length ?? 0, readCount: 1, lines: ['read: ok', '1 specs'] };
+          },
+          async preview() { throw new Error('preview should not run'); },
+          async execute() { throw new Error('execute should not run'); },
+          async copy() { throw new Error('copy should not run'); },
+          async delist() { throw new Error('delist should not run'); },
+          async tenancySet() { throw new Error('tenancySet should not run'); },
+          async specDiscover() { throw new Error('specDiscover should not run'); },
+          async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+        },
+      },
+    );
+
+    expect(response.text).toContain('761');
+    expect(response.text).toContain('rent1day');
+    expect(response.text).toContain('22.00');
+    expect(response.text).toContain('s1 黑色：rent1day=22.00');
+    expect(response.card).toBeUndefined();
+  });
+
+  it('blocks oversized rental.batchRead requests before daemon calls', async () => {
+    const productIds = Array.from({ length: 61 }, (_, index) => String(1000 + index));
+    let called = false;
+
+    await expect(executeAgentToolRequest(
+      { toolName: 'rental.batchRead', arguments: { productIds }, reason: 'too many reads' },
+      'output',
+      {
+        rentalPriceClient: {
+          async batchRead() {
+            called = true;
+            throw new Error('batchRead should not run');
+          },
+          async preview() { throw new Error('preview should not run'); },
+          async execute() { throw new Error('execute should not run'); },
+          async copy() { throw new Error('copy should not run'); },
+          async delist() { throw new Error('delist should not run'); },
+          async tenancySet() { throw new Error('tenancySet should not run'); },
+          async specDiscover() { throw new Error('specDiscover should not run'); },
+          async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+        },
+      },
+    )).rejects.toThrow('60');
+
+    expect(called).toBe(false);
+  });
+
   it('turns Agent-planned same-sku spec removal into a dedicated confirmation card', async () => {
     const outputDir = await writeContext();
     const registryRoot = await mkdtemp(join(tmpdir(), 'mt-agent-x300-spec-remove-'));
@@ -2310,6 +2525,83 @@ describe('handleBotIntent', () => {
     expect(cardText).toContain('spec-remove-items');
     expect(cardText).toContain('"itemTitle":"含手柄"');
     expect(cardText).not.toContain('agent_tool_confirm');
+  });
+
+  it('turns Agent-planned per-spec price plan into the apply confirmation card without confirming the plan first', async () => {
+    const outputDir = await writeContext();
+    const planner: AgentPlannerProvider = {
+      async proposePlan(request) {
+        expect(request.tools.map((tool) => tool.name)).toContain('rental.perSpecPricePlan');
+        return JSON.stringify({
+          goal: '给商品 648 的指定规格写绝对租金',
+          selectedTool: 'rental.perSpecPricePlan',
+          arguments: { productId: '648', specPrices: [{ specId: '3863', fields: { rent1day: '80.00' } }] },
+          confidence: 0.91,
+          reason: '用户要求按规格差异化改价，必须先生成确认卡',
+        });
+      },
+    };
+    const readCalls: string[] = [];
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run for per-spec plan'); },
+      async execute() { throw new Error('execute should not run for per-spec plan'); },
+      async read(productId) {
+        readCalls.push(productId);
+        return { productId, ok: true, specs: [{ specId: '3863', title: 'B' }], values: { '3863': { rent1day: '70.00' } }, lines: ['read: ok'] };
+      },
+      async copy() { throw new Error('copy should not run'); },
+      async delist() { throw new Error('delist should not run'); },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+      async applyPerSpec() { throw new Error('applyPerSpec should not run before confirmation'); },
+    };
+
+    const response = await handleBotIntent({ type: 'unknown', text: '648 的 3863 规格 1天改成80' }, outputDir, { agentPlannerProvider: planner, rentalPriceClient });
+
+    expect(readCalls).toEqual(['648']);
+    expect(response.text).toContain('按规格改价预览：商品 648');
+    const confirmRequest = await loadAgentToolConfirmRequestFromCard(outputDir, response.card);
+    expect(confirmRequest.toolName).toBe('rental.perSpecPriceApply');
+    expect(confirmRequest.arguments).toEqual({ productId: '648', specFields: { '3863': { rent1day: '80.00' } } });
+  });
+
+  it('turns Agent-planned spec dimension plan into the apply confirmation card without confirming the plan first', async () => {
+    const outputDir = await writeContext();
+    const planner: AgentPlannerProvider = {
+      async proposePlan(request) {
+        expect(request.tools.map((tool) => tool.name)).toContain('rental.specDimPlan');
+        return JSON.stringify({
+          goal: '给商品 648 添加规格维度',
+          selectedTool: 'rental.specDimPlan',
+          arguments: { productId: '648', action: 'add', title: '激光险' },
+          confidence: 0.91,
+          reason: '用户要求添加规格维度，必须先生成确认卡',
+        });
+      },
+    };
+    const specDiscoverCalls: string[] = [];
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run for spec dimension plan'); },
+      async execute() { throw new Error('execute should not run for spec dimension plan'); },
+      async copy() { throw new Error('copy should not run'); },
+      async delist() { throw new Error('delist should not run'); },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover(productId) {
+        specDiscoverCalls.push(productId);
+        return { productId, ok: true, dimensions: [], lines: ['spec-discover: ok'] };
+      },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+      async specAddDim() { throw new Error('specAddDim should not run before confirmation'); },
+    };
+
+    const response = await handleBotIntent({ type: 'unknown', text: '给 648 加激光险规格维度' }, outputDir, { agentPlannerProvider: planner, rentalPriceClient });
+
+    expect(specDiscoverCalls).toEqual(['648']);
+    expect(response.text).toContain('规格维度变更预览：商品 648');
+    const confirmRequest = await loadAgentToolConfirmRequestFromCard(outputDir, response.card);
+    expect(confirmRequest.toolName).toBe('rental.specDimApply');
+    expect(confirmRequest.arguments).toEqual({ productId: '648', action: 'add', title: '激光险' });
   });
 
   it('keeps explicit internal id spec removal scoped to that product only', async () => {
@@ -2539,6 +2831,49 @@ describe('handleBotIntent', () => {
     expect(audit.request?.delistProductIds).toEqual(['901', '902']);
   });
 
+  it('skips missing products during confirmed activity refresh execution and continues the batch', async () => {
+    const { outputDir, registryPaths } = await writeRefreshActivityFixtures();
+    const plan = await executeAgentToolRequest(
+      { toolName: 'operations.refreshActivityPlan', arguments: {}, reason: 'test refresh activity plan' },
+      outputDir,
+      { closedOrderRegistryPaths: registryPaths },
+    );
+    const request = readAgentToolConfirmRequestFromCard(plan.card);
+    const calls: string[] = [];
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run'); },
+      async execute() { throw new Error('execute should not run'); },
+      async copy(productId) {
+        calls.push(`copy:${productId}`);
+        return { productId, ok: true, newProductId: `new-${calls.length}`, lines: ['copy: ok'] };
+      },
+      async delist(productId) {
+        calls.push(`delist:${productId}`);
+        if (productId === '901') {
+          return { productId, ok: false, lines: ['delist: error', 'Product not found: 901'] };
+        }
+        return { productId, ok: true, lines: ['delist: ok'] };
+      },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+
+    const response = await executeAgentToolRequest(request, outputDir, { rentalPriceClient });
+
+    expect(calls).toEqual(['delist:901', 'delist:902', 'copy:900', 'copy:900']);
+    expect(response.text).toContain('活跃度刷新部分完成');
+    expect(response.text).toContain('跳过：1 个商品不存在（901）');
+    expect(response.metadata?.skippedMissingDelistProductIds).toEqual(['901']);
+    expect(response.metadata?.ok).toBe(false);
+    const audit = JSON.parse(await readFile(response.metadata?.auditPath as string, 'utf8')) as {
+      ok?: boolean;
+      skippedMissingDelistProductIds?: string[];
+    };
+    expect(audit.ok).toBe(false);
+    expect(audit.skippedMissingDelistProductIds).toEqual(['901']);
+  });
+
   it('continues a multi-step plan after a confirmed activity refresh execution card', async () => {
     const { outputDir, registryPaths } = await writeRefreshActivityFixtures();
     const planner: AgentPlannerProvider = {
@@ -2677,6 +3012,168 @@ describe('handleBotIntent', () => {
     expect(JSON.stringify(response.card)).toContain('agent_tool_confirm');
     expect(JSON.stringify(response.card)).toContain('rental.delist');
     expect(JSON.stringify(response.card)).toContain('761');
+  });
+
+  it('turns batch delist agent plans into one approval card without side effects', async () => {
+    const planner: AgentPlannerProvider = {
+      async proposePlan(request) {
+        expect(request.tools.map((tool) => tool.name)).toContain('rental.delistBatch');
+        return JSON.stringify({
+          goal: '批量下架租赁商品',
+          selectedTool: 'rental.delistBatch',
+          arguments: { productIds: ['251', '467', '252'] },
+          confidence: 0.95,
+          reason: '用户明确给出多个端内ID并要求下架',
+          requiresConfirmation: true,
+        });
+      },
+    };
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run before approval'); },
+      async execute() { throw new Error('execute should not run before approval'); },
+      async copy() { throw new Error('copy should not run before approval'); },
+      async delist() { throw new Error('delist should not run before approval'); },
+      async tenancySet() { throw new Error('tenancySet should not run before approval'); },
+      async specDiscover() { throw new Error('specDiscover should not run before approval'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run before approval'); },
+    };
+
+    const response = await handleBotIntent({ type: 'unknown', text: '下架: 251, 467, 252' }, 'output', {
+      agentPlannerProvider: planner,
+      rentalPriceClient,
+    });
+
+    expect(response.text).toContain('请确认 Agent 操作：rental.delistBatch');
+    expect(response.card).toBeDefined();
+    expect(JSON.stringify(response.card)).toContain('agent_tool_confirm');
+    expect(JSON.stringify(response.card)).toContain('rental.delistBatch');
+    expect(JSON.stringify(response.card)).toContain('251');
+    expect(JSON.stringify(response.card)).toContain('467');
+    expect(JSON.stringify(response.card)).toContain('252');
+  });
+
+  it('executes batch delist requests and skips missing products safely', async () => {
+    const calls: string[] = [];
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run'); },
+      async execute() { throw new Error('execute should not run'); },
+      async copy() { throw new Error('copy should not run'); },
+      async delist(productId) {
+        calls.push(productId);
+        if (productId === '901') {
+          return { productId, ok: false, lines: ['delist: error', 'Product not found: 901'] };
+        }
+        return { productId, ok: true, lines: ['delist: ok'] };
+      },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+
+    const response = await executeAgentToolRequest(
+      { toolName: 'rental.delistBatch', arguments: { productIds: ['900', '901', '902'] }, reason: '批量下架测试' },
+      'output',
+      { rentalPriceClient },
+    );
+
+    expect(calls).toEqual(['900', '901', '902']);
+    expect(response.text).toContain('批量下架部分完成');
+    expect(response.text).toContain('跳过：1 个商品不存在（901）');
+    expect(response.metadata).toMatchObject({
+      toolName: 'rental.delistBatch',
+      ok: false,
+      delistedProductIds: ['900', '902'],
+      skippedMissingProductIds: ['901'],
+    });
+  });
+
+  it('continues batch delist after an individual product fails verification', async () => {
+    const calls: string[] = [];
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run'); },
+      async execute() { throw new Error('execute should not run'); },
+      async copy() { throw new Error('copy should not run'); },
+      async delist(productId) {
+        calls.push(productId);
+        if (productId === '467') {
+          return { productId, ok: false, lines: ['delist: error', 'Product still visible after delist'] };
+        }
+        return { productId, ok: true, lines: ['delist: ok'] };
+      },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+
+    const response = await executeAgentToolRequest(
+      { toolName: 'rental.delistBatch', arguments: { productIds: ['251', '467', '252'] }, reason: '批量下架测试' },
+      'output',
+      { rentalPriceClient },
+    );
+
+    expect(calls).toEqual(['251', '467', '252']);
+    expect(response.text).toContain('批量下架部分完成');
+    expect(response.text).toContain('失败：1 个（467）');
+    expect(response.text).not.toContain('未执行');
+    expect(response.metadata).toMatchObject({
+      toolName: 'rental.delistBatch',
+      ok: false,
+      delistedProductIds: ['251', '252'],
+      failedProductIds: ['467'],
+      pendingProductIds: [],
+    });
+  });
+
+  it('keeps rental.delist compatible with productIds arrays from the planner', async () => {
+    const calls: string[] = [];
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run'); },
+      async execute() { throw new Error('execute should not run'); },
+      async copy() { throw new Error('copy should not run'); },
+      async delist(productId) {
+        calls.push(productId);
+        return { productId, ok: true, lines: ['delist: ok'] };
+      },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+
+    const response = await executeAgentToolRequest(
+      { toolName: 'rental.delist', arguments: { productIds: ['251', '467'] }, reason: '兼容批量下架参数' },
+      'output',
+      { rentalPriceClient },
+    );
+
+    expect(calls).toEqual(['251', '467']);
+    expect(response.text).toContain('批量下架完成');
+    expect(response.metadata).toMatchObject({ toolName: 'rental.delist', ok: true, delistedProductIds: ['251', '467'] });
+  });
+
+  it('keeps rental.delist compatible with comma separated productId lists from the planner', async () => {
+    const calls: string[] = [];
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run'); },
+      async execute() { throw new Error('execute should not run'); },
+      async copy() { throw new Error('copy should not run'); },
+      async delist(productId) {
+        calls.push(productId);
+        return { productId, ok: true, lines: ['delist: ok'] };
+      },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+
+    const response = await executeAgentToolRequest(
+      { toolName: 'rental.delist', arguments: { productId: '251, 467, 252' }, reason: '兼容批量下架 productId 字符串' },
+      'output',
+      { rentalPriceClient },
+    );
+
+    expect(calls).toEqual(['251', '467', '252']);
+    expect(response.text).toContain('批量下架完成');
+    expect(response.metadata).toMatchObject({ toolName: 'rental.delist', ok: true, delistedProductIds: ['251', '467', '252'] });
   });
 
   it('turns ambiguous generic agent plans into clarification cards', async () => {

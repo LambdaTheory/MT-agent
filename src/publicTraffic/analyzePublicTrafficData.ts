@@ -10,6 +10,7 @@ import type {
   PublicTrafficProductDataRow,
   PublicTrafficReportSectionItem,
 } from './types.js';
+import { isRemovedExposureProduct } from './exposureStatus.js';
 
 const PERIODS: PeriodKey[] = ['1d', '7d', '30d'];
 const PRIORITY_RANK: Record<NonNullable<PublicTrafficReportSectionItem['priority']>, number> = { high: 0, medium: 1, low: 2 };
@@ -182,6 +183,7 @@ function rowForCumulativeProduct(product: ExposureCumulativeProduct, rowsById: M
 function buildCustodyAbnormalItems(input: PublicTrafficDataAnalysisInput, rowsById: Map<string, PublicTrafficProductDataRow>): PublicTrafficReportSectionItem[] {
   const seen = new Set<string>();
   return (input.cumulativeProducts ?? [])
+    .filter((product) => !isRemovedExposureProduct(product))
     .map((product) => ({ product, status: custodyStatusText(product), row: rowForCumulativeProduct(product, rowsById) }))
     .filter(({ status }) => status.includes('托管异常'))
     .map(({ product, status, row }) => {

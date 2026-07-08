@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { buildAgentToolConfirmCard } from '../src/agentRuntime/approvalCard.js';
+import { createDailyMissionRun, saveDailyMissionRun, transitionDailyMissionRun } from '../src/agentRuntime/dailyMissionRun.js';
 import type { AgentPlannerProvider } from '../src/agentRuntime/planner.js';
 import { extractTextMessage, startFeishuBotServer } from '../src/feishuBot/server.js';
 import {
@@ -20,6 +21,7 @@ import type { LinkRegistryOverrideRisk } from '../src/linkRegistry/overrides.js'
 import type { LinkRegistryEntry } from '../src/linkRegistry/types.js';
 import { buildRentalOperationConfirmCard, type RentalPriceSkillClient } from '../src/feishuBot/rentalPrice.js';
 import type { FeishuBotIncomingTextMessage } from '../src/feishuBot/types.js';
+import { buildFeishuSignature } from '../src/feishuBot/verify.js';
 
 function readAgentToolConfirmValue(card: unknown): unknown {
   const body = (card as { body?: { elements?: Array<{ elements?: Array<{ name?: string; behaviors?: Array<{ value?: unknown }> }> }> } }).body;
@@ -354,6 +356,81 @@ describe('startFeishuBotServer', () => {
 
       expect(response.status).toBe(200);
       await expect(response.json()).resolves.toEqual({ challenge: 'challenge-value' });
+    } finally {
+      server.close();
+    }
+  });
+
+  it('does not treat encrypt key as request signature secret for HTTP card callbacks', async () => {
+    const server = startFeishuBotServer({ port: 0, appId: 'app', appSecret: 'secret', verificationToken: 'token', encryptKey: 'encrypt-key' });
+    try {
+      await new Promise<void>((resolve) => server.once('listening', resolve));
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+
+      const response = await fetch(`http://127.0.0.1:${address.port}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          header: { event_type: 'card.action.trigger' },
+          event: { context: { open_message_id: 'mid-forged' }, action: { value: { action: 'agent_tool_confirm' } } },
+        }),
+      });
+
+      expect(response.status).toBe(200);
+    } finally {
+      server.close();
+    }
+  });
+
+  it('rejects unsigned HTTP card callbacks when callback signature secret is configured', async () => {
+    const server = startFeishuBotServer({ port: 0, appId: 'app', appSecret: 'secret', verificationToken: 'token', callbackSignatureSecret: 'signature-secret' });
+    try {
+      await new Promise<void>((resolve) => server.once('listening', resolve));
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+
+      const response = await fetch(`http://127.0.0.1:${address.port}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          header: { event_type: 'card.action.trigger' },
+          event: { context: { open_message_id: 'mid-forged' }, action: { value: { action: 'agent_tool_confirm' } } },
+        }),
+      });
+
+      expect(response.status).toBe(401);
+      await expect(response.json()).resolves.toEqual({ error: 'invalid signature' });
+    } finally {
+      server.close();
+    }
+  });
+
+  it('accepts signed HTTP card callbacks when callback signature secret is configured', async () => {
+    const server = startFeishuBotServer({ port: 0, appId: 'app', appSecret: 'secret', verificationToken: 'token', callbackSignatureSecret: 'signature-secret' });
+    try {
+      await new Promise<void>((resolve) => server.once('listening', resolve));
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+      const body = JSON.stringify({
+        header: { event_type: 'card.action.trigger' },
+        event: { context: { open_message_id: 'mid-signed' }, action: { value: { action: 'unknown' } } },
+      });
+      const timestamp = '1710000000';
+      const nonce = 'nonce';
+
+      const response = await fetch(`http://127.0.0.1:${address.port}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Lark-Request-Timestamp': timestamp,
+          'X-Lark-Request-Nonce': nonce,
+          'X-Lark-Signature': buildFeishuSignature(timestamp, nonce, body, 'signature-secret'),
+        },
+        body,
+      });
+
+      expect(response.status).toBe(200);
     } finally {
       server.close();
     }
@@ -1284,6 +1361,83 @@ describe('startFeishuBotServer', () => {
       expect(replies).toHaveLength(1);
       expect(replies[0].text).toContain('步骤 2/2：product.rankBestSameSku');
       expect(replies[0].text).toContain('数据最好的 alpha 是：端内ID 711');
+    } finally {
+      server.close();
+    }
+  });
+
+  it('delivers Daily Mission pending confirmation cards through HTTP callbacks', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-http-dm-pending-'));
+    const missionDir = join(outputDir, 'daily-mission', '2026-07-02');
+    await mkdir(missionDir, { recursive: true });
+    let run = createDailyMissionRun({ runId: 'run-http-pending', date: '2026-07-02', trigger: 'manual', startedAt: '2026-07-02T00:00:00.000Z' });
+    run = transitionDailyMissionRun(run, 'planning', '2026-07-02T00:00:01.000Z');
+    run = transitionDailyMissionRun(run, 'waiting_approval', '2026-07-02T00:00:02.000Z');
+    await saveDailyMissionRun(outputDir, run);
+    await writeFile(join(missionDir, 'approval-request.json'), JSON.stringify({
+      approvals: [{
+        decisionId: 'dec-pending',
+        runId: 'run-http-pending',
+        title: '预览改价',
+        subjects: [{ kind: 'product', id: '648' }],
+        operationType: 'price_down',
+        recommendation: 'approve_to_execute',
+        risk: 'high',
+        rationale: [],
+        evidenceRefs: ['http.pending'],
+        uncertainties: [],
+        proposedTool: { toolName: 'rental.pricePreview', arguments: { productIds: ['648'], discount: 0.9 } },
+      }],
+      observations: [],
+    }), 'utf8');
+    const cards: Array<{ messageId: string; card: Record<string, unknown> }> = [];
+    const rentalPriceClient = {
+      async preview() { return { productId: '648', fields: { rent1day: '18.00' }, lines: ['1天:20->18'], warnings: [] }; },
+      async execute() { throw new Error('execute should not run during preview'); },
+      async copy() { throw new Error('copy should not run during preview'); },
+      async delist() { throw new Error('delist should not run during preview'); },
+      async tenancySet() { throw new Error('tenancySet should not run during preview'); },
+      async specDiscover() { return { productId: '648', ok: true, dimensions: [], lines: [] }; },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run during preview'); },
+    } as unknown as RentalPriceSkillClient;
+    const server = startFeishuBotServer({
+      port: 0,
+      appId: 'app',
+      appSecret: 'secret',
+      outputDir,
+      rentalPriceClient,
+      replyCard: async ({ messageId }, card) => {
+        cards.push({ messageId, card });
+        return { sent: true, channel: 'app' };
+      },
+      replyText: async () => {
+        throw new Error('replyText should not be called for pending confirmation card');
+      },
+    });
+    try {
+      await new Promise<void>((resolve) => server.once('listening', resolve));
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+      const request = {
+        toolName: 'rental.pricePreview',
+        arguments: { productIds: ['648'], discount: 0.9 },
+        reason: '[[dailyMission:runId=run-http-pending;decisionId=dec-pending]] 预览改价',
+      };
+      const confirmValue = readAgentToolConfirmValue(buildAgentToolConfirmCard(request));
+
+      const response = await fetch(`http://127.0.0.1:${address.port}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          header: { event_type: 'card.action.trigger' },
+          event: { context: { open_message_id: 'mid-http-dm-pending' }, action: { value: confirmValue } },
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(cards).toHaveLength(1);
+      expect(JSON.stringify(cards[0]?.card)).toContain('agent_tool_confirm');
+      expect(JSON.stringify(cards[0]?.card)).toContain('rental.priceApply');
     } finally {
       server.close();
     }

@@ -1,5 +1,6 @@
 import type { PublicTrafficRulesConfig } from './rulesConfig.js';
 import type { ExposureCumulativeProduct, ExposureDailyDelta, ExposureProductSummary, PublicTrafficReportSectionItem } from './types.js';
+import { isRemovedExposureProduct } from './exposureStatus.js';
 
 export interface AnalyzePublicTrafficInput {
   date: string;
@@ -83,6 +84,7 @@ function lifecycleGovernance(input: AnalyzePublicTrafficInput): PublicTrafficRep
   const rules = input.config.lifecycleGovernance;
   const summaryById = new Map(input.thirtyDaySummary.map((row) => [row.platformProductId, row]));
   const candidates = input.cumulativeProducts
+    .filter((row) => !isRemovedExposureProduct(row))
     .filter((row) => typeof row.custodyDays === 'number' && row.custodyDays >= rules.minCustodyDays)
     .map((row) => ({ cumulative: row, summary: summaryById.get(row.platformProductId) }))
     .filter(({ summary }) =>

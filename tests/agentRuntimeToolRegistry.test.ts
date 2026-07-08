@@ -44,8 +44,15 @@ describe('agent runtime tool registry', () => {
       'operations.refreshActivityExecute',
       'closedOrder.syncFeedback',
       'closedOrder.runObservationReport',
+      'rental.daemonStatus',
+      'rental.platformSearch',
+      'rental.platformSearchAll',
+      'rental.batchRead',
+      'rental.specDiscoverFull',
+      'rental.readRaw',
       'rental.copy',
       'rental.delist',
+      'rental.delistBatch',
       'rental.tenancySet',
       'rental.specDiscover',
       'rental.specAddAndRefresh',
@@ -57,6 +64,10 @@ describe('agent runtime tool registry', () => {
       'rental.priceRollback',
       'rental.priceApply',
       'rental.operationConfirmRequest',
+      'rental.perSpecPricePlan',
+      'rental.perSpecPriceApply',
+      'rental.specDimPlan',
+      'rental.specDimApply',
     ]);
     expect(listAgentTools().map((tool) => tool.name)).toContain('rental.newLinkBatchPlan');
     expect(listAgentTools().map((tool) => tool.name)).toContain('rental.pricePreview');
@@ -69,7 +80,7 @@ describe('agent runtime tool registry', () => {
 
     const tools = listAgentTools();
     tools.pop();
-    expect(listAgentTools()).toHaveLength(48);
+    expect(listAgentTools()).toHaveLength(59);
   });
 
   it('returns defensive copies of tool metadata', () => {
@@ -160,8 +171,12 @@ describe('agent runtime tool registry', () => {
     expect(findAgentTool('operations.refreshActivityExecute')).toMatchObject({ risk: 'high', requiresConfirmation: true });
     expect(findAgentTool('closedOrder.syncFeedback')).toMatchObject({ risk: 'write', requiresConfirmation: false });
     expect(findAgentTool('closedOrder.runObservationReport')).toMatchObject({ risk: 'write', requiresConfirmation: false });
+    expect(findAgentTool('rental.daemonStatus')).toMatchObject({ risk: 'read', requiresConfirmation: false });
+    expect(findAgentTool('rental.platformSearch')).toMatchObject({ risk: 'read', requiresConfirmation: false });
+    expect(findAgentTool('rental.batchRead')).toMatchObject({ risk: 'read', requiresConfirmation: false });
     expect(findAgentTool('rental.copy')).toMatchObject({ risk: 'high', requiresConfirmation: true });
     expect(findAgentTool('rental.delist')).toMatchObject({ risk: 'high', requiresConfirmation: true });
+    expect(findAgentTool('rental.delistBatch')).toMatchObject({ risk: 'high', requiresConfirmation: true });
     expect(findAgentTool('rental.tenancySet')).toMatchObject({ risk: 'high', requiresConfirmation: true });
     expect(findAgentTool('rental.specDiscover')).toMatchObject({ risk: 'read', requiresConfirmation: false });
     expect(findAgentTool('rental.specAddAndRefresh')).toMatchObject({ risk: 'high', requiresConfirmation: true });
@@ -173,6 +188,10 @@ describe('agent runtime tool registry', () => {
     expect(findAgentTool('rental.priceRollback')).toMatchObject({ risk: 'high', requiresConfirmation: true });
     expect(findAgentTool('rental.priceApply')).toMatchObject({ risk: 'high', requiresConfirmation: true, plannerVisible: false });
     expect(findAgentTool('rental.operationConfirmRequest')).toMatchObject({ risk: 'high', requiresConfirmation: true });
+    expect(findAgentTool('rental.perSpecPricePlan')).toMatchObject({ risk: 'high', requiresConfirmation: true });
+    expect(findAgentTool('rental.perSpecPriceApply')).toMatchObject({ risk: 'high', requiresConfirmation: true, plannerVisible: false });
+    expect(findAgentTool('rental.specDimPlan')).toMatchObject({ risk: 'high', requiresConfirmation: true });
+    expect(findAgentTool('rental.specDimApply')).toMatchObject({ risk: 'high', requiresConfirmation: true, plannerVisible: false });
   });
 
   it('allows read-only report tools to target an explicit report date', () => {
@@ -273,8 +292,15 @@ describe('agent runtime tool registry', () => {
       'operations.refreshActivityPlan',
       'closedOrder.syncFeedback',
       'closedOrder.runObservationReport',
+      'rental.daemonStatus',
+      'rental.platformSearch',
+      'rental.platformSearchAll',
+      'rental.batchRead',
+      'rental.specDiscoverFull',
+      'rental.readRaw',
       'rental.copy',
       'rental.delist',
+      'rental.delistBatch',
       'rental.tenancySet',
       'rental.specDiscover',
       'rental.specAddAndRefresh',
@@ -284,9 +310,13 @@ describe('agent runtime tool registry', () => {
       'rental.priceSnapshot',
       'rental.newLinkBatchPlan',
       'rental.priceRollback',
+      'rental.perSpecPricePlan',
+      'rental.specDimPlan',
     ]);
     expect(plannerToolNames).not.toContain('rental.operationConfirmRequest');
     expect(plannerToolNames).not.toContain('rental.priceApply');
+    expect(plannerToolNames).not.toContain('rental.perSpecPriceApply');
+    expect(plannerToolNames).not.toContain('rental.specDimApply');
     expect(plannerToolNames).not.toContain('operations.refreshActivityExecute');
   });
 
@@ -388,6 +418,50 @@ describe('agent runtime tool registry', () => {
       required: ['date', 'delistProductIds', 'newLinkItems'],
       additionalProperties: false,
     });
+    expect(findAgentTool('rental.daemonStatus')?.inputSchema).toMatchObject({
+      type: 'object',
+      additionalProperties: false,
+    });
+    expect(findAgentTool('rental.platformSearch')?.inputSchema).toMatchObject({
+      properties: {
+        keyword: { type: 'string' },
+      },
+      required: ['keyword'],
+      additionalProperties: false,
+    });
+    expect(findAgentTool('rental.platformSearchAll')?.inputSchema).toMatchObject({
+      properties: {
+        limit: { type: ['integer', 'string'], minimum: 1, maximum: 200 },
+      },
+      additionalProperties: false,
+    });
+    expect(findAgentTool('rental.batchRead')?.inputSchema).toMatchObject({
+      properties: {
+        productIds: {
+          type: 'array',
+          minItems: 1,
+          maxItems: 60,
+          items: { type: 'string' },
+        },
+      },
+      required: ['productIds'],
+      additionalProperties: false,
+    });
+    expect(findAgentTool('rental.specDiscoverFull')?.inputSchema).toMatchObject({
+      properties: {
+        productId: { type: 'string' },
+      },
+      required: ['productId'],
+      additionalProperties: false,
+    });
+    expect(findAgentTool('rental.readRaw')?.inputSchema).toMatchObject({
+      properties: {
+        productId: { type: 'string' },
+        fields: { type: 'array', maxItems: 32, items: { type: 'string' } },
+      },
+      required: ['productId'],
+      additionalProperties: false,
+    });
     expect(findAgentTool('rental.priceChange')?.inputSchema).toMatchObject({
       properties: {
         productId: { type: 'string' },
@@ -414,6 +488,13 @@ describe('agent runtime tool registry', () => {
       required: ['query'],
       additionalProperties: false,
     });
+    expect(findAgentTool('rental.delistBatch')?.inputSchema).toMatchObject({
+      properties: {
+        productIds: { type: 'array' },
+      },
+      required: ['productIds'],
+      additionalProperties: false,
+    });
     expect(findAgentTool('rental.newLinkBatchPlan')?.inputSchema).toMatchObject({
       properties: {
         keyword: { type: 'string' },
@@ -434,6 +515,18 @@ describe('agent runtime tool registry', () => {
     });
     expect(findAgentTool('rental.operationConfirmRequest')?.inputSchema).toMatchObject({
       required: ['action', 'productId'],
+    });
+    expect(findAgentTool('rental.perSpecPricePlan')?.inputSchema).toMatchObject({
+      required: ['productId', 'specPrices'],
+    });
+    expect(findAgentTool('rental.perSpecPriceApply')?.inputSchema).toMatchObject({
+      required: ['productId', 'specFields'],
+    });
+    expect(findAgentTool('rental.specDimPlan')?.inputSchema).toMatchObject({
+      required: ['productId', 'action'],
+    });
+    expect(findAgentTool('rental.specDimApply')?.inputSchema).toMatchObject({
+      required: ['productId', 'action'],
     });
   });
 });

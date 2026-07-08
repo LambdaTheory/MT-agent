@@ -249,6 +249,23 @@ const productIdArgumentsSchema = {
   required: ['productId'],
   additionalProperties: false,
 };
+const rentalDelistArgumentsSchema = {
+  type: 'object',
+  properties: {
+    productId: { type: 'string', description: 'Single internal product id, or a comma/newline separated list for batch delist compatibility.' },
+    productIds: { type: 'array', minItems: 1, maxItems: 80, items: { type: 'string' }, description: 'Internal product ids to delist in one confirmed batch.' },
+  },
+  minProperties: 1,
+  additionalProperties: false,
+};
+const rentalDelistBatchArgumentsSchema = {
+  type: 'object',
+  properties: {
+    productIds: { type: 'array', minItems: 1, maxItems: 80, items: { type: 'string' } },
+  },
+  required: ['productIds'],
+  additionalProperties: false,
+};
 const tenancySetArgumentsSchema = {
   type: 'object',
   properties: {
@@ -274,6 +291,38 @@ const specRemovePlanArgumentsSchema = {
     keyword: { type: 'string' },
   },
   required: ['query', 'keyword'],
+  additionalProperties: false,
+};
+const rentalPlatformSearchArgumentsSchema = {
+  type: 'object',
+  properties: {
+    keyword: { type: 'string' },
+  },
+  required: ['keyword'],
+  additionalProperties: false,
+};
+const rentalPlatformSearchAllArgumentsSchema = {
+  type: 'object',
+  properties: {
+    limit: { type: ['integer', 'string'], pattern: '^[1-9]\\d*$', minimum: 1, maximum: 200 },
+  },
+  additionalProperties: false,
+};
+const rentalBatchReadArgumentsSchema = {
+  type: 'object',
+  properties: {
+    productIds: { type: 'array', minItems: 1, maxItems: 60, items: { type: 'string' } },
+  },
+  required: ['productIds'],
+  additionalProperties: false,
+};
+const rentalReadRawArgumentsSchema = {
+  type: 'object',
+  properties: {
+    productId: { type: 'string' },
+    fields: { type: 'array', maxItems: 32, items: { type: 'string' } },
+  },
+  required: ['productId'],
   additionalProperties: false,
 };
 const refreshActivityPlanArgumentsSchema = {
@@ -362,6 +411,47 @@ const rentalPriceApplyArgumentsSchema = {
     },
   },
   required: ['items'],
+  additionalProperties: false,
+};
+const rentalPerSpecPricePlanArgumentsSchema = {
+  type: 'object',
+  properties: {
+    productId: { type: 'string' },
+    specPrices: {
+      type: 'array',
+      minItems: 1,
+      items: {
+        type: 'object',
+        properties: {
+          specId: { type: 'string' },
+          fields: { type: 'object', description: 'Absolute price fields for this specId, e.g. { rent1day: "80.00" }. Relative calculation must happen before calling this tool.' },
+        },
+        required: ['specId', 'fields'],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ['productId', 'specPrices'],
+  additionalProperties: false,
+};
+const rentalPerSpecPriceApplyArgumentsSchema = {
+  type: 'object',
+  properties: {
+    productId: { type: 'string' },
+    specFields: { type: 'object', description: 'Nested absolute price changes keyed by specId: { specId: { field: value } }.' },
+  },
+  required: ['productId', 'specFields'],
+  additionalProperties: false,
+};
+const rentalSpecDimArgumentsSchema = {
+  type: 'object',
+  properties: {
+    productId: { type: 'string' },
+    action: { type: 'string', enum: ['add', 'remove'] },
+    title: { type: 'string', description: 'Required when action is add.' },
+    specDimId: { type: 'string', description: 'Required when action is remove.' },
+  },
+  required: ['productId', 'action'],
   additionalProperties: false,
 };
 const rentalPriceRollbackArgumentsSchema = {
@@ -668,6 +758,48 @@ const agentTools: AgentToolDefinition[] = [
     inputSchema: noArgumentsSchema,
   },
   {
+    name: 'rental.daemonStatus',
+    description: '只读查询 rental-price-agent daemon 状态，用于确认底层 skill 服务是否可用；不会执行商品写操作。',
+    risk: 'read',
+    requiresConfirmation: false,
+    inputSchema: noArgumentsSchema,
+  },
+  {
+    name: 'rental.platformSearch',
+    description: '只读调用 rental-price-agent 在租赁后台按关键词搜索商品，返回候选商品；不会复制、下架或改价。',
+    risk: 'read',
+    requiresConfirmation: false,
+    inputSchema: rentalPlatformSearchArgumentsSchema,
+  },
+  {
+    name: 'rental.platformSearchAll',
+    description: '只读调用 rental-price-agent 遍历租赁后台商品列表，返回受限数量的候选商品；不会复制、下架或改价。',
+    risk: 'read',
+    requiresConfirmation: false,
+    inputSchema: rentalPlatformSearchAllArgumentsSchema,
+  },
+  {
+    name: 'rental.batchRead',
+    description: '只读批量读取多个端内ID的租赁后台当前规格和价格，单次最多 60 个商品；不会执行商品写操作。',
+    risk: 'read',
+    requiresConfirmation: false,
+    inputSchema: rentalBatchReadArgumentsSchema,
+  },
+  {
+    name: 'rental.specDiscoverFull',
+    description: '只读读取租赁商品完整规格维度和规格项；不会新增、删除或刷新规格。',
+    risk: 'read',
+    requiresConfirmation: false,
+    inputSchema: productIdArgumentsSchema,
+  },
+  {
+    name: 'rental.readRaw',
+    description: '只读读取租赁商品原始规格和字段值，可选 fields 限定字段；不会执行商品写操作。',
+    risk: 'read',
+    requiresConfirmation: false,
+    inputSchema: rentalReadRawArgumentsSchema,
+  },
+  {
     name: 'rental.copy',
     description: '复制租赁商品前的确认请求',
     risk: 'high',
@@ -677,10 +809,17 @@ const agentTools: AgentToolDefinition[] = [
   },
   {
     name: 'rental.delist',
-    description: '下架租赁商品前的确认请求',
+    description: '下架单个或多个租赁商品前的确认请求；多个端内ID请用 productIds 数组。',
     risk: 'high',
     requiresConfirmation: true,
-    inputSchema: productIdArgumentsSchema,
+    inputSchema: rentalDelistArgumentsSchema,
+  },
+  {
+    name: 'rental.delistBatch',
+    description: '批量下架多个租赁商品前的确认请求；确认后逐个下架，找不到的商品会跳过并继续。',
+    risk: 'high',
+    requiresConfirmation: true,
+    inputSchema: rentalDelistBatchArgumentsSchema,
   },
   {
     name: 'rental.tenancySet',
@@ -764,6 +903,36 @@ const agentTools: AgentToolDefinition[] = [
     requiresConfirmation: true,
     plannerVisible: false,
     inputSchema: rentalOperationArgumentsSchema,
+  },
+  {
+    name: 'rental.perSpecPricePlan',
+    description: '按单个商品的具体 specId 生成差异化改价确认卡；只接受已经算好的绝对价格，不做相对计算或场景编排。确认前不会改价。',
+    risk: 'high',
+    requiresConfirmation: true,
+    inputSchema: rentalPerSpecPricePlanArgumentsSchema,
+  },
+  {
+    name: 'rental.perSpecPriceApply',
+    description: '确认后按 specId 写入绝对价格字段；每次只调用 daemon nested apply 原子动作。',
+    risk: 'high',
+    requiresConfirmation: true,
+    plannerVisible: false,
+    inputSchema: rentalPerSpecPriceApplyArgumentsSchema,
+  },
+  {
+    name: 'rental.specDimPlan',
+    description: '生成租赁商品规格维度添加或删除确认卡；add 传 title，remove 传 specDimId。确认前不会修改。',
+    risk: 'high',
+    requiresConfirmation: true,
+    inputSchema: rentalSpecDimArgumentsSchema,
+  },
+  {
+    name: 'rental.specDimApply',
+    description: '确认后执行单个规格维度添加或删除原子动作。',
+    risk: 'high',
+    requiresConfirmation: true,
+    plannerVisible: false,
+    inputSchema: rentalSpecDimArgumentsSchema,
   },
 ];
 

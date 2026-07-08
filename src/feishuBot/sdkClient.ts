@@ -2,6 +2,8 @@ import * as lark from '@larksuiteoapi/node-sdk';
 import { createHash } from 'node:crypto';
 import { createActivityCancellationAssistant, type ActivityCancellationAssistant } from '../activityAutomation/cancelAssistance.js';
 import { updateActivitySubmitSessionStatus } from '../activityAutomation/submitSession.js';
+import { resolveDailyMissionApproval } from '../agentRuntime/dailyMissionApprovalCallback.js';
+import { recordDailyMissionRejection } from '../agentRuntime/dailyMissionRejection.js';
 import type { AgentToolConfirmRequest } from '../agentRuntime/approvalCard.js';
 import { buildClarifiedMessage, parseAgentClarificationCustomSelection, parseAgentClarificationSelection } from '../agentRuntime/clarificationCard.js';
 import type { AgentPlannerProvider } from '../agentRuntime/planner.js';
@@ -377,7 +379,7 @@ function statusCard(title: string, content: string, template: 'blue' | 'green' |
 }
 
 function isFailedBotResponse(response: { metadata?: Record<string, unknown> }): boolean {
-  return response.metadata?.ok === false;
+  return response.metadata?.ok === false && response.metadata.status !== 'pending_confirmation';
 }
 
 function agentToolResultStatusCard(response: { text: string; metadata?: Record<string, unknown> }): FeishuCardPayload {
@@ -824,7 +826,10 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
           void (async () => {
             await deliverCard(client, messageId, statusCard('Agent 操作处理中', `工具 ${request.toolName} 已收到确认，正在执行。`, 'blue'), logError);
             try {
-              const response = await executeAgentToolRequestWithContinuation(request, config.outputDir ?? 'output', agentToolExecutionOptions);
+              const missionResult = await resolveDailyMissionApproval(request, config.outputDir ?? 'output', agentToolExecutionOptions);
+              const response = missionResult
+                ? { text: missionResult.text, card: missionResult.card, metadata: { ok: missionResult.ok, status: missionResult.status } }
+                : await executeAgentToolRequestWithContinuation(request, config.outputDir ?? 'output', agentToolExecutionOptions);
               const ok = !isFailedBotResponse(response);
               setRentalActionStatus(claim.key, ok ? 'completed' : 'failed');
               recordLearning({
@@ -861,10 +866,13 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
 
         if (actionName === 'agent_tool_cancel') {
           const toolName = readString(value?.toolName) ?? '未知工具';
+          const reason = readString(value?.reason);
+          const args = isRecord(value?.arguments) ? value.arguments : {};
           const claim = claimRentalAction(messageId, actionName, value);
           if (!claim.claimed) {
             return cardActionUpdateResponse(claimStatusCard('Agent 操作已处理', claim.claim));
           }
+          if (reason) await recordDailyMissionRejection({ toolName, arguments: args, reason }, config.outputDir ?? 'output');
           setRentalActionStatus(claim.key, 'cancelled');
           recordLearning({
             type: 'tool_cancelled',
