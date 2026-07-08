@@ -15,7 +15,7 @@ import { buildDataHealthReport } from '../agentData/dataHealth.js';
 import { explainRefreshCandidates } from '../agentData/refreshCandidateExplain.js';
 import { resolveSafeSourceForSameSkuGroup } from '../agentData/safeSource.js';
 import { findWindowedProducts, type WindowedPredicate } from '../agentData/windowedFindings.js';
-import { aggregateWindowProducts } from '../agentData/windowAggregate.js';
+import { aggregateWindowProducts, type WindowProductAggregate } from '../agentData/windowAggregate.js';
 import { openLinkRegistryGovernancePrompt } from '../linkRegistry/governanceSession.js';
 import { openLinkRegistryMaintenancePrompt } from '../linkRegistry/maintenanceSession.js';
 import { createLinkRegistry } from '../linkRegistry/store.js';
@@ -45,7 +45,7 @@ import { buildPublicTrafficCard } from '../publicTraffic/buildPublicTrafficCard.
 import { buildPublicTrafficFeishuText } from '../publicTraffic/buildPublicTrafficFeishu.js';
 import { runDashboardRefresh } from '../publicTraffic/dashboardRefresh.js';
 import { buildPublicTrafficPaths } from '../publicTraffic/paths.js';
-import type { PublicTrafficDataReportContext, PublicTrafficProductDataRow } from '../publicTraffic/types.js';
+import type { PublicTrafficDataReportContext, PublicTrafficPeriodMetrics, PublicTrafficProductDataRow } from '../publicTraffic/types.js';
 import { startOperationsLearningSession } from '../operationsLearningLoop/session.js';
 import type { BotResponse } from './types.js';
 import type { FeishuSendTo } from './types.js';
@@ -1210,6 +1210,35 @@ function isRefreshActivityZeroMetricMatch(thirty: PublicTrafficProductDataRow['p
   return zeroMetric === 'amount' ? thirty.amount === 0 : thirty.createdOrders === 0;
 }
 
+function refreshActivityMetricFromWindowAggregate(aggregate: WindowProductAggregate, windowDays: number): PublicTrafficPeriodMetrics {
+  const hasFullWindow = aggregate.daysCovered === windowDays;
+  return {
+    exposure: aggregate.exposure,
+    publicVisits: aggregate.publicVisits,
+    dashboardVisits: aggregate.dashboardVisits,
+    createdOrders: aggregate.createdOrders,
+    signedOrders: 0,
+    reviewedOrders: 0,
+    shippedOrders: aggregate.shippedOrders,
+    amount: aggregate.amount,
+    exposureVisitRate: aggregate.exposure > 0 ? aggregate.publicVisits / aggregate.exposure : 0,
+    visitCreatedOrderRate: aggregate.publicVisits > 0 ? aggregate.createdOrders / aggregate.publicVisits : 0,
+    visitShipmentRate: aggregate.publicVisits > 0 ? aggregate.shippedOrders / aggregate.publicVisits : 0,
+    hasExposureData: hasFullWindow,
+    hasDashboardData: hasFullWindow,
+  };
+}
+
+function rowWithRefreshActivityWindowMetric(row: PublicTrafficProductDataRow, aggregate: WindowProductAggregate, windowDays: number): PublicTrafficProductDataRow {
+  return {
+    ...row,
+    periods: {
+      ...row.periods,
+      '30d': refreshActivityMetricFromWindowAggregate(aggregate, windowDays),
+    },
+  };
+}
+
 function scopedRefreshActivityEntries(
   args: Record<string, unknown>,
   registryEntries: LinkRegistryEntry[],
@@ -1464,6 +1493,10 @@ async function refreshActivityPlanResponse(
   const scoped = scopedRefreshActivityEntries(args, registryContext.registry);
   if ('text' in scoped) return { text: scoped.text, metadata: { toolName: 'operations.refreshActivityPlan', ok: false } };
 
+  const windowMetricsByProductId = windowDays === REFRESH_ACTIVITY_DEFAULT_WINDOW_DAYS
+    ? null
+    : new Map((await aggregateWindowProducts({ outputDir, endDate: report.context.date, windowDays })).map((item) => [item.internalProductId, item]));
+
   const candidates: Array<{ entry: LinkRegistryEntry; row: PublicTrafficProductDataRow }> = [];
   const skipped = { missingRow: 0, missing30dDashboard: 0, inactive: 0, onlineLessThan30d: 0, onlineDaysUnknown: 0 };
   for (const entry of scoped.entries) {
@@ -1476,7 +1509,13 @@ async function refreshActivityPlanResponse(
       skipped.missingRow += 1;
       continue;
     }
-    const thirty = row.periods['30d'];
+    const windowAggregate = windowMetricsByProductId?.get(entry.internalProductId);
+    if (windowMetricsByProductId && !windowAggregate) {
+      skipped.missing30dDashboard += 1;
+      continue;
+    }
+    const evaluatedRow = windowAggregate ? rowWithRefreshActivityWindowMetric(row, windowAggregate, windowDays) : row;
+    const thirty = evaluatedRow.periods['30d'];
     if (!thirty.hasDashboardData) {
       skipped.missing30dDashboard += 1;
       continue;
@@ -1490,7 +1529,7 @@ async function refreshActivityPlanResponse(
       skipped.onlineLessThan30d += 1;
       continue;
     }
-    if (isRefreshActivityZeroMetricMatch(thirty, zeroMetric)) candidates.push({ entry, row });
+    if (isRefreshActivityZeroMetricMatch(thirty, zeroMetric)) candidates.push({ entry, row: evaluatedRow });
   }
 
   const groups = groupRefreshActivityCandidates(candidates);

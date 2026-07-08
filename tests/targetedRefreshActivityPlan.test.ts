@@ -35,6 +35,31 @@ async function writeTargetedRefreshFixtures() {
   const zeroAmount30d = { ...metric, exposure: 240, publicVisits: 24, dashboardVisits: 18, createdOrders: 2, amount: 0, hasDashboardData: true };
   const globalZero30d = { ...metric, exposure: 500, publicVisits: 50, dashboardVisits: 40, createdOrders: 0, amount: 0, hasDashboardData: true };
 
+  async function writeWindowDay(date: string) {
+    await mkdir(join(outputDir, date), { recursive: true });
+    await writeFile(join(outputDir, date, `公域数据上下文_${date}.json`), JSON.stringify({
+      date,
+      summary: { '1d': metric, '7d': metric, '30d': metric },
+      conclusions: [],
+      rows: [
+        { productName: 'R50 健康源', platformProductId: 'p680', displayProductId: '端内ID 680', custodyDays: 50, periods: { '1d': { ...metric, exposure: 10, publicVisits: 2, dashboardVisits: 2, createdOrders: 1, amount: 10, hasDashboardData: true }, '7d': metric, '30d': active30d } },
+        { productName: 'R50 金额为0', platformProductId: 'p681', displayProductId: '端内ID 681', custodyDays: 45, periods: { '1d': { ...metric, exposure: 2, publicVisits: 1, dashboardVisits: 1, createdOrders: 1, amount: 1, hasDashboardData: true }, '7d': metric, '30d': zeroAmount30d } },
+        { productName: 'R50 创单为0', platformProductId: 'p682', displayProductId: '端内ID 682', custodyDays: 45, periods: { '1d': { ...metric, exposure: 3, publicVisits: 1, dashboardVisits: 1, createdOrders: 0, amount: 0, hasDashboardData: true }, '7d': metric, '30d': zeroCreatedOrders30d } },
+      ],
+      lowExposure: [],
+      weakClick: [],
+      weakConversion: [],
+      highPotential: [],
+      newProductObservation: [],
+      lifecycleGovernance: [],
+      recommendedActions: [],
+      emptySectionNotes: {},
+    }), 'utf8');
+  }
+
+  for (let day = 28; day <= 31; day += 1) await writeWindowDay(`2026-05-${String(day).padStart(2, '0')}`);
+  for (let day = 1; day <= 11; day += 1) await writeWindowDay(`2026-06-${String(day).padStart(2, '0')}`);
+
   await writeFile(join(outputDir, '2026-06-11', 'report-context.json'), JSON.stringify({
     date: '2026-06-11',
     summary: { '1d': metric, '7d': metric, '30d': metric },
@@ -128,5 +153,19 @@ describe('targeted refresh activity plan', () => {
 
     expect(response.text).toContain('筛选口径：active 链接，15日访问页数据已抓取，上线满 15 天，近15天订单金额为0。');
     expect(response.metadata).toMatchObject({ toolName: 'operations.refreshActivityPlan', windowDays: 15 });
+  });
+
+  it('uses daily window aggregates instead of fixed 30d summary for non-30-day candidates', async () => {
+    const { outputDir, registryPaths } = await writeTargetedRefreshFixtures();
+
+    const response = await executeAgentToolRequest(
+      { toolName: 'operations.refreshActivityPlan', arguments: { query: 'r50', zeroMetric: 'amount', windowDays: 15 }, reason: '帮我下架r50近15天产生订单金额为0的链接' },
+      outputDir,
+      { closedOrderRegistryPaths: registryPaths },
+    );
+
+    expect(response.text).toContain('端内ID 682');
+    expect(response.text).not.toContain('端内ID 681');
+    expect(response.metadata?.candidateCount).toBe(1);
   });
 });
