@@ -41,6 +41,7 @@ async function writeTargetedRefreshFixtures(options: { includeWindowOnlineCandid
       date,
       summary: { '1d': metric, '7d': metric, '30d': metric },
       conclusions: [],
+      dataQualityNotes: date === '2026-06-11' ? ['15日窗口测试缺失 1 条'] : [],
       rows: [
         { productName: 'R50 健康源', platformProductId: 'p680', displayProductId: '端内ID 680', custodyDays: 50, periods: { '1d': { ...metric, exposure: 10, publicVisits: 2, dashboardVisits: 2, createdOrders: 1, amount: 10, hasDashboardData: true }, '7d': metric, '30d': active30d } },
         { productName: 'R50 金额为0', platformProductId: 'p681', displayProductId: '端内ID 681', custodyDays: 45, periods: { '1d': { ...metric, exposure: 2, publicVisits: 1, dashboardVisits: 1, createdOrders: 1, amount: 1, hasDashboardData: true }, '7d': metric, '30d': zeroAmount30d } },
@@ -200,5 +201,19 @@ describe('targeted refresh activity plan', () => {
     expect(response.text).toContain('端内ID 682、684');
     expect(response.text).not.toContain('端内ID 681');
     expect(response.metadata?.candidateCount).toBe(2);
+  });
+
+  it('explains zero candidates with data health and strategy context', async () => {
+    const { outputDir, registryPaths } = await writeTargetedRefreshFixtures();
+
+    const response = await executeAgentToolRequest(
+      { toolName: 'operations.refreshActivityPlan', arguments: { query: 'pocket3', zeroMetric: 'amount', windowDays: 15 }, reason: '为什么pocket3近15天金额为0候选是0' },
+      outputDir,
+      { closedOrderRegistryPaths: registryPaths },
+    );
+
+    expect(response.text).toContain('0 候选解释：');
+    expect(response.text).toContain('数据健康：15日窗口测试缺失 1 条');
+    expect(response.metadata?.candidateCount).toBe(0);
   });
 });

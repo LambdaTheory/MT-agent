@@ -1533,6 +1533,18 @@ async function refreshActivityPlanResponse(
   }
 
   const groups = groupRefreshActivityCandidates(candidates);
+  const zeroCandidateExplanation = candidates.length === 0
+    ? [
+      '0 候选解释：',
+      ...explainRefreshCandidates(registryContext.registry, report.context, {
+        ...(readString(args.query) ? { query: readString(args.query)! } : {}),
+        ...(readString(args.sameSkuGroupId) ? { sameSkuGroupId: readString(args.sameSkuGroupId)! } : {}),
+        zeroMetric,
+        date: report.context.date,
+      }).reasonSummary.map((line) => `- 策略说明：${line}`),
+      `- 数据健康：${(await buildDataHealthReport(outputDir, report.context.date)).dataQualityNotes.join('；') || '无额外质量备注'}`,
+    ]
+    : [];
   const shownCandidates = candidates
     .sort((left, right) =>
       left.row.periods['30d'].publicVisits - right.row.periods['30d'].publicVisits
@@ -1578,6 +1590,7 @@ async function refreshActivityPlanResponse(
       `本次展示：${shownCandidates.length}/${candidates.length} 条。`,
       '',
       ...(groupLines.length ? groupLines : ['没有找到符合条件的零创单 active 链接。']),
+      ...(zeroCandidateExplanation.length ? ['', ...zeroCandidateExplanation] : []),
       '',
       `跳过：非 active ${skipped.inactive} 条，无日报行 ${skipped.missingRow} 条，30日访问页缺失 ${skipped.missing30dDashboard} 条，上线不足 ${windowDays} 天 ${skipped.onlineLessThan30d} 条，上线天数未知 ${skipped.onlineDaysUnknown} 条。`,
       delistOnlyExecution.request
@@ -1599,6 +1612,7 @@ async function refreshActivityPlanResponse(
       strategyRequests: { delistOnly: delistOnlyExecution.request ?? null, delistAndRefill: refillExecution.request ?? null },
       blockers: [...delistOnlyExecution.blockers, ...refillExecution.blockers],
       skippedGroups: refillExecution.skippedGroups,
+      zeroCandidateExplanation,
     },
     ...(strategyCard ? { card: strategyCard } : {}),
   };
