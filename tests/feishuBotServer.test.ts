@@ -24,6 +24,8 @@ import { openLinkRegistryMaintenancePrompt } from '../src/linkRegistry/maintenan
 import type { LinkRegistryOverrideRisk } from '../src/linkRegistry/overrides.js';
 import type { LinkRegistryEntry } from '../src/linkRegistry/types.js';
 import { buildRentalOperationConfirmCard, type RentalPriceSkillClient } from '../src/feishuBot/rentalPrice.js';
+import { buildRefreshActivityStrategyCard } from '../src/feishuBot/refreshActivityCard.js';
+import { refreshActivityPlanConfirmationKey, saveRefreshActivityPlan, type RefreshActivityPlan } from '../src/feishuBot/refreshActivityPlanStore.js';
 import type { FeishuBotIncomingTextMessage } from '../src/feishuBot/types.js';
 import { buildFeishuSignature } from '../src/feishuBot/verify.js';
 
@@ -1475,6 +1477,64 @@ describe('startFeishuBotServer', () => {
       expect(second.status).toBe(200);
       expect(rentalPriceClient.calls).toEqual(['875']);
       expect(replies).toHaveLength(1);
+      expect(JSON.stringify(await second.json())).toContain('已经执行完成');
+    } finally {
+      server.close();
+    }
+  });
+
+  it('blocks cross-strategy HTTP refresh activity selections from the same plan card', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-http-refresh-strategy-claim-'));
+    const plan: RefreshActivityPlan = {
+      date: '2026-06-11',
+      delistProductIds: ['901', '902'],
+      delistProductIdsForRefill: ['901', '902'],
+      newLinkItemsForRefill: [{ keyword: 'DJI Pocket 3', count: 2, sourceProductId: '900', sourceProductName: 'Pocket3 健康源', sameSkuGroupId: 'dji-pocket-3' }],
+      skippedGroups: [],
+      canRefill: true,
+    };
+    const planRef = await saveRefreshActivityPlan(outputDir, plan);
+    const strategyCard = buildRefreshActivityStrategyCard({
+      date: plan.date,
+      planRef,
+      confirmationKeyDelistOnly: refreshActivityPlanConfirmationKey(plan, 'delist_only'),
+      confirmationKeyDelistAndRefill: refreshActivityPlanConfirmationKey(plan, 'delist_and_refill'),
+      delistCount: 2,
+      newLinkCount: 2,
+      skippedGroups: [],
+    });
+    const delistValue = readButtonValue(strategyCard, 'refresh_activity_delist_only_submit');
+    const refillValue = readButtonValue(strategyCard, 'refresh_activity_delist_refill_submit');
+    const cards: Array<{ messageId: string; card: Record<string, unknown> }> = [];
+    const server = startFeishuBotServer({
+      port: 0,
+      appId: 'app',
+      appSecret: 'secret',
+      outputDir,
+      replyCard: async ({ messageId }, card) => {
+        cards.push({ messageId, card });
+        return { sent: true, channel: 'app' };
+      },
+    });
+    try {
+      await new Promise<void>((resolve) => server.once('listening', resolve));
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+      const first = await fetch(`http://127.0.0.1:${address.port}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ header: { event_type: 'card.action.trigger' }, event: { context: { open_message_id: 'mid-http-refresh-strategy' }, action: { value: delistValue } } }),
+      });
+      const second = await fetch(`http://127.0.0.1:${address.port}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ header: { event_type: 'card.action.trigger' }, event: { context: { open_message_id: 'mid-http-refresh-strategy' }, action: { value: refillValue } } }),
+      });
+
+      expect(first.status).toBe(200);
+      expect(second.status).toBe(200);
+      expect(cards).toHaveLength(1);
+      expect(JSON.stringify(cards[0].card)).toContain('即将下架端内ID：901、902');
       expect(JSON.stringify(await second.json())).toContain('已经执行完成');
     } finally {
       server.close();

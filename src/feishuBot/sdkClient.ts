@@ -19,6 +19,7 @@ import { continueAgentPlannerStepsAfterResponse, executeAgentToolRequestWithCont
 import { agentExploreLedgerContextFromRequest } from './agentExploreAttribution.js';
 import { loadAgentToolConfirmRequestFromValue } from './agentToolConfirmStore.js';
 import { loadClarificationContext, verifyClarificationKey } from './clarificationStore.js';
+import { handleRefreshActivityStrategySelect } from './refreshActivityStrategySelect.js';
 import { executeOrConfirmAgentToolRequest } from './tools.js';
 import {
   agentRequestFromNewLinkBatchConfirm,
@@ -183,6 +184,8 @@ function expectedActionForButtonName(name: string | undefined): string | undefin
   if (!name) return undefined;
   const exact: Record<string, string> = {
     agent_tool_confirm_submit: 'agent_tool_confirm',
+    refresh_activity_delist_only_submit: 'refresh_activity_strategy_select',
+    refresh_activity_delist_refill_submit: 'refresh_activity_strategy_select',
     agent_tool_cancel_submit: 'agent_tool_cancel',
     new_link_batch_confirm_submit: 'new_link_batch_confirm',
     new_link_batch_multi_confirm_submit: 'new_link_batch_multi_confirm',
@@ -339,6 +342,8 @@ function actionClaimFamily(actionName: string): string {
 
 function stableActionKey(messageId: string, actionName: string, value: Record<string, unknown>): string {
   const family = actionClaimFamily(actionName);
+  const planRef = actionName === 'refresh_activity_strategy_select' ? readString(value.planRef) : undefined;
+  if (planRef) return createHash('sha256').update(JSON.stringify({ messageId, family: `${family}:${planRef}` })).digest('hex');
   const confirmationKey = readString(value.confirmationKey);
   return createHash('sha256').update(JSON.stringify({ messageId, family: confirmationKey ? `${family}:${confirmationKey}` : family })).digest('hex');
 }
@@ -886,6 +891,18 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
             }
           })();
           return;
+        }
+
+        if (actionName === 'refresh_activity_strategy_select') {
+          const claim = claimRentalAction(messageId, actionName, value);
+          if (!claim.claimed) {
+            return cardActionUpdateResponse(claimStatusCard('活跃度刷新策略已处理', claim.claim));
+          }
+          const response = await handleRefreshActivityStrategySelect(config.outputDir ?? 'output', value);
+          setRentalActionStatus(claim.key, response.card ? 'completed' : 'failed');
+          return response.card
+            ? replaceCard(client, messageId, response.card)
+            : replaceCard(client, messageId, statusCard('活跃度刷新策略已失效', response.text, 'red'));
         }
 
         if (actionName === 'agent_tool_cancel') {

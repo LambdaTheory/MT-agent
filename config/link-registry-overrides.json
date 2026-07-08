@@ -2,44 +2,34 @@
   "version": 1,
   "entries": [
     {
-      "internalProductId": "764",
-      "productName": "SEAYEO大排灯美容仪经典款 光子嫩肤面罩",
-      "categoryId": "beauty-device",
-      "categoryName": "美容仪",
-      "productType": "led-face-mask",
-      "shortName": "SEAYEO 大排灯美容仪",
-      "aliases": [
-        "SEAYEO 大排灯美容仪",
-        "SEAYEO大排灯",
-        "大排灯美容仪"
-      ],
-      "sameSkuGroupId": "seayeo-led-face-mask",
-      "status": "active",
-      "confidence": 0.95,
-      "reason": "daemon_live_catalog_review",
-      "maintainer": "codex_daemon_refresh",
-      "updatedAt": "2026-06-27"
-    },
-    {
-      "internalProductId": "929",
-      "shortName": "rx10m4",
-      "aliases": [
-        "RX10M4",
-        "rx10m4",
-        "索尼 RX10M4"
-      ],
-      "confidence": 0.95,
-      "reason": "daemon_live_short_name_alignment",
-      "maintainer": "codex_daemon_refresh",
-      "updatedAt": "2026-06-27"
-    },
-    {
       "internalProductId": "218",
       "sameSkuGroupId": "vivo-蔡司-2-35x增距镜-神器",
       "confidence": 0.95,
       "reason": "link_registry_merge_review_approval",
       "maintainer": "merge_review_csv",
       "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "230",
+      "sameSkuGroupId": "vivo-zeiss-telephoto-lens",
+      "categoryId": "lens",
+      "categoryName": "镜头",
+      "productType": "lens-accessory",
+      "shortName": "vivo 蔡司增距镜",
+      "confidence": 0.95,
+      "updatedAt": "2026-07-01",
+      "reason": "link_registry_maintenance_review"
+    },
+    {
+      "internalProductId": "233",
+      "sameSkuGroupId": "dji-action-5-pro",
+      "categoryId": "camera",
+      "categoryName": "相机",
+      "productType": "action-camera",
+      "shortName": "Action 5 Pro",
+      "confidence": 0.95,
+      "updatedAt": "2026-07-01",
+      "reason": "link_registry_maintenance_review"
     },
     {
       "internalProductId": "234",
@@ -76,6 +66,28 @@
       "updatedAt": "2026-06-26"
     },
     {
+      "internalProductId": "237",
+      "sameSkuGroupId": "fujifilm-instax-mini-link-3",
+      "categoryId": "printer",
+      "categoryName": "打印机",
+      "productType": "photo-printer",
+      "shortName": "mini Link 3",
+      "confidence": 0.95,
+      "updatedAt": "2026-07-01",
+      "reason": "link_registry_maintenance_review"
+    },
+    {
+      "internalProductId": "238",
+      "sameSkuGroupId": "insta360-go3s",
+      "categoryId": "camera",
+      "categoryName": "相机",
+      "productType": "action-camera",
+      "shortName": "Insta360 GO3S",
+      "confidence": 0.95,
+      "updatedAt": "2026-07-01",
+      "reason": "link_registry_maintenance_review"
+    },
+    {
       "internalProductId": "242",
       "shortName": "mini EVO",
       "aliases": [
@@ -85,6 +97,17 @@
       "reason": "link_registry_audit_review_approval",
       "maintainer": "audit_review_markdown",
       "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "243",
+      "sameSkuGroupId": "fujifilm-instax-mini-99",
+      "categoryId": "camera",
+      "categoryName": "相机",
+      "productType": "instant-camera",
+      "shortName": "Mini 99",
+      "confidence": 0.95,
+      "updatedAt": "2026-07-01",
+      "reason": "link_registry_maintenance_review"
     },
     {
       "internalProductId": "247",
@@ -1234,63 +1257,6 @@
       "updatedAt": "2026-06-27"
     },
     {
-      "internalProductId": "761",
-      "productName": "Ipod touch6 顺丰发货，1天起租---skills测试用，请勿下单",
-      "categoryId": "media-player",
-      "categoryName": "播放器",
-      "productType": "music-player",
-      "shortName": "iPod touch 6",
-      "aliases": [
-        "iPod touch 6",
-        "ipod touch 6",
-        "ipodtouch6"
-      ],
-      "sameSkuGroupId": "ipod-touch-6",
-      "status": "active",
-      "confidence": 0.95,
-      "reason": "manual_live_only_link_seed",
-      "maintainer": "codex",
-      "updatedAt": "2026-06-27"
-    },
-    {
-      "internalProductId": "763",
-      "productName": "Ipod touch6 顺丰发货，1天起租---skills测试用，请勿下单",
-      "categoryId": "media-player",
-      "categoryName": "播放器",
-      "productType": "music-player",
-      "shortName": "iPod touch 6",
-      "aliases": [
-        "iPod touch 6",
-        "ipod touch 6",
-        "ipodtouch6"
-      ],
-      "sameSkuGroupId": "ipod-touch-6",
-      "status": "active",
-      "confidence": 0.95,
-      "reason": "manual_live_only_link_seed",
-      "maintainer": "codex",
-      "updatedAt": "2026-06-27"
-    },
-    {
-      "internalProductId": "876",
-      "productName": "Ipod touch6 顺丰发货，1天起租---skills测试用，请勿下单",
-      "categoryId": "media-player",
-      "categoryName": "播放器",
-      "productType": "music-player",
-      "shortName": "iPod touch 6",
-      "aliases": [
-        "iPod touch 6",
-        "ipod touch 6",
-        "ipodtouch6"
-      ],
-      "sameSkuGroupId": "ipod-touch-6",
-      "status": "active",
-      "confidence": 0.95,
-      "reason": "manual_live_only_link_seed",
-      "maintainer": "codex",
-      "updatedAt": "2026-06-27"
-    },
-    {
       "internalProductId": "663",
       "shortName": "Pocket 3",
       "aliases": [
@@ -1777,6 +1743,25 @@
       "updatedAt": "2026-06-26"
     },
     {
+      "internalProductId": "761",
+      "productName": "Ipod touch6 顺丰发货，1天起租---skills测试用，请勿下单",
+      "categoryId": "media-player",
+      "categoryName": "播放器",
+      "productType": "music-player",
+      "shortName": "iPod touch 6",
+      "aliases": [
+        "iPod touch 6",
+        "ipod touch 6",
+        "ipodtouch6"
+      ],
+      "sameSkuGroupId": "ipod-touch-6",
+      "status": "active",
+      "confidence": 0.95,
+      "reason": "link_registry_maintenance_review",
+      "maintainer": "codex",
+      "updatedAt": "2026-07-01"
+    },
+    {
       "internalProductId": "762",
       "shortName": "s24U",
       "aliases": [
@@ -1788,6 +1773,44 @@
       "reason": "link_registry_group_review_approval",
       "maintainer": "group_review_csv",
       "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "763",
+      "productName": "Ipod touch6 顺丰发货，1天起租---skills测试用，请勿下单",
+      "categoryId": "media-player",
+      "categoryName": "播放器",
+      "productType": "music-player",
+      "shortName": "iPod touch 6",
+      "aliases": [
+        "iPod touch 6",
+        "ipod touch 6",
+        "ipodtouch6"
+      ],
+      "sameSkuGroupId": "ipod-touch-6",
+      "status": "active",
+      "confidence": 0.95,
+      "reason": "link_registry_maintenance_review",
+      "maintainer": "codex",
+      "updatedAt": "2026-07-01"
+    },
+    {
+      "internalProductId": "764",
+      "productName": "SEAYEO大排灯美容仪经典款 光子嫩肤面罩",
+      "categoryId": "beauty-device",
+      "categoryName": "美容仪",
+      "productType": "led-face-mask",
+      "shortName": "SEAYEO 大排灯美容仪",
+      "aliases": [
+        "SEAYEO 大排灯美容仪",
+        "SEAYEO大排灯",
+        "大排灯美容仪"
+      ],
+      "sameSkuGroupId": "seayeo-led-face-mask",
+      "status": "active",
+      "confidence": 0.95,
+      "reason": "daemon_live_catalog_review",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
     },
     {
       "internalProductId": "765",
@@ -2249,6 +2272,25 @@
       "updatedAt": "2026-06-26"
     },
     {
+      "internalProductId": "876",
+      "productName": "Ipod touch6 顺丰发货，1天起租---skills测试用，请勿下单",
+      "categoryId": "media-player",
+      "categoryName": "播放器",
+      "productType": "music-player",
+      "shortName": "iPod touch 6",
+      "aliases": [
+        "iPod touch 6",
+        "ipod touch 6",
+        "ipodtouch6"
+      ],
+      "sameSkuGroupId": "ipod-touch-6",
+      "status": "active",
+      "confidence": 0.95,
+      "reason": "manual_live_only_link_seed",
+      "maintainer": "codex",
+      "updatedAt": "2026-06-27"
+    },
+    {
       "internalProductId": "882",
       "shortName": "pocket 3",
       "aliases": [
@@ -2538,6 +2580,63 @@
       "reason": "link_registry_audit_review_approval",
       "maintainer": "audit_review_markdown",
       "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "929",
+      "shortName": "rx10m4",
+      "aliases": [
+        "RX10M4",
+        "rx10m4",
+        "索尼 RX10M4"
+      ],
+      "confidence": 0.95,
+      "reason": "daemon_live_short_name_alignment",
+      "maintainer": "codex_daemon_refresh",
+      "updatedAt": "2026-06-27"
+    },
+    {
+      "internalProductId": "954",
+      "sameSkuGroupId": "ipod-touch-6",
+      "categoryId": "media-player",
+      "categoryName": "播放器",
+      "productType": "music-player",
+      "shortName": "iPod touch 6",
+      "confidence": 0.95,
+      "updatedAt": "2026-07-04",
+      "reason": "link_registry_maintenance_review"
+    },
+    {
+      "internalProductId": "956",
+      "sameSkuGroupId": "ipod-touch-6",
+      "categoryId": "media-player",
+      "categoryName": "播放器",
+      "productType": "music-player",
+      "shortName": "iPod touch 6",
+      "confidence": 0.95,
+      "updatedAt": "2026-07-04",
+      "reason": "link_registry_maintenance_review"
+    },
+    {
+      "internalProductId": "958",
+      "sameSkuGroupId": "ipod-touch-6",
+      "categoryId": "media-player",
+      "categoryName": "播放器",
+      "productType": "music-player",
+      "shortName": "iPod touch 6",
+      "confidence": 0.95,
+      "updatedAt": "2026-07-04",
+      "reason": "link_registry_maintenance_review"
+    },
+    {
+      "internalProductId": "959",
+      "sameSkuGroupId": "ipod-touch-6",
+      "categoryId": "media-player",
+      "categoryName": "播放器",
+      "productType": "music-player",
+      "shortName": "iPod touch 6",
+      "confidence": 0.95,
+      "updatedAt": "2026-07-04",
+      "reason": "link_registry_maintenance_review"
     }
   ],
   "sameSkuGroupRules": [
@@ -2709,6 +2808,9 @@
     },
     {
       "matchSameSkuGroupId": "canon r50",
+      "categoryId": "camera",
+      "categoryName": "相机",
+      "productType": "camera",
       "shortName": "R50",
       "aliases": [
         "R50",
@@ -3068,6 +3170,9 @@
     },
     {
       "matchSameSkuGroupId": "canon-eos-r50",
+      "categoryId": "camera",
+      "categoryName": "相机",
+      "productType": "camera",
       "shortName": "R50",
       "aliases": [
         "R50",
@@ -3322,7 +3427,7 @@
       "updatedAt": "2026-06-27"
     },
     {
-      "matchSameSkuGroupId": "fujifilm-in-ta-mini90一次成像-婚礼聚",
+      "matchSameSkuGroupId": "fujifilm-insta-mini90一次成像-婚礼聚会旅游立即出片-相纸可选",
       "shortName": "Mini 90",
       "aliases": [
         "Mini 90",
@@ -3937,6 +4042,9 @@
     },
     {
       "matchSameSkuGroupId": "vivo x300 pro",
+      "categoryId": "phone",
+      "categoryName": "手机",
+      "productType": "smartphone",
       "shortName": "vivo X300 Pro",
       "aliases": [
         "vivo X300 Pro",
@@ -3951,6 +4059,9 @@
     },
     {
       "matchSameSkuGroupId": "vivo x301 pro",
+      "categoryId": "phone",
+      "categoryName": "手机",
+      "productType": "smartphone",
       "shortName": "vivo X300 Pro",
       "aliases": [
         "vivo X300 Pro",
@@ -3965,6 +4076,9 @@
     },
     {
       "matchSameSkuGroupId": "vivo x302 pro",
+      "categoryId": "phone",
+      "categoryName": "手机",
+      "productType": "smartphone",
       "shortName": "vivo X300 Pro",
       "aliases": [
         "vivo X300 Pro",
@@ -3979,6 +4093,9 @@
     },
     {
       "matchSameSkuGroupId": "vivo x303 pro",
+      "categoryId": "phone",
+      "categoryName": "手机",
+      "productType": "smartphone",
       "shortName": "vivo X300 Pro",
       "aliases": [
         "vivo X300 Pro",
@@ -3993,6 +4110,9 @@
     },
     {
       "matchSameSkuGroupId": "vivo x304 pro",
+      "categoryId": "phone",
+      "categoryName": "手机",
+      "productType": "smartphone",
       "shortName": "vivo X300 Pro",
       "aliases": [
         "vivo X300 Pro",
@@ -4023,6 +4143,9 @@
     },
     {
       "matchSameSkuGroupId": "vivo-x300-pro",
+      "categoryId": "phone",
+      "categoryName": "手机",
+      "productType": "smartphone",
       "shortName": "vivo X300 Pro",
       "aliases": [
         "vivo X300 Pro",
@@ -4082,6 +4205,21 @@
       "reason": "daemon_live_group_alignment",
       "maintainer": "codex_daemon_refresh",
       "updatedAt": "2026-06-27"
+    },
+    {
+      "matchSameSkuGroupId": "fujifilm-in-ta-mini90一次成像-婚礼聚",
+      "shortName": "Mini 90",
+      "aliases": [
+        "Mini 90",
+        "Mini90",
+        "mini 90",
+        "mini90"
+      ],
+      "sameSkuGroupId": "fujifilm-instax-mini-90",
+      "confidence": 0.95,
+      "reason": "mini90_promo_slug_variant_remap",
+      "maintainer": "taxonomy_governance",
+      "updatedAt": "2026-07-06"
     }
   ]
 }

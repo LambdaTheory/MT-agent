@@ -11,6 +11,7 @@ import { recordAgentLearningEvent } from '../src/agentLearning/store.js';
 import { executeAgentToolRequestWithContinuation } from '../src/feishuBot/agentToolContinuation.js';
 import { executeAgentToolRequest } from '../src/feishuBot/agentToolExecutor.js';
 import { loadAgentToolConfirmRequestFromValue } from '../src/feishuBot/agentToolConfirmStore.js';
+import { handleRefreshActivityStrategySelect } from '../src/feishuBot/refreshActivityStrategySelect.js';
 import { handleBotIntent } from '../src/feishuBot/tools.js';
 
 const mocks = vi.hoisted(() => ({
@@ -108,9 +109,13 @@ interface TestRegistryPaths {
 }
 
 function readAgentToolConfirmValueFromCard(card: unknown): unknown {
-  const body = (card as { body?: { elements?: Array<{ elements?: Array<{ name?: string; behaviors?: Array<{ value?: unknown }> }> }> } }).body;
-  const form = body?.elements?.find((element) => Array.isArray(element.elements));
-  const button = form?.elements?.find((element) => element.name === 'agent_tool_confirm_submit');
+  type El = { name?: string; text?: { content?: string }; behaviors?: Array<{ value?: unknown }>; elements?: El[] };
+  const body = (card as { body?: { elements?: El[] } }).body;
+  const allButtons = (body?.elements ?? []).flatMap((el) => (Array.isArray(el.elements) ? el.elements : []));
+  const button = allButtons.find((element) => element.name === 'refresh_activity_delist_refill_submit')
+    ?? allButtons.find((element) => element.text?.content === '下架+补链')
+    ?? allButtons.find((element) => element.name === 'refresh_activity_delist_only_submit')
+    ?? allButtons.find((element) => element.name === 'agent_tool_confirm_submit');
   return button?.behaviors?.[0]?.value;
 }
 
@@ -2788,17 +2793,11 @@ describe('handleBotIntent', () => {
     expect(response.text).toContain('30日访问页缺失 1 条');
     expect(response.text).toContain('上线不足 30 天 1 条');
     expect(response.text).toContain('上线天数未知 1 条');
-    expect(response.text).toContain('已生成执行确认卡；确认前不会下架或补链');
+    expect(response.text).toContain('端内ID 901、902');
+    expect(response.text).toContain('计划已生成，请在策略卡选择执行策略');
     expect(response.card).toBeDefined();
-    const request = readAgentToolConfirmRequestFromCard(response.card);
-    expect(request.toolName).toBe('operations.refreshActivityExecute');
-    expect(request.arguments).toMatchObject({
-      date: '2026-06-11',
-      delistProductIds: ['901', '902'],
-      newLinkItems: [{ keyword: 'DJI Pocket 3', count: 2, sourceProductId: '900', sourceProductName: 'Pocket3 健康源', sameSkuGroupId: 'dji-pocket-3' }],
-    });
-    expect(request.arguments.delistProductIds).not.toContain('906');
-    expect(request.arguments.delistProductIds).not.toContain('907');
+    expect(JSON.stringify(response.card)).toContain('refresh_activity_strategy_select');
+    expect(JSON.stringify(response.card)).not.toContain('agent_tool_confirm');
   });
 
   it('uses first seen date as a fallback before treating zero 30-day orders as inactive', async () => {
@@ -2815,22 +2814,25 @@ describe('handleBotIntent', () => {
 
     expect(response.text).toContain('待下架候选：3 条');
     expect(response.text).toContain('上线天数未知 0 条');
-    const request = readAgentToolConfirmRequestFromCard(response.card);
-    expect(request.arguments).toMatchObject({
-      delistProductIds: ['901', '902', '907'],
-      newLinkItems: [{ keyword: 'DJI Pocket 3', count: 3, sourceProductId: '900' }],
-    });
-    expect(request.arguments.delistProductIds).not.toContain('906');
+    expect(response.text).toContain('端内ID 901、902、907');
+    expect(response.text).toContain('计划已生成，请在策略卡选择执行策略');
+    expect(response.card).toBeDefined();
+    expect(JSON.stringify(response.card)).toContain('refresh_activity_strategy_select');
+    expect(JSON.stringify(response.card)).not.toContain('agent_tool_confirm');
   });
 
   it('executes a confirmed activity refresh plan with audit output', async () => {
-    const { outputDir, registryPaths } = await writeRefreshActivityFixtures();
-    const plan = await executeAgentToolRequest(
-      { toolName: 'operations.refreshActivityPlan', arguments: {}, reason: '测试生成活跃度刷新计划' },
-      outputDir,
-      { closedOrderRegistryPaths: registryPaths },
-    );
-    const request = readAgentToolConfirmRequestFromCard(plan.card);
+    const { outputDir } = await writeRefreshActivityFixtures();
+    const request = {
+      toolName: 'operations.refreshActivityExecute',
+      arguments: {
+        date: '2026-06-11',
+        delistProductIds: ['901', '902'],
+        newLinkItems: [{ keyword: 'DJI Pocket 3', count: 2, sourceProductId: '900', sourceProductName: 'Pocket3 健康源', sameSkuGroupId: 'dji-pocket-3' }],
+        strategy: 'delist_and_refill',
+      },
+      reason: '测试执行活跃度刷新计划',
+    };
     const calls: string[] = [];
     const rentalPriceClient: RentalPriceSkillClient = {
       async preview() { throw new Error('preview should not run'); },
@@ -2863,13 +2865,17 @@ describe('handleBotIntent', () => {
   });
 
   it('skips missing products during confirmed activity refresh execution and continues the batch', async () => {
-    const { outputDir, registryPaths } = await writeRefreshActivityFixtures();
-    const plan = await executeAgentToolRequest(
-      { toolName: 'operations.refreshActivityPlan', arguments: {}, reason: 'test refresh activity plan' },
-      outputDir,
-      { closedOrderRegistryPaths: registryPaths },
-    );
-    const request = readAgentToolConfirmRequestFromCard(plan.card);
+    const { outputDir } = await writeRefreshActivityFixtures();
+    const request = {
+      toolName: 'operations.refreshActivityExecute',
+      arguments: {
+        date: '2026-06-11',
+        delistProductIds: ['901', '902'],
+        newLinkItems: [{ keyword: 'DJI Pocket 3', count: 2, sourceProductId: '900', sourceProductName: 'Pocket3 健康源', sameSkuGroupId: 'dji-pocket-3' }],
+        strategy: 'delist_and_refill',
+      },
+      reason: 'test refresh activity execution',
+    };
     const calls: string[] = [];
     const rentalPriceClient: RentalPriceSkillClient = {
       async preview() { throw new Error('preview should not run'); },
@@ -2942,12 +2948,13 @@ describe('handleBotIntent', () => {
       rentalPriceClient,
       closedOrderRegistryPaths: registryPaths,
     });
-    const request = readAgentToolConfirmRequestFromCard(response.card);
+    const confirmResponse = await handleRefreshActivityStrategySelect(outputDir, readAgentToolConfirmValueFromCard(response.card));
+    const request = await loadAgentToolConfirmRequestFromCard(outputDir, confirmResponse.card);
 
-    expect(request.toolName).toBe('operations.refreshActivityExecute');
+    expect(request?.toolName).toBe('operations.refreshActivityExecute');
     expect(request.continuation?.steps).toHaveLength(1);
 
-    const executed = await executeAgentToolRequestWithContinuation(request, outputDir, {
+    const executed = await executeAgentToolRequestWithContinuation(request!, outputDir, {
       rentalPriceClient,
       closedOrderRegistryPaths: registryPaths,
     });
@@ -4010,9 +4017,9 @@ describe('handleBotIntent', () => {
           closeId: 'close-1',
           internalProductId: '560',
           rawRemark: '价格太低，不接单',
-          closedAt: '2026-06-30T01:00:00.000Z',
-          firstIngestedAt: '2026-06-30T01:05:00.000Z',
-          lastIngestedAt: '2026-06-30T01:05:00.000Z',
+          closedAt: '2026-07-06T01:00:00.000Z',
+          firstIngestedAt: '2026-07-06T01:05:00.000Z',
+          lastIngestedAt: '2026-07-06T01:05:00.000Z',
           seenCount: 1,
         },
         {
@@ -4020,9 +4027,9 @@ describe('handleBotIntent', () => {
           closeId: 'close-2',
           internalProductId: '561',
           rawRemark: '库存不足',
-          closedAt: '2026-06-29T08:00:00.000Z',
-          firstIngestedAt: '2026-06-29T08:05:00.000Z',
-          lastIngestedAt: '2026-06-29T08:05:00.000Z',
+          closedAt: '2026-07-05T08:00:00.000Z',
+          firstIngestedAt: '2026-07-05T08:05:00.000Z',
+          lastIngestedAt: '2026-07-05T08:05:00.000Z',
           seenCount: 1,
         },
       ],

@@ -6,6 +6,7 @@ import {
   handleLinkRegistryGovernanceCardAction,
   openLinkRegistryGovernancePrompt,
 } from '../src/linkRegistry/governanceSession.js';
+import { loadLinkRegistryReminderState, saveLinkRegistryReminderState } from '../src/linkRegistry/reminderState.js';
 import type { LinkRegistryOverrideRisk } from '../src/linkRegistry/overrides.js';
 import type { LinkRegistryEntry } from '../src/linkRegistry/types.js';
 
@@ -162,5 +163,138 @@ describe('link registry governance session', () => {
     });
     expect(changed).not.toBeNull();
     expect(changed?.text).toContain('发现 4 个组级治理问题');
+  });
+
+  it('serializes concurrent governance submissions without losing review records', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-link-governance-serialized-'));
+    await openLinkRegistryGovernancePrompt(outputDir, {
+      date: '2026-06-24',
+      registry: registryEntries,
+      overrideRisks,
+    });
+    await handleLinkRegistryGovernanceCardAction(outputDir, {
+      date: '2026-06-24',
+      action: 'start',
+    });
+
+    await Promise.all([
+      handleLinkRegistryGovernanceCardAction(outputDir, {
+        date: '2026-06-24',
+        action: 'submit',
+        reviewIndex: 1,
+        decision: 'resolved',
+        note: 'Pocket 3 done.',
+        reviewerId: 'ou_governance_1',
+      }),
+      handleLinkRegistryGovernanceCardAction(outputDir, {
+        date: '2026-06-24',
+        action: 'submit',
+        reviewIndex: 2,
+        decision: 'watch',
+        note: 'Wide300 watch.',
+        reviewerId: 'ou_governance_2',
+      }),
+    ]);
+
+    const session = JSON.parse(
+      await readFile(join(outputDir, '2026-06-24', 'link-registry-governance-session.json'), 'utf8'),
+    ) as { status: string; reviewRecords: Array<{ reviewIndex: number; decision: string }> };
+    expect(session.status).toBe('reviewing');
+    expect(session.reviewRecords.map((record) => record.reviewIndex).sort()).toEqual([1, 2]);
+    expect(session.reviewRecords.map((record) => record.decision).sort()).toEqual(['resolved', 'watch']);
+  });
+
+  it('treats duplicate governance submissions for one review index as idempotent', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-link-governance-idempotent-'));
+    await openLinkRegistryGovernancePrompt(outputDir, {
+      date: '2026-06-24',
+      registry: registryEntries,
+      overrideRisks,
+    });
+    await handleLinkRegistryGovernanceCardAction(outputDir, { date: '2026-06-24', action: 'start' });
+
+    const action = {
+      date: '2026-06-24',
+      action: 'submit' as const,
+      reviewIndex: 1,
+      decision: 'resolved' as const,
+      note: 'Pocket 3 done.',
+      reviewerId: 'ou_governance_duplicate',
+    };
+    await Promise.all([
+      handleLinkRegistryGovernanceCardAction(outputDir, action),
+      handleLinkRegistryGovernanceCardAction(outputDir, action),
+    ]);
+
+    const session = JSON.parse(
+      await readFile(join(outputDir, '2026-06-24', 'link-registry-governance-session.json'), 'utf8'),
+    ) as { reviewRecords: Array<{ reviewIndex: number }> };
+    expect(session.reviewRecords.map((record) => record.reviewIndex)).toEqual([1]);
+  });
+
+  it('does not let a forced prompt reset overwrite an active governance review', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-link-governance-force-race-'));
+    await openLinkRegistryGovernancePrompt(outputDir, {
+      date: '2026-06-24',
+      registry: registryEntries,
+      overrideRisks,
+    });
+    await handleLinkRegistryGovernanceCardAction(outputDir, { date: '2026-06-24', action: 'start' });
+
+    const changedRisks: LinkRegistryOverrideRisk[] = [
+      ...overrideRisks,
+      { type: 'unknown_internal_product_id', message: 'Override target not found: 888', internalProductId: '888' },
+    ];
+    await Promise.all([
+      openLinkRegistryGovernancePrompt(outputDir, {
+        date: '2026-06-24',
+        registry: registryEntries,
+        overrideRisks: changedRisks,
+        force: true,
+      }),
+      handleLinkRegistryGovernanceCardAction(outputDir, {
+        date: '2026-06-24',
+        action: 'submit',
+        reviewIndex: 1,
+        decision: 'resolved',
+        note: 'Pocket 3 done.',
+        reviewerId: 'ou_governance_force_race',
+      }),
+    ]);
+
+    const session = JSON.parse(
+      await readFile(join(outputDir, '2026-06-24', 'link-registry-governance-session.json'), 'utf8'),
+    ) as { status: string; queue: unknown[]; reviewRecords: Array<{ reviewIndex: number }> };
+    expect(session.status).toBe('reviewing');
+    expect(session.queue).toHaveLength(3);
+    expect(session.reviewRecords.map((record) => record.reviewIndex)).toEqual([1]);
+  });
+
+  it('serializes concurrent reminder state updates for one state file', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-link-reminder-state-'));
+
+    await Promise.all([
+      saveLinkRegistryReminderState(outputDir, 'maintenance', {
+        signature: 'maintenance-signature',
+        status: 'prompted',
+        sessionDate: '2026-06-24',
+        updatedAt: '2026-06-24T10:00:00.000Z',
+      }),
+      saveLinkRegistryReminderState(outputDir, 'governance', {
+        signature: 'governance-signature',
+        status: 'reviewing',
+        sessionDate: '2026-06-24',
+        updatedAt: '2026-06-24T10:01:00.000Z',
+      }),
+    ]);
+
+    await expect(loadLinkRegistryReminderState(outputDir, 'maintenance')).resolves.toMatchObject({
+      signature: 'maintenance-signature',
+      status: 'prompted',
+    });
+    await expect(loadLinkRegistryReminderState(outputDir, 'governance')).resolves.toMatchObject({
+      signature: 'governance-signature',
+      status: 'reviewing',
+    });
   });
 });

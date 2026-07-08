@@ -35,6 +35,7 @@ import { continueAgentPlannerStepsAfterResponse, executeAgentToolRequestWithCont
 import { agentExploreLedgerContextFromRequest } from './agentExploreAttribution.js';
 import { loadAgentToolConfirmRequestFromValue } from './agentToolConfirmStore.js';
 import { loadClarificationContext, verifyClarificationKey } from './clarificationStore.js';
+import { handleRefreshActivityStrategySelect } from './refreshActivityStrategySelect.js';
 import { executeOrConfirmAgentToolRequest } from './tools.js';
 import {
   agentRequestFromNewLinkBatchConfirm,
@@ -141,6 +142,8 @@ function expectedActionForButtonName(name: string | undefined): string | undefin
   if (!name) return undefined;
   const exact: Record<string, string> = {
     agent_tool_confirm_submit: 'agent_tool_confirm',
+    refresh_activity_delist_only_submit: 'refresh_activity_strategy_select',
+    refresh_activity_delist_refill_submit: 'refresh_activity_strategy_select',
     agent_tool_cancel_submit: 'agent_tool_cancel',
     new_link_batch_confirm_submit: 'new_link_batch_confirm',
     new_link_batch_multi_confirm_submit: 'new_link_batch_multi_confirm',
@@ -293,6 +296,11 @@ function agentToolClaimFamily(value: Record<string, unknown> | undefined): strin
 function cardActionClaimFamily(family: string, value: Record<string, unknown> | undefined): string {
   const confirmationKey = readString(value?.confirmationKey);
   return confirmationKey ? `${family}:${confirmationKey}` : family;
+}
+
+function refreshActivityStrategyClaimFamily(value: Record<string, unknown> | undefined): string {
+  const planRef = readString(value?.planRef);
+  return planRef ? `refresh_activity_strategy_select:${planRef}` : cardActionClaimFamily('refresh_activity_strategy_select', value);
 }
 
 function readActionFormValue(action: FeishuCardAction | undefined, name: string): string | undefined {
@@ -602,6 +610,18 @@ async function handleCardActionTrigger(
       reason: request.reason,
       resultSummary: response.text,
     });
+    if (response.card) await replyCard(replyConfig, response.card);
+    else await replyText(replyConfig, response.text);
+    return;
+  }
+
+  if (actionName === 'refresh_activity_strategy_select') {
+    const claim = claimServerCardAction(messageId, refreshActivityStrategyClaimFamily(value), actionName);
+    if (!claim.claimed) {
+      return claimStatusCard('活跃度刷新策略已处理', claim.claim);
+    }
+    const response = await handleRefreshActivityStrategySelect(config.outputDir ?? 'output', value);
+    setServerCardActionStatus(claim.key, response.card ? 'completed' : 'failed');
     if (response.card) await replyCard(replyConfig, response.card);
     else await replyText(replyConfig, response.text);
     return;

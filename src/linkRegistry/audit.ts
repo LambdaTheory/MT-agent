@@ -3,7 +3,7 @@ import { createLinkRegistryQuery, type SameSkuGroupConfidence } from './queryReg
 import type { LinkRegistryEntry, LinkRegistryStatus } from './types.js';
 import type { LinkRegistryOverrideRisk } from './overrides.js';
 
-export type LinkRegistryAuditRiskType = LinkRegistryOverrideRisk['type'] | 'sample_insufficient' | 'classification_unknown' | 'alias_duplicate_hit' | 'removed_link_returned_in_active_query' | 'platform_id_mapping_missing';
+export type LinkRegistryAuditRiskType = LinkRegistryOverrideRisk['type'] | 'sample_insufficient' | 'classification_unknown' | 'alias_duplicate_hit' | 'removed_link_returned_in_active_query' | 'platform_id_mapping_missing' | 'mixed_product_type' | 'promo_title_slug_leak' | 'group_classification_missing';
 
 export interface LinkRegistryAuditRisk {
   type: LinkRegistryAuditRiskType;
@@ -46,6 +46,7 @@ export interface LinkRegistryCategoryAudit extends LinkRegistryStatusCounts {
 export interface LinkRegistryAudit extends LinkRegistryStatusCounts {
   categories: LinkRegistryCategoryAudit[];
   unknownEntries: LinkRegistryEntry[];
+  unclassifiedCount: number;
   sameSkuGroups: LinkRegistrySameSkuGroupAudit[];
   risks: LinkRegistryAuditRisk[];
 }
@@ -92,10 +93,59 @@ function sameSkuGroupIds(entries: LinkRegistryEntry[]): string[] {
   return [...new Set(entries.map((entry) => entry.sameSkuGroupId?.trim()).filter((value): value is string => !!value))].sort(compareText);
 }
 
+function distinctNonEmptyValues(values: Array<string | undefined>): string[] {
+  return [...new Set(values.map((value) => value?.trim()).filter((value): value is string => Boolean(value)))].sort(compareText);
+}
+
+function isPromoTitleSlugLeak(sameSkuGroupId: string): boolean {
+  const trimmed = sameSkuGroupId.trim();
+  if (!trimmed) return false;
+  const hasChinese = /\p{Script=Han}/u.test(trimmed);
+  const hasMarketingSeparator = /[-_]/.test(trimmed);
+  return hasChinese && hasMarketingSeparator && trimmed.length >= 24;
+}
+
+function hasUsableGroupLevelClassificationPair(entry: LinkRegistryEntry): boolean {
+  return Boolean(entry.categoryId?.trim() && entry.productType?.trim());
+}
+
+function groupLevelClassificationMissing(entries: LinkRegistryEntry[]): boolean {
+  return !entries.some(hasUsableGroupLevelClassificationPair);
+}
+
+function governanceRisksForSameSkuGroup(entries: LinkRegistryEntry[], sameSkuGroupId: string): LinkRegistryAuditRisk[] {
+  const productTypes = distinctNonEmptyValues(entries.map((entry) => entry.productType));
+  const risks: LinkRegistryAuditRisk[] = [];
+  if (productTypes.length > 1) {
+    risks.push({
+      type: 'mixed_product_type',
+      message: `Same sku group ${sameSkuGroupId} mixes productType values: ${productTypes.join(', ')}`,
+      sameSkuGroupId,
+    });
+  }
+  if (isPromoTitleSlugLeak(sameSkuGroupId)) {
+    risks.push({
+      type: 'promo_title_slug_leak',
+      message: `Same sku group ${sameSkuGroupId} looks like leaked promo-title slug text`,
+      sameSkuGroupId,
+    });
+  }
+  if (groupLevelClassificationMissing(entries)) {
+    risks.push({
+      type: 'group_classification_missing',
+      message: `Same sku group ${sameSkuGroupId} is missing group-level classification`,
+      sameSkuGroupId,
+    });
+  }
+  return risks;
+}
+
 function buildSameSkuGroupAudit(entries: LinkRegistryEntry[], sameSkuGroupId: string): LinkRegistrySameSkuGroupAudit {
   const result = createLinkRegistryQuery(entries).bySameSkuGroup(sameSkuGroupId);
   const counts = countsFor(result.entries);
-  const risks: LinkRegistryAuditRisk[] = [];
+  const risks: LinkRegistryAuditRisk[] = [
+    ...governanceRisksForSameSkuGroup(result.entries, sameSkuGroupId),
+  ];
   if (result.sampleInsufficient) risks.push({ type: 'sample_insufficient', message: `Same sku group ${sameSkuGroupId} has ${result.sampleSize} entries`, sameSkuGroupId });
   return {
     sameSkuGroupId: result.sameSkuGroupId,
@@ -200,9 +250,11 @@ export function buildLinkRegistryAudit(entries: LinkRegistryEntry[], overrideRis
     ...activeQueryLeakRisks(entries),
     ...sameSkuGroups.flatMap((group) => group.risks),
   ];
+  const unknownEntries = entries.filter((entry) => !entry.categoryId || !entry.productType);
   return {
     categories,
-    unknownEntries: entries.filter((entry) => !entry.categoryId || !entry.productType),
+    unknownEntries,
+    unclassifiedCount: unknownEntries.length,
     sameSkuGroups,
     risks,
     ...counts,

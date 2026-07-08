@@ -1,5 +1,6 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { mutateJsonFileSerialized } from './persistence.js';
 
 export type LinkRegistryReminderKind = 'maintenance' | 'governance';
 export type LinkRegistryReminderStatus = 'prompted' | 'reviewing' | 'snoozed' | 'ignored' | 'completed';
@@ -34,11 +35,6 @@ async function readReminderStateFile(path: string): Promise<LinkRegistryReminder
   }
 }
 
-async function saveReminderStateFile(path: string, file: LinkRegistryReminderStateFile): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, `${JSON.stringify(file, null, 2)}\n`, 'utf8');
-}
-
 export async function loadLinkRegistryReminderState(
   outputDir: string,
   kind: LinkRegistryReminderKind,
@@ -53,6 +49,9 @@ export async function saveLinkRegistryReminderState(
   record: LinkRegistryReminderStateRecord,
 ): Promise<void> {
   const path = reminderStatePath(outputDir);
-  const file = await readReminderStateFile(path);
-  await saveReminderStateFile(path, { ...file, version: 1, [kind]: record });
+  await mutateJsonFileSerialized<LinkRegistryReminderStateFile>(path, { version: 1 }, (file) => ({
+    ...file,
+    version: 1,
+    [kind]: record,
+  }));
 }

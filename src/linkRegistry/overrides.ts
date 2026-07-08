@@ -58,6 +58,41 @@ export interface LinkRegistrySameSkuGroupRule {
   disabled?: boolean;
 }
 
+export const sameSkuGroupRules: ReadonlyArray<Pick<LinkRegistrySameSkuGroupRule, 'matchSameSkuGroupId' | 'sameSkuGroupId' | 'categoryId' | 'categoryName' | 'productType'>> = [
+  {
+    matchSameSkuGroupId: 'r50',
+    sameSkuGroupId: 'canon-eos-r50',
+    categoryId: 'camera',
+    categoryName: '相机',
+    productType: 'camera',
+  },
+  {
+    matchSameSkuGroupId: 'canon-eos-r50',
+    categoryId: 'camera',
+    categoryName: '相机',
+    productType: 'camera',
+  },
+  {
+    matchSameSkuGroupId: 'ace-pro-2',
+    sameSkuGroupId: 'insta360-ace-pro-2',
+    categoryId: 'camera',
+    categoryName: '运动相机',
+    productType: 'action-camera',
+  },
+  {
+    matchSameSkuGroupId: 'insta360-ace-pro-2',
+    categoryId: 'camera',
+    categoryName: '运动相机',
+    productType: 'action-camera',
+  },
+  {
+    matchSameSkuGroupId: 'vivo-x300-pro',
+    categoryId: 'phone',
+    categoryName: '手机',
+    productType: 'smartphone',
+  },
+];
+
 export interface LinkRegistryOverrides {
   version: 1;
   entries?: LinkRegistryEntryOverride[];
@@ -93,13 +128,30 @@ function validInternalProductId(value: string): boolean {
   return /^\d+$/.test(value.trim());
 }
 
+function isPromoTitleSlug(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  const hasChinese = /\p{Script=Han}/u.test(trimmed);
+  const hasMarketingSeparator = /[-_]/.test(trimmed);
+  return hasChinese && hasMarketingSeparator && trimmed.length >= 24;
+}
+
+/** Validates a canonical sameSkuGroupId (destination, not a remap source). Rejects promo-title slugs. */
 function validSameSkuGroupId(value: string): boolean {
-  return /^[\p{Letter}\p{Number}][\p{Letter}\p{Number}\s_-]{1,63}$/u.test(value.trim());
+  const trimmed = value.trim();
+  if (isPromoTitleSlug(trimmed)) return false;
+  return /^[\p{Letter}\p{Number}][\p{Letter}\p{Number}\s_-]{1,63}$/u.test(trimmed);
+}
+
+/** Validates a matchSameSkuGroupId (remap source). Allows promo-title slugs so existing group remaps work. */
+function validMatchSameSkuGroupId(value: string): boolean {
+  return /^[\p{Letter}\p{Number}][\p{Letter}\p{Number}\s_-]{1,127}$/u.test(value.trim());
 }
 
 function normalizeKnownBrokenSameSkuGroupId(value: string): string {
   const trimmed = value.trim();
   if (/^vivo-.*2-35x.*$/iu.test(trimmed) && /钄|澧炶窛|绁炲櫒|�/u.test(trimmed)) return 'vivo-zeiss-telephoto-lens';
+  if (/^fujifilm-instax-mini90/iu.test(trimmed)) return 'fujifilm-instax-mini-90';
   return trimmed;
 }
 
@@ -147,6 +199,14 @@ function parseSameSkuGroupId(value: string | undefined): string | undefined {
   const normalized = normalizeKnownBrokenSameSkuGroupId(value);
   if (!validSameSkuGroupId(normalized)) throw new Error(`Invalid sameSkuGroupId: ${value}`);
   return normalized;
+}
+
+/** Parse a matchSameSkuGroupId (remap source): allows promo-title slugs so existing group remaps work. */
+function parseMatchSameSkuGroupId(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const trimmed = value.trim();
+  if (!validMatchSameSkuGroupId(trimmed)) throw new Error(`Invalid matchSameSkuGroupId: ${value}`);
+  return trimmed;
 }
 
 function parseEntryOverride(value: unknown): LinkRegistryEntryOverride {
@@ -211,7 +271,7 @@ function parseSameSkuGroupAliasRule(value: unknown): LinkRegistrySameSkuGroupAli
 
 function parseSameSkuGroupRule(value: unknown): LinkRegistrySameSkuGroupRule {
   if (!isRecord(value)) throw new Error('Invalid sameSkuGroup rule: expected object');
-  const matchSameSkuGroupId = parseSameSkuGroupId(optionalString(value, 'matchSameSkuGroupId'));
+  const matchSameSkuGroupId = parseMatchSameSkuGroupId(optionalString(value, 'matchSameSkuGroupId'));
   if (!matchSameSkuGroupId) throw new Error('Invalid sameSkuGroup rule matchSameSkuGroupId');
   const sameSkuGroupId = parseSameSkuGroupId(optionalString(value, 'sameSkuGroupId'));
   return {

@@ -234,4 +234,126 @@ describe('link registry maintenance report', () => {
 
     expect(report.queue.some((item) => item.internalProductId === '711')).toBe(false);
   });
+
+  it('queues group-level governance issues for mixed productType, leaked promo slug, and missing classification', () => {
+    const leakedGroupId = 'fujifilm-instax-mini90一次成像-婚礼聚会旅游立即出片-相纸可选';
+    const report = buildLinkRegistryMaintenanceReport([
+      {
+        internalProductId: '801',
+        platformProductId: 'platform-801',
+        productName: 'Canon R50',
+        shortName: 'Canon R50',
+        sameSkuGroupId: 'canon-eos-r50',
+        categoryId: 'camera',
+        categoryName: '相机',
+        productType: 'camera',
+        status: 'active',
+        source: ['product_id_mapping'],
+      },
+      {
+        internalProductId: '802',
+        platformProductId: 'platform-802',
+        productName: 'Canon R50 Kit',
+        shortName: 'Canon R50 Kit',
+        sameSkuGroupId: 'canon-eos-r50',
+        categoryId: 'accessory',
+        categoryName: '配件',
+        productType: 'lens-accessory',
+        status: 'active',
+        source: ['product_id_mapping'],
+      },
+      {
+        internalProductId: '901',
+        platformProductId: 'platform-901',
+        productName: 'Mini 90 一次成像',
+        shortName: 'Mini 90',
+        sameSkuGroupId: leakedGroupId,
+        categoryId: 'camera',
+        categoryName: '相机',
+        productType: 'instant-camera',
+        status: 'active',
+        source: ['goods_first_seen'],
+      },
+      {
+        internalProductId: '1001',
+        platformProductId: 'platform-1001',
+        productName: 'vivo X300 Pro',
+        shortName: 'X300 Pro',
+        sameSkuGroupId: 'vivo-x300-pro',
+        status: 'active',
+        source: ['goods_first_seen'],
+      },
+    ]);
+
+    expect(report.queue).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: 'same_sku_group',
+        sameSkuGroupId: 'canon-eos-r50',
+        reasonCodes: expect.arrayContaining(['mixed_product_type']),
+      }),
+      expect.objectContaining({
+        kind: 'same_sku_group',
+        sameSkuGroupId: leakedGroupId,
+        reasonCodes: expect.arrayContaining(['promo_title_slug_leak']),
+      }),
+      expect.objectContaining({
+        kind: 'same_sku_group',
+        sameSkuGroupId: 'vivo-x300-pro',
+        reasonCodes: expect.arrayContaining(['group_classification_missing']),
+      }),
+    ]));
+  });
+
+  it('does not inherit governance risks from entries ignored by maintenance filtering', () => {
+    const report = buildLinkRegistryMaintenanceReport([
+      {
+        internalProductId: '1101',
+        platformProductId: 'platform-1101',
+        productName: 'MQ Canon R50 线下自提',
+        shortName: 'MQ Canon R50',
+        sameSkuGroupId: 'canon-r50-governance-mixed',
+        categoryId: 'camera',
+        categoryName: '相机',
+        productType: 'camera',
+        status: 'active',
+        source: ['goods_first_seen'],
+      },
+      {
+        internalProductId: '1102',
+        platformProductId: 'platform-1102',
+        productName: 'Canon R50 正常商品',
+        shortName: 'Canon R50',
+        sameSkuGroupId: 'canon-r50-governance-mixed',
+        categoryId: 'camera',
+        categoryName: '相机',
+        productType: 'camera',
+        status: 'active',
+        source: ['goods_first_seen'],
+      },
+      {
+        internalProductId: '1201',
+        platformProductId: 'platform-1201',
+        productName: 'MQ Split Class 线下自提',
+        shortName: 'MQ Split Class',
+        sameSkuGroupId: 'split-classification-visible-gap',
+        categoryId: 'camera',
+        categoryName: '相机',
+        status: 'active',
+        source: ['goods_first_seen'],
+      },
+      {
+        internalProductId: '1202',
+        platformProductId: 'platform-1202',
+        productName: 'Visible Split Class',
+        shortName: 'Visible Split Class',
+        sameSkuGroupId: 'split-classification-visible-gap',
+        productType: 'mirrorless-camera',
+        status: 'active',
+        source: ['goods_first_seen'],
+      },
+    ]);
+
+    expect(report.queue.some((item) => item.kind === 'same_sku_group' && item.sameSkuGroupId === 'canon-r50-governance-mixed' && item.reasonCodes.includes('mixed_product_type'))).toBe(false);
+    expect(report.queue.some((item) => item.kind === 'same_sku_group' && item.sameSkuGroupId === 'split-classification-visible-gap' && item.reasonCodes.includes('group_classification_missing'))).toBe(true);
+  });
 });

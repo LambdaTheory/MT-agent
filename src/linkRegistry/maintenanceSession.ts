@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
-import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
+import { readdir, readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import type { FeishuCardPayload } from '../notify/feishuApp.js';
 import { createLinkRegistry } from './store.js';
 import {
@@ -12,6 +12,7 @@ import {
   loadLinkRegistryReminderState,
   saveLinkRegistryReminderState,
 } from './reminderState.js';
+import { mutateJsonFileSerialized } from './persistence.js';
 import type { LinkRegistryRefreshSummary } from './promptRefresh.js';
 import type { LinkRegistryEntry } from './types.js';
 
@@ -179,9 +180,12 @@ async function readOptionalJson<T>(path: string, fallback: T): Promise<T> {
   }
 }
 
-async function saveSession(path: string, session: LinkRegistryMaintenanceSession): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, `${JSON.stringify(session, null, 2)}\n`, 'utf8');
+async function mutateSession(path: string, fallback: LinkRegistryMaintenanceSession, mutator: (current: LinkRegistryMaintenanceSession) => LinkRegistryMaintenanceSession | Promise<LinkRegistryMaintenanceSession>): Promise<LinkRegistryMaintenanceSession> {
+  return mutateJsonFileSerialized<LinkRegistryMaintenanceSession>(path, fallback, mutator);
+}
+
+async function mutateOptionalSession(path: string, mutator: (current: LinkRegistryMaintenanceSession | null) => LinkRegistryMaintenanceSession | null): Promise<LinkRegistryMaintenanceSession | null> {
+  return mutateJsonFileSerialized<LinkRegistryMaintenanceSession | null>(path, null, mutator);
 }
 
 async function loadSession(outputDir: string, date: string): Promise<LinkRegistryMaintenanceSession | null> {
@@ -571,14 +575,14 @@ function overrideEntryPayload(input: {
 }
 
 async function writeOverrideEntry(overridesPath: string, payload: Record<string, unknown>): Promise<void> {
-  const existing = await readOptionalJson<LinkRegistryOverrideFile>(overridesPath, { version: 1 });
-  const entries = [...(existing.entries ?? [])];
-  const index = entries.findIndex((item) => item.internalProductId === payload.internalProductId);
-  if (index >= 0) entries[index] = { ...entries[index], ...payload };
-  else entries.push(payload);
-  entries.sort((left, right) => String(left.internalProductId ?? '').localeCompare(String(right.internalProductId ?? '')));
-  await mkdir(dirname(overridesPath), { recursive: true });
-  await writeFile(overridesPath, `${JSON.stringify({ ...existing, version: 1, entries }, null, 2)}\n`, 'utf8');
+  await mutateJsonFileSerialized<LinkRegistryOverrideFile>(overridesPath, { version: 1 }, (existing) => {
+    const entries = [...(existing.entries ?? [])];
+    const index = entries.findIndex((item) => item.internalProductId === payload.internalProductId);
+    if (index >= 0) entries[index] = { ...entries[index], ...payload };
+    else entries.push(payload);
+    entries.sort((left, right) => String(left.internalProductId ?? '').localeCompare(String(right.internalProductId ?? '')));
+    return { ...existing, version: 1, entries };
+  });
 }
 
 async function saveReminderStatus(
@@ -602,49 +606,61 @@ export async function openLinkRegistryMaintenancePrompt(
   if (queue.length === 0 && !input.promptSummary?.newLinkCount) return null;
 
   const signature = buildSessionSignature(queue);
-  const existing = await loadSession(outputDir, input.date);
-  if (existing?.signature === signature) {
-    if (!input.force) return null;
-    if (existing.status === 'reviewing' || existing.status === 'completed') return currentReviewResponse(existing);
-    existing.status = 'open';
-    existing.updatedAt = new Date().toISOString();
-    if (input.promptSummary) existing.promptSummary = input.promptSummary;
-    await saveSession(sessionPath(outputDir, input.date), existing);
-    await saveReminderStatus(outputDir, existing, existing.status);
-    return {
-      text: existing.queue.length > 0
-        ? `发现 ${existing.queue.length} 条待维护链接，请确认是否开始维护。`
-        : `本次新增 ${existing.promptSummary?.newLinkCount ?? 0} 条链接，已自动归档，无需人工维护。`,
-      card: buildPromptCard(existing),
-    };
-  }
-  if (!input.force && existing && (existing.status === 'open' || existing.status === 'reviewing')) return null;
-
   const reminderState = await loadLinkRegistryReminderState(outputDir, 'maintenance');
   if (!input.force && reminderState?.signature === signature) return null;
 
-  const now = new Date().toISOString();
-  const session: LinkRegistryMaintenanceSession = {
-    date: input.date,
-    createdAt: now,
-    updatedAt: now,
-    status: 'open',
-    signature,
-    queue,
-    categoryOptions: categoryOptions(input.registry),
-    productTypeOptions: productTypeOptions(input.registry),
-    reviewRecords: [],
-    overridesPath: input.overridesPath,
-    ...(input.promptSummary ? { promptSummary: input.promptSummary } : {}),
-  };
-  await saveSession(sessionPath(outputDir, input.date), session);
-  await saveReminderStatus(outputDir, session, session.status);
-  return {
-    text: queue.length > 0
-      ? `发现 ${queue.length} 条待维护链接，请确认是否开始维护。`
-      : `本次新增 ${input.promptSummary?.newLinkCount ?? 0} 条链接，已自动归档，无需人工维护。`,
-    card: buildPromptCard(session),
-  };
+  let response: LinkRegistryMaintenanceResponse | null = null;
+  let reminderSession: LinkRegistryMaintenanceSession | null = null;
+  await mutateOptionalSession(sessionPath(outputDir, input.date), (existing) => {
+    if (existing && (existing.status === 'reviewing' || existing.status === 'completed')) {
+      response = currentReviewResponse(existing);
+      return existing;
+    }
+    if (existing?.signature === signature) {
+      if (!input.force) return existing;
+      const updated: LinkRegistryMaintenanceSession = {
+        ...existing,
+        status: 'open',
+        updatedAt: new Date().toISOString(),
+        ...(input.promptSummary ? { promptSummary: input.promptSummary } : {}),
+      };
+      reminderSession = updated;
+      response = {
+        text: updated.queue.length > 0
+          ? `发现 ${updated.queue.length} 条待维护链接，请确认是否开始维护。`
+          : `本次新增 ${updated.promptSummary?.newLinkCount ?? 0} 条链接，已自动归档，无需人工维护。`,
+        card: buildPromptCard(updated),
+      };
+      return updated;
+    }
+    if (!input.force && existing && (existing.status === 'open' || existing.status === 'reviewing')) return existing;
+
+    const now = new Date().toISOString();
+    const session: LinkRegistryMaintenanceSession = {
+      date: input.date,
+      createdAt: now,
+      updatedAt: now,
+      status: 'open',
+      signature,
+      queue,
+      categoryOptions: categoryOptions(input.registry),
+      productTypeOptions: productTypeOptions(input.registry),
+      reviewRecords: [],
+      overridesPath: input.overridesPath,
+      ...(input.promptSummary ? { promptSummary: input.promptSummary } : {}),
+    };
+    reminderSession = session;
+    response = {
+      text: queue.length > 0
+        ? `发现 ${queue.length} 条待维护链接，请确认是否开始维护。`
+        : `本次新增 ${input.promptSummary?.newLinkCount ?? 0} 条链接，已自动归档，无需人工维护。`,
+      card: buildPromptCard(session),
+    };
+    return session;
+  });
+  const sessionForReminder = reminderSession as LinkRegistryMaintenanceSession | null;
+  if (sessionForReminder) await saveReminderStatus(outputDir, sessionForReminder, sessionForReminder.status);
+  return response;
 }
 
 export async function handleLinkRegistryMaintenanceCardAction(
@@ -656,57 +672,78 @@ export async function handleLinkRegistryMaintenanceCardAction(
   const { path, session } = resolved;
 
   if (input.action === 'start') {
-    session.status = 'reviewing';
-    session.updatedAt = new Date().toISOString();
-    await saveSession(path, session);
-    await saveReminderStatus(outputDir, session, session.status);
-    return currentReviewResponse(session);
+    const updated = await mutateSession(path, session, (current) => ({
+      ...current,
+      status: 'reviewing',
+      updatedAt: new Date().toISOString(),
+    }));
+    await saveReminderStatus(outputDir, updated, updated.status);
+    return currentReviewResponse(updated);
   }
 
   if (input.action === 'snooze') {
-    session.status = 'snoozed';
-    session.updatedAt = new Date().toISOString();
-    await saveSession(path, session);
-    await saveReminderStatus(outputDir, session, session.status);
+    const updated = await mutateSession(path, session, (current) => ({
+      ...current,
+      status: 'snoozed',
+      updatedAt: new Date().toISOString(),
+    }));
+    await saveReminderStatus(outputDir, updated, updated.status);
     return {
-      text: `链接维护已暂缓 ${session.date}`,
-      card: statusCard('链接维护已暂缓', `已暂缓本次链接维护提醒，日期 ${session.date}。`, 'grey'),
+      text: `链接维护已暂缓 ${updated.date}`,
+      card: statusCard('链接维护已暂缓', `已暂缓本次链接维护提醒，日期 ${updated.date}。`, 'grey'),
     };
   }
 
   if (input.action === 'ignore') {
-    session.status = 'ignored';
-    session.updatedAt = new Date().toISOString();
-    await saveSession(path, session);
-    await saveReminderStatus(outputDir, session, session.status);
+    const updated = await mutateSession(path, session, (current) => ({
+      ...current,
+      status: 'ignored',
+      updatedAt: new Date().toISOString(),
+    }));
+    await saveReminderStatus(outputDir, updated, updated.status);
     return {
-      text: `链接维护已忽略 ${session.date}`,
-      card: statusCard('链接维护本次忽略', `已忽略本次链接维护提醒，日期 ${session.date}。`, 'grey'),
+      text: `链接维护已忽略 ${updated.date}`,
+      card: statusCard('链接维护本次忽略', `已忽略本次链接维护提醒，日期 ${updated.date}。`, 'grey'),
     };
   }
 
-  const reviewIndex = input.reviewIndex && input.reviewIndex > 0 ? input.reviewIndex : nextQueueIndex(session);
-  const item = session.queue[reviewIndex - 1];
-  const internalProductId = input.internalProductId ?? item?.internalProductId;
-  if (!item || item.internalProductId !== internalProductId) {
-    return { text: '没有找到对应的链接维护条目，请从最新卡片继续。' };
-  }
+  let invalidResponse: LinkRegistryMaintenanceResponse | null = null;
+  const updated = await mutateSession(path, session, async (current) => {
+    const reviewIndex = input.reviewIndex && input.reviewIndex > 0 ? input.reviewIndex : nextQueueIndex(current);
+    const item = current.queue[reviewIndex - 1];
+    const internalProductId = input.internalProductId ?? item?.internalProductId;
+    if (!item || item.internalProductId !== internalProductId) {
+      invalidResponse = { text: '没有找到对应的链接维护条目，请从最新卡片继续。' };
+      return current;
+    }
+    if (current.reviewRecords.some((record) => record.internalProductId === item.internalProductId)) {
+      return current;
+    }
 
-  const decision = input.decision ?? 'accept_with_edit';
-  if (decision !== 'ignore') {
-    await writeOverrideEntry(session.overridesPath, overrideEntryPayload({ session, item, action: input }));
-  }
-  session.reviewRecords.push({
-    internalProductId: item.internalProductId,
-    decision,
-    ...(input.reviewerId ? { reviewerId: input.reviewerId } : {}),
-    submittedAt: new Date().toISOString(),
+    const decision = input.decision ?? 'accept_with_edit';
+    if (decision !== 'ignore') {
+      await writeOverrideEntry(current.overridesPath, overrideEntryPayload({ session: current, item, action: input }));
+    }
+    const nextSession: LinkRegistryMaintenanceSession = {
+      ...current,
+      reviewRecords: [
+        ...current.reviewRecords,
+        {
+          internalProductId: item.internalProductId,
+          decision,
+          ...(input.reviewerId ? { reviewerId: input.reviewerId } : {}),
+          submittedAt: new Date().toISOString(),
+        },
+      ],
+      status: 'reviewing',
+      updatedAt: new Date().toISOString(),
+    };
+    nextSession.status = nextQueueIndex(nextSession) > nextSession.queue.length ? 'completed' : 'reviewing';
+    return nextSession;
   });
-  session.status = nextQueueIndex(session) > session.queue.length ? 'completed' : 'reviewing';
-  session.updatedAt = new Date().toISOString();
-  await saveSession(path, session);
-  await saveReminderStatus(outputDir, session, session.status);
-  return currentReviewResponse(session);
+  if (invalidResponse) return invalidResponse;
+  await saveReminderStatus(outputDir, updated, updated.status);
+  return currentReviewResponse(updated);
 }
 
 export function formatReasonLabels(reasonCodes: LinkRegistryMaintenanceReasonCode[]): string[] {

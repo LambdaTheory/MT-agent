@@ -115,6 +115,10 @@ function confirmationKey(request: AgentToolConfirmRequest): string {
   return createHash('sha256').update(JSON.stringify(request)).digest('hex').slice(0, 24);
 }
 
+export function buildAgentToolConfirmValue(request: AgentToolConfirmRequest): { action: 'agent_tool_confirm'; request: AgentToolConfirmRequest; confirmationKey: string } {
+  return { action: 'agent_tool_confirm', request, confirmationKey: confirmationKey(request) };
+}
+
 function readConfirmationKey(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
@@ -147,7 +151,7 @@ export function buildAgentToolConfirmCard(request: AgentToolConfirmRequest, opti
   const key = confirmationKey(request);
   const confirmValue = options.requestRef
     ? { action: 'agent_tool_confirm', requestRef: options.requestRef, confirmationKey: key }
-    : { action: 'agent_tool_confirm', request, confirmationKey: key };
+    : buildAgentToolConfirmValue(request);
   const cancelValue = options.requestRef
     ? { action: 'agent_tool_cancel', requestRef: options.requestRef, confirmationKey: key }
     : { action: 'agent_tool_cancel', toolName: request.toolName, arguments: request.arguments, reason: request.reason, confirmationKey: key };

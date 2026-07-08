@@ -1,5 +1,6 @@
 import type { LinkRegistryAliasResolutionCandidate, LinkRegistryStore } from '../linkRegistry/store.js';
 import type { LinkRegistryEntry } from '../linkRegistry/types.js';
+import type { PeriodKey } from '../domain/types.js';
 import type { PublicTrafficDataReportContext, PublicTrafficProductDataRow } from '../publicTraffic/types.js';
 
 export type ProductRankingMatchMethod = 'internal_id' | 'same_sku_group' | 'alias';
@@ -17,9 +18,22 @@ export interface RankedProduct {
   sevenDayShippedOrders: number;
   sevenDayAmount: number;
   sevenDayPublicVisits: number;
+  sevenDayExposure: number;
   oneDayShippedOrders: number;
   oneDayAmount: number;
   oneDayPublicVisits: number;
+  oneDayExposure: number;
+  thirtyDayShippedOrders: number;
+  thirtyDayAmount: number;
+  thirtyDayPublicVisits: number;
+  thirtyDayExposure: number;
+}
+
+export type ProductRankingMetric = 'shippedOrders' | 'amount' | 'exposure';
+
+export interface ProductRankingOptions {
+  periodDays?: 1 | 7 | 30;
+  metric?: ProductRankingMetric;
 }
 
 export type ProductRankingResult =
@@ -107,6 +121,7 @@ function findRow(context: PublicTrafficDataReportContext, entry: LinkRegistryEnt
 function rankRow(entry: LinkRegistryEntry, row: PublicTrafficProductDataRow): RankedProduct {
   const seven = row.periods['7d'];
   const one = row.periods['1d'];
+  const thirty = row.periods['30d'];
   return {
     internalProductId: entry.internalProductId,
     platformProductId: row.platformProductId,
@@ -114,10 +129,36 @@ function rankRow(entry: LinkRegistryEntry, row: PublicTrafficProductDataRow): Ra
     sevenDayShippedOrders: seven.shippedOrders,
     sevenDayAmount: seven.amount,
     sevenDayPublicVisits: seven.publicVisits,
+    sevenDayExposure: seven.exposure,
     oneDayShippedOrders: one.shippedOrders,
     oneDayAmount: one.amount,
     oneDayPublicVisits: one.publicVisits,
+    oneDayExposure: one.exposure,
+    thirtyDayShippedOrders: thirty.shippedOrders,
+    thirtyDayAmount: thirty.amount,
+    thirtyDayPublicVisits: thirty.publicVisits,
+    thirtyDayExposure: thirty.exposure,
   };
+}
+
+function periodKey(days: 1 | 7 | 30): PeriodKey {
+  return `${days}d` as PeriodKey;
+}
+
+function rankingMetricValue(row: RankedProduct, periodDays: 1 | 7 | 30, metric: ProductRankingMetric): number {
+  if (periodDays === 30) {
+    if (metric === 'shippedOrders') return row.thirtyDayShippedOrders;
+    if (metric === 'amount') return row.thirtyDayAmount;
+    return row.thirtyDayExposure;
+  }
+  if (periodDays === 7) {
+    if (metric === 'shippedOrders') return row.sevenDayShippedOrders;
+    if (metric === 'amount') return row.sevenDayAmount;
+    return row.sevenDayExposure;
+  }
+  if (metric === 'shippedOrders') return row.oneDayShippedOrders;
+  if (metric === 'amount') return row.oneDayAmount;
+  return row.oneDayExposure;
 }
 
 function compareRankedProducts(left: RankedProduct, right: RankedProduct): number {
@@ -133,10 +174,21 @@ function compareRankedProducts(left: RankedProduct, right: RankedProduct): numbe
   );
 }
 
+function compareByExplicitMetric(left: RankedProduct, right: RankedProduct, options: Required<ProductRankingOptions>): number {
+  return rankingMetricValue(right, options.periodDays, options.metric) - rankingMetricValue(left, options.periodDays, options.metric) || compareRankedProducts(left, right);
+}
+
+function metricLabel(metric: ProductRankingMetric): string {
+  if (metric === 'shippedOrders') return '发货';
+  if (metric === 'amount') return '成交额';
+  return '曝光';
+}
+
 export function rankBestProductByRegistryQuery(
   context: PublicTrafficDataReportContext,
   registry: LinkRegistryStore,
   query: string,
+  options: ProductRankingOptions = {},
 ): ProductRankingResult {
   const resolved = resolveGroup(registry, query);
   if ('status' in resolved) return resolved;
@@ -157,8 +209,12 @@ export function rankBestProductByRegistryQuery(
     ranking.push(rankRow(entry, row));
   }
 
-  ranking.sort(compareRankedProducts);
+  ranking.sort(options.periodDays && options.metric ? (left, right) => compareByExplicitMetric(left, right, { periodDays: options.periodDays!, metric: options.metric! }) : compareRankedProducts);
   if (ranking.length === 0) return { status: 'no_metrics', query, sameSkuGroupId: resolved.sameSkuGroupId, excluded };
+
+  const rationale = options.periodDays && options.metric
+    ? `按 ${periodKey(options.periodDays)} ${metricLabel(options.metric)} 排序，并排除已下架或缺少数据的链接；并列时沿用默认多指标排序。`
+    : '按 7日发货、7日成交额、7日访问、1日发货、1日成交额、1日访问依次排序，并排除已下架或缺少数据的链接。';
 
   return {
     status: 'ranked',
@@ -168,7 +224,7 @@ export function rankBestProductByRegistryQuery(
     best: ranking[0],
     ranking,
     excluded,
-    rationale: '按 7日发货、7日成交额、7日访问、1日发货、1日成交额、1日访问依次排序，并排除已下架或缺少数据的链接。',
+    rationale,
     date: context.date,
   };
 }

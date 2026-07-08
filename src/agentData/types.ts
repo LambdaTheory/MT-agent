@@ -73,10 +73,12 @@ export interface AgentTaskItem {
   status: '待处理';
 }
 
+export type AgentRankingMetric = 'shippedOrders' | 'amount' | 'exposure';
+
 export type AgentIntent =
   | { type: 'overview' }
   | { type: 'product'; keyword: string }
-  | { type: 'best_product_by_same_sku'; query: string }
+  | { type: 'best_product_by_same_sku'; query: string; periodDays?: 1 | 7 | 30; metric?: AgentRankingMetric }
   | { type: 'tasks' }
   | { type: 'problem_products'; problemType: AgentProblemType }
   | { type: 'new_product_pool' }

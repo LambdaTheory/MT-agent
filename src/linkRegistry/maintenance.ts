@@ -9,7 +9,10 @@ export type LinkRegistryMaintenanceReasonCode =
   | 'platform_mapping_missing'
   | 'recent_new_link'
   | 'same_sku_group_sample_insufficient'
-  | 'override_risk';
+  | 'override_risk'
+  | 'mixed_product_type'
+  | 'promo_title_slug_leak'
+  | 'group_classification_missing';
 
 export type LinkRegistryMaintenancePriority = 'p0' | 'p1' | 'p2';
 
@@ -70,6 +73,9 @@ const REASON_LABELS: Record<LinkRegistryMaintenanceReasonCode, string> = {
   recent_new_link: '\u8fd17\u5929\u65b0\u94fe\u63a5',
   same_sku_group_sample_insufficient: '\u540c\u6b3e\u7ec4\u6837\u672c\u4e0d\u8db3',
   override_risk: '\u4eba\u5de5\u8986\u76d6\u98ce\u9669',
+  mixed_product_type: '\u7ec4\u5185\u6df7\u7c7b',
+  promo_title_slug_leak: '\u4fc3\u9500\u6807\u9898 slug \u6cc4\u6f0f',
+  group_classification_missing: '\u7f3a\u7ec4\u7ea7\u5206\u7c7b',
 };
 
 function ratio(ready: number, total: number): number {
@@ -267,14 +273,27 @@ export function buildLinkRegistryMaintenanceReport(
   const groupQueue = audit.sameSkuGroups
     .map<LinkRegistryMaintenanceQueueItem | null>((group) => {
       const visibleEntries = group.entries.filter((entry) => !isLinkRegistryMaintenanceIgnoredEntry(entry));
-      if (visibleEntries.length === 0 || visibleEntries.length >= MIN_SAME_SKU_GROUP_SAMPLE_SIZE) return null;
-      if (isNaturallySparseSameSkuGroup(group.sameSkuGroupId)) return null;
+      if (visibleEntries.length === 0) return null;
+      const governanceReasonCodes = buildLinkRegistryAudit(visibleEntries).sameSkuGroups
+        .find((visibleGroup) => visibleGroup.sameSkuGroupId === group.sameSkuGroupId)?.risks
+        .map((risk) => {
+          if (risk.type === 'mixed_product_type') return 'mixed_product_type';
+          if (risk.type === 'promo_title_slug_leak') return 'promo_title_slug_leak';
+          if (risk.type === 'group_classification_missing') return 'group_classification_missing';
+          return null;
+        })
+        .filter((reason): reason is Extract<LinkRegistryMaintenanceReasonCode, 'mixed_product_type' | 'promo_title_slug_leak' | 'group_classification_missing'> => reason !== null) ?? [];
+      const sampleReasonCodes = visibleEntries.length < MIN_SAME_SKU_GROUP_SAMPLE_SIZE && !isNaturallySparseSameSkuGroup(group.sameSkuGroupId)
+        ? ['same_sku_group_sample_insufficient' as const]
+        : [];
+      const reasonCodes = [...new Set([...governanceReasonCodes, ...sampleReasonCodes])];
+      if (reasonCodes.length === 0) return null;
       const updatedAt = visibleEntries.find((entry) => entry.updatedAt)?.updatedAt;
       return {
         kind: 'same_sku_group',
-        priority: 'p1',
-        reasonCodes: ['same_sku_group_sample_insufficient'],
-        reasonLabels: labelsFor(['same_sku_group_sample_insufficient']),
+        priority: governanceReasonCodes.length > 0 ? 'p0' : 'p1',
+        reasonCodes,
+        reasonLabels: labelsFor(reasonCodes),
         sameSkuGroupId: group.sameSkuGroupId,
         ...(updatedAt ? { updatedAt } : {}),
       };

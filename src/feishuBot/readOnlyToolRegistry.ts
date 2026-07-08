@@ -34,7 +34,16 @@ export type LlmBackedReadOnlyTool = ReadOnlyTool & { llm: ReadOnlyToolLlmMetadat
 
 const noArgumentsSchema = { type: 'object', additionalProperties: false };
 const productArgumentsSchema = { type: 'object', properties: { keyword: { type: 'string' } }, required: ['keyword'], additionalProperties: false };
-const productRankingArgumentsSchema = { type: 'object', properties: { query: { type: 'string' } }, required: ['query'], additionalProperties: false };
+const productRankingArgumentsSchema = {
+  type: 'object',
+  properties: {
+    query: { type: 'string' },
+    metric: { type: 'string', enum: ['shippedOrders', 'amount', 'exposure'] },
+    periodDays: { type: ['integer', 'string'], enum: [1, 7, 30, '1', '7', '30'] },
+  },
+  required: ['query'],
+  additionalProperties: false,
+};
 const problemProductsArgumentsSchema = {
   type: 'object',
   properties: { problemType: { enum: ['low_exposure', 'weak_conversion', 'high_potential', 'new_product_pool', 'recommended_action'] } },
@@ -49,6 +58,15 @@ function readStringArgument(argumentsRecord: Record<string, unknown>, key: strin
 
 function isAgentProblemType(value: unknown): value is AgentProblemType {
   return value === 'low_exposure' || value === 'weak_conversion' || value === 'high_potential' || value === 'new_product_pool' || value === 'recommended_action';
+}
+
+function readRankingMetric(value: unknown): 'shippedOrders' | 'amount' | 'exposure' | undefined {
+  return value === 'shippedOrders' || value === 'amount' || value === 'exposure' ? value : undefined;
+}
+
+function readRankingPeriodDays(value: unknown): 1 | 7 | 30 | undefined {
+  const numeric = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN;
+  return numeric === 1 || numeric === 7 || numeric === 30 ? numeric : undefined;
 }
 
 function formatTaskLines(items: Array<{ productId: string; suggestedAction: string; reason: string }>): string {
@@ -162,22 +180,24 @@ export const readOnlyTools: ReadOnlyTool[] = [
   },
   {
     name: 'best_product_by_same_sku',
-    description: '按链接维护档案解析商品/同款组，并返回公域数据表现最好的端内ID',
+    description: '按链接维护档案解析商品/同款组，并返回公域数据表现最好的端内ID；支持 periodDays=1/7/30 和 metric=shippedOrders/amount/exposure。',
     intentType: 'best_product_by_same_sku',
     llm: {
       name: 'rank_best_same_sku_product',
-      description: '查询某个商品或同款组中公域数据表现最好的端内ID。只适用于“数据最好的 X 是哪个端内ID”“表现最好的同款链接”等只读问题。',
+      description: '查询某个商品或同款组中公域数据表现最好的端内ID。支持 periodDays=1/7/30 和 metric=shippedOrders/amount/exposure；适用于“数据最好的 X 是哪个端内ID”“近30天金额最好的 r50 是哪条”“近30天曝光最好的 pocket3 是哪个id”等只读问题。',
       argumentsSchema: productRankingArgumentsSchema,
       toIntent: (argumentsRecord) => {
         const query = readStringArgument(argumentsRecord, 'query');
-        return query ? { type: 'best_product_by_same_sku', query } : undefined;
+        const periodDays = readRankingPeriodDays(argumentsRecord.periodDays);
+        const metric = readRankingMetric(argumentsRecord.metric);
+        return query ? { type: 'best_product_by_same_sku', query, ...(periodDays ? { periodDays } : {}), ...(metric ? { metric } : {}) } : undefined;
       },
     },
     async run(context, intent, options = {}) {
       if (intent.type !== 'best_product_by_same_sku') return { text: '暂无匹配商品。' };
       const registry = options.linkRegistryStore;
       if (!registry) return { text: '需要先读取链接维护档案，才能安全判断同款组里哪个端内ID数据最好。' };
-      const result = rankBestProductByRegistryQuery(context, registry, intent.query);
+      const result = rankBestProductByRegistryQuery(context, registry, intent.query, { periodDays: intent.periodDays, metric: intent.metric });
       return {
         text: formatRankingAnswer(result),
         metadata: {
@@ -191,6 +211,8 @@ export const readOnlyTools: ReadOnlyTool[] = [
                 ranking: result.ranking,
                 sameSkuGroupId: result.sameSkuGroupId,
                 date: result.date,
+                periodDays: intent.periodDays,
+                metric: intent.metric,
               }
             : {}),
           result,

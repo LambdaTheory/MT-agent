@@ -169,6 +169,10 @@ export interface AgentRemovedLinkContextItem {
 
 export interface PublicTrafficAgentData {
   removedLinks: AgentRemovedLinkContextItem[];
+  refreshHealth?: {
+    warnings: string[];
+    lifecycleSuppressed: boolean;
+  };
 }
 
 export interface PublicTrafficEmptySectionNotes {

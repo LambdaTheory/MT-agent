@@ -47,14 +47,16 @@ function activeFromSnapshot(current: GoodsSnapshotItem[]): Record<string, GoodsL
   return active;
 }
 
-export function updateGoodsLinkLifecycle(input: { currentDate: string; previous: GoodsLinkLifecycleState | null; current: GoodsSnapshotItem[]; retentionDays?: number }): { state: GoodsLinkLifecycleState; removedLinks: GoodsRemovedLinkItem[] } {
+export function updateGoodsLinkLifecycle(input: { currentDate: string; previous: GoodsLinkLifecycleState | null; current: GoodsSnapshotItem[]; retentionDays?: number; suppressNewRemovals?: boolean }): { state: GoodsLinkLifecycleState; removedLinks: GoodsRemovedLinkItem[] } {
   const retentionDays = input.retentionDays ?? 7;
-  const active = activeFromSnapshot(input.current);
+  const currentActive = activeFromSnapshot(input.current);
 
   if (!input.previous) {
-    const state = { active, removedLinks: [] };
+    const state = { active: currentActive, removedLinks: [] };
     return { state, removedLinks: [] };
   }
+
+  const active = input.suppressNewRemovals ? { ...input.previous.active, ...currentActive } : currentActive;
 
   const latestRemoved = new Map<string, GoodsRemovedLinkItem>();
   for (const item of input.previous.removedLinks) {
@@ -63,16 +65,18 @@ export function updateGoodsLinkLifecycle(input: { currentDate: string; previous:
     if (inRetentionWindow(item.removedDate, input.currentDate, retentionDays) && (!existing || item.removedDate > existing.removedDate)) latestRemoved.set(item.productId, item);
   }
 
-  for (const [productId, entry] of Object.entries(input.previous.active)) {
-    if (active[productId]) continue;
-    latestRemoved.set(productId, {
-      productId,
-      platformProductId: entry.platformProductId,
-      productName: entry.productName,
-      removedDate: input.currentDate,
-      reason: '商品总表缺失',
-      source: 'goods_snapshot_diff',
-    });
+  if (!input.suppressNewRemovals) {
+    for (const [productId, entry] of Object.entries(input.previous.active)) {
+      if (active[productId]) continue;
+      latestRemoved.set(productId, {
+        productId,
+        platformProductId: entry.platformProductId,
+        productName: entry.productName,
+        removedDate: input.currentDate,
+        reason: '商品总表缺失',
+        source: 'goods_snapshot_diff',
+      });
+    }
   }
 
   const removedLinks = [...latestRemoved.values()]
