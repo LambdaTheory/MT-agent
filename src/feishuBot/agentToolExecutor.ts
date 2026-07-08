@@ -1525,7 +1525,7 @@ async function refreshActivityPlanResponse(
       skipped.onlineDaysUnknown += 1;
       continue;
     }
-    if (onlineDays < REFRESH_ACTIVITY_MIN_ONLINE_DAYS) {
+    if (onlineDays < windowDays) {
       skipped.onlineLessThan30d += 1;
       continue;
     }
@@ -1579,7 +1579,7 @@ async function refreshActivityPlanResponse(
       '',
       ...(groupLines.length ? groupLines : ['没有找到符合条件的零创单 active 链接。']),
       '',
-      `跳过：非 active ${skipped.inactive} 条，无日报行 ${skipped.missingRow} 条，30日访问页缺失 ${skipped.missing30dDashboard} 条，上线不足 ${REFRESH_ACTIVITY_MIN_ONLINE_DAYS} 天 ${skipped.onlineLessThan30d} 条，上线天数未知 ${skipped.onlineDaysUnknown} 条。`,
+      `跳过：非 active ${skipped.inactive} 条，无日报行 ${skipped.missingRow} 条，30日访问页缺失 ${skipped.missing30dDashboard} 条，上线不足 ${windowDays} 天 ${skipped.onlineLessThan30d} 条，上线天数未知 ${skipped.onlineDaysUnknown} 条。`,
       delistOnlyExecution.request
         ? `计划已生成，请在策略卡选择执行策略（待下架 ${delistOnlyExecution.request.delistProductIds.length} 条：端内ID ${delistOnlyExecution.request.delistProductIds.join('、')}）。`
         : '未能生成执行计划；请先处理以下阻断项。',
