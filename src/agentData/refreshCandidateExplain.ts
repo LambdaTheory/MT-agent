@@ -10,6 +10,7 @@ export interface RefreshCandidateExplainInput {
   sameSkuGroupId?: string;
   zeroMetric: 'created_orders' | 'amount';
   date: string;
+  windowDays?: number;
 }
 
 export interface RefreshCandidateExplainResult {
@@ -69,8 +70,9 @@ function isZeroMetricMatch(row: PublicTrafficProductDataRow, zeroMetric: Refresh
   return zeroMetric === 'amount' ? thirty.amount === 0 : thirty.createdOrders === 0;
 }
 
-function zeroMetricLabel(zeroMetric: RefreshCandidateExplainInput['zeroMetric']): string {
-  return zeroMetric === 'amount' ? '近30天订单金额为0' : '近 30 天创单为 0';
+function zeroMetricLabel(zeroMetric: RefreshCandidateExplainInput['zeroMetric'], windowDays: number): string {
+  if (zeroMetric === 'amount') return `近${windowDays}天订单金额为0`;
+  return windowDays === REFRESH_ACTIVITY_MIN_ONLINE_DAYS ? '近 30 天创单为 0' : `近${windowDays}天创单为0`;
 }
 
 function resolveScopedEntries(registryEntries: LinkRegistryEntry[], input: RefreshCandidateExplainInput): { entries: LinkRegistryEntry[]; scopeLine: string; sameSkuGroupId?: string } {
@@ -111,12 +113,12 @@ function resolveScopedEntries(registryEntries: LinkRegistryEntry[], input: Refre
   return { entries: [], scopeLine: `筛选范围：${query}` };
 }
 
-function compactSkipSummary(skipped: RefreshCandidateExplainResult['skipped']): string {
+function compactSkipSummary(skipped: RefreshCandidateExplainResult['skipped'], windowDays: number): string {
   return [
     skipped.inactive ? `${skipped.inactive} 条非 active` : undefined,
     skipped.missingRow ? `${skipped.missingRow} 条无日报行` : undefined,
-    skipped.missing30dDashboard ? `${skipped.missing30dDashboard} 条 30日访问页缺失` : undefined,
-    skipped.onlineLessThan30d ? `${skipped.onlineLessThan30d} 条上线不足 ${REFRESH_ACTIVITY_MIN_ONLINE_DAYS} 天` : undefined,
+    skipped.missing30dDashboard ? `${skipped.missing30dDashboard} 条 ${windowDays}日访问页缺失` : undefined,
+    skipped.onlineLessThan30d ? `${skipped.onlineLessThan30d} 条上线不足 ${windowDays} 天` : undefined,
     skipped.onlineDaysUnknown ? `${skipped.onlineDaysUnknown} 条上线天数未知` : undefined,
   ].filter((item): item is string => Boolean(item)).join('、');
 }
@@ -127,6 +129,7 @@ export function explainRefreshCandidates(
   input: RefreshCandidateExplainInput,
 ): RefreshCandidateExplainResult {
   const scoped = resolveScopedEntries(registryEntries, input);
+  const windowDays = input.windowDays ?? REFRESH_ACTIVITY_MIN_ONLINE_DAYS;
   const skipped = { inactive: 0, missingRow: 0, missing30dDashboard: 0, onlineLessThan30d: 0, onlineDaysUnknown: 0 };
   const candidateProductIds: string[] = [];
   const missing30dDashboardProductIds: string[] = [];
@@ -154,7 +157,7 @@ export function explainRefreshCandidates(
       skipped.onlineDaysUnknown += 1;
       continue;
     }
-    if (onlineDays < REFRESH_ACTIVITY_MIN_ONLINE_DAYS) {
+    if (onlineDays < windowDays) {
       skipped.onlineLessThan30d += 1;
       continue;
     }
@@ -164,8 +167,8 @@ export function explainRefreshCandidates(
     }
   }
 
-  const metricLabel = zeroMetricLabel(input.zeroMetric);
-  const skippedSummary = compactSkipSummary(skipped);
+  const metricLabel = zeroMetricLabel(input.zeroMetric, windowDays);
+  const skippedSummary = compactSkipSummary(skipped, windowDays);
   return {
     scopeLine: scoped.scopeLine,
     ...(scoped.sameSkuGroupId ? { sameSkuGroupId: scoped.sameSkuGroupId } : {}),

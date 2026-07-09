@@ -1260,6 +1260,29 @@ function findRefreshActivityWindowAggregate(index: RefreshActivityWindowAggregat
     ?? (entry.platformProductId ? index.byPlatformProductId.get(entry.platformProductId) : undefined);
 }
 
+function findRefreshActivityWindowAggregateForRow(index: RefreshActivityWindowAggregateIndex, row: PublicTrafficProductDataRow): WindowProductAggregate | undefined {
+  const internalProductId = extractInternalProductId(row.displayProductId);
+  return (internalProductId ? index.byInternalProductId.get(internalProductId) : undefined)
+    ?? index.byPlatformProductId.get(row.platformProductId);
+}
+
+function contextWithRefreshActivityWindowMetrics(context: PublicTrafficDataReportContext, index: RefreshActivityWindowAggregateIndex, windowDays: number): PublicTrafficDataReportContext {
+  return {
+    ...context,
+    rows: context.rows.map((row) => {
+      const aggregate = findRefreshActivityWindowAggregateForRow(index, row);
+      if (aggregate) return rowWithRefreshActivityWindowMetric(row, aggregate, windowDays);
+      return {
+        ...row,
+        periods: {
+          ...row.periods,
+          '30d': { ...row.periods['30d'], hasDashboardData: false },
+        },
+      };
+    }),
+  };
+}
+
 function scopedRefreshActivityEntries(
   args: Record<string, unknown>,
   registryEntries: LinkRegistryEntry[],
@@ -1565,11 +1588,12 @@ async function refreshActivityPlanResponse(
   const zeroCandidateExplanation = candidates.length === 0
     ? [
       '0 候选解释：',
-      ...explainRefreshCandidates(registryContext.registry, report.context, {
+      ...explainRefreshCandidates(registryContext.registry, windowMetrics ? contextWithRefreshActivityWindowMetrics(report.context, windowMetrics, windowDays) : report.context, {
         ...(readString(args.query) ? { query: readString(args.query)! } : {}),
         ...(readString(args.sameSkuGroupId) ? { sameSkuGroupId: readString(args.sameSkuGroupId)! } : {}),
         zeroMetric,
         date: report.context.date,
+        windowDays,
       }).reasonSummary.map((line) => `- 策略说明：${line}`),
       `- 数据健康：${(await buildDataHealthReport(outputDir, report.context.date)).dataQualityNotes.join('；') || '无额外质量备注'}`,
     ]
