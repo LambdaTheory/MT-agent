@@ -7,6 +7,14 @@ describe('agent tool continuation metadata references', () => {
       agg: { productIds: ['648', '649'] },
     })).toEqual({ ok: true, value: { productIds: ['648', '649'] } });
 
+    expect(resolvePlannerArguments({ sourceProductId: '${resolve.productIds[0]}' }, {
+      resolve: { productIds: ['388'] },
+    })).toEqual({ ok: true, value: { sourceProductId: '388' } });
+
+    expect(resolvePlannerArguments({ sourceProductId: '${agg.items[0].internalProductId}' }, {
+      agg: { items: [{ internalProductId: '648' }] },
+    })).toEqual({ ok: true, value: { sourceProductId: '648' } });
+
     expect(resolvePlannerArguments({ productIds: '${explain.candidateProductIds}' }, {
       explain: { candidateProductIds: ['681'] },
     })).toEqual({ ok: true, value: { productIds: ['681'] } });

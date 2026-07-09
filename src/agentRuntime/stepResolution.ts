@@ -9,13 +9,26 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function readSegmentValue(current: unknown, part: string): unknown {
+  const indexed = /^(\w+)\[(\d+)\]$/.exec(part);
+  if (indexed) {
+    if (!isRecord(current) && !Array.isArray(current)) return undefined;
+    const container = (current as Record<string, unknown>)[indexed[1]];
+    if (!Array.isArray(container)) return undefined;
+    return container[Number(indexed[2])];
+  }
+
+  if (!isRecord(current) && !Array.isArray(current)) return undefined;
+  return (current as Record<string, unknown>)[part];
+}
+
 function readPath(root: unknown, path: string): unknown {
   if (!path.trim()) return undefined;
   let current: unknown = root;
   for (const part of path.split('.')) {
     if (!part) return undefined;
-    if (!isRecord(current) && !Array.isArray(current)) return undefined;
-    current = (current as Record<string, unknown>)[part];
+    current = readSegmentValue(current, part);
+    if (current === undefined) return undefined;
   }
   return current;
 }
