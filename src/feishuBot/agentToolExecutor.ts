@@ -1287,6 +1287,8 @@ function buildRefreshActivityNewLinkItems(
   context: PublicTrafficDataReportContext,
   registryEntries: LinkRegistryEntry[],
   delistProductIds: Set<string>,
+  windowMetrics?: RefreshActivityWindowAggregateIndex,
+  windowDays = REFRESH_ACTIVITY_DEFAULT_WINDOW_DAYS,
 ): { items: RefreshActivityNewLinkItem[]; blockers: string[]; skippedGroups: string[]; skippedBlockers: string[] } {
   const items: RefreshActivityNewLinkItem[] = [];
   const blockers: string[] = [];
@@ -1308,7 +1310,11 @@ function buildRefreshActivityNewLinkItems(
         && !delistProductIds.has(entry.internalProductId))
       .map((entry) => {
         const row = findReportRowForEntry(context, entry);
-        return row ? { entry, row, score: refreshActivitySourceScore(row) } : null;
+        if (!row) return null;
+        const aggregate = windowMetrics ? findRefreshActivityWindowAggregate(windowMetrics, entry) : undefined;
+        if (windowMetrics && !aggregate) return null;
+        const scoreRow = aggregate ? rowWithRefreshActivityWindowMetric(row, aggregate, windowDays) : row;
+        return { entry, row: scoreRow, score: refreshActivitySourceScore(scoreRow) };
       })
       .filter((candidate): candidate is { entry: LinkRegistryEntry; row: PublicTrafficProductDataRow; score: number } => Boolean(candidate && candidate.score > 0))
       .sort((left, right) => right.score - left.score || Number(left.entry.internalProductId) - Number(right.entry.internalProductId))[0];
@@ -1344,6 +1350,8 @@ function buildRefreshActivityExecuteRequest(
   context: PublicTrafficDataReportContext,
   registryEntries: LinkRegistryEntry[],
   strategy: RefreshActivityExecutionStrategy,
+  windowMetrics?: RefreshActivityWindowAggregateIndex,
+  windowDays = REFRESH_ACTIVITY_DEFAULT_WINDOW_DAYS,
 ): { request?: RefreshActivityExecuteRequest; blockers: string[]; skippedGroups: string[]; skippedBlockers: string[] } {
   const delistProductIds = groups.flatMap((group) => group.items.map((item) => item.entry.internalProductId));
   const blockers: string[] = [];
@@ -1358,7 +1366,7 @@ function buildRefreshActivityExecuteRequest(
     return { request: { date, delistProductIds, newLinkItems: [], strategy }, blockers, skippedGroups: [], skippedBlockers: [] };
   }
 
-  const newLinks = buildRefreshActivityNewLinkItems(groups, context, registryEntries, new Set(delistProductIds));
+  const newLinks = buildRefreshActivityNewLinkItems(groups, context, registryEntries, new Set(delistProductIds), windowMetrics, windowDays);
   blockers.push(...newLinks.blockers);
   if (blockers.length > 0) return { blockers, skippedGroups: newLinks.skippedGroups, skippedBlockers: newLinks.skippedBlockers };
   const executableGroupIds = new Set(newLinks.items.map((item) => item.sameSkuGroupId).filter((value): value is string => Boolean(value)));
@@ -1573,8 +1581,8 @@ async function refreshActivityPlanResponse(
       || Number(left.entry.internalProductId) - Number(right.entry.internalProductId))
     .slice(0, maxCandidates);
   const shownGroups = groupRefreshActivityCandidates(shownCandidates);
-  const delistOnlyExecution = buildRefreshActivityExecuteRequest(report.context.date, shownGroups, report.context, registryContext.registry, 'delist_only');
-  const refillExecution = buildRefreshActivityExecuteRequest(report.context.date, shownGroups, report.context, registryContext.registry, 'delist_and_refill');
+  const delistOnlyExecution = buildRefreshActivityExecuteRequest(report.context.date, shownGroups, report.context, registryContext.registry, 'delist_only', windowMetrics ?? undefined, windowDays);
+  const refillExecution = buildRefreshActivityExecuteRequest(report.context.date, shownGroups, report.context, registryContext.registry, 'delist_and_refill', windowMetrics ?? undefined, windowDays);
   const groupLines = shownGroups.slice(0, 12).map((group, index) => {
     const ids = group.items.map((item) => item.entry.internalProductId).join('、');
     const newLinkItem = refillExecution.request?.newLinkItems.find((item) => item.sameSkuGroupId === group.sameSkuGroupId);

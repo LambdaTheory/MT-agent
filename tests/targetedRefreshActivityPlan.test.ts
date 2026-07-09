@@ -21,7 +21,7 @@ const metric: PublicTrafficPeriodMetrics = {
   hasDashboardData: true,
 };
 
-async function writeTargetedRefreshFixtures(options: { includeWindowOnlineCandidate?: boolean; includeWindowCreatedOrdersCandidate?: boolean; dirtyWindowDashboardCandidate?: boolean; includePlatformFallbackCandidate?: boolean } = {}) {
+async function writeTargetedRefreshFixtures(options: { includeWindowOnlineCandidate?: boolean; includeWindowCreatedOrdersCandidate?: boolean; dirtyWindowDashboardCandidate?: boolean; includePlatformFallbackCandidate?: boolean; preferWindowSourceCandidate?: boolean } = {}) {
   const rootDir = await mkdtemp(join(tmpdir(), 'mt-agent-targeted-refresh-'));
   const outputDir = join(rootDir, 'output');
   const configDir = join(rootDir, 'config');
@@ -39,6 +39,16 @@ async function writeTargetedRefreshFixtures(options: { includeWindowOnlineCandid
     const dirtyDashboardMetric = date === '2026-06-11'
       ? { ...metric, exposure: 3, publicVisits: 1, dashboardVisits: Number.NaN, createdOrders: 0, amount: 0, hasDashboardData: true }
       : { ...metric, exposure: 3, publicVisits: 1, dashboardVisits: 1, createdOrders: 0, amount: 0, hasDashboardData: true };
+    const source680WindowMetric = options.preferWindowSourceCandidate
+      ? date === '2026-06-11'
+        ? { ...metric, exposure: 500, publicVisits: 20, dashboardVisits: 20, createdOrders: 1, amount: 1000, shippedOrders: 5, hasDashboardData: true }
+        : { ...metric, exposure: 1, publicVisits: 0, dashboardVisits: 1, createdOrders: 1, amount: 0, shippedOrders: 0, hasDashboardData: true }
+      : { ...metric, exposure: 10, publicVisits: 2, dashboardVisits: 2, createdOrders: 1, amount: 10, hasDashboardData: true };
+    const source681WindowMetric = options.preferWindowSourceCandidate
+      ? date === '2026-06-11'
+        ? { ...metric, exposure: 2, publicVisits: 1, dashboardVisits: 1, createdOrders: 1, amount: 1, shippedOrders: 0, hasDashboardData: true }
+        : { ...metric, exposure: 100, publicVisits: 20, dashboardVisits: 20, createdOrders: 1, amount: 200, shippedOrders: 5, hasDashboardData: true }
+      : { ...metric, exposure: 2, publicVisits: 1, dashboardVisits: 1, createdOrders: 1, amount: 1, hasDashboardData: true };
     await mkdir(join(outputDir, date), { recursive: true });
     await writeFile(join(outputDir, date, `公域数据上下文_${date}.json`), JSON.stringify({
       date,
@@ -46,8 +56,8 @@ async function writeTargetedRefreshFixtures(options: { includeWindowOnlineCandid
       conclusions: [],
       dataQualityNotes: date === '2026-06-11' ? ['15日窗口测试缺失 1 条'] : [],
       rows: [
-        { productName: 'R50 健康源', platformProductId: 'p680', displayProductId: '端内ID 680', custodyDays: 50, periods: { '1d': { ...metric, exposure: 10, publicVisits: 2, dashboardVisits: 2, createdOrders: 1, amount: 10, hasDashboardData: true }, '7d': metric, '30d': active30d } },
-        { productName: 'R50 金额为0', platformProductId: 'p681', displayProductId: '端内ID 681', custodyDays: 45, periods: { '1d': { ...metric, exposure: 2, publicVisits: 1, dashboardVisits: 1, createdOrders: 1, amount: 1, hasDashboardData: true }, '7d': metric, '30d': zeroAmount30d } },
+        { productName: 'R50 健康源', platformProductId: 'p680', displayProductId: '端内ID 680', custodyDays: 50, periods: { '1d': source680WindowMetric, '7d': metric, '30d': active30d } },
+        { productName: 'R50 金额为0', platformProductId: 'p681', displayProductId: '端内ID 681', custodyDays: 45, periods: { '1d': source681WindowMetric, '7d': metric, '30d': zeroAmount30d } },
         { productName: 'R50 创单为0', platformProductId: 'p682', displayProductId: '端内ID 682', custodyDays: 45, periods: { '1d': options.dirtyWindowDashboardCandidate ? dirtyDashboardMetric : { ...metric, exposure: 3, publicVisits: 1, dashboardVisits: 1, createdOrders: 0, amount: 0, hasDashboardData: true }, '7d': metric, '30d': zeroCreatedOrders30d } },
         ...(options.includeWindowOnlineCandidate ? [{ productName: 'R50 上线20天窗口候选', platformProductId: 'p683', displayProductId: '端内ID 683', custodyDays: 20, periods: { '1d': { ...metric, exposure: 4, publicVisits: 1, dashboardVisits: 1, createdOrders: 0, amount: 0, hasDashboardData: true }, '7d': metric, '30d': zeroCreatedOrders30d } }] : []),
         ...(options.includeWindowCreatedOrdersCandidate ? [{ productName: 'R50 窗口创单为0', platformProductId: 'p684', displayProductId: '端内ID 684', custodyDays: 45, periods: { '1d': { ...metric, exposure: 5, publicVisits: 1, dashboardVisits: 1, createdOrders: 0, amount: 10, hasDashboardData: true }, '7d': metric, '30d': active30d } }] : []),
@@ -237,6 +247,19 @@ describe('targeted refresh activity plan', () => {
     expect(response.text).toContain('待下架候选：1 条');
     expect(response.text).toContain('15日访问页缺失 0 条');
     expect(response.metadata?.candidateCount).toBe(1);
+  });
+
+  it('orders refill sources by the selected window metrics', async () => {
+    const { outputDir, registryPaths } = await writeTargetedRefreshFixtures({ preferWindowSourceCandidate: true });
+
+    const response = await executeAgentToolRequest(
+      { toolName: 'operations.refreshActivityPlan', arguments: { query: 'r50', zeroMetric: 'created_orders', windowDays: 15 }, reason: '帮我下架r50近15天创单为0的链接并补链' },
+      outputDir,
+      { closedOrderRegistryPaths: registryPaths },
+    );
+
+    expect(response.text).toContain('端内ID 682；补链源 681 R50 金额为0');
+    expect(response.metadata?.strategyRequests).toMatchObject({ delistAndRefill: { newLinkItems: [{ sourceProductId: '681' }] } });
   });
 
   it('explains zero candidates with data health and strategy context', async () => {
