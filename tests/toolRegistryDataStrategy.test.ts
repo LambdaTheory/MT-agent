@@ -149,6 +149,8 @@ describe('data and strategy capability tools', () => {
         windowDays: expect.any(Object),
       },
     });
+    expect(findAgentTool('operations.refreshActivityPlan')?.description).toContain('windowDays');
+    expect(findAgentTool('operations.refreshActivityPlan')?.description).not.toContain('近30天零创单');
   });
 
   it('dispatches window aggregation and data health tools', async () => {

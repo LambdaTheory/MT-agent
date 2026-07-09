@@ -214,6 +214,10 @@ describe('targeted refresh activity plan', () => {
 
     expect(response.text).toContain('0 候选解释：');
     expect(response.text).toContain('数据健康：15日窗口测试缺失 1 条');
+    expect(response.text).toContain('没有找到符合条件的近15天订单金额为0 active 链接。');
+    expect(response.text).toContain('15日访问页缺失');
+    expect(response.text).not.toContain('30日访问页缺失');
+    expect(response.text).not.toContain('零创单 active 链接');
     expect(response.metadata?.candidateCount).toBe(0);
   });
 });

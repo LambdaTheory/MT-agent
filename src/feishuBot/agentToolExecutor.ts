@@ -1203,7 +1203,7 @@ function readRefreshActivityZeroMetric(value: unknown): RefreshActivityZeroMetri
 }
 
 function refreshActivityZeroMetricLabel(zeroMetric: RefreshActivityZeroMetric, windowDays = REFRESH_ACTIVITY_DEFAULT_WINDOW_DAYS): string {
-  return zeroMetric === 'amount' ? `近${windowDays}天订单金额为0` : `近 ${windowDays} 天创单为 0`;
+  return zeroMetric === 'amount' ? `近${windowDays}天订单金额为0` : `近${windowDays}天创单为0`;
 }
 
 function isRefreshActivityZeroMetricMatch(thirty: PublicTrafficProductDataRow['periods']['30d'], zeroMetric: RefreshActivityZeroMetric): boolean {
@@ -1589,10 +1589,10 @@ async function refreshActivityPlanResponse(
       `待下架候选：${candidates.length} 条；涉及种类/同款组 ${groups.length} 个。`,
       `本次展示：${shownCandidates.length}/${candidates.length} 条。`,
       '',
-      ...(groupLines.length ? groupLines : ['没有找到符合条件的零创单 active 链接。']),
+      ...(groupLines.length ? groupLines : [`没有找到符合条件的${refreshActivityZeroMetricLabel(zeroMetric, windowDays)} active 链接。`]),
       ...(zeroCandidateExplanation.length ? ['', ...zeroCandidateExplanation] : []),
       '',
-      `跳过：非 active ${skipped.inactive} 条，无日报行 ${skipped.missingRow} 条，30日访问页缺失 ${skipped.missing30dDashboard} 条，上线不足 ${windowDays} 天 ${skipped.onlineLessThan30d} 条，上线天数未知 ${skipped.onlineDaysUnknown} 条。`,
+      `跳过：非 active ${skipped.inactive} 条，无日报行 ${skipped.missingRow} 条，${windowDays}日访问页缺失 ${skipped.missing30dDashboard} 条，上线不足 ${windowDays} 天 ${skipped.onlineLessThan30d} 条，上线天数未知 ${skipped.onlineDaysUnknown} 条。`,
       delistOnlyExecution.request
         ? `计划已生成，请在策略卡选择执行策略（待下架 ${delistOnlyExecution.request.delistProductIds.length} 条：端内ID ${delistOnlyExecution.request.delistProductIds.join('、')}）。`
         : '未能生成执行计划；请先处理以下阻断项。',
