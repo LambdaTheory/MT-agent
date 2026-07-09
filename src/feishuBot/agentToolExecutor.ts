@@ -2126,7 +2126,10 @@ export async function executeAgentToolRequest(
       const windowDays = request.arguments.windowDays === undefined ? undefined : readRefreshActivityWindowDays(request.arguments.windowDays);
       const query = readString(request.arguments.query) ?? undefined;
       const sameSkuGroupId = readString(request.arguments.sameSkuGroupId) ?? undefined;
-      const result = explainRefreshCandidates(registryContext.registry, report.context, { ...(query ? { query } : {}), ...(sameSkuGroupId ? { sameSkuGroupId } : {}), zeroMetric, date: report.context.date, ...(windowDays ? { windowDays } : {}) });
+      const explainContext = windowDays && windowDays !== REFRESH_ACTIVITY_DEFAULT_WINDOW_DAYS
+        ? contextWithRefreshActivityWindowMetrics(report.context, buildRefreshActivityWindowAggregateIndex(await aggregateWindowProducts({ outputDir, endDate: report.context.date, windowDays })), windowDays)
+        : report.context;
+      const result = explainRefreshCandidates(registryContext.registry, explainContext, { ...(query ? { query } : {}), ...(sameSkuGroupId ? { sameSkuGroupId } : {}), zeroMetric, date: report.context.date, ...(windowDays ? { windowDays } : {}) });
       return formatRefreshCandidateExplainResponse(result, zeroMetric, { ...(query ? { query } : {}), ...(sameSkuGroupId ? { sameSkuGroupId } : {}) });
     }
     case 'publicTraffic.runReport':

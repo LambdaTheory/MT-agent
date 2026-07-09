@@ -46,7 +46,7 @@ async function writeDay(outputDir: string, date: string, exposure: number, amoun
         platformProductId: 'p681',
         displayProductId: '端内ID 681',
         custodyDays: 40,
-        periods: { '1d': metric, '7d': metric, '30d': { ...metric, createdOrders: 1, amount: 0 } },
+        periods: { '1d': { ...metric, amount: 50 }, '7d': metric, '30d': { ...metric, createdOrders: 1, amount: 0 } },
       },
     ],
     lowExposure: [],
@@ -185,14 +185,14 @@ describe('data and strategy capability tools', () => {
     });
 
     const response = await executeAgentToolRequest(
-      { toolName: 'strategy.refreshCandidateExplain', arguments: { date: '2026-07-02', query: 'r50', zeroMetric: 'amount', windowDays: 15 }, reason: '测试15天候选解释' },
+      { toolName: 'strategy.refreshCandidateExplain', arguments: { date: '2026-07-02', query: 'r50', zeroMetric: 'amount', windowDays: 2 }, reason: '测试2天候选解释' },
       outputDir,
       { closedOrderRegistryPaths: registryPaths },
     );
 
-    expect(response.text).toContain('找到 1 条符合 近15天订单金额为0 的 active 链接。');
+    expect(response.text).toContain('没有找到符合 近2天订单金额为0 的 active 链接。');
     expect(response.text).not.toContain('近30天');
     expect(response.text).not.toContain('近 30 天');
-    expect(response.metadata).toMatchObject({ toolName: 'strategy.refreshCandidateExplain', windowDays: 15, candidateCount: 1, candidateProductIds: ['681'] });
+    expect(response.metadata).toMatchObject({ toolName: 'strategy.refreshCandidateExplain', windowDays: 2, candidateCount: 0, candidateProductIds: [] });
   });
 });
