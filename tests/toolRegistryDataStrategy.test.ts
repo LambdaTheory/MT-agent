@@ -195,4 +195,19 @@ describe('data and strategy capability tools', () => {
     expect(response.text).not.toContain('近 30 天');
     expect(response.metadata).toMatchObject({ toolName: 'strategy.refreshCandidateExplain', windowDays: 2, candidateCount: 0, candidateProductIds: [] });
   });
+
+  it('normalizes string windowDays before refresh-candidate window aggregation', async () => {
+    const { outputDir, registryPaths } = await writeFixtures();
+
+    const response = await executeAgentToolRequest(
+      { toolName: 'strategy.refreshCandidateExplain', arguments: { date: '2026-07-02', query: 'r50', zeroMetric: 'amount', windowDays: '2' }, reason: '测试字符串窗口候选解释' },
+      outputDir,
+      { closedOrderRegistryPaths: registryPaths },
+    );
+
+    expect(response.text).toContain('没有找到符合 近2天订单金额为0 的 active 链接。');
+    expect(response.text).not.toContain('近30天');
+    expect(response.text).not.toContain('近 30 天');
+    expect(response.metadata).toMatchObject({ toolName: 'strategy.refreshCandidateExplain', windowDays: 2, candidateCount: 0, candidateProductIds: [] });
+  });
 });
