@@ -21,7 +21,7 @@ const metric: PublicTrafficPeriodMetrics = {
   hasDashboardData: true,
 };
 
-async function writeTargetedRefreshFixtures(options: { includeWindowOnlineCandidate?: boolean; includeWindowCreatedOrdersCandidate?: boolean } = {}) {
+async function writeTargetedRefreshFixtures(options: { includeWindowOnlineCandidate?: boolean; includeWindowCreatedOrdersCandidate?: boolean; dirtyWindowDashboardCandidate?: boolean } = {}) {
   const rootDir = await mkdtemp(join(tmpdir(), 'mt-agent-targeted-refresh-'));
   const outputDir = join(rootDir, 'output');
   const configDir = join(rootDir, 'config');
@@ -36,6 +36,9 @@ async function writeTargetedRefreshFixtures(options: { includeWindowOnlineCandid
   const globalZero30d = { ...metric, exposure: 500, publicVisits: 50, dashboardVisits: 40, createdOrders: 0, amount: 0, hasDashboardData: true };
 
   async function writeWindowDay(date: string) {
+    const dirtyDashboardMetric = date === '2026-06-11'
+      ? { ...metric, exposure: 3, publicVisits: 1, dashboardVisits: Number.NaN, createdOrders: 0, amount: 0, hasDashboardData: true }
+      : { ...metric, exposure: 3, publicVisits: 1, dashboardVisits: 1, createdOrders: 0, amount: 0, hasDashboardData: true };
     await mkdir(join(outputDir, date), { recursive: true });
     await writeFile(join(outputDir, date, `公域数据上下文_${date}.json`), JSON.stringify({
       date,
@@ -45,7 +48,7 @@ async function writeTargetedRefreshFixtures(options: { includeWindowOnlineCandid
       rows: [
         { productName: 'R50 健康源', platformProductId: 'p680', displayProductId: '端内ID 680', custodyDays: 50, periods: { '1d': { ...metric, exposure: 10, publicVisits: 2, dashboardVisits: 2, createdOrders: 1, amount: 10, hasDashboardData: true }, '7d': metric, '30d': active30d } },
         { productName: 'R50 金额为0', platformProductId: 'p681', displayProductId: '端内ID 681', custodyDays: 45, periods: { '1d': { ...metric, exposure: 2, publicVisits: 1, dashboardVisits: 1, createdOrders: 1, amount: 1, hasDashboardData: true }, '7d': metric, '30d': zeroAmount30d } },
-        { productName: 'R50 创单为0', platformProductId: 'p682', displayProductId: '端内ID 682', custodyDays: 45, periods: { '1d': { ...metric, exposure: 3, publicVisits: 1, dashboardVisits: 1, createdOrders: 0, amount: 0, hasDashboardData: true }, '7d': metric, '30d': zeroCreatedOrders30d } },
+        { productName: 'R50 创单为0', platformProductId: 'p682', displayProductId: '端内ID 682', custodyDays: 45, periods: { '1d': options.dirtyWindowDashboardCandidate ? dirtyDashboardMetric : { ...metric, exposure: 3, publicVisits: 1, dashboardVisits: 1, createdOrders: 0, amount: 0, hasDashboardData: true }, '7d': metric, '30d': zeroCreatedOrders30d } },
         ...(options.includeWindowOnlineCandidate ? [{ productName: 'R50 上线20天窗口候选', platformProductId: 'p683', displayProductId: '端内ID 683', custodyDays: 20, periods: { '1d': { ...metric, exposure: 4, publicVisits: 1, dashboardVisits: 1, createdOrders: 0, amount: 0, hasDashboardData: true }, '7d': metric, '30d': zeroCreatedOrders30d } }] : []),
         ...(options.includeWindowCreatedOrdersCandidate ? [{ productName: 'R50 窗口创单为0', platformProductId: 'p684', displayProductId: '端内ID 684', custodyDays: 45, periods: { '1d': { ...metric, exposure: 5, publicVisits: 1, dashboardVisits: 1, createdOrders: 0, amount: 10, hasDashboardData: true }, '7d': metric, '30d': active30d } }] : []),
       ],
@@ -201,6 +204,21 @@ describe('targeted refresh activity plan', () => {
     expect(response.text).toContain('端内ID 682、684');
     expect(response.text).not.toContain('端内ID 681');
     expect(response.metadata?.candidateCount).toBe(2);
+  });
+
+  it('does not treat a full row window as dashboard-covered when a daily dashboard metric is invalid', async () => {
+    const { outputDir, registryPaths } = await writeTargetedRefreshFixtures({ dirtyWindowDashboardCandidate: true });
+
+    const response = await executeAgentToolRequest(
+      { toolName: 'operations.refreshActivityPlan', arguments: { query: 'r50', zeroMetric: 'created_orders', windowDays: 15 }, reason: '帮我下架r50近15天创单为0的链接' },
+      outputDir,
+      { closedOrderRegistryPaths: registryPaths },
+    );
+
+    expect(response.text).not.toContain('端内ID 682');
+    expect(response.text).toContain('15日访问页缺失 1 条');
+    expect(response.metadata?.candidateCount).toBe(0);
+    expect(response.metadata?.skipped).toMatchObject({ missing30dDashboard: 1 });
   });
 
   it('explains zero candidates with data health and strategy context', async () => {

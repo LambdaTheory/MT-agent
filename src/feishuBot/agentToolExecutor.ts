@@ -1212,6 +1212,7 @@ function isRefreshActivityZeroMetricMatch(thirty: PublicTrafficProductDataRow['p
 
 function refreshActivityMetricFromWindowAggregate(aggregate: WindowProductAggregate, windowDays: number): PublicTrafficPeriodMetrics {
   const hasFullWindow = aggregate.daysCovered === windowDays;
+  const hasFullDashboardWindow = aggregate.dashboardDaysCovered === windowDays;
   return {
     exposure: aggregate.exposure,
     publicVisits: aggregate.publicVisits,
@@ -1225,7 +1226,7 @@ function refreshActivityMetricFromWindowAggregate(aggregate: WindowProductAggreg
     visitCreatedOrderRate: aggregate.publicVisits > 0 ? aggregate.createdOrders / aggregate.publicVisits : 0,
     visitShipmentRate: aggregate.publicVisits > 0 ? aggregate.shippedOrders / aggregate.publicVisits : 0,
     hasExposureData: hasFullWindow,
-    hasDashboardData: hasFullWindow,
+    hasDashboardData: hasFullDashboardWindow,
   };
 }
 
