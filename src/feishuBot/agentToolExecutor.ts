@@ -1196,6 +1196,16 @@ function refreshActivitySourceScore(row: PublicTrafficProductDataRow): number {
   );
 }
 
+function refreshActivityWindowSourceScore(metric: PublicTrafficPeriodMetrics): number {
+  return (
+    metric.shippedOrders * 1000
+    + metric.amount * 2
+    + metric.publicVisits * 5
+    + metric.createdOrders * 50
+    + Math.min(metric.exposure, 5000) * 0.1
+  );
+}
+
 function readRefreshActivityZeroMetric(value: unknown): RefreshActivityZeroMetric {
   if (value === undefined) return 'created_orders';
   if (value === 'created_orders' || value === 'amount') return value;
@@ -1337,7 +1347,8 @@ function buildRefreshActivityNewLinkItems(
         const aggregate = windowMetrics ? findRefreshActivityWindowAggregate(windowMetrics, entry) : undefined;
         if (windowMetrics && !aggregate) return null;
         const scoreRow = aggregate ? rowWithRefreshActivityWindowMetric(row, aggregate, windowDays) : row;
-        return { entry, row: scoreRow, score: refreshActivitySourceScore(scoreRow) };
+        const score = aggregate ? refreshActivityWindowSourceScore(scoreRow.periods['30d']) : refreshActivitySourceScore(scoreRow);
+        return { entry, row: scoreRow, score };
       })
       .filter((candidate): candidate is { entry: LinkRegistryEntry; row: PublicTrafficProductDataRow; score: number } => Boolean(candidate && candidate.score > 0))
       .sort((left, right) => right.score - left.score || Number(left.entry.internalProductId) - Number(right.entry.internalProductId))[0];
