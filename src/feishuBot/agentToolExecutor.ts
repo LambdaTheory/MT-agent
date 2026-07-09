@@ -1240,6 +1240,26 @@ function rowWithRefreshActivityWindowMetric(row: PublicTrafficProductDataRow, ag
   };
 }
 
+interface RefreshActivityWindowAggregateIndex {
+  byInternalProductId: Map<string, WindowProductAggregate>;
+  byPlatformProductId: Map<string, WindowProductAggregate>;
+}
+
+function buildRefreshActivityWindowAggregateIndex(aggregates: WindowProductAggregate[]): RefreshActivityWindowAggregateIndex {
+  const byInternalProductId = new Map<string, WindowProductAggregate>();
+  const byPlatformProductId = new Map<string, WindowProductAggregate>();
+  for (const aggregate of aggregates) {
+    byInternalProductId.set(aggregate.internalProductId, aggregate);
+    if (aggregate.platformProductId) byPlatformProductId.set(aggregate.platformProductId, aggregate);
+  }
+  return { byInternalProductId, byPlatformProductId };
+}
+
+function findRefreshActivityWindowAggregate(index: RefreshActivityWindowAggregateIndex, entry: LinkRegistryEntry): WindowProductAggregate | undefined {
+  return index.byInternalProductId.get(entry.internalProductId)
+    ?? (entry.platformProductId ? index.byPlatformProductId.get(entry.platformProductId) : undefined);
+}
+
 function scopedRefreshActivityEntries(
   args: Record<string, unknown>,
   registryEntries: LinkRegistryEntry[],
@@ -1494,9 +1514,9 @@ async function refreshActivityPlanResponse(
   const scoped = scopedRefreshActivityEntries(args, registryContext.registry);
   if ('text' in scoped) return { text: scoped.text, metadata: { toolName: 'operations.refreshActivityPlan', ok: false } };
 
-  const windowMetricsByProductId = windowDays === REFRESH_ACTIVITY_DEFAULT_WINDOW_DAYS
+  const windowMetrics = windowDays === REFRESH_ACTIVITY_DEFAULT_WINDOW_DAYS
     ? null
-    : new Map((await aggregateWindowProducts({ outputDir, endDate: report.context.date, windowDays })).map((item) => [item.internalProductId, item]));
+    : buildRefreshActivityWindowAggregateIndex(await aggregateWindowProducts({ outputDir, endDate: report.context.date, windowDays }));
 
   const candidates: Array<{ entry: LinkRegistryEntry; row: PublicTrafficProductDataRow }> = [];
   const skipped = { missingRow: 0, missing30dDashboard: 0, inactive: 0, onlineLessThan30d: 0, onlineDaysUnknown: 0 };
@@ -1510,8 +1530,8 @@ async function refreshActivityPlanResponse(
       skipped.missingRow += 1;
       continue;
     }
-    const windowAggregate = windowMetricsByProductId?.get(entry.internalProductId);
-    if (windowMetricsByProductId && !windowAggregate) {
+    const windowAggregate = windowMetrics ? findRefreshActivityWindowAggregate(windowMetrics, entry) : undefined;
+    if (windowMetrics && !windowAggregate) {
       skipped.missing30dDashboard += 1;
       continue;
     }
