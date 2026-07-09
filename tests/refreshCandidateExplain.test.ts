@@ -69,6 +69,7 @@ describe('explainRefreshCandidates', () => {
     expect(explainRefreshCandidates(registryEntries, context, { sameSkuGroupId: 'canon-eos-r50', zeroMetric: 'created_orders', date: '2026-07-06' })).toEqual({
       scopeLine: '筛选范围：R50 / canon-eos-r50',
       sameSkuGroupId: 'canon-eos-r50',
+      windowDays: 30,
       candidateCount: 0,
       candidateProductIds: [],
       missing30dDashboardProductIds: ['682'],
@@ -97,5 +98,19 @@ describe('explainRefreshCandidates', () => {
     expect(result.sameSkuGroupId).toBe('canon-eos-r50');
     expect(result.scopeLine).toBe('筛选范围：R50 / canon-eos-r50');
     expect(result.reasonSummary[0]).toBe('找到 1 条符合 近30天订单金额为0 的 active 链接。');
+  });
+
+  it('uses windowDays in zero-candidate explanations', () => {
+    const input = { sameSkuGroupId: 'canon-eos-r50', zeroMetric: 'created_orders' as const, date: '2026-07-06', windowDays: 15 };
+
+    const result = explainRefreshCandidates(registryEntries, context, input);
+
+    expect(result.reasonSummary).toEqual([
+      '没有找到符合 近15天创单为0 的 active 链接。',
+      '另有 1 条非 active、1 条无日报行、1 条 15日访问页缺失、1 条上线不足 15 天、1 条上线天数未知。',
+    ]);
+    expect(result.reasonSummary.join('\n')).not.toContain('近 30 天');
+    expect(result.reasonSummary.join('\n')).not.toContain('30日访问页缺失');
+    expect(result.reasonSummary.join('\n')).not.toContain('上线不足 30 天');
   });
 });

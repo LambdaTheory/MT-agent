@@ -12,7 +12,9 @@ export interface WindowProductAggregate {
   platformProductId?: string;
   productName: string;
   daysCovered: number;
+  dashboardDaysCovered: number;
   missingDates: string[];
+  missingDashboardDates: string[];
   exposure: number;
   publicVisits: number;
   dashboardVisits: number;
@@ -28,6 +30,7 @@ interface DailyMetricRecord {
   createdOrders: number;
   shippedOrders: number;
   amount: number;
+  hasDashboardData: boolean;
 }
 
 interface DailyRowRecord {
@@ -45,6 +48,7 @@ interface DailyReportRecord {
 
 interface MutableWindowProductAggregate extends WindowProductAggregate {
   coveredDates: Set<string>;
+  dashboardCoveredDates: Set<string>;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -56,6 +60,19 @@ function readNumber(record: Record<string, unknown>, key: keyof DailyMetricRecor
   return typeof value === 'number' && Number.isFinite(value) ? value : 0;
 }
 
+function hasFiniteNumber(record: Record<string, unknown>, key: keyof DailyMetricRecord): boolean {
+  const value = record[key];
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function readHasDashboardData(record: Record<string, unknown>): boolean {
+  return record.hasDashboardData !== false
+    && hasFiniteNumber(record, 'dashboardVisits')
+    && hasFiniteNumber(record, 'createdOrders')
+    && hasFiniteNumber(record, 'shippedOrders')
+    && hasFiniteNumber(record, 'amount');
+}
+
 function readMetric(value: unknown): DailyMetricRecord | null {
   if (!isRecord(value)) return null;
   return {
@@ -65,6 +82,7 @@ function readMetric(value: unknown): DailyMetricRecord | null {
     createdOrders: readNumber(value, 'createdOrders'),
     shippedOrders: readNumber(value, 'shippedOrders'),
     amount: readNumber(value, 'amount'),
+    hasDashboardData: readHasDashboardData(value),
   };
 }
 
@@ -124,7 +142,9 @@ function createAggregate(row: DailyRowRecord): MutableWindowProductAggregate {
     ...(row.platformProductId ? { platformProductId: row.platformProductId } : {}),
     productName: row.productName,
     daysCovered: 0,
+    dashboardDaysCovered: 0,
     missingDates: [],
+    missingDashboardDates: [],
     exposure: 0,
     publicVisits: 0,
     dashboardVisits: 0,
@@ -132,12 +152,17 @@ function createAggregate(row: DailyRowRecord): MutableWindowProductAggregate {
     shippedOrders: 0,
     amount: 0,
     coveredDates: new Set<string>(),
+    dashboardCoveredDates: new Set<string>(),
   };
 }
 
 function addMetric(target: MutableWindowProductAggregate, date: string, metric: DailyMetricRecord): void {
   target.daysCovered += 1;
   target.coveredDates.add(date);
+  if (metric.hasDashboardData) {
+    target.dashboardDaysCovered += 1;
+    target.dashboardCoveredDates.add(date);
+  }
   target.exposure += metric.exposure;
   target.publicVisits += metric.publicVisits;
   target.dashboardVisits += metric.dashboardVisits;
@@ -165,10 +190,11 @@ export async function aggregateWindowProducts(input: WindowAggregateInput): Prom
 
   return Array.from(products.values())
     .map((product) => {
-      const { coveredDates, ...aggregate } = product;
+      const { coveredDates, dashboardCoveredDates, ...aggregate } = product;
       return {
         ...aggregate,
         missingDates: dates.filter((date) => !coveredDates.has(date)),
+        missingDashboardDates: dates.filter((date) => !dashboardCoveredDates.has(date)),
       };
     })
     .sort((left, right) => Number(left.internalProductId) - Number(right.internalProductId) || left.internalProductId.localeCompare(right.internalProductId));

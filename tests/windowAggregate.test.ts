@@ -23,7 +23,7 @@ const baseMetric = {
   visitShipmentRate: 0,
 };
 
-async function writeDay(root: string, date: string, rows: Array<{ id: string; name: string; exposure: number; amount: number; createdOrders?: number; shippedOrders?: number }>) {
+async function writeDay(root: string, date: string, rows: Array<{ id: string; name: string; exposure: number; amount: number; createdOrders?: number; shippedOrders?: number; dashboardVisits?: number | string }>) {
   const dir = join(root, date);
   await mkdir(dir, { recursive: true });
   await writeFile(join(dir, `公域数据上下文_${date}.json`), JSON.stringify({
@@ -41,6 +41,7 @@ async function writeDay(root: string, date: string, rows: Array<{ id: string; na
           ...baseMetric,
           exposure: row.exposure,
           amount: row.amount,
+          dashboardVisits: row.dashboardVisits ?? baseMetric.dashboardVisits,
           createdOrders: row.createdOrders ?? 0,
           shippedOrders: row.shippedOrders ?? 0,
         },
@@ -96,6 +97,20 @@ describe('aggregateWindowProducts', () => {
 
     expect(result.find((item) => item.internalProductId === '648')).toMatchObject({ daysCovered: 1, missingDates: ['2026-07-02'] });
     expect(result.find((item) => item.internalProductId === '649')).toMatchObject({ daysCovered: 1, missingDates: ['2026-07-01'] });
+  });
+
+  it('keeps row coverage separate from real dashboard coverage', async () => {
+    await writeDay(dir, '2026-07-01', [{ id: '648', name: 'R50 A', exposure: 10, amount: 0, dashboardVisits: 1 }]);
+    await writeDay(dir, '2026-07-02', [{ id: '648', name: 'R50 A', exposure: 20, amount: 0, dashboardVisits: '异常' }]);
+
+    const result = await aggregateWindowProducts({ outputDir: dir, endDate: '2026-07-02', windowDays: 2 });
+
+    expect(result[0]).toMatchObject({
+      internalProductId: '648',
+      daysCovered: 2,
+      dashboardDaysCovered: 1,
+      missingDashboardDates: ['2026-07-02'],
+    });
   });
 
   it('exposes stable product id metadata for follow-up planner steps', async () => {

@@ -30,6 +30,7 @@ const refreshCandidateExplainArgumentsSchema = {
     query: { type: 'string' },
     sameSkuGroupId: { type: 'string' },
     zeroMetric: { type: 'string', enum: ['created_orders', 'amount'] },
+    windowDays: { type: ['integer', 'string'], pattern: '^[1-9]\\d*$', minimum: 1 },
   },
   required: ['zeroMetric'],
   additionalProperties: false,
@@ -244,6 +245,7 @@ const refreshCandidateExplainResultMetadataSchema = {
     toolName: { type: 'string' },
     status: { type: 'string' },
     zeroMetric: { type: 'string' },
+    windowDays: { type: 'integer' },
     query: { type: 'string' },
     sameSkuGroupId: { type: 'string' },
     candidateCount: { type: 'integer', description: 'Number of refresh candidates in scope.' },
@@ -308,6 +310,7 @@ const refreshActivityPlanResultMetadataSchema = {
     skippedGroups: { type: 'array', items: { type: 'string' } },
     scope: { type: ['string', 'null'] },
     zeroMetric: { type: 'string', enum: ['created_orders', 'amount'] },
+    windowDays: { type: 'integer' },
   },
 };
 const refreshActivityExecuteResultMetadataSchema = {
@@ -498,6 +501,7 @@ const refreshActivityPlanArgumentsSchema = {
     query: { type: 'string' },
     sameSkuGroupId: { type: 'string' },
     zeroMetric: { type: 'string', enum: ['created_orders', 'amount'] },
+    windowDays: { type: ['integer', 'string'], pattern: '^[1-9]\\d*$', minimum: 1 },
   },
   additionalProperties: false,
 };
@@ -906,7 +910,7 @@ const agentTools: AgentToolDefinition[] = [
   },
   {
     name: 'strategy.refreshCandidateExplain',
-    description: '独立解释活跃度刷新候选数量，说明为什么某查询或同款组 0 候选，包括 inactive、无日报行、30d 访问缺失、上线天数不足或未知。',
+    description: '独立解释活跃度刷新候选数量，可传 windowDays 调整窗口天数，说明为什么某查询或同款组 0 候选，包括 inactive、无日报行、访问页缺失、上线天数不足或未知。',
     risk: 'read',
     requiresConfirmation: false,
     inputSchema: refreshCandidateExplainArgumentsSchema,
@@ -942,7 +946,7 @@ const agentTools: AgentToolDefinition[] = [
   },
   {
     name: 'operations.refreshActivityPlan',
-    description: '按最新或指定日期公域日报筛选近30天零创单或零订单金额 active 链接，按链接档案汇总待下架链接和补链建议；可传 query 或 sameSkuGroupId 将范围收窄到指定商品/同款组，可传 zeroMetric=amount 表示订单金额为0、zeroMetric=created_orders 表示创单为0；返回只下架 / 下架+补链策略选择卡，确认前不下架、不补链。',
+    description: '按最新或指定日期公域日报筛选指定 windowDays 窗口内创单为0或订单金额为0的 active 链接，按链接档案汇总待下架链接和补链建议；可传 query 或 sameSkuGroupId 将范围收窄到指定商品/同款组，可传 windowDays 调整窗口天数，可传 zeroMetric=amount 表示订单金额为0、zeroMetric=created_orders 表示创单为0；返回只下架 / 下架+补链策略选择卡，确认前不下架、不补链。',
     risk: 'read',
     requiresConfirmation: false,
     inputSchema: refreshActivityPlanArgumentsSchema,
@@ -950,7 +954,7 @@ const agentTools: AgentToolDefinition[] = [
   },
   {
     name: 'operations.refreshActivityExecute',
-    description: '确认后执行活跃度刷新计划：批量下架近 30 天零创单链接，并按同款组补回新链',
+    description: '确认后执行活跃度刷新计划：批量下架计划中选定的低活跃链接，并按同款组补回新链',
     risk: 'high',
     requiresConfirmation: true,
     plannerVisible: false,

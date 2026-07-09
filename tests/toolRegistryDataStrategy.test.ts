@@ -46,7 +46,7 @@ async function writeDay(outputDir: string, date: string, exposure: number, amoun
         platformProductId: 'p681',
         displayProductId: '端内ID 681',
         custodyDays: 40,
-        periods: { '1d': metric, '7d': metric, '30d': { ...metric, createdOrders: 1, amount: 0 } },
+        periods: { '1d': { ...metric, amount: 50 }, '7d': metric, '30d': { ...metric, createdOrders: 1, amount: 0 } },
       },
     ],
     lowExposure: [],
@@ -132,6 +132,7 @@ describe('data and strategy capability tools', () => {
     });
     expect(findAgentTool('strategy.refreshCandidateExplain')?.resultMetadataSchema).toMatchObject({
       properties: {
+        windowDays: expect.any(Object),
         candidateCount: expect.any(Object),
         candidateProductIds: expect.any(Object),
         missing30dDashboardProductIds: expect.any(Object),
@@ -139,6 +140,18 @@ describe('data and strategy capability tools', () => {
         skippedReasons: expect.any(Object),
       },
     });
+    expect(findAgentTool('operations.refreshActivityPlan')?.inputSchema).toMatchObject({
+      properties: {
+        windowDays: expect.any(Object),
+      },
+    });
+    expect(findAgentTool('operations.refreshActivityPlan')?.resultMetadataSchema).toMatchObject({
+      properties: {
+        windowDays: expect.any(Object),
+      },
+    });
+    expect(findAgentTool('operations.refreshActivityPlan')?.description).toContain('windowDays');
+    expect(findAgentTool('operations.refreshActivityPlan')?.description).not.toContain('近30天零创单');
   });
 
   it('dispatches window aggregation and data health tools', async () => {
@@ -161,5 +174,40 @@ describe('data and strategy capability tools', () => {
     await expect(executeAgentToolRequest({ toolName: 'strategy.refreshCandidateExplain', arguments: { date: '2026-07-02', query: 'r50', zeroMetric: 'amount' }, reason: '测试候选解释' }, outputDir, { closedOrderRegistryPaths: registryPaths })).resolves.toMatchObject({
       metadata: { toolName: 'strategy.refreshCandidateExplain', query: 'r50', sameSkuGroupId: 'canon-eos-r50', candidateCount: 1, candidateProductIds: ['681'] },
     });
+  });
+
+  it('dispatches refresh-candidate explanation with windowDays semantics', async () => {
+    const { outputDir, registryPaths } = await writeFixtures();
+
+    const tool = findAgentTool('strategy.refreshCandidateExplain');
+    expect(tool?.inputSchema).toMatchObject({
+      properties: { windowDays: expect.any(Object) },
+    });
+
+    const response = await executeAgentToolRequest(
+      { toolName: 'strategy.refreshCandidateExplain', arguments: { date: '2026-07-02', query: 'r50', zeroMetric: 'amount', windowDays: 2 }, reason: '测试2天候选解释' },
+      outputDir,
+      { closedOrderRegistryPaths: registryPaths },
+    );
+
+    expect(response.text).toContain('没有找到符合 近2天订单金额为0 的 active 链接。');
+    expect(response.text).not.toContain('近30天');
+    expect(response.text).not.toContain('近 30 天');
+    expect(response.metadata).toMatchObject({ toolName: 'strategy.refreshCandidateExplain', windowDays: 2, candidateCount: 0, candidateProductIds: [] });
+  });
+
+  it('normalizes string windowDays before refresh-candidate window aggregation', async () => {
+    const { outputDir, registryPaths } = await writeFixtures();
+
+    const response = await executeAgentToolRequest(
+      { toolName: 'strategy.refreshCandidateExplain', arguments: { date: '2026-07-02', query: 'r50', zeroMetric: 'amount', windowDays: '2' }, reason: '测试字符串窗口候选解释' },
+      outputDir,
+      { closedOrderRegistryPaths: registryPaths },
+    );
+
+    expect(response.text).toContain('没有找到符合 近2天订单金额为0 的 active 链接。');
+    expect(response.text).not.toContain('近30天');
+    expect(response.text).not.toContain('近 30 天');
+    expect(response.metadata).toMatchObject({ toolName: 'strategy.refreshCandidateExplain', windowDays: 2, candidateCount: 0, candidateProductIds: [] });
   });
 });

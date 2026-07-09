@@ -15,7 +15,7 @@ import { buildDataHealthReport } from '../agentData/dataHealth.js';
 import { explainRefreshCandidates } from '../agentData/refreshCandidateExplain.js';
 import { resolveSafeSourceForSameSkuGroup } from '../agentData/safeSource.js';
 import { findWindowedProducts, type WindowedPredicate } from '../agentData/windowedFindings.js';
-import { aggregateWindowProducts } from '../agentData/windowAggregate.js';
+import { aggregateWindowProducts, type WindowProductAggregate } from '../agentData/windowAggregate.js';
 import { openLinkRegistryGovernancePrompt } from '../linkRegistry/governanceSession.js';
 import { openLinkRegistryMaintenancePrompt } from '../linkRegistry/maintenanceSession.js';
 import { createLinkRegistry } from '../linkRegistry/store.js';
@@ -45,7 +45,7 @@ import { buildPublicTrafficCard } from '../publicTraffic/buildPublicTrafficCard.
 import { buildPublicTrafficFeishuText } from '../publicTraffic/buildPublicTrafficFeishu.js';
 import { runDashboardRefresh } from '../publicTraffic/dashboardRefresh.js';
 import { buildPublicTrafficPaths } from '../publicTraffic/paths.js';
-import type { PublicTrafficDataReportContext, PublicTrafficProductDataRow } from '../publicTraffic/types.js';
+import type { PublicTrafficDataReportContext, PublicTrafficPeriodMetrics, PublicTrafficProductDataRow } from '../publicTraffic/types.js';
 import { startOperationsLearningSession } from '../operationsLearningLoop/session.js';
 import type { BotResponse } from './types.js';
 import type { FeishuSendTo } from './types.js';
@@ -118,6 +118,7 @@ const RENTAL_SPEC_REMOVE_PLAN_MAX_PRODUCTS = 60;
 const RENTAL_SPEC_REMOVE_PLAN_MAX_ITEMS = 50;
 const REFRESH_ACTIVITY_DEFAULT_MAX_CANDIDATES = 20;
 const REFRESH_ACTIVITY_MIN_ONLINE_DAYS = 30;
+const REFRESH_ACTIVITY_DEFAULT_WINDOW_DAYS = 30;
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const NON_RENT_PRICE_FIELD_LABELS: Record<string, string[]> = {
   marketPrice: ['marketPrice', '市场价', '市场价格'],
@@ -1115,6 +1116,13 @@ function readMaxCandidates(value: unknown): number {
   return Math.min(Math.floor(numeric), 100);
 }
 
+function readRefreshActivityWindowDays(value: unknown): number {
+  if (value === undefined) return REFRESH_ACTIVITY_DEFAULT_WINDOW_DAYS;
+  const numeric = typeof value === 'number' ? value : Number(value);
+  if (!Number.isInteger(numeric) || numeric < 1) throw new Error('windowDays must be a positive integer');
+  return numeric;
+}
+
 function parseDateToUtcDay(value: string | undefined): number | null {
   if (!value) return null;
   const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value.trim());
@@ -1188,18 +1196,101 @@ function refreshActivitySourceScore(row: PublicTrafficProductDataRow): number {
   );
 }
 
+function refreshActivityWindowSourceScore(metric: PublicTrafficPeriodMetrics): number {
+  return (
+    metric.shippedOrders * 1000
+    + metric.amount * 2
+    + metric.publicVisits * 5
+    + metric.createdOrders * 50
+    + Math.min(metric.exposure, 5000) * 0.1
+  );
+}
+
 function readRefreshActivityZeroMetric(value: unknown): RefreshActivityZeroMetric {
   if (value === undefined) return 'created_orders';
   if (value === 'created_orders' || value === 'amount') return value;
   throw new Error('zeroMetric must be created_orders or amount');
 }
 
-function refreshActivityZeroMetricLabel(zeroMetric: RefreshActivityZeroMetric): string {
-  return zeroMetric === 'amount' ? '近30天订单金额为0' : '近 30 天创单为 0';
+function refreshActivityZeroMetricLabel(zeroMetric: RefreshActivityZeroMetric, windowDays = REFRESH_ACTIVITY_DEFAULT_WINDOW_DAYS): string {
+  return zeroMetric === 'amount' ? `近${windowDays}天订单金额为0` : `近${windowDays}天创单为0`;
 }
 
 function isRefreshActivityZeroMetricMatch(thirty: PublicTrafficProductDataRow['periods']['30d'], zeroMetric: RefreshActivityZeroMetric): boolean {
   return zeroMetric === 'amount' ? thirty.amount === 0 : thirty.createdOrders === 0;
+}
+
+function refreshActivityMetricFromWindowAggregate(aggregate: WindowProductAggregate, windowDays: number): PublicTrafficPeriodMetrics {
+  const hasFullWindow = aggregate.daysCovered === windowDays;
+  const hasFullDashboardWindow = aggregate.dashboardDaysCovered === windowDays;
+  return {
+    exposure: aggregate.exposure,
+    publicVisits: aggregate.publicVisits,
+    dashboardVisits: aggregate.dashboardVisits,
+    createdOrders: aggregate.createdOrders,
+    signedOrders: 0,
+    reviewedOrders: 0,
+    shippedOrders: aggregate.shippedOrders,
+    amount: aggregate.amount,
+    exposureVisitRate: aggregate.exposure > 0 ? aggregate.publicVisits / aggregate.exposure : 0,
+    visitCreatedOrderRate: aggregate.publicVisits > 0 ? aggregate.createdOrders / aggregate.publicVisits : 0,
+    visitShipmentRate: aggregate.publicVisits > 0 ? aggregate.shippedOrders / aggregate.publicVisits : 0,
+    hasExposureData: hasFullWindow,
+    hasDashboardData: hasFullDashboardWindow,
+  };
+}
+
+function rowWithRefreshActivityWindowMetric(row: PublicTrafficProductDataRow, aggregate: WindowProductAggregate, windowDays: number): PublicTrafficProductDataRow {
+  return {
+    ...row,
+    periods: {
+      ...row.periods,
+      '30d': refreshActivityMetricFromWindowAggregate(aggregate, windowDays),
+    },
+  };
+}
+
+interface RefreshActivityWindowAggregateIndex {
+  byInternalProductId: Map<string, WindowProductAggregate>;
+  byPlatformProductId: Map<string, WindowProductAggregate>;
+}
+
+function buildRefreshActivityWindowAggregateIndex(aggregates: WindowProductAggregate[]): RefreshActivityWindowAggregateIndex {
+  const byInternalProductId = new Map<string, WindowProductAggregate>();
+  const byPlatformProductId = new Map<string, WindowProductAggregate>();
+  for (const aggregate of aggregates) {
+    byInternalProductId.set(aggregate.internalProductId, aggregate);
+    if (aggregate.platformProductId) byPlatformProductId.set(aggregate.platformProductId, aggregate);
+  }
+  return { byInternalProductId, byPlatformProductId };
+}
+
+function findRefreshActivityWindowAggregate(index: RefreshActivityWindowAggregateIndex, entry: LinkRegistryEntry): WindowProductAggregate | undefined {
+  return index.byInternalProductId.get(entry.internalProductId)
+    ?? (entry.platformProductId ? index.byPlatformProductId.get(entry.platformProductId) : undefined);
+}
+
+function findRefreshActivityWindowAggregateForRow(index: RefreshActivityWindowAggregateIndex, row: PublicTrafficProductDataRow): WindowProductAggregate | undefined {
+  const internalProductId = extractInternalProductId(row.displayProductId);
+  return (internalProductId ? index.byInternalProductId.get(internalProductId) : undefined)
+    ?? index.byPlatformProductId.get(row.platformProductId);
+}
+
+function contextWithRefreshActivityWindowMetrics(context: PublicTrafficDataReportContext, index: RefreshActivityWindowAggregateIndex, windowDays: number): PublicTrafficDataReportContext {
+  return {
+    ...context,
+    rows: context.rows.map((row) => {
+      const aggregate = findRefreshActivityWindowAggregateForRow(index, row);
+      if (aggregate) return rowWithRefreshActivityWindowMetric(row, aggregate, windowDays);
+      return {
+        ...row,
+        periods: {
+          ...row.periods,
+          '30d': { ...row.periods['30d'], hasDashboardData: false },
+        },
+      };
+    }),
+  };
 }
 
 function scopedRefreshActivityEntries(
@@ -1229,6 +1320,8 @@ function buildRefreshActivityNewLinkItems(
   context: PublicTrafficDataReportContext,
   registryEntries: LinkRegistryEntry[],
   delistProductIds: Set<string>,
+  windowMetrics?: RefreshActivityWindowAggregateIndex,
+  windowDays = REFRESH_ACTIVITY_DEFAULT_WINDOW_DAYS,
 ): { items: RefreshActivityNewLinkItem[]; blockers: string[]; skippedGroups: string[]; skippedBlockers: string[] } {
   const items: RefreshActivityNewLinkItem[] = [];
   const blockers: string[] = [];
@@ -1250,7 +1343,12 @@ function buildRefreshActivityNewLinkItems(
         && !delistProductIds.has(entry.internalProductId))
       .map((entry) => {
         const row = findReportRowForEntry(context, entry);
-        return row ? { entry, row, score: refreshActivitySourceScore(row) } : null;
+        if (!row) return null;
+        const aggregate = windowMetrics ? findRefreshActivityWindowAggregate(windowMetrics, entry) : undefined;
+        if (windowMetrics && !aggregate) return null;
+        const scoreRow = aggregate ? rowWithRefreshActivityWindowMetric(row, aggregate, windowDays) : row;
+        const score = aggregate ? refreshActivityWindowSourceScore(scoreRow.periods['30d']) : refreshActivitySourceScore(scoreRow);
+        return { entry, row: scoreRow, score };
       })
       .filter((candidate): candidate is { entry: LinkRegistryEntry; row: PublicTrafficProductDataRow; score: number } => Boolean(candidate && candidate.score > 0))
       .sort((left, right) => right.score - left.score || Number(left.entry.internalProductId) - Number(right.entry.internalProductId))[0];
@@ -1286,6 +1384,8 @@ function buildRefreshActivityExecuteRequest(
   context: PublicTrafficDataReportContext,
   registryEntries: LinkRegistryEntry[],
   strategy: RefreshActivityExecutionStrategy,
+  windowMetrics?: RefreshActivityWindowAggregateIndex,
+  windowDays = REFRESH_ACTIVITY_DEFAULT_WINDOW_DAYS,
 ): { request?: RefreshActivityExecuteRequest; blockers: string[]; skippedGroups: string[]; skippedBlockers: string[] } {
   const delistProductIds = groups.flatMap((group) => group.items.map((item) => item.entry.internalProductId));
   const blockers: string[] = [];
@@ -1300,7 +1400,7 @@ function buildRefreshActivityExecuteRequest(
     return { request: { date, delistProductIds, newLinkItems: [], strategy }, blockers, skippedGroups: [], skippedBlockers: [] };
   }
 
-  const newLinks = buildRefreshActivityNewLinkItems(groups, context, registryEntries, new Set(delistProductIds));
+  const newLinks = buildRefreshActivityNewLinkItems(groups, context, registryEntries, new Set(delistProductIds), windowMetrics, windowDays);
   blockers.push(...newLinks.blockers);
   if (blockers.length > 0) return { blockers, skippedGroups: newLinks.skippedGroups, skippedBlockers: newLinks.skippedBlockers };
   const executableGroupIds = new Set(newLinks.items.map((item) => item.sameSkuGroupId).filter((value): value is string => Boolean(value)));
@@ -1452,8 +1552,13 @@ async function refreshActivityPlanResponse(
   const registryContext = await loadClosedOrderRegistryContext(options.closedOrderRegistryPaths);
   const maxCandidates = readMaxCandidates(args.maxCandidates);
   const zeroMetric = readRefreshActivityZeroMetric(args.zeroMetric);
+  const windowDays = readRefreshActivityWindowDays(args.windowDays);
   const scoped = scopedRefreshActivityEntries(args, registryContext.registry);
   if ('text' in scoped) return { text: scoped.text, metadata: { toolName: 'operations.refreshActivityPlan', ok: false } };
+
+  const windowMetrics = windowDays === REFRESH_ACTIVITY_DEFAULT_WINDOW_DAYS
+    ? null
+    : buildRefreshActivityWindowAggregateIndex(await aggregateWindowProducts({ outputDir, endDate: report.context.date, windowDays }));
 
   const candidates: Array<{ entry: LinkRegistryEntry; row: PublicTrafficProductDataRow }> = [];
   const skipped = { missingRow: 0, missing30dDashboard: 0, inactive: 0, onlineLessThan30d: 0, onlineDaysUnknown: 0 };
@@ -1467,7 +1572,13 @@ async function refreshActivityPlanResponse(
       skipped.missingRow += 1;
       continue;
     }
-    const thirty = row.periods['30d'];
+    const windowAggregate = windowMetrics ? findRefreshActivityWindowAggregate(windowMetrics, entry) : undefined;
+    if (windowMetrics && !windowAggregate) {
+      skipped.missing30dDashboard += 1;
+      continue;
+    }
+    const evaluatedRow = windowAggregate ? rowWithRefreshActivityWindowMetric(row, windowAggregate, windowDays) : row;
+    const thirty = evaluatedRow.periods['30d'];
     if (!thirty.hasDashboardData) {
       skipped.missing30dDashboard += 1;
       continue;
@@ -1477,14 +1588,27 @@ async function refreshActivityPlanResponse(
       skipped.onlineDaysUnknown += 1;
       continue;
     }
-    if (onlineDays < REFRESH_ACTIVITY_MIN_ONLINE_DAYS) {
+    if (onlineDays < windowDays) {
       skipped.onlineLessThan30d += 1;
       continue;
     }
-    if (isRefreshActivityZeroMetricMatch(thirty, zeroMetric)) candidates.push({ entry, row });
+    if (isRefreshActivityZeroMetricMatch(thirty, zeroMetric)) candidates.push({ entry, row: evaluatedRow });
   }
 
   const groups = groupRefreshActivityCandidates(candidates);
+  const zeroCandidateExplanation = candidates.length === 0
+    ? [
+      '0 候选解释：',
+      ...explainRefreshCandidates(registryContext.registry, windowMetrics ? contextWithRefreshActivityWindowMetrics(report.context, windowMetrics, windowDays) : report.context, {
+        ...(readString(args.query) ? { query: readString(args.query)! } : {}),
+        ...(readString(args.sameSkuGroupId) ? { sameSkuGroupId: readString(args.sameSkuGroupId)! } : {}),
+        zeroMetric,
+        date: report.context.date,
+        windowDays,
+      }).reasonSummary.map((line) => `- 策略说明：${line}`),
+      `- 数据健康：${(await buildDataHealthReport(outputDir, report.context.date)).dataQualityNotes.join('；') || '无额外质量备注'}`,
+    ]
+    : [];
   const shownCandidates = candidates
     .sort((left, right) =>
       left.row.periods['30d'].publicVisits - right.row.periods['30d'].publicVisits
@@ -1492,8 +1616,8 @@ async function refreshActivityPlanResponse(
       || Number(left.entry.internalProductId) - Number(right.entry.internalProductId))
     .slice(0, maxCandidates);
   const shownGroups = groupRefreshActivityCandidates(shownCandidates);
-  const delistOnlyExecution = buildRefreshActivityExecuteRequest(report.context.date, shownGroups, report.context, registryContext.registry, 'delist_only');
-  const refillExecution = buildRefreshActivityExecuteRequest(report.context.date, shownGroups, report.context, registryContext.registry, 'delist_and_refill');
+  const delistOnlyExecution = buildRefreshActivityExecuteRequest(report.context.date, shownGroups, report.context, registryContext.registry, 'delist_only', windowMetrics ?? undefined, windowDays);
+  const refillExecution = buildRefreshActivityExecuteRequest(report.context.date, shownGroups, report.context, registryContext.registry, 'delist_and_refill', windowMetrics ?? undefined, windowDays);
   const groupLines = shownGroups.slice(0, 12).map((group, index) => {
     const ids = group.items.map((item) => item.entry.internalProductId).join('、');
     const newLinkItem = refillExecution.request?.newLinkItems.find((item) => item.sameSkuGroupId === group.sameSkuGroupId);
@@ -1525,13 +1649,14 @@ async function refreshActivityPlanResponse(
     text: [
       `活跃度刷新计划：${report.context.date}`,
       scoped.scopeLine,
-      `筛选口径：active 链接，30日访问页数据已抓取，上线满 ${REFRESH_ACTIVITY_MIN_ONLINE_DAYS} 天，${refreshActivityZeroMetricLabel(zeroMetric)}。`,
+      `筛选口径：active 链接，${windowDays}日访问页数据已抓取，上线满 ${windowDays} 天，${refreshActivityZeroMetricLabel(zeroMetric, windowDays)}。`,
       `待下架候选：${candidates.length} 条；涉及种类/同款组 ${groups.length} 个。`,
       `本次展示：${shownCandidates.length}/${candidates.length} 条。`,
       '',
-      ...(groupLines.length ? groupLines : ['没有找到符合条件的零创单 active 链接。']),
+      ...(groupLines.length ? groupLines : [`没有找到符合条件的${refreshActivityZeroMetricLabel(zeroMetric, windowDays)} active 链接。`]),
+      ...(zeroCandidateExplanation.length ? ['', ...zeroCandidateExplanation] : []),
       '',
-      `跳过：非 active ${skipped.inactive} 条，无日报行 ${skipped.missingRow} 条，30日访问页缺失 ${skipped.missing30dDashboard} 条，上线不足 ${REFRESH_ACTIVITY_MIN_ONLINE_DAYS} 天 ${skipped.onlineLessThan30d} 条，上线天数未知 ${skipped.onlineDaysUnknown} 条。`,
+      `跳过：非 active ${skipped.inactive} 条，无日报行 ${skipped.missingRow} 条，${windowDays}日访问页缺失 ${skipped.missing30dDashboard} 条，上线不足 ${windowDays} 天 ${skipped.onlineLessThan30d} 条，上线天数未知 ${skipped.onlineDaysUnknown} 条。`,
       delistOnlyExecution.request
         ? `计划已生成，请在策略卡选择执行策略（待下架 ${delistOnlyExecution.request.delistProductIds.length} 条：端内ID ${delistOnlyExecution.request.delistProductIds.join('、')}）。`
         : '未能生成执行计划；请先处理以下阻断项。',
@@ -1546,10 +1671,12 @@ async function refreshActivityPlanResponse(
       skipped,
       scope: scoped.scopeLine ?? null,
       zeroMetric,
+      windowDays,
       executeRequest: null,
       strategyRequests: { delistOnly: delistOnlyExecution.request ?? null, delistAndRefill: refillExecution.request ?? null },
       blockers: [...delistOnlyExecution.blockers, ...refillExecution.blockers],
       skippedGroups: refillExecution.skippedGroups,
+      zeroCandidateExplanation,
     },
     ...(strategyCard ? { card: strategyCard } : {}),
   };
@@ -1996,9 +2123,13 @@ export async function executeAgentToolRequest(
       if (!report) return { text: missingReportContextText(date) };
       const registryContext = await loadClosedOrderRegistryContext(options.closedOrderRegistryPaths);
       const zeroMetric = readRefreshActivityZeroMetric(request.arguments.zeroMetric);
+      const windowDays = request.arguments.windowDays === undefined ? undefined : readRefreshActivityWindowDays(request.arguments.windowDays);
       const query = readString(request.arguments.query) ?? undefined;
       const sameSkuGroupId = readString(request.arguments.sameSkuGroupId) ?? undefined;
-      const result = explainRefreshCandidates(registryContext.registry, report.context, { ...(query ? { query } : {}), ...(sameSkuGroupId ? { sameSkuGroupId } : {}), zeroMetric, date: report.context.date });
+      const explainContext = windowDays && windowDays !== REFRESH_ACTIVITY_DEFAULT_WINDOW_DAYS
+        ? contextWithRefreshActivityWindowMetrics(report.context, buildRefreshActivityWindowAggregateIndex(await aggregateWindowProducts({ outputDir, endDate: report.context.date, windowDays })), windowDays)
+        : report.context;
+      const result = explainRefreshCandidates(registryContext.registry, explainContext, { ...(query ? { query } : {}), ...(sameSkuGroupId ? { sameSkuGroupId } : {}), zeroMetric, date: report.context.date, ...(windowDays ? { windowDays } : {}) });
       return formatRefreshCandidateExplainResponse(result, zeroMetric, { ...(query ? { query } : {}), ...(sameSkuGroupId ? { sameSkuGroupId } : {}) });
     }
     case 'publicTraffic.runReport':
