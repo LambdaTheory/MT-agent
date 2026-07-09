@@ -132,6 +132,7 @@ describe('data and strategy capability tools', () => {
     });
     expect(findAgentTool('strategy.refreshCandidateExplain')?.resultMetadataSchema).toMatchObject({
       properties: {
+        windowDays: expect.any(Object),
         candidateCount: expect.any(Object),
         candidateProductIds: expect.any(Object),
         missing30dDashboardProductIds: expect.any(Object),
@@ -173,5 +174,25 @@ describe('data and strategy capability tools', () => {
     await expect(executeAgentToolRequest({ toolName: 'strategy.refreshCandidateExplain', arguments: { date: '2026-07-02', query: 'r50', zeroMetric: 'amount' }, reason: '测试候选解释' }, outputDir, { closedOrderRegistryPaths: registryPaths })).resolves.toMatchObject({
       metadata: { toolName: 'strategy.refreshCandidateExplain', query: 'r50', sameSkuGroupId: 'canon-eos-r50', candidateCount: 1, candidateProductIds: ['681'] },
     });
+  });
+
+  it('dispatches refresh-candidate explanation with windowDays semantics', async () => {
+    const { outputDir, registryPaths } = await writeFixtures();
+
+    const tool = findAgentTool('strategy.refreshCandidateExplain');
+    expect(tool?.inputSchema).toMatchObject({
+      properties: { windowDays: expect.any(Object) },
+    });
+
+    const response = await executeAgentToolRequest(
+      { toolName: 'strategy.refreshCandidateExplain', arguments: { date: '2026-07-02', query: 'r50', zeroMetric: 'amount', windowDays: 15 }, reason: '测试15天候选解释' },
+      outputDir,
+      { closedOrderRegistryPaths: registryPaths },
+    );
+
+    expect(response.text).toContain('找到 1 条符合 近15天订单金额为0 的 active 链接。');
+    expect(response.text).not.toContain('近30天');
+    expect(response.text).not.toContain('近 30 天');
+    expect(response.metadata).toMatchObject({ toolName: 'strategy.refreshCandidateExplain', windowDays: 15, candidateCount: 1, candidateProductIds: ['681'] });
   });
 });

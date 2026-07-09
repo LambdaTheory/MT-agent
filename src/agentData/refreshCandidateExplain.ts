@@ -16,6 +16,7 @@ export interface RefreshCandidateExplainInput {
 export interface RefreshCandidateExplainResult {
   scopeLine: string;
   sameSkuGroupId?: string;
+  windowDays: number;
   candidateCount: number;
   candidateProductIds: string[];
   missing30dDashboardProductIds: string[];
@@ -172,6 +173,7 @@ export function explainRefreshCandidates(
   return {
     scopeLine: scoped.scopeLine,
     ...(scoped.sameSkuGroupId ? { sameSkuGroupId: scoped.sameSkuGroupId } : {}),
+    windowDays,
     candidateCount,
     candidateProductIds,
     missing30dDashboardProductIds,

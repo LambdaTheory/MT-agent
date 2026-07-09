@@ -69,6 +69,7 @@ describe('explainRefreshCandidates', () => {
     expect(explainRefreshCandidates(registryEntries, context, { sameSkuGroupId: 'canon-eos-r50', zeroMetric: 'created_orders', date: '2026-07-06' })).toEqual({
       scopeLine: '筛选范围：R50 / canon-eos-r50',
       sameSkuGroupId: 'canon-eos-r50',
+      windowDays: 30,
       candidateCount: 0,
       candidateProductIds: [],
       missing30dDashboardProductIds: ['682'],

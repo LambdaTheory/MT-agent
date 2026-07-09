@@ -2112,9 +2112,10 @@ export async function executeAgentToolRequest(
       if (!report) return { text: missingReportContextText(date) };
       const registryContext = await loadClosedOrderRegistryContext(options.closedOrderRegistryPaths);
       const zeroMetric = readRefreshActivityZeroMetric(request.arguments.zeroMetric);
+      const windowDays = request.arguments.windowDays === undefined ? undefined : readRefreshActivityWindowDays(request.arguments.windowDays);
       const query = readString(request.arguments.query) ?? undefined;
       const sameSkuGroupId = readString(request.arguments.sameSkuGroupId) ?? undefined;
-      const result = explainRefreshCandidates(registryContext.registry, report.context, { ...(query ? { query } : {}), ...(sameSkuGroupId ? { sameSkuGroupId } : {}), zeroMetric, date: report.context.date });
+      const result = explainRefreshCandidates(registryContext.registry, report.context, { ...(query ? { query } : {}), ...(sameSkuGroupId ? { sameSkuGroupId } : {}), zeroMetric, date: report.context.date, ...(windowDays ? { windowDays } : {}) });
       return formatRefreshCandidateExplainResponse(result, zeroMetric, { ...(query ? { query } : {}), ...(sameSkuGroupId ? { sameSkuGroupId } : {}) });
     }
     case 'publicTraffic.runReport':
