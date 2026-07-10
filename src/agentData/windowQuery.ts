@@ -21,6 +21,12 @@ export interface PublicTrafficWindowQueryResult {
   matchedCount: number;
   availableCountByMetric: Partial<Record<PublicTrafficMetricKey, number>>;
   excludedUnavailableCountByMetric: Partial<Record<PublicTrafficMetricKey, number>>;
+  aggregation?: {
+    metric: PublicTrafficMetricKey;
+    aggregation: NonNullable<PublicTrafficWindowQueryArguments['aggregation']>;
+    value: number;
+    label: string;
+  };
   items: Array<{
     internalProductId: string;
     productName: string;
@@ -77,6 +83,38 @@ function unavailableError(metric: PublicTrafficMetricKey, windowDays: number): E
   return new Error(`${label}在近${windowDays}天窗口内不可用`);
 }
 
+const aggregationLabels: Record<NonNullable<PublicTrafficWindowQueryArguments['aggregation']>, string> = {
+  count: '窗口计数',
+  sum: '窗口求和',
+  avg: '窗口平均',
+  min: '窗口最小',
+  max: '窗口最大',
+};
+
+function aggregateItems(
+  items: WindowProductAggregate[],
+  metrics: PublicTrafficMetricKey[],
+  aggregation: NonNullable<PublicTrafficWindowQueryArguments['aggregation']> | undefined,
+  windowDays: number,
+): PublicTrafficWindowQueryResult['aggregation'] {
+  if (!aggregation) return undefined;
+  const metric = metrics[0];
+  if (!metric) throw new Error('metrics is required when aggregation is specified');
+  const definition = getPublicTrafficMetric(metric)!;
+  if (aggregation === 'sum' && definition.format === 'percent') throw new Error('率指标不支持 sum 聚合');
+  if (aggregation === 'count') return { metric, aggregation, value: items.length, label: aggregationLabels.count };
+
+  const values = items.flatMap((item) => {
+    const value = readWindowMetric(item, metric);
+    return value === undefined ? [] : [value];
+  });
+  if (values.length === 0) throw unavailableError(metric, windowDays);
+  if (aggregation === 'sum') return { metric, aggregation, value: values.reduce((total, value) => total + value, 0), label: aggregationLabels.sum };
+  if (aggregation === 'avg') return { metric, aggregation, value: values.reduce((total, value) => total + value, 0) / values.length, label: aggregationLabels.avg };
+  if (aggregation === 'min') return { metric, aggregation, value: Math.min(...values), label: aggregationLabels.min };
+  return { metric, aggregation, value: Math.max(...values), label: aggregationLabels.max };
+}
+
 export async function queryPublicTrafficWindow(
   outputDir: string,
   args: PublicTrafficWindowQueryArguments,
@@ -122,6 +160,7 @@ export async function queryPublicTrafficWindow(
   }
 
   const requestedMetrics = args.metrics?.length ? args.metrics : availabilityMetrics;
+  const aggregation = aggregateItems(items, requestedMetrics, args.aggregation, windowDays);
   const limited = items.slice(0, args.limit ?? 50);
   return {
     endDate,
@@ -129,6 +168,7 @@ export async function queryPublicTrafficWindow(
     matchedCount: items.length,
     availableCountByMetric,
     excludedUnavailableCountByMetric,
+    ...(aggregation ? { aggregation } : {}),
     items: limited.map((item) => ({
       internalProductId: item.internalProductId,
       productName: item.productName,

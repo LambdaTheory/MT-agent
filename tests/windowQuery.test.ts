@@ -112,4 +112,33 @@ describe('queryPublicTrafficWindow', () => {
   it('rejects unsupported window lengths before reading daily files', async () => {
     await expect(queryPublicTrafficWindow(dir, { windowDays: 91 })).rejects.toThrow('windowDays must be between 1 and 90');
   });
+
+  it('aggregates available arbitrary-window metric values', async () => {
+    for (let day = 1; day <= 2; day += 1) {
+      await writeDay(dir, dateAt(day), [
+        { id: '215', name: 'A', exposure: 10, publicVisits: day },
+        { id: '218', name: 'B', exposure: 30, publicVisits: day + 1 },
+      ]);
+    }
+
+    const result = await queryPublicTrafficWindow(dir, {
+      endDate: '2026-07-02',
+      windowDays: 2,
+      metrics: ['publicVisits'],
+      aggregation: 'sum',
+    });
+
+    expect(result.aggregation).toMatchObject({ metric: 'publicVisits', aggregation: 'sum', value: 8, label: '窗口求和' });
+  });
+
+  it('rejects sum aggregation for rate metrics', async () => {
+    await writeDay(dir, '2026-07-01', [{ id: '215', name: 'A', exposure: 10, publicVisits: 1 }]);
+
+    await expect(queryPublicTrafficWindow(dir, {
+      endDate: '2026-07-01',
+      windowDays: 1,
+      metrics: ['exposureVisitRate'],
+      aggregation: 'sum',
+    })).rejects.toThrow('率指标不支持 sum 聚合');
+  });
 });
