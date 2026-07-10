@@ -1,5 +1,7 @@
 import { createLinkRegistry } from '../linkRegistry/store.js';
 import type { LinkRegistryEntry } from '../linkRegistry/types.js';
+import { formatMetricThresholdCondition } from './metricThresholdStrategy.js';
+import { metricAvailabilityForFixedPeriod, type PublicTrafficMetricKey } from './publicTrafficMetricCatalog.js';
 import type { PublicTrafficDataReportContext, PublicTrafficProductDataRow } from '../publicTraffic/types.js';
 
 const REFRESH_ACTIVITY_MIN_ONLINE_DAYS = 30;
@@ -8,7 +10,17 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000;
 export interface RefreshCandidateExplainInput {
   query?: string;
   sameSkuGroupId?: string;
-  zeroMetric: 'created_orders' | 'amount';
+  metric: PublicTrafficMetricKey;
+  operator: 'eq';
+  value: 0;
+  date: string;
+  windowDays?: number;
+}
+
+export interface LegacyRefreshCandidateExplainInput {
+  query?: string;
+  sameSkuGroupId?: string;
+  zeroMetric?: 'created_orders' | 'amount';
   date: string;
   windowDays?: number;
 }
@@ -17,6 +29,9 @@ export interface RefreshCandidateExplainResult {
   scopeLine: string;
   sameSkuGroupId?: string;
   windowDays: number;
+  metric: PublicTrafficMetricKey;
+  operator: 'eq';
+  value: 0;
   candidateCount: number;
   candidateProductIds: string[];
   missing30dDashboardProductIds: string[];
@@ -66,14 +81,31 @@ function estimateOnlineDays(row: PublicTrafficProductDataRow, entry: LinkRegistr
   return Math.floor((reportDay - firstSeenDay) / MS_PER_DAY) + 1;
 }
 
-function isZeroMetricMatch(row: PublicTrafficProductDataRow, zeroMetric: RefreshCandidateExplainInput['zeroMetric']): boolean {
-  const thirty = row.periods['30d'];
-  return zeroMetric === 'amount' ? thirty.amount === 0 : thirty.createdOrders === 0;
+type PeriodMetricKey = Exclude<PublicTrafficMetricKey, 'custodyDays'>;
+
+export function adaptLegacyRefreshCandidateExplainInput(input: LegacyRefreshCandidateExplainInput): RefreshCandidateExplainInput {
+  if (input.zeroMetric === undefined) throw new Error('zeroMetric is required for legacy refresh candidate explain');
+  if (input.zeroMetric !== 'created_orders' && input.zeroMetric !== 'amount') throw new Error('zeroMetric must be created_orders or amount');
+  return {
+    ...(input.query ? { query: input.query } : {}),
+    ...(input.sameSkuGroupId ? { sameSkuGroupId: input.sameSkuGroupId } : {}),
+    metric: input.zeroMetric === 'created_orders' ? 'createdOrders' : 'amount',
+    operator: 'eq',
+    value: 0,
+    date: input.date,
+    ...(input.windowDays !== undefined ? { windowDays: input.windowDays } : {}),
+  };
 }
 
-function zeroMetricLabel(zeroMetric: RefreshCandidateExplainInput['zeroMetric'], windowDays: number): string {
-  if (zeroMetric === 'amount') return `近${windowDays}天订单金额为0`;
-  return windowDays === REFRESH_ACTIVITY_MIN_ONLINE_DAYS ? '近 30 天创单为 0' : `近${windowDays}天创单为0`;
+function readMetricValue(row: PublicTrafficProductDataRow, metric: PublicTrafficMetricKey): number | undefined {
+  if (metric === 'custodyDays') return typeof row.custodyDays === 'number' && Number.isFinite(row.custodyDays) ? row.custodyDays : undefined;
+  const value = row.periods['30d'][metric as PeriodMetricKey];
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function isThresholdMatch(row: PublicTrafficProductDataRow, input: RefreshCandidateExplainInput): boolean {
+  const value = readMetricValue(row, input.metric);
+  return value !== undefined && value === input.value;
 }
 
 function resolveScopedEntries(registryEntries: LinkRegistryEntry[], input: RefreshCandidateExplainInput): { entries: LinkRegistryEntry[]; scopeLine: string; sameSkuGroupId?: string } {
@@ -124,13 +156,18 @@ function compactSkipSummary(skipped: RefreshCandidateExplainResult['skipped'], w
   ].filter((item): item is string => Boolean(item)).join('、');
 }
 
+function normalizeRefreshCandidateExplainInput(input: RefreshCandidateExplainInput | LegacyRefreshCandidateExplainInput): RefreshCandidateExplainInput {
+  return 'metric' in input ? input : adaptLegacyRefreshCandidateExplainInput(input);
+}
+
 export function explainRefreshCandidates(
   registryEntries: LinkRegistryEntry[],
   context: PublicTrafficDataReportContext,
-  input: RefreshCandidateExplainInput,
+  input: RefreshCandidateExplainInput | LegacyRefreshCandidateExplainInput,
 ): RefreshCandidateExplainResult {
-  const scoped = resolveScopedEntries(registryEntries, input);
-  const windowDays = input.windowDays ?? REFRESH_ACTIVITY_MIN_ONLINE_DAYS;
+  const explicitInput = normalizeRefreshCandidateExplainInput(input);
+  const scoped = resolveScopedEntries(registryEntries, explicitInput);
+  const windowDays = explicitInput.windowDays ?? REFRESH_ACTIVITY_MIN_ONLINE_DAYS;
   const skipped = { inactive: 0, missingRow: 0, missing30dDashboard: 0, onlineLessThan30d: 0, onlineDaysUnknown: 0 };
   const candidateProductIds: string[] = [];
   const missing30dDashboardProductIds: string[] = [];
@@ -148,12 +185,13 @@ export function explainRefreshCandidates(
       missingRowProductIds.push(entry.internalProductId);
       continue;
     }
-    if (!row.periods['30d'].hasDashboardData) {
+    const availability = metricAvailabilityForFixedPeriod(row, '30d', explicitInput.metric);
+    if (!availability.available) {
       skipped.missing30dDashboard += 1;
       missing30dDashboardProductIds.push(entry.internalProductId);
       continue;
     }
-    const onlineDays = estimateOnlineDays(row, entry, input.date);
+    const onlineDays = estimateOnlineDays(row, entry, explicitInput.date);
     if (onlineDays === null) {
       skipped.onlineDaysUnknown += 1;
       continue;
@@ -162,18 +200,21 @@ export function explainRefreshCandidates(
       skipped.onlineLessThan30d += 1;
       continue;
     }
-    if (isZeroMetricMatch(row, input.zeroMetric)) {
+    if (isThresholdMatch(row, explicitInput)) {
       candidateCount += 1;
       candidateProductIds.push(entry.internalProductId);
     }
   }
 
-  const metricLabel = zeroMetricLabel(input.zeroMetric, windowDays);
+  const metricLabel = formatMetricThresholdCondition({ metric: explicitInput.metric, operator: explicitInput.operator, value: explicitInput.value, windowDays });
   const skippedSummary = compactSkipSummary(skipped, windowDays);
   return {
     scopeLine: scoped.scopeLine,
     ...(scoped.sameSkuGroupId ? { sameSkuGroupId: scoped.sameSkuGroupId } : {}),
     windowDays,
+    metric: explicitInput.metric,
+    operator: explicitInput.operator,
+    value: explicitInput.value,
     candidateCount,
     candidateProductIds,
     missing30dDashboardProductIds,

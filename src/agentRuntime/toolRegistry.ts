@@ -36,6 +36,23 @@ const refreshCandidateExplainArgumentsSchema = {
   required: ['zeroMetric'],
   additionalProperties: false,
 };
+const metricThresholdOperatorSchema = { type: 'string', enum: ['eq', 'neq', 'gt', 'gte', 'lt', 'lte'] };
+const metricThresholdExplainArgumentsSchema = {
+  type: 'object',
+  properties: {
+    date: reportDateSchema,
+    query: { type: 'string' },
+    sameSkuGroupId: { type: 'string' },
+    metric: { type: 'string', enum: [...publicTrafficMetricKeys] },
+    operator: metricThresholdOperatorSchema,
+    value: { type: 'number' },
+    windowDays: { type: ['integer', 'string'], pattern: '^[1-9]\\d*$', minimum: 1 },
+    requireActive: { type: 'boolean' },
+    requireOnlineDays: { type: ['integer', 'string'], pattern: '^[1-9]\\d*$', minimum: 1 },
+  },
+  required: ['metric', 'operator', 'value'],
+  additionalProperties: false,
+};
 const reportPeriodSchema = { type: 'string', enum: ['1d', '7d', '30d'] };
 const reportMetricSchema = {
   type: 'string',
@@ -274,6 +291,28 @@ const refreshCandidateExplainResultMetadataSchema = {
     skipped: { type: 'object' },
     skippedReasons: { type: 'array', items: { type: 'string' }, description: 'Human-readable skip reasons for follow-up planner branching.' },
     scopeLine: { type: 'string' },
+    reasonSummary: { type: 'array', items: { type: 'string' } },
+  },
+};
+const metricThresholdExplainResultMetadataSchema = {
+  type: 'object',
+  description: 'Metadata available to later planner steps after strategy.metricThresholdExplain.',
+  properties: {
+    toolName: { type: 'string' },
+    status: { type: 'string' },
+    metric: { type: 'string' },
+    metricLabel: { type: 'string' },
+    metricSource: { type: 'string' },
+    operator: { type: 'string' },
+    value: { type: 'number' },
+    windowDays: { type: 'integer' },
+    query: { type: 'string' },
+    sameSkuGroupId: { type: 'string' },
+    candidateCount: { type: 'integer', description: 'Number of products matching the threshold.' },
+    candidateProductIds: { type: 'array', items: { type: 'string' }, description: 'Stable internal product ids that matched the threshold.' },
+    unavailableMetricProductIds: { type: 'array', items: { type: 'string' }, description: 'Product ids skipped because the requested metric is unavailable in the window.' },
+    skipped: { type: 'object' },
+    skippedReasons: { type: 'array', items: { type: 'string' }, description: 'Human-readable skip reasons for follow-up planner branching.' },
     reasonSummary: { type: 'array', items: { type: 'string' } },
   },
 };
@@ -936,8 +975,16 @@ const agentTools: AgentToolDefinition[] = [
     resultMetadataSchema: safeSourceResolveResultMetadataSchema,
   },
   {
+    name: 'strategy.metricThresholdExplain',
+    description: '通用来源感知指标阈值解释工具：按任意公域日报指标、比较符和值筛选候选，支持 query/sameSkuGroupId 缩小范围、windowDays 任意窗口、requireActive 和 requireOnlineDays；不可用指标不会按 0 参与筛选。',
+    risk: 'read',
+    requiresConfirmation: false,
+    inputSchema: metricThresholdExplainArgumentsSchema,
+    resultMetadataSchema: metricThresholdExplainResultMetadataSchema,
+  },
+  {
     name: 'strategy.refreshCandidateExplain',
-    description: '独立解释活跃度刷新候选数量，可传 windowDays 调整窗口天数，说明为什么某查询或同款组 0 候选，包括 inactive、无日报行、访问页缺失、上线天数不足或未知。',
+    description: '兼容旧参数的活跃度刷新候选解释工具，已被 strategy.metricThresholdExplain 取代；必须显式传 zeroMetric=amount 或 zeroMetric=created_orders，不再默认创单。',
     risk: 'read',
     requiresConfirmation: false,
     inputSchema: refreshCandidateExplainArgumentsSchema,

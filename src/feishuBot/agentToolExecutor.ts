@@ -12,7 +12,8 @@ import { loadClosedOrderRegistryContext, type ClosedOrderRegistryPathsInput } fr
 import type { AgentIntent, AgentProblemType } from '../agentData/types.js';
 import { rankProductsByCategory, rankProductsByCategoryWindowed, type CategoryRankingMetric } from '../agentData/categoryRanking.js';
 import { buildDataHealthReport } from '../agentData/dataHealth.js';
-import { explainRefreshCandidates } from '../agentData/refreshCandidateExplain.js';
+import { adaptLegacyRefreshCandidateExplainInput, explainRefreshCandidates } from '../agentData/refreshCandidateExplain.js';
+import { evaluateMetricThresholdStrategy, formatMetricThresholdCondition, metricSourceLabel, type MetricThresholdStrategyInput, type MetricThresholdStrategyResult } from '../agentData/metricThresholdStrategy.js';
 import { resolveSafeSourceForSameSkuGroup } from '../agentData/safeSource.js';
 import { findWindowedProducts, type WindowedPredicate } from '../agentData/windowedFindings.js';
 import { aggregateWindowProducts, readWindowMetric, type WindowProductAggregate } from '../agentData/windowAggregate.js';
@@ -263,6 +264,16 @@ function readPublicTrafficMetric(value: unknown): PublicTrafficMetricKey {
   throw new Error('metric must be a supported public traffic metric');
 }
 
+function readMetricThresholdOperator(value: unknown): MetricThresholdStrategyInput['operator'] {
+  if (value === 'eq' || value === 'neq' || value === 'gt' || value === 'gte' || value === 'lt' || value === 'lte') return value;
+  throw new Error('operator must be eq, neq, gt, gte, lt, or lte');
+}
+
+function readRequiredNumber(value: unknown, fieldName: string): number {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  throw new Error(`${fieldName} must be a finite number`);
+}
+
 function isFixedCategoryMetric(metric: PublicTrafficMetricKey): metric is CategoryRankingMetric {
   return metric === 'shippedOrders' || metric === 'amount' || metric === 'exposure';
 }
@@ -418,11 +429,68 @@ function formatSafeSourceResponse(result: ReturnType<typeof resolveSafeSourceFor
   return { text, metadata: { toolName: 'strategy.safeSourceResolve', ...result } };
 }
 
-function formatRefreshCandidateExplainResponse(result: ReturnType<typeof explainRefreshCandidates>, zeroMetric: 'created_orders' | 'amount', input: { query?: string; sameSkuGroupId?: string } = {}): BotResponse {
-  const status = result.candidateCount > 0 ? 'found' : 'empty';
+function formatLegacyRefreshCandidateLine(result: MetricThresholdStrategyResult, input: MetricThresholdStrategyInput): string | null {
+  if (result.metric !== 'amount' && result.metric !== 'createdOrders') return null;
+  const label = result.metric === 'amount' ? `近${input.windowDays}天订单金额为0` : `近${input.windowDays}天创单为0`;
+  return result.candidateProductIds.length > 0
+    ? `找到 ${result.candidateProductIds.length} 条符合 ${label} 的 active 链接。`
+    : `没有找到符合 ${label} 的 active 链接。`;
+}
+
+function formatMetricThresholdExplainResponse(
+  result: MetricThresholdStrategyResult,
+  input: MetricThresholdStrategyInput,
+  toolName: 'strategy.metricThresholdExplain' | 'strategy.refreshCandidateExplain',
+  resolvedSameSkuGroupId?: string,
+): BotResponse {
+  const definition = getPublicTrafficMetric(result.metric)!;
+  const status = result.candidateProductIds.length > 0 ? 'found' : 'empty';
+  const condition = formatMetricThresholdCondition(input);
+  const sourceLabel = metricSourceLabel(definition.source);
+  const sameSkuGroupId = input.sameSkuGroupId ?? resolvedSameSkuGroupId;
+  const scopeLine = sameSkuGroupId
+    ? `筛选范围：${sameSkuGroupId}`
+    : input.query ? `筛选范围：${input.query}` : '筛选范围：全部链接档案';
+  const legacyLine = toolName === 'strategy.refreshCandidateExplain' ? formatLegacyRefreshCandidateLine(result, input) : null;
   return {
-    text: [result.scopeLine, ...result.reasonSummary].join('\n'),
-    metadata: { toolName: 'strategy.refreshCandidateExplain', status, zeroMetric, ...(input.query ? { query: input.query } : {}), ...(input.sameSkuGroupId ? { sameSkuGroupId: input.sameSkuGroupId } : {}), ...result, skippedReasons: result.reasonSummary },
+    text: [
+      scopeLine,
+      `筛选口径：${input.requireActive ? 'active 链接' : '链接档案范围'}，${condition}，${sourceLabel}完整${input.requireOnlineDays ? `，上线满${input.requireOnlineDays}天` : ''}。`,
+      `数据说明：${definition.label}来自${sourceLabel}；缺失的访问页/公域数据不会按0参与筛选。`,
+      ...result.reasonSummary,
+      legacyLine,
+    ].join('\n'),
+    metadata: {
+      toolName,
+      status,
+      metricLabel: definition.label,
+      metricSource: definition.source,
+      operator: input.operator,
+      value: input.value,
+      ...(toolName === 'strategy.refreshCandidateExplain' ? { zeroMetric: result.metric === 'createdOrders' ? 'created_orders' : 'amount' } : {}),
+      ...(input.query ? { query: input.query } : {}),
+      ...(sameSkuGroupId ? { sameSkuGroupId } : {}),
+      ...result,
+      candidateCount: result.candidateProductIds.length,
+      skippedReasons: result.reasonSummary,
+    },
+  };
+}
+
+function metricThresholdResultFromRefreshExplain(result: ReturnType<typeof explainRefreshCandidates>): MetricThresholdStrategyResult {
+  return {
+    metric: result.metric,
+    windowDays: result.windowDays,
+    candidateProductIds: result.candidateProductIds,
+    skipped: {
+      inactive: result.skipped.inactive,
+      missingRow: result.skipped.missingRow,
+      unavailableMetric: result.skipped.missing30dDashboard,
+      onlineLessThanRequired: result.skipped.onlineLessThan30d,
+      onlineDaysUnknown: result.skipped.onlineDaysUnknown,
+    },
+    unavailableMetricProductIds: result.missing30dDashboardProductIds,
+    reasonSummary: result.reasonSummary,
   };
 }
 
@@ -1667,7 +1735,9 @@ async function refreshActivityPlanResponse(
       ...explainRefreshCandidates(registryContext.registry, windowMetrics ? contextWithRefreshActivityWindowMetrics(report.context, windowMetrics, windowDays) : report.context, {
         ...(readString(args.query) ? { query: readString(args.query)! } : {}),
         ...(readString(args.sameSkuGroupId) ? { sameSkuGroupId: readString(args.sameSkuGroupId)! } : {}),
-        zeroMetric,
+        metric: zeroMetric === 'created_orders' ? 'createdOrders' : 'amount',
+        operator: 'eq',
+        value: 0,
         date: report.context.date,
         windowDays,
       }).reasonSummary.map((line) => `- 策略说明：${line}`),
@@ -2208,20 +2278,51 @@ export async function executeAgentToolRequest(
       const excludedProductIds = new Set(readStringArrayArgument(request.arguments.excludedProductIds, 'excludedProductIds'));
       return formatSafeSourceResponse(resolveSafeSourceForSameSkuGroup(registryContext.registry, report.context, sameSkuGroupId, excludedProductIds));
     }
-    case 'strategy.refreshCandidateExplain': {
-      const date = readOptionalDate(request.arguments.date);
-      const report = await findReportContextForTool(outputDir, date);
-      if (!report) return { text: missingReportContextText(date) };
+    case 'strategy.metricThresholdExplain': {
+      const explicitDate = readOptionalDate(request.arguments.date);
+      const latest = explicitDate ? null : await findLatestReportContext(outputDir);
+      const endDate = explicitDate ?? latest?.context.date;
+      if (!endDate) return { text: '还没有找到公域日报上下文。' };
       const registryContext = await loadClosedOrderRegistryContext(options.closedOrderRegistryPaths);
-      const zeroMetric = readRefreshActivityZeroMetric(request.arguments.zeroMetric);
-      const windowDays = request.arguments.windowDays === undefined ? undefined : readRefreshActivityWindowDays(request.arguments.windowDays);
-      const query = readString(request.arguments.query) ?? undefined;
-      const sameSkuGroupId = readString(request.arguments.sameSkuGroupId) ?? undefined;
-      const explainContext = windowDays && windowDays !== REFRESH_ACTIVITY_DEFAULT_WINDOW_DAYS
-        ? contextWithRefreshActivityWindowMetrics(report.context, buildRefreshActivityWindowAggregateIndex(await aggregateWindowProducts({ outputDir, endDate: report.context.date, windowDays })), windowDays)
-        : report.context;
-      const result = explainRefreshCandidates(registryContext.registry, explainContext, { ...(query ? { query } : {}), ...(sameSkuGroupId ? { sameSkuGroupId } : {}), zeroMetric, date: report.context.date, ...(windowDays ? { windowDays } : {}) });
-      return formatRefreshCandidateExplainResponse(result, zeroMetric, { ...(query ? { query } : {}), ...(sameSkuGroupId ? { sameSkuGroupId } : {}) });
+      const input: MetricThresholdStrategyInput = {
+        ...(readString(request.arguments.query) ? { query: readString(request.arguments.query)! } : {}),
+        ...(readString(request.arguments.sameSkuGroupId) ? { sameSkuGroupId: readString(request.arguments.sameSkuGroupId)! } : {}),
+        metric: readPublicTrafficMetric(request.arguments.metric),
+        operator: readMetricThresholdOperator(request.arguments.operator),
+        value: readRequiredNumber(request.arguments.value, 'value'),
+        date: endDate,
+        windowDays: readOptionalLimit(request.arguments.windowDays) ?? REFRESH_ACTIVITY_DEFAULT_WINDOW_DAYS,
+        ...(request.arguments.requireActive !== undefined ? { requireActive: request.arguments.requireActive === true } : {}),
+        ...(request.arguments.requireOnlineDays !== undefined ? { requireOnlineDays: readOptionalLimit(request.arguments.requireOnlineDays) ?? REFRESH_ACTIVITY_DEFAULT_WINDOW_DAYS } : {}),
+      };
+      return formatMetricThresholdExplainResponse(await evaluateMetricThresholdStrategy(outputDir, registryContext.registry, input), input, 'strategy.metricThresholdExplain');
+    }
+    case 'strategy.refreshCandidateExplain': {
+      const explicitDate = readOptionalDate(request.arguments.date);
+      const latest = explicitDate ? null : await findLatestReportContext(outputDir);
+      const endDate = explicitDate ?? latest?.context.date;
+      if (!endDate) return { text: '还没有找到公域日报上下文。' };
+      const registryContext = await loadClosedOrderRegistryContext(options.closedOrderRegistryPaths);
+      const legacyInput = adaptLegacyRefreshCandidateExplainInput({
+        ...(readString(request.arguments.query) ? { query: readString(request.arguments.query)! } : {}),
+        ...(readString(request.arguments.sameSkuGroupId) ? { sameSkuGroupId: readString(request.arguments.sameSkuGroupId)! } : {}),
+        zeroMetric: request.arguments.zeroMetric === 'created_orders' || request.arguments.zeroMetric === 'amount' ? request.arguments.zeroMetric : undefined,
+        date: endDate,
+        ...(request.arguments.windowDays !== undefined ? { windowDays: readRefreshActivityWindowDays(request.arguments.windowDays) } : {}),
+      });
+      const input: MetricThresholdStrategyInput = {
+        ...legacyInput,
+        windowDays: legacyInput.windowDays ?? REFRESH_ACTIVITY_DEFAULT_WINDOW_DAYS,
+        requireActive: true,
+        requireOnlineDays: legacyInput.windowDays ?? REFRESH_ACTIVITY_DEFAULT_WINDOW_DAYS,
+      };
+      if (request.arguments.windowDays === undefined) {
+        const report = await findReportContextForTool(outputDir, explicitDate);
+        if (!report) return { text: missingReportContextText(explicitDate) };
+        const result = explainRefreshCandidates(registryContext.registry, report.context, legacyInput);
+        return formatMetricThresholdExplainResponse(metricThresholdResultFromRefreshExplain(result), input, 'strategy.refreshCandidateExplain', result.sameSkuGroupId);
+      }
+      return formatMetricThresholdExplainResponse(await evaluateMetricThresholdStrategy(outputDir, registryContext.registry, input), input, 'strategy.refreshCandidateExplain');
     }
     case 'publicTraffic.runReport':
       if (publicTrafficReportRunning) return { text: '公域日报正在运行中，请稍后再试。' };
