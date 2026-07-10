@@ -1,6 +1,6 @@
 import { explainRefreshCandidates } from '../agentData/refreshCandidateExplain.js';
 import { resolveSafeSourceForSameSkuGroup } from '../agentData/safeSource.js';
-import { aggregateWindowProducts, type WindowProductAggregate } from '../agentData/windowAggregate.js';
+import { aggregateWindowProducts, readWindowMetric, type WindowProductAggregate } from '../agentData/windowAggregate.js';
 import { getInactiveLinks, getNewProductPool, getProblemProducts, getProductPerformance, getRemovedLinks } from '../agentData/publicTrafficQueries.js';
 import { rankBestProductByRegistryQuery, rankBestProductByRegistryQueryWindowed, type ProductRankingResult, type ProductWindowRankingResult } from '../agentData/productRanking.js';
 import { getPublicTrafficMetric, type PublicTrafficMetricKey } from '../agentData/publicTrafficMetricCatalog.js';
@@ -176,9 +176,7 @@ function formatWindowRankingAnswer(result: ProductWindowRankingResult): string {
 }
 
 function rankingAggregateMetricValue(item: WindowProductAggregate, metric: 'shippedOrders' | 'amount' | 'exposure'): number {
-  if (metric === 'shippedOrders') return item.shippedOrders;
-  if (metric === 'amount') return item.amount;
-  return item.exposure;
+  return readWindowMetric(item, metric) ?? 0;
 }
 
 function resolveSameSkuGroupEntries(registry: LinkRegistryStore, query: string): LinkRegistryEntry[] {
@@ -225,9 +223,9 @@ async function rankWindowAggregateAnswer(
       `近 ${periodDays} 天数据最好的 ${intent.query} 是：端内ID ${best.internalProductId}（${best.productName}）`,
       `数据日期：${context.date}`,
       `依据：逐日 1d 聚合，按 ${metricLabel} 排序；覆盖 ${best.daysCovered}/${periodDays} 天。`,
-      `近 ${periodDays} 天：发货 ${best.shippedOrders}，成交额 ¥${formatMoney(best.amount)}，访问 ${best.publicVisits}，曝光 ${best.exposure}`,
+      `近 ${periodDays} 天：发货 ${readWindowMetric(best, 'shippedOrders') ?? 0}，成交额 ¥${formatMoney(readWindowMetric(best, 'amount') ?? 0)}，访问 ${readWindowMetric(best, 'publicVisits') ?? 0}，曝光 ${readWindowMetric(best, 'exposure') ?? 0}`,
     ].join('\n'),
-    metadata: { toolName: 'product.rankBestSameSku', status: 'ranked', query: intent.query, bestProductId: best.internalProductId, best, ranking: aggregates, productIds, ...(sameSkuGroupId ? { sameSkuGroupId } : {}), rankingCount: aggregates.length, date: context.date, periodDays, metric },
+    metadata: { toolName: 'product.rankBestSameSku', status: 'ranked', query: intent.query, bestProductId: best.internalProductId, best, ranking: aggregates, productIds, ...(sameSkuGroupId ? { sameSkuGroupId } : {}), rankingCount: aggregates.length, date: context.date, endDate: context.date, periodDays, windowDays: periodDays, metric, availability: best.availability },
   };
 }
 
@@ -327,7 +325,7 @@ export const readOnlyTools: ReadOnlyTool[] = [
             status: result.status,
             query: intent.query,
             ...(result.status === 'ranked'
-              ? { bestProductId: result.best.internalProductId, best: result.best, ranking: result.ranking, productIds: result.ranking.map((item) => item.internalProductId), rankingCount: result.ranking.length, sameSkuGroupId: result.sameSkuGroupId, date: result.date, periodDays: result.periodDays, metric: result.metric }
+              ? { bestProductId: result.best.internalProductId, best: result.best, ranking: result.ranking, productIds: result.ranking.map((item) => item.internalProductId), rankingCount: result.ranking.length, sameSkuGroupId: result.sameSkuGroupId, date: result.date, endDate: result.date, periodDays: result.periodDays, windowDays: result.periodDays, metric: result.metric, availability: {} }
               : {}),
             result,
           },
@@ -352,8 +350,11 @@ export const readOnlyTools: ReadOnlyTool[] = [
                 rankingCount: result.ranking.length,
                 sameSkuGroupId: result.sameSkuGroupId,
                 date: result.date,
+                endDate: result.date,
                 periodDays: intent.periodDays,
+                windowDays: intent.periodDays,
                 metric: intent.metric,
+                availability: {},
               }
             : {}),
           result,
@@ -376,7 +377,7 @@ export const readOnlyTools: ReadOnlyTool[] = [
       const conditionMetadata = 'metric' in intent
         ? { metric: intent.metric, operator: intent.operator, value: intent.value }
         : { zeroMetric: intent.zeroMetric };
-      return { text: [result.scopeLine, ...result.reasonSummary].join('\n'), metadata: { toolName: 'strategy.refreshCandidateExplain', status, ...conditionMetadata, ...(intent.query ? { query: intent.query } : {}), ...(intent.sameSkuGroupId ? { sameSkuGroupId: intent.sameSkuGroupId } : {}), ...result, skippedReasons: result.reasonSummary } };
+      return { text: [result.scopeLine, ...result.reasonSummary].join('\n'), metadata: { toolName: 'strategy.refreshCandidateExplain', status, endDate: context.date, productIds: result.candidateProductIds, availability: { unavailableMetricProductIds: result.missing30dDashboardProductIds, unavailableMetricCount: result.skipped.missing30dDashboard }, ...conditionMetadata, ...('metric' in intent ? {} : { legacyArgumentAdapted: true }), ...(intent.query ? { query: intent.query } : {}), ...(intent.sameSkuGroupId ? { sameSkuGroupId: intent.sameSkuGroupId } : {}), ...result, skippedReasons: result.reasonSummary } };
     },
   },
   {

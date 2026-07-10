@@ -58,6 +58,13 @@ const reportMetricSchema = {
   type: 'string',
   enum: [...publicTrafficMetricKeys],
 };
+const stableMetricMetadataProperties = {
+  metric: { type: 'string', enum: [...publicTrafficMetricKeys] },
+  windowDays: { type: 'integer' },
+  endDate: { type: 'string' },
+  availability: { type: 'object' },
+  productIds: { type: 'array', items: { type: 'string' } },
+};
 const reportAggregationSchema = { type: 'string', enum: ['count', 'sum', 'avg', 'min', 'max'] };
 const reportSourceSchema = { type: 'string', enum: ['exposure', 'dashboard', 'all'] };
 const reportCoverageStatusSchema = { type: 'string', enum: ['available', 'missing', 'all'] };
@@ -231,32 +238,54 @@ const productRankingResultMetadataSchema = {
   type: 'object',
   description: 'Metadata available to later planner steps after product.rankBestSameSku.',
   properties: {
+    ...stableMetricMetadataProperties,
     status: { type: 'string' },
     query: { type: 'string' },
     bestProductId: { type: 'string', description: 'Best internal product id for follow-up actions such as rental.newLinkBatchPlan.sourceProductId.' },
     sameSkuGroupId: { type: 'string' },
-    productIds: { type: 'array', items: { type: 'string' }, description: 'Stable ranked internal product ids for later planner steps.' },
+    productIds: { ...stableMetricMetadataProperties.productIds, description: 'Stable ranked internal product ids for later planner steps.' },
     rankingCount: { type: 'integer', description: 'Number of ranked products available to later planner steps.' },
     periodDays: { type: 'integer' },
-    metric: { type: 'string' },
     date: { type: 'string' },
     best: { type: 'object' },
     ranking: { type: 'array' },
+  },
+};
+const categoryRankingResultMetadataSchema = {
+  type: 'object',
+  description: 'Metadata available to later planner steps after product.rankByCategory.',
+  properties: {
+    ...stableMetricMetadataProperties,
+    toolName: { type: 'string' },
+    date: { type: 'string' },
+    category: { type: ['string', 'null'] },
+    period: { type: 'string' },
+    periodDays: { type: 'integer' },
+    items: { type: 'array' },
   },
 };
 const windowAggregateResultMetadataSchema = {
   type: 'object',
   description: 'Metadata available to later planner steps after publicTraffic.windowAggregate; use productIds instead of guessing item internals.',
   properties: {
+    ...stableMetricMetadataProperties,
     toolName: { type: 'string' },
     status: { type: 'string' },
-    endDate: { type: 'string' },
     windowDays: { type: 'integer', description: 'Window length used for the aggregation.' },
     productCount: { type: 'integer', description: 'Number of aggregated products.' },
-    productIds: { type: 'array', items: { type: 'string' }, description: 'Stable internal product ids for follow-up planner steps.' },
+    productIds: { ...stableMetricMetadataProperties.productIds, description: 'Stable internal product ids for follow-up planner steps.' },
     fullyCoveredProductIds: { type: 'array', items: { type: 'string' }, description: 'Product ids with complete daily coverage for the requested window.' },
     partialCoveredProductIds: { type: 'array', items: { type: 'string' }, description: 'Product ids with partial daily coverage for the requested window.' },
     missingDatesByProduct: { type: 'object', description: 'Missing daily report dates keyed by internal product id.' },
+    items: { type: 'array' },
+  },
+};
+const windowQueryResultMetadataSchema = {
+  type: 'object',
+  description: 'Metadata available to later planner steps after publicTraffic.windowQuery.',
+  properties: {
+    ...stableMetricMetadataProperties,
+    toolName: { type: 'string' },
     items: { type: 'array' },
   },
 };
@@ -278,10 +307,11 @@ const refreshCandidateExplainResultMetadataSchema = {
   type: 'object',
   description: 'Metadata available to later planner steps after strategy.refreshCandidateExplain.',
   properties: {
+    ...stableMetricMetadataProperties,
     toolName: { type: 'string' },
     status: { type: 'string' },
     zeroMetric: { type: 'string' },
-    windowDays: { type: 'integer' },
+    legacyArgumentAdapted: { type: 'boolean' },
     query: { type: 'string' },
     sameSkuGroupId: { type: 'string' },
     candidateCount: { type: 'integer', description: 'Number of refresh candidates in scope.' },
@@ -298,14 +328,13 @@ const metricThresholdExplainResultMetadataSchema = {
   type: 'object',
   description: 'Metadata available to later planner steps after strategy.metricThresholdExplain.',
   properties: {
+    ...stableMetricMetadataProperties,
     toolName: { type: 'string' },
     status: { type: 'string' },
-    metric: { type: 'string' },
     metricLabel: { type: 'string' },
     metricSource: { type: 'string' },
     operator: { type: 'string' },
     value: { type: 'number' },
-    windowDays: { type: 'integer' },
     query: { type: 'string' },
     sameSkuGroupId: { type: 'string' },
     candidateCount: { type: 'integer', description: 'Number of products matching the threshold.' },
@@ -349,6 +378,7 @@ const refreshActivityPlanResultMetadataSchema = {
   type: 'object',
   description: 'Metadata available after operations.refreshActivityPlan planning.',
   properties: {
+    ...stableMetricMetadataProperties,
     date: { type: 'string' },
     candidateCount: { type: 'integer' },
     shownCandidateCount: { type: 'integer' },
@@ -367,11 +397,10 @@ const refreshActivityPlanResultMetadataSchema = {
     blockers: { type: 'array', items: { type: 'string' } },
     skippedGroups: { type: 'array', items: { type: 'string' } },
     scope: { type: ['string', 'null'] },
-    metric: { type: 'string' },
     metricLabel: { type: 'string' },
     operator: { type: 'string' },
     value: { type: 'number' },
-    windowDays: { type: 'integer' },
+    legacyArgumentAdapted: { type: 'boolean' },
   },
 };
 const refreshActivityExecuteResultMetadataSchema = {
@@ -793,6 +822,7 @@ const agentTools: AgentToolDefinition[] = [
     risk: 'read',
     requiresConfirmation: false,
     inputSchema: categoryRankingArgumentsSchema,
+    resultMetadataSchema: categoryRankingResultMetadataSchema,
   },
   {
     name: 'productId.lookup',
@@ -963,7 +993,7 @@ const agentTools: AgentToolDefinition[] = [
     risk: 'read',
     requiresConfirmation: false,
     inputSchema: publicTrafficWindowQueryArgumentsSchema,
-    resultMetadataSchema: windowAggregateResultMetadataSchema,
+    resultMetadataSchema: windowQueryResultMetadataSchema,
   },
   {
     name: 'system.dataHealth',

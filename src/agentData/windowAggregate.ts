@@ -18,12 +18,6 @@ export interface WindowProductAggregate {
   missingDashboardDates: string[];
   metrics: Partial<Record<PublicTrafficMetricKey, number>>;
   availability: Record<PublicTrafficMetricKey, MetricAvailability>;
-  exposure: number;
-  publicVisits: number;
-  dashboardVisits: number;
-  createdOrders: number;
-  shippedOrders: number;
-  amount: number;
 }
 
 interface DailyMetricRecord {
@@ -183,12 +177,6 @@ function createAggregate(row: DailyRowRecord): MutableWindowProductAggregate {
     missingDashboardDates: [],
     metrics: {},
     availability: emptyAvailability(1),
-    exposure: 0,
-    publicVisits: 0,
-    dashboardVisits: 0,
-    createdOrders: 0,
-    shippedOrders: 0,
-    amount: 0,
     coveredDates: new Set<string>(),
     dashboardCoveredDates: new Set<string>(),
     exposureCoveredDates: new Set<string>(),
@@ -229,13 +217,6 @@ function addMetric(target: MutableWindowProductAggregate, date: string, metric: 
     target.dashboardDaysCovered += 1;
     target.dashboardCoveredDates.add(date);
   }
-  target.exposure += metric.exposure;
-  target.publicVisits += metric.publicVisits;
-  target.dashboardVisits += metric.dashboardVisits;
-  target.createdOrders += metric.createdOrders;
-  target.shippedOrders += metric.shippedOrders;
-  target.amount += metric.amount;
-
   if (metric.hasExposureData) {
     addMetricValue(target, 'exposure', metric.exposure, date);
     addMetricValue(target, 'publicVisits', metric.publicVisits, date);

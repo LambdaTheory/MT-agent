@@ -317,12 +317,13 @@ function formatCategoryRankingMetric(metric: CategoryRankingMetric): string {
 function formatCategoryRankingResponse(result: ReturnType<typeof rankProductsByCategory>): BotResponse {
   const label = formatCategoryRankingMetric(result.metric);
   const lines = result.items.map((item, index) => `${index + 1}. ${item.productName}（端内ID ${item.internalProductId}，${item.category}）${label} ${item.value}`);
+  const windowDays = Number(result.period.replace('d', ''));
   return {
     text: [
       `品类排名：${result.category ?? '全部'} ${result.period} ${label}`,
       ...lines,
     ].join('\n'),
-    metadata: { toolName: 'product.rankByCategory', date: result.date, category: result.category, metric: result.metric, period: result.period, items: result.items },
+    metadata: { toolName: 'product.rankByCategory', date: result.date, endDate: result.date, category: result.category, metric: result.metric, period: result.period, periodDays: windowDays, windowDays, availability: {}, productIds: result.items.map((item) => item.internalProductId), items: result.items },
   };
 }
 
@@ -353,10 +354,11 @@ function formatWindowAggregateResponse(result: Awaited<ReturnType<typeof aggrega
   const missingDatesByProduct = Object.fromEntries(result
     .filter((item) => item.missingDates.length > 0)
     .map((item) => [item.internalProductId, item.missingDates]));
+  const availability = Object.fromEntries(publicTrafficMetricKeys.map((metric) => [metric, result.filter((item) => item.availability[metric]?.available).length]));
   const status = result.length === 0 ? 'empty' : partialCoveredProductIds.length > 0 ? 'partial' : 'ok';
   return {
     text: [`公域窗口聚合：截至 ${endDate}，近 ${windowDays} 天`, ...lines].join('\n'),
-    metadata: { toolName: 'publicTraffic.windowAggregate', status, endDate, windowDays, productCount: result.length, productIds, fullyCoveredProductIds, partialCoveredProductIds, missingDatesByProduct, items: result },
+    metadata: { toolName: 'publicTraffic.windowAggregate', status, endDate, windowDays, availability, productCount: result.length, productIds, fullyCoveredProductIds, partialCoveredProductIds, missingDatesByProduct, items: result },
   };
 }
 
@@ -399,7 +401,7 @@ function formatWindowCategoryRankingResponse(result: Awaited<ReturnType<typeof r
   });
   return {
     text: [`品类排名：${result.category ?? '全部'} 近${result.periodDays}天 ${definition.label}`, ...lines].join('\n'),
-    metadata: { toolName: 'product.rankByCategory', date: result.date, category: result.category, metric: result.metric, periodDays: result.periodDays, productIds: result.items.map((item) => item.internalProductId), items: result.items },
+    metadata: { toolName: 'product.rankByCategory', date: result.date, endDate: result.date, category: result.category, metric: result.metric, periodDays: result.periodDays, windowDays: result.periodDays, availability: {}, productIds: result.items.map((item) => item.internalProductId), items: result.items },
   };
 }
 
@@ -463,11 +465,15 @@ function formatMetricThresholdExplainResponse(
     metadata: {
       toolName,
       status,
+      endDate: input.date,
+      availability: { unavailableMetricProductIds: result.unavailableMetricProductIds, unavailableMetricCount: result.skipped.unavailableMetric },
+      productIds: result.candidateProductIds,
       metricLabel: definition.label,
       metricSource: definition.source,
       operator: input.operator,
       value: input.value,
       ...(toolName === 'strategy.refreshCandidateExplain' ? { zeroMetric: result.metric === 'createdOrders' ? 'created_orders' : 'amount' } : {}),
+      ...(toolName === 'strategy.refreshCandidateExplain' ? { legacyArgumentAdapted: true } : {}),
       ...(input.query ? { query: input.query } : {}),
       ...(sameSkuGroupId ? { sameSkuGroupId } : {}),
       ...result,
@@ -1302,8 +1308,6 @@ interface RefreshActivityNewLinkItem {
   sameSkuGroupId?: string;
 }
 
-type RefreshActivityZeroMetric = 'created_orders' | 'amount';
-
 interface RefreshActivityExecuteRequest {
   date: string;
   delistProductIds: string[];
@@ -1339,32 +1343,36 @@ function refreshActivityWindowSourceScore(metric: PublicTrafficPeriodMetrics): n
   );
 }
 
-function readRefreshActivityZeroMetric(value: unknown): RefreshActivityZeroMetric {
-  if (value === 'created_orders' || value === 'amount') return value;
+function adaptRefreshActivityLegacyZeroMetric(value: unknown): Pick<MetricThresholdStrategyInput, 'metric' | 'operator' | 'value'> | null {
+  if (value === undefined) return null;
+  if (value === 'created_orders') return { metric: 'createdOrders', operator: 'eq', value: 0 };
+  if (value === 'amount') return { metric: 'amount', operator: 'eq', value: 0 };
   throw new Error('zeroMetric must be created_orders or amount');
 }
 
-function adaptRefreshActivityLegacyZeroMetric(value: unknown): Pick<MetricThresholdStrategyInput, 'metric' | 'operator' | 'value'> | null {
-  if (value === undefined) return null;
-  const zeroMetric = readRefreshActivityZeroMetric(value);
-  return { metric: zeroMetric === 'created_orders' ? 'createdOrders' : 'amount', operator: 'eq', value: 0 };
-}
-
 function refreshActivityMetricFromWindowAggregate(aggregate: WindowProductAggregate, windowDays: number): PublicTrafficPeriodMetrics {
-  const hasFullWindow = aggregate.daysCovered === windowDays;
-  const hasFullDashboardWindow = aggregate.dashboardDaysCovered === windowDays;
+  const exposure = readWindowMetric(aggregate, 'exposure') ?? 0;
+  const publicVisits = readWindowMetric(aggregate, 'publicVisits') ?? 0;
+  const amount = readWindowMetric(aggregate, 'amount') ?? 0;
+  const dashboardVisits = readWindowMetric(aggregate, 'dashboardVisits') ?? 0;
+  const createdOrders = readWindowMetric(aggregate, 'createdOrders') ?? 0;
+  const signedOrders = readWindowMetric(aggregate, 'signedOrders') ?? 0;
+  const reviewedOrders = readWindowMetric(aggregate, 'reviewedOrders') ?? 0;
+  const shippedOrders = readWindowMetric(aggregate, 'shippedOrders') ?? 0;
+  const hasFullWindow = aggregate.availability.exposure.available && aggregate.availability.publicVisits.available && aggregate.availability.amount.available;
+  const hasFullDashboardWindow = aggregate.availability.dashboardVisits.available && aggregate.availability.createdOrders.available && aggregate.availability.shippedOrders.available;
   return {
-    exposure: aggregate.exposure,
-    publicVisits: aggregate.publicVisits,
-    dashboardVisits: aggregate.dashboardVisits,
-    createdOrders: aggregate.createdOrders,
-    signedOrders: 0,
-    reviewedOrders: 0,
-    shippedOrders: aggregate.shippedOrders,
-    amount: aggregate.amount,
-    exposureVisitRate: aggregate.exposure > 0 ? aggregate.publicVisits / aggregate.exposure : 0,
-    visitCreatedOrderRate: aggregate.publicVisits > 0 ? aggregate.createdOrders / aggregate.publicVisits : 0,
-    visitShipmentRate: aggregate.publicVisits > 0 ? aggregate.shippedOrders / aggregate.publicVisits : 0,
+    exposure,
+    publicVisits,
+    dashboardVisits,
+    createdOrders,
+    signedOrders,
+    reviewedOrders,
+    shippedOrders,
+    amount,
+    exposureVisitRate: exposure > 0 ? publicVisits / exposure : 0,
+    visitCreatedOrderRate: dashboardVisits > 0 ? createdOrders / dashboardVisits : 0,
+    visitShipmentRate: dashboardVisits > 0 ? shippedOrders / dashboardVisits : 0,
     hasExposureData: hasFullWindow,
     hasDashboardData: hasFullDashboardWindow,
   };
@@ -1829,8 +1837,11 @@ async function refreshActivityPlanResponse(
     metadata: {
       toolName: 'operations.refreshActivityPlan',
       date: report.context.date,
+      endDate: report.context.date,
       candidateCount: candidates.length,
       shownCandidateCount: shownCandidates.length,
+      productIds: candidates.map((candidate) => candidate.entry.internalProductId),
+      availability: { unavailableMetricProductIds: strategyResult.unavailableMetricProductIds, unavailableMetricCount: strategyResult.skipped.unavailableMetric },
       skipped: {
         inactive: strategyResult.skipped.inactive,
         missingRow: strategyResult.skipped.missingRow,
@@ -1849,6 +1860,7 @@ async function refreshActivityPlanResponse(
       blockers: [...delistOnlyExecution.blockers, ...refillExecution.blockers],
       skippedGroups: refillExecution.skippedGroups,
       zeroCandidateExplanation,
+      ...(args.zeroMetric !== undefined ? { legacyArgumentAdapted: true } : {}),
     },
     ...(strategyCard ? { card: strategyCard } : {}),
   };

@@ -85,12 +85,14 @@ describe('aggregateWindowProducts', () => {
       internalProductId: '648',
       platformProductId: 'p648',
       productName: 'R50 A',
-      exposure: 30,
-      amount: 100,
-      createdOrders: 1,
-      shippedOrders: 2,
       daysCovered: 2,
     });
+    expect(result[0]?.metrics.exposure).toBeUndefined();
+    expect(result[0]?.metrics.amount).toBeUndefined();
+    expect(result[0]?.availability.exposure).toMatchObject({ available: false, coveredDays: 2 });
+    expect(result[0]?.availability.amount).toMatchObject({ available: false, coveredDays: 2 });
+    expect(readWindowMetric(result[0]!, 'createdOrders')).toBeUndefined();
+    expect(readWindowMetric(result[0]!, 'shippedOrders')).toBeUndefined();
     expect(result[0]?.missingDates).toHaveLength(18);
     expect(result[0]?.missingDates).toContain('2026-06-30');
   });
