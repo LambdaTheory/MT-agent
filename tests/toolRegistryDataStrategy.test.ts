@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { findAgentTool } from '../src/agentRuntime/toolRegistry.js';
+import { publicTrafficMetricKeys } from '../src/agentData/publicTrafficMetricCatalog.js';
 import { executeAgentToolRequest } from '../src/feishuBot/agentToolExecutor.js';
 
 const metric = {
@@ -96,6 +97,12 @@ async function writeFixtures() {
 }
 
 describe('data and strategy capability tools', () => {
+  it('derives reportQuery metric schema from the metric catalog', () => {
+    expect(findAgentTool('publicTraffic.reportQuery')?.inputSchema).toMatchObject({
+      properties: { metrics: { items: { enum: [...publicTrafficMetricKeys] } } },
+    });
+  });
+
   it('registers every new capability as read-only', () => {
     for (const name of ['publicTraffic.windowAggregate', 'system.dataHealth', 'strategy.safeSourceResolve', 'strategy.refreshCandidateExplain']) {
       expect(findAgentTool(name)).toMatchObject({ risk: 'read', requiresConfirmation: false });
