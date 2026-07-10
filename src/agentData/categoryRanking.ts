@@ -1,7 +1,7 @@
 import type { LinkRegistryEntry } from '../linkRegistry/types.js';
 import type { PeriodKey } from '../domain/types.js';
 import type { PublicTrafficDataReportContext, PublicTrafficProductDataRow } from '../publicTraffic/types.js';
-import { queryPublicTrafficWindow } from './windowQuery.js';
+import { aggregateWindowProducts, readWindowMetric, type WindowProductAggregate } from './windowAggregate.js';
 import type { PublicTrafficMetricKey } from './publicTrafficMetricCatalog.js';
 
 export type CategoryRankingMetric = 'shippedOrders' | 'amount' | 'exposure';
@@ -73,6 +73,10 @@ function findEntry(row: PublicTrafficProductDataRow, index: Map<string, LinkRegi
   return (internalProductId ? index.get(`internal:${internalProductId}`) : undefined) ?? index.get(`platform:${row.platformProductId}`);
 }
 
+function findAggregateEntry(item: WindowProductAggregate, index: Map<string, LinkRegistryEntry>): LinkRegistryEntry | undefined {
+  return index.get(`internal:${item.internalProductId}`) ?? (item.platformProductId ? index.get(`platform:${item.platformProductId}`) : undefined);
+}
+
 function metricValue(row: PublicTrafficProductDataRow, period: PeriodKey, metric: CategoryRankingMetric): number {
   const metrics = row.periods[period];
   if (!metrics) return 0;
@@ -115,22 +119,18 @@ export async function rankProductsByCategoryWindowed(
   registry: LinkRegistryEntry[],
   args: CategoryWindowRankingArgs,
 ): Promise<CategoryWindowRankingResult> {
+  const endDate = args.endDate ?? new Date().toISOString().slice(0, 10);
   const requestedCategory = args.category?.trim() || null;
   const registryIndex = buildRegistryIndex(registry);
-  const result = await queryPublicTrafficWindow(outputDir, {
-    endDate: args.endDate,
-    windowDays: args.periodDays,
-    metrics: [args.metric],
-    sortBy: args.metric,
-    sortDirection: 'desc',
-    limit: 50,
-  }, registry);
-  const items = result.items
-    .map((item) => {
-      const entry = registryIndex.get(`internal:${item.internalProductId}`);
-      return { internalProductId: item.internalProductId, productName: item.productName, category: categoryOf(entry), value: item.values[args.metric] ?? 0 };
+  const items = (await aggregateWindowProducts({ outputDir, endDate, windowDays: args.periodDays }))
+    .flatMap((item) => {
+      const value = readWindowMetric(item, args.metric);
+      if (value === undefined) return [];
+      const entry = findAggregateEntry(item, registryIndex);
+      return [{ internalProductId: item.internalProductId, productName: item.productName, category: categoryOf(entry), value }];
     })
     .filter((item) => !requestedCategory || item.category === requestedCategory)
+    .sort((left, right) => right.value - left.value || left.internalProductId.localeCompare(right.internalProductId))
     .slice(0, Math.max(1, Math.min(args.limit ?? 10, 50)));
-  return { date: result.endDate, category: requestedCategory, metric: args.metric, periodDays: args.periodDays, items };
+  return { date: endDate, category: requestedCategory, metric: args.metric, periodDays: args.periodDays, items };
 }

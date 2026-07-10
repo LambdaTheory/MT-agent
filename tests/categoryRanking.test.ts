@@ -8,6 +8,8 @@ import { findAgentTool } from '../src/agentRuntime/toolRegistry.js';
 import type { PublicTrafficDataReportContext, PublicTrafficPeriodMetrics } from '../src/publicTraffic/types.js';
 import type { LinkRegistryEntry } from '../src/linkRegistry/types.js';
 
+const overrideSource: LinkRegistryEntry['source'] = ['link_registry_override'];
+
 const metric: PublicTrafficPeriodMetrics = {
   exposure: 0,
   publicVisits: 0,
@@ -96,6 +98,34 @@ describe('rankProductsByCategory', () => {
 
     expect(result).toMatchObject({ metric: 'reviewedOrderAmount', periodDays: 20, date: '2026-07-20' });
     expect(result.items.map((item) => item.internalProductId)).toEqual(['102', '101']);
+  });
+
+  it('does not drop a requested category when global top products belong to other categories', async () => {
+    dir = await mkdtemp(join(tmpdir(), 'mt-cat-window-rank-global-'));
+    const date = '2026-07-01';
+    const dayDir = join(dir, date);
+    await mkdir(dayDir, { recursive: true });
+    const phoneRows = Array.from({ length: 51 }, (_, index) => {
+      const id = String(300 + index);
+      return { productName: `高访问手机 ${id}`, platformProductId: `p${id}`, displayProductId: `端内ID ${id}`, custodyDays: 1, periods: { '1d': { ...metric, exposure: 1000, publicVisits: 1000 + index } } };
+    });
+    await writeFile(join(dayDir, `公域数据上下文_${date}.json`), JSON.stringify({
+      date,
+      rows: [
+        ...phoneRows,
+        { productName: '低访问相机', platformProductId: 'p901', displayProductId: '端内ID 901', custodyDays: 1, periods: { '1d': { ...metric, exposure: 10, publicVisits: 1 } } },
+      ],
+    }), 'utf8');
+    const crowdedRegistry: LinkRegistryEntry[] = [
+      ...phoneRows.map((row): LinkRegistryEntry => ({ internalProductId: row.displayProductId.replace('端内ID ', ''), platformProductId: row.platformProductId, productName: row.productName, categoryName: '手机', status: 'active', source: overrideSource })),
+      { internalProductId: '901', platformProductId: 'p901', productName: '低访问相机', categoryName: '相机', status: 'active', source: overrideSource },
+    ];
+
+    const result = await rankProductsByCategoryWindowed(dir, crowdedRegistry, {
+      category: '相机', metric: 'publicVisits', periodDays: 1, endDate: date, limit: 10,
+    });
+
+    expect(result.items.map((item) => item.internalProductId)).toEqual(['901']);
   });
 
   it('registers and dispatches product.rankByCategory as a read tool', async () => {
