@@ -74,6 +74,8 @@ interface ResolvedGroup {
   entries: LinkRegistryEntry[];
 }
 
+type ResolveGroupFailure = Extract<ProductRankingResult, { status: 'ambiguous' | 'not_found' | 'no_metrics' }>;
+
 function extractInternalProductId(displayProductId: string): string | null {
   return /^端内id\s*(\d+)$/i.exec(displayProductId.trim())?.[1] ?? null;
 }
@@ -95,7 +97,7 @@ function sameSkuEntries(registry: LinkRegistryStore, sameSkuGroupId: string): Li
   return registry.listBySameSkuGroup(sameSkuGroupId, { includeRemoved: true, includeUnknown: true });
 }
 
-function resolveGroup(registry: LinkRegistryStore, query: string): ResolvedGroup | ProductRankingResult {
+function resolveGroup(registry: LinkRegistryStore, query: string): ResolvedGroup | ResolveGroupFailure {
   const trimmedQuery = query.trim();
   if (!trimmedQuery) return { status: 'not_found', query };
 
@@ -252,7 +254,11 @@ export async function rankBestProductByRegistryQueryWindowed(
   options: ProductWindowRankingOptions,
 ): Promise<ProductWindowRankingResult> {
   const resolved = resolveGroup(createLinkRegistry(registryEntries), query);
-  if ('status' in resolved) return resolved;
+  if ('status' in resolved) {
+    if (resolved.status === 'ambiguous') return { status: 'ambiguous', query: resolved.query, candidates: resolved.candidates };
+    if (resolved.status === 'not_found') return { status: 'not_found', query: resolved.query };
+    if (resolved.status === 'no_metrics') return { status: 'no_metrics', query: resolved.query, sameSkuGroupId: resolved.sameSkuGroupId, excluded: resolved.excluded };
+  }
   const activeIds = new Set(resolved.entries.filter((entry) => entry.status === 'active').map((entry) => entry.internalProductId));
   const result = await queryPublicTrafficWindow(outputDir, {
     endDate: options.endDate,

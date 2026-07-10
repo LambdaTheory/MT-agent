@@ -198,10 +198,12 @@ function createAggregate(row: DailyRowRecord): MutableWindowProductAggregate {
 }
 
 function emptyAvailability(requiredDays: number): Record<PublicTrafficMetricKey, MetricAvailability> {
-  return Object.fromEntries(publicTrafficMetricKeys.map((key) => {
+  const availability = {} as Record<PublicTrafficMetricKey, MetricAvailability>;
+  for (const key of publicTrafficMetricKeys) {
     const definition = getPublicTrafficMetric(key)!;
-    return [key, { available: false, source: definition.source, requiredDays, coveredDays: 0, missingDates: [] }];
-  })) as Record<PublicTrafficMetricKey, MetricAvailability>;
+    availability[key] = { available: false, source: definition.source, requiredDays, coveredDays: 0, missingDates: [] };
+  }
+  return availability;
 }
 
 function addMetricCoverage(target: MutableWindowProductAggregate, metric: PublicTrafficMetricKey, date: string): void {
