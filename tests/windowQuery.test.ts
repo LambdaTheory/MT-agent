@@ -131,6 +131,23 @@ describe('queryPublicTrafficWindow', () => {
     expect(result.aggregation).toMatchObject({ metric: 'publicVisits', aggregation: 'sum', value: 8, label: '窗口求和' });
   });
 
+  it('counts matched arbitrary-window products without requiring metrics', async () => {
+    for (let day = 1; day <= 2; day += 1) {
+      await writeDay(dir, dateAt(day), [
+        { id: '215', name: 'A', exposure: 10, publicVisits: day },
+        { id: '218', name: 'B', exposure: 30, publicVisits: day + 1 },
+      ]);
+    }
+
+    const result = await queryPublicTrafficWindow(dir, {
+      endDate: '2026-07-02',
+      windowDays: 2,
+      aggregation: 'count',
+    });
+
+    expect(result.aggregation).toMatchObject({ aggregation: 'count', value: 2, label: '窗口计数' });
+  });
+
   it('rejects sum aggregation for rate metrics', async () => {
     await writeDay(dir, '2026-07-01', [{ id: '215', name: 'A', exposure: 10, publicVisits: 1 }]);
 

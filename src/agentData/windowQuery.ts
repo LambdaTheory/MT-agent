@@ -22,7 +22,7 @@ export interface PublicTrafficWindowQueryResult {
   availableCountByMetric: Partial<Record<PublicTrafficMetricKey, number>>;
   excludedUnavailableCountByMetric: Partial<Record<PublicTrafficMetricKey, number>>;
   aggregation?: {
-    metric: PublicTrafficMetricKey;
+    metric?: PublicTrafficMetricKey;
     aggregation: NonNullable<PublicTrafficWindowQueryArguments['aggregation']>;
     value: number;
     label: string;
@@ -98,11 +98,11 @@ function aggregateItems(
   windowDays: number,
 ): PublicTrafficWindowQueryResult['aggregation'] {
   if (!aggregation) return undefined;
+  if (aggregation === 'count') return { aggregation, value: items.length, label: aggregationLabels.count };
   const metric = metrics[0];
   if (!metric) throw new Error('metrics is required when aggregation is specified');
   const definition = getPublicTrafficMetric(metric)!;
   if (aggregation === 'sum' && definition.format === 'percent') throw new Error('率指标不支持 sum 聚合');
-  if (aggregation === 'count') return { metric, aggregation, value: items.length, label: aggregationLabels.count };
 
   const values = items.flatMap((item) => {
     const value = readWindowMetric(item, metric);

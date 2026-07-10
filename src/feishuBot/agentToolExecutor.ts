@@ -383,7 +383,7 @@ function formatWindowAggregateMetric(item: WindowProductAggregate, metric: Publi
 
 function formatWindowQueryResponse(result: PublicTrafficWindowQueryResult): BotResponse {
   const aggregationLine = result.aggregation
-    ? `统计：${getPublicTrafficMetric(result.aggregation.metric)!.label}${result.aggregation.label} = ${Number.isInteger(result.aggregation.value) ? result.aggregation.value : result.aggregation.value.toFixed(2)}`
+    ? `统计：${result.aggregation.metric ? getPublicTrafficMetric(result.aggregation.metric)!.label : ''}${result.aggregation.label} = ${Number.isInteger(result.aggregation.value) ? result.aggregation.value : result.aggregation.value.toFixed(2)}`
     : undefined;
   const lines = result.items.map((item, index) => {
     const metricText = Object.entries(item.values).map(([metric, value]) => {
