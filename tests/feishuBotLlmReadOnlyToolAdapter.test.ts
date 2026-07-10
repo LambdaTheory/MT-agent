@@ -3,7 +3,7 @@ import { FakeLlmProvider } from '../src/llm/fakeProvider.js';
 import { createLlmToolSelector } from '../src/feishuBot/llmToolSelector.js';
 import { findReadOnlyToolByLlmName } from '../src/feishuBot/readOnlyToolRegistry.js';
 import { runReadOnlyToolSelection } from '../src/feishuBot/llmReadOnlyToolAdapter.js';
-import type { LlmToolSelection } from '../src/feishuBot/llmProvider.js';
+import { parseLlmToolSelection, type LlmToolSelection } from '../src/feishuBot/llmProvider.js';
 import { createLinkRegistry } from '../src/linkRegistry/store.js';
 import type { LinkRegistryEntry } from '../src/linkRegistry/types.js';
 import type { PublicTrafficDataReportContext } from '../src/publicTraffic/types.js';
@@ -70,7 +70,39 @@ function selection(tool: LlmToolSelection['tool'], selectionArguments: Record<st
   return { intent: 'test', tool, arguments: selectionArguments, confidence: 0.9, reason: 'test' };
 }
 
+async function selectReadOnlyToolForTest(message: string): Promise<LlmToolSelection | null> {
+  const provider = new FakeLlmProvider('{"intent":"rank_best","tool":"rank_best_same_sku_product","arguments":{"query":"链接","metric":"publicVisits","periodDays":15},"confidence":0.92,"reason":"legacy ranking"}');
+  const selector = createLlmToolSelector(provider);
+  const parsed = parseLlmToolSelection(await selector.selectTool({ message }));
+
+  return parsed.ok && parsed.selection.tool !== 'none' ? parsed.selection : null;
+}
+
+async function runLegacyReadOnlyToolForTest(message: string): Promise<{ text: string }> {
+  const provider = new FakeLlmProvider('{"intent":"rank_best","tool":"rank_best_same_sku_product","arguments":{"query":"链接","metric":"signedOrderAmount","periodDays":15},"confidence":0.92,"reason":"legacy ranking"}');
+  const selector = createLlmToolSelector(provider);
+  const parsed = parseLlmToolSelection(await selector.selectTool({ message }));
+  if (!parsed.ok || parsed.selection.tool === 'none') return { text: parsed.ok ? parsed.selection.reason : '请使用数据查询工具处理该问题。' };
+
+  const result = await runReadOnlyToolSelection(context, parsed.selection);
+  return result.ok ? result.response : { text: '请使用数据查询工具处理该问题。' };
+}
+
 describe('LLM read-only tool adapter', () => {
+  it('routes arbitrary-window metric requests to publicTraffic.windowQuery, not legacy read-only tools', async () => {
+    const selected = await selectReadOnlyToolForTest('访问量15天内为0的链接');
+
+    expect(selected).toBeNull();
+  });
+
+  it('keeps legacy selector from rewriting a metric it cannot represent', async () => {
+    const response = await runLegacyReadOnlyToolForTest('近15天签约订单金额为0的链接');
+
+    expect(response.text).toContain('请使用数据查询工具');
+    expect(response.text).not.toContain('金额为0');
+    expect(response.text).not.toContain('创单为0');
+  });
+
   it('runs a registry-backed product query from an LLM selection', async () => {
     const result = await runReadOnlyToolSelection(context, selection('query_product_performance', { keyword: '701' }));
 

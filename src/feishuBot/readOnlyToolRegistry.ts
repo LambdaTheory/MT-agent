@@ -3,7 +3,7 @@ import { resolveSafeSourceForSameSkuGroup } from '../agentData/safeSource.js';
 import { aggregateWindowProducts, type WindowProductAggregate } from '../agentData/windowAggregate.js';
 import { getInactiveLinks, getNewProductPool, getProblemProducts, getProductPerformance, getRemovedLinks } from '../agentData/publicTrafficQueries.js';
 import { rankBestProductByRegistryQuery, rankBestProductByRegistryQueryWindowed, type ProductRankingResult, type ProductWindowRankingResult } from '../agentData/productRanking.js';
-import { getPublicTrafficMetric, publicTrafficMetricKeys, type PublicTrafficMetricKey } from '../agentData/publicTrafficMetricCatalog.js';
+import { getPublicTrafficMetric, type PublicTrafficMetricKey } from '../agentData/publicTrafficMetricCatalog.js';
 import { buildAgentTaskPool } from '../agentData/taskPool.js';
 import type { AgentIntent, AgentProblemType } from '../agentData/types.js';
 import { createLinkRegistry } from '../linkRegistry/store.js';
@@ -46,8 +46,8 @@ const productRankingArgumentsSchema = {
   type: 'object',
   properties: {
     query: { type: 'string' },
-    metric: { type: 'string', enum: [...publicTrafficMetricKeys] },
-    periodDays: { type: ['integer', 'string'], pattern: '^[1-9]\\d*$', minimum: 1 },
+    metric: { type: 'string', enum: ['shippedOrders', 'amount', 'exposure'] },
+    periodDays: { type: ['integer', 'string'], enum: [1, 7, 30, '1', '7', '30'] },
   },
   required: ['query'],
   additionalProperties: false,
@@ -298,17 +298,20 @@ export const readOnlyTools: ReadOnlyTool[] = [
   },
   {
     name: 'best_product_by_same_sku',
-    description: '按链接维护档案解析商品/同款组，并返回公域数据表现最好的端内ID；支持完整公域日报指标目录和任意正整数 periodDays。',
+    description: '按链接维护档案解析商品/同款组，并返回固定 1/7/30 日公域核心指标表现最好的端内ID。',
     intentType: 'best_product_by_same_sku',
     llm: {
       name: 'rank_best_same_sku_product',
-      description: '查询某个商品或同款组中公域数据表现最好的端内ID。支持完整公域日报指标目录和任意正整数 periodDays；适用于“数据最好的 X 是哪个端内ID”“近15天访问最高的 pocket3 是哪个id”“近30天金额最好的 r50 是哪条”等只读问题。',
+      description: '查询某个商品或同款组中固定 1/7/30 日核心指标表现最好的端内ID。仅支持 shippedOrders、amount、exposure；任意窗口、筛选、排序、排名或其它指标请求应交给数据查询工具。',
       argumentsSchema: productRankingArgumentsSchema,
       toIntent: (argumentsRecord) => {
         const query = readStringArgument(argumentsRecord, 'query');
         const periodDays = readRankingPeriodDays(argumentsRecord.periodDays);
         const metric = readRankingMetric(argumentsRecord.metric);
-        return query ? { type: 'best_product_by_same_sku', query, ...(periodDays ? { periodDays } : {}), ...(metric ? { metric } : {}) } : undefined;
+        if (!query) return undefined;
+        if (argumentsRecord.metric !== undefined && !metric) return undefined;
+        if (argumentsRecord.periodDays !== undefined && (!periodDays || (periodDays !== 1 && periodDays !== 7 && periodDays !== 30))) return undefined;
+        return { type: 'best_product_by_same_sku', query, ...(periodDays ? { periodDays } : {}), ...(metric ? { metric } : {}) };
       },
     },
     async run(context, intent, options = {}) {

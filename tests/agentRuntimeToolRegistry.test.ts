@@ -39,8 +39,10 @@ describe('agent runtime tool registry', () => {
       'publicTraffic.orderSummary',
       'publicTraffic.windowedFindings',
       'publicTraffic.windowAggregate',
+      'publicTraffic.windowQuery',
       'system.dataHealth',
       'strategy.safeSourceResolve',
+      'strategy.metricThresholdExplain',
       'strategy.refreshCandidateExplain',
       'publicTraffic.runReport',
       'publicTraffic.resendLatestReport',
@@ -98,7 +100,7 @@ describe('agent runtime tool registry', () => {
 
     const tools = listAgentTools();
     tools.pop();
-    expect(listAgentTools()).toHaveLength(77);
+    expect(listAgentTools()).toHaveLength(79);
   });
 
   it('returns defensive copies of tool metadata', () => {
@@ -182,8 +184,10 @@ describe('agent runtime tool registry', () => {
     expect(findAgentTool('publicTraffic.removedLinks')).toMatchObject({ risk: 'read', requiresConfirmation: false });
     expect(findAgentTool('publicTraffic.orderSummary')).toMatchObject({ risk: 'read', requiresConfirmation: false });
     expect(findAgentTool('publicTraffic.windowAggregate')).toMatchObject({ risk: 'read', requiresConfirmation: false });
+    expect(findAgentTool('publicTraffic.windowQuery')).toMatchObject({ risk: 'read', requiresConfirmation: false });
     expect(findAgentTool('system.dataHealth')).toMatchObject({ risk: 'read', requiresConfirmation: false });
     expect(findAgentTool('strategy.safeSourceResolve')).toMatchObject({ risk: 'read', requiresConfirmation: false });
+    expect(findAgentTool('strategy.metricThresholdExplain')).toMatchObject({ risk: 'read', requiresConfirmation: false });
     expect(findAgentTool('strategy.refreshCandidateExplain')).toMatchObject({ risk: 'read', requiresConfirmation: false });
     expect(findAgentTool('publicTraffic.runReport')).toMatchObject({ risk: 'write', requiresConfirmation: true });
     expect(findAgentTool('publicTraffic.resendLatestReport')).toMatchObject({ risk: 'write', requiresConfirmation: false });
@@ -310,8 +314,10 @@ describe('agent runtime tool registry', () => {
       'publicTraffic.orderSummary',
       'publicTraffic.windowedFindings',
       'publicTraffic.windowAggregate',
+      'publicTraffic.windowQuery',
       'system.dataHealth',
       'strategy.safeSourceResolve',
+      'strategy.metricThresholdExplain',
       'strategy.refreshCandidateExplain',
       'publicTraffic.runReport',
       'publicTraffic.resendLatestReport',
@@ -372,6 +378,12 @@ describe('agent runtime tool registry', () => {
       properties: {
         productIds: { type: 'array' },
         count: { type: 'integer' },
+      },
+    });
+    expect(plannerTools.find((tool) => tool.name === 'publicTraffic.windowQuery')?.resultMetadataSchema).toMatchObject({
+      properties: {
+        productIds: { type: 'array' },
+        items: { type: 'array' },
       },
     });
     expect(plannerTools.find((tool) => tool.name === 'rental.copy')?.resultMetadataSchema).toMatchObject({
@@ -440,16 +452,37 @@ describe('agent runtime tool registry', () => {
         maxCandidates: { type: 'number' },
         query: { type: 'string' },
         sameSkuGroupId: { type: 'string' },
-        zeroMetric: { type: 'string' },
+        metric: { type: 'string' },
+        operator: { type: 'string' },
+        value: { type: 'number' },
+        windowDays: { type: ['integer', 'string'] },
       },
+      required: ['metric', 'operator', 'value', 'windowDays'],
+      additionalProperties: false,
+    });
+    expect(findAgentTool('publicTraffic.windowAggregate')?.description).toContain('不筛选、不排序');
+    expect(findAgentTool('publicTraffic.windowQuery')?.description).toContain('全指标');
+    expect(findAgentTool('publicTraffic.windowQuery')?.description).toContain('筛选');
+    expect(findAgentTool('publicTraffic.windowQuery')?.description).toContain('排序');
+    expect(findAgentTool('publicTraffic.windowQuery')?.inputSchema).toMatchObject({
+      properties: {
+        metrics: { type: 'array' },
+        filters: { type: 'array' },
+        sortBy: { type: 'string' },
+        aggregation: { enum: ['count', 'sum', 'avg', 'min', 'max'] },
+      },
+      required: ['windowDays'],
       additionalProperties: false,
     });
     expect(findAgentTool('operations.refreshActivityPlan')?.description).toContain('query');
-    expect(findAgentTool('operations.refreshActivityPlan')?.description).toContain('zeroMetric');
+    expect(findAgentTool('operations.refreshActivityPlan')?.description).toContain('metric/operator/value/windowDays');
     expect(findAgentTool('operations.refreshActivityPlan')?.resultMetadataSchema).toMatchObject({
       properties: {
         scope: { type: ['string', 'null'] },
-        zeroMetric: { type: 'string' },
+        metric: { type: 'string' },
+        operator: { type: 'string' },
+        value: { type: 'number' },
+        windowDays: { type: 'integer' },
         strategyRequests: { type: 'object' },
         skippedGroups: { type: 'array' },
       },

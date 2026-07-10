@@ -959,7 +959,7 @@ const agentTools: AgentToolDefinition[] = [
   },
   {
     name: 'publicTraffic.windowQuery',
-    description: '按任意 1..90 天窗口查询每日公域商品总表全指标，支持字段选择、AND 筛选、排序和限制条数；不可用字段不会按 0 参与比较。',
+    description: '按任意 1..90 天窗口查询每日公域商品总表全指标，支持字段选择、AND 筛选、排序、排名、聚合和限制条数；不可用字段不会按 0 参与比较。',
     risk: 'read',
     requiresConfirmation: false,
     inputSchema: publicTrafficWindowQueryArgumentsSchema,
@@ -1026,7 +1026,7 @@ const agentTools: AgentToolDefinition[] = [
   },
   {
     name: 'operations.refreshActivityPlan',
-    description: '按最新或指定日期公域日报筛选指定 windowDays 窗口内满足显式 metric/operator/value 阈值的 active 链接，按链接档案汇总待下架链接和补链建议；可传 query 或 sameSkuGroupId 将范围收窄到指定商品/同款组。metric 必须保持用户指定指标，不能改写为创单、金额或其它指标；未授权为自动下架条件的指标只返回解释，不生成执行策略卡。确认前不下架、不补链。',
+    description: '按最新或指定日期公域日报筛选满足显式 metric/operator/value/windowDays 阈值的 active 链接，按链接档案汇总待下架链接和补链建议；可传 query 或 sameSkuGroupId 将范围收窄到指定商品/同款组。metric 必须保持用户指定指标，不能改写为创单、金额或其它指标；未授权为自动下架条件的指标只返回解释，不生成执行策略卡。确认前不下架、不补链。',
     risk: 'read',
     requiresConfirmation: false,
     inputSchema: refreshActivityPlanArgumentsSchema,

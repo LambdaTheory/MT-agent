@@ -46,7 +46,15 @@ describe('agent runtime LLM planner', () => {
     expect(system).toContain('aggregation count/sum/avg/min/max');
     expect(system).toContain('target sourceCoverage');
     expect(system).toContain('coverageStatus missing');
-    expect(system).toContain('use publicTraffic.windowAggregate');
+    expect(system).toContain('use publicTraffic.windowQuery');
+    expect(system).toContain('访问量 / 公域访问 → publicVisits');
+    expect(system).toContain('后链路访问 / 访问页访问 → dashboardVisits');
+    expect(system).toContain('订单金额 / 公域交易金额 → amount');
+    expect(system).toContain('签约订单金额 → signedOrderAmount');
+    expect(system).toContain('创建订单 / 创单 → createdOrders');
+    expect(system).toContain('non-1/7/30 window with filters, sort, rank, or a metric condition');
+    expect(system).toContain('Never call publicTraffic.windowAggregate as an answer to a filtered request');
+    expect(system).toContain('Never substitute a different metric');
     expect(system).toContain('windowAggregate');
     expect(system).toContain('productIds');
     expect(system).toContain('sameSkuGroupId');
@@ -69,6 +77,7 @@ describe('agent runtime LLM planner', () => {
     expect(user.tools.map((tool) => tool.name)).toContain('rental.newLinkBatchPlan');
     expect(user.tools.map((tool) => tool.name)).toContain('publicTraffic.reportQuery');
     expect(user.tools.map((tool) => tool.name)).toContain('publicTraffic.windowAggregate');
+    expect(user.tools.map((tool) => tool.name)).toContain('publicTraffic.windowQuery');
     expect(user.tools.map((tool) => tool.name)).toContain('strategy.refreshCandidateExplain');
     expect(user.tools.map((tool) => tool.name)).toContain('strategy.safeSourceResolve');
     expect(user.tools.map((tool) => tool.name)).toContain('linkRegistry.resolveProducts');
@@ -115,5 +124,37 @@ describe('agent runtime LLM planner', () => {
       },
     });
     expect(JSON.stringify(refreshTool?.inputSchema)).not.toContain('zeroMetric');
+  });
+
+  it('instructs arbitrary-window filtered metric questions to use windowQuery without metric substitution', async () => {
+    const requests: LlmGenerateJsonInput[] = [];
+    const provider: LlmProvider = {
+      async generateJson(input) {
+        requests.push(input);
+        return {
+          text: '{"goal":"query","selectedTool":"publicTraffic.windowQuery","arguments":{"windowDays":15,"metrics":["signedOrderAmount"],"filters":[{"field":"signedOrderAmount","operator":"eq","value":0}]},"confidence":0.9,"reason":"test"}',
+          json: { goal: 'query' },
+        };
+      },
+    };
+    const planner = createAgentPlannerProvider(provider);
+
+    await planner.proposePlan({ message: '近15天签约订单金额为0的链接', tools: [], workflows: [] });
+
+    const system = requests[0].messages.find((message) => message.role === 'system')?.content ?? '';
+    const user = JSON.parse(requests[0].messages.find((message) => message.role === 'user')?.content ?? '{}') as AgentPlannerRequest;
+
+    expect(system).toContain('近15天签约订单金额为0');
+    expect(system).toContain('publicTraffic.windowQuery');
+    expect(system).toContain('signedOrderAmount');
+    expect(system).toContain('Never substitute a different metric');
+    expect(user.tools.find((tool) => tool.name === 'publicTraffic.windowQuery')?.inputSchema).toMatchObject({
+      properties: {
+        metrics: { type: 'array' },
+        filters: { type: 'array' },
+        sortBy: { type: 'string' },
+        limit: { type: 'integer' },
+      },
+    });
   });
 });
