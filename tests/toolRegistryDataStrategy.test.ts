@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { findAgentTool } from '../src/agentRuntime/toolRegistry.js';
+import { validateAgentToolArguments } from '../src/agentRuntime/planner.js';
 import { publicTrafficMetricKeys } from '../src/agentData/publicTrafficMetricCatalog.js';
 import { executeAgentToolRequest } from '../src/feishuBot/agentToolExecutor.js';
 
@@ -135,6 +136,15 @@ describe('data and strategy capability tools', () => {
         properties: { windowDays: { minimum: 1, maximum: 90 } },
       });
     }
+  });
+
+  it('rejects oversized string windows at the planner schema boundary', () => {
+    expect(validateAgentToolArguments('publicTraffic.windowAggregate', { windowDays: '91' })).toBe(false);
+    expect(validateAgentToolArguments('strategy.metricThresholdExplain', { metric: 'publicVisits', operator: 'eq', value: 0, windowDays: '91' })).toBe(false);
+    expect(validateAgentToolArguments('strategy.refreshCandidateExplain', { zeroMetric: 'amount', windowDays: '91' })).toBe(false);
+    expect(validateAgentToolArguments('operations.refreshActivityPlan', { metric: 'publicVisits', operator: 'eq', value: 0, windowDays: '91' })).toBe(false);
+    expect(validateAgentToolArguments('product.rankBestSameSku', { query: 'r50', periodDays: '91' })).toBe(false);
+    expect(validateAgentToolArguments('product.rankByCategory', { metric: 'publicVisits', periodDays: '91' })).toBe(false);
   });
 
   it('registers every new capability as read-only', () => {

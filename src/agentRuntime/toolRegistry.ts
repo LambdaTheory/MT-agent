@@ -1,7 +1,7 @@
 import type { AgentToolDefinition } from './tool.js';
 import { publicTrafficMetricKeys } from '../agentData/publicTrafficMetricCatalog.js';
 
-const arbitraryWindowDaysSchema = { type: ['integer', 'string'], pattern: '^[1-9]\\d*$', minimum: 1, maximum: 90 };
+const arbitraryWindowDaysSchema = { type: ['integer', 'string'], pattern: '^(?:[1-9]|[1-8]\\d|90)$', minimum: 1, maximum: 90 };
 const noArgumentsSchema = { type: 'object', additionalProperties: false };
 const reportDateSchema = { type: 'string', pattern: '^(?:\\d{4}-\\d{2}-\\d{2}|\\d{2,4}[./-]\\d{1,2}[./-]\\d{1,2}|\\d{1,2}[./-]\\d{1,2}|\\d{1,2}月\\d{1,2}日)$' };
 const optionalReportDateArgumentsSchema = { type: 'object', properties: { date: reportDateSchema }, additionalProperties: false };
