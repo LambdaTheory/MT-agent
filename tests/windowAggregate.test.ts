@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { aggregateWindowProducts } from '../src/agentData/windowAggregate.js';
+import { aggregateWindowProducts, readWindowMetric } from '../src/agentData/windowAggregate.js';
 import { executeAgentToolRequest } from '../src/feishuBot/agentToolExecutor.js';
 
 const baseMetric = {
@@ -23,7 +23,7 @@ const baseMetric = {
   visitShipmentRate: 0,
 };
 
-async function writeDay(root: string, date: string, rows: Array<{ id: string; name: string; exposure: number; amount: number; createdOrders?: number; shippedOrders?: number; dashboardVisits?: number | string }>) {
+async function writeDay(root: string, date: string, rows: Array<{ id: string; name: string; exposure: number; amount: number; createdOrders?: number; signedOrders?: number; reviewedOrders?: number; shippedOrders?: number; dashboardVisits?: number | string; createdOrderAmount?: number; signedOrderAmount?: number; reviewedOrderAmount?: number; shippedOrderAmount?: number }>) {
   const dir = join(root, date);
   await mkdir(dir, { recursive: true });
   await writeFile(join(dir, `公域数据上下文_${date}.json`), JSON.stringify({
@@ -43,7 +43,13 @@ async function writeDay(root: string, date: string, rows: Array<{ id: string; na
           amount: row.amount,
           dashboardVisits: row.dashboardVisits ?? baseMetric.dashboardVisits,
           createdOrders: row.createdOrders ?? 0,
+          signedOrders: row.signedOrders ?? 0,
+          reviewedOrders: row.reviewedOrders ?? 0,
           shippedOrders: row.shippedOrders ?? 0,
+          ...(row.createdOrderAmount !== undefined ? { createdOrderAmount: row.createdOrderAmount } : {}),
+          ...(row.signedOrderAmount !== undefined ? { signedOrderAmount: row.signedOrderAmount } : {}),
+          ...(row.reviewedOrderAmount !== undefined ? { reviewedOrderAmount: row.reviewedOrderAmount } : {}),
+          ...(row.shippedOrderAmount !== undefined ? { shippedOrderAmount: row.shippedOrderAmount } : {}),
         },
         '30d': {
           ...baseMetric,
@@ -111,6 +117,40 @@ describe('aggregateWindowProducts', () => {
       dashboardDaysCovered: 1,
       missingDashboardDates: ['2026-07-02'],
     });
+  });
+
+  it('aggregates every sum metric and derives weighted rates only from complete source windows', async () => {
+    await writeDay(dir, '2026-07-01', [{
+      id: '648', name: 'R50 A', exposure: 100, amount: 50,
+      dashboardVisits: 20, createdOrders: 4, shippedOrders: 2,
+      signedOrders: 3, reviewedOrders: 2,
+    }]);
+    await writeDay(dir, '2026-07-02', [{
+      id: '648', name: 'R50 A', exposure: 300, amount: 100,
+      dashboardVisits: 30, createdOrders: 6, shippedOrders: 3,
+      signedOrders: 5, reviewedOrders: 4,
+    }]);
+
+    const [result] = await aggregateWindowProducts({ outputDir: dir, endDate: '2026-07-02', windowDays: 2 });
+
+    expect(readWindowMetric(result!, 'exposure')).toBe(400);
+    expect(readWindowMetric(result!, 'publicVisits')).toBe(0);
+    expect(readWindowMetric(result!, 'signedOrders')).toBe(8);
+    expect(readWindowMetric(result!, 'reviewedOrders')).toBe(6);
+    expect(readWindowMetric(result!, 'exposureVisitRate')).toBe(0);
+    expect(readWindowMetric(result!, 'visitCreatedOrderRate')).toBeCloseTo(10 / 50);
+    expect(result!.availability.signedOrders).toMatchObject({ available: true, coveredDays: 2 });
+  });
+
+  it('does not make dashboard metrics available when one daily dashboard row is absent', async () => {
+    await writeDay(dir, '2026-07-01', [{ id: '648', name: 'R50 A', exposure: 1, amount: 1, dashboardVisits: 3, createdOrders: 1 }]);
+    await writeDay(dir, '2026-07-02', [{ id: '648', name: 'R50 A', exposure: 1, amount: 1, dashboardVisits: '异常' }]);
+
+    const [result] = await aggregateWindowProducts({ outputDir: dir, endDate: '2026-07-02', windowDays: 2 });
+
+    expect(result!.availability.publicVisits).toMatchObject({ available: true });
+    expect(result!.availability.createdOrders).toMatchObject({ available: false, reason: 'missing_dashboard_data' });
+    expect(readWindowMetric(result!, 'createdOrders')).toBeUndefined();
   });
 
   it('exposes stable product id metadata for follow-up planner steps', async () => {

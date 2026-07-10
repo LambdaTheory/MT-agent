@@ -15,7 +15,8 @@ import { buildDataHealthReport } from '../agentData/dataHealth.js';
 import { explainRefreshCandidates } from '../agentData/refreshCandidateExplain.js';
 import { resolveSafeSourceForSameSkuGroup } from '../agentData/safeSource.js';
 import { findWindowedProducts, type WindowedPredicate } from '../agentData/windowedFindings.js';
-import { aggregateWindowProducts, type WindowProductAggregate } from '../agentData/windowAggregate.js';
+import { aggregateWindowProducts, readWindowMetric, type WindowProductAggregate } from '../agentData/windowAggregate.js';
+import { getPublicTrafficMetric, publicTrafficMetricKeys, type PublicTrafficMetricKey } from '../agentData/publicTrafficMetricCatalog.js';
 import { openLinkRegistryGovernancePrompt } from '../linkRegistry/governanceSession.js';
 import { openLinkRegistryMaintenancePrompt } from '../linkRegistry/maintenanceSession.js';
 import { createLinkRegistry } from '../linkRegistry/store.js';
@@ -313,7 +314,13 @@ function formatWindowedFindingsResponse(result: Awaited<ReturnType<typeof findWi
 }
 
 function formatWindowAggregateResponse(result: Awaited<ReturnType<typeof aggregateWindowProducts>>, endDate: string, windowDays: number): BotResponse {
-  const lines = result.slice(0, 10).map((item, index) => `${index + 1}. ${item.productName}（端内ID ${item.internalProductId}）覆盖 ${item.daysCovered}/${windowDays} 天，曝光 ${item.exposure}，访问 ${item.publicVisits}，金额 ${item.amount}`);
+  const displayMetrics = publicTrafficMetricKeys.filter((metric) => metric !== 'custodyDays');
+  const lines = result.slice(0, 10).map((item, index) => {
+    const metricText = displayMetrics
+      .map((metric) => formatWindowAggregateMetric(item, metric))
+      .join('，');
+    return `${index + 1}. ${item.productName}（端内ID ${item.internalProductId}）覆盖 ${item.daysCovered}/${windowDays} 天，${metricText}`;
+  });
   const productIds = result.map((item) => item.internalProductId);
   const fullyCoveredProductIds = result.filter((item) => item.daysCovered === windowDays).map((item) => item.internalProductId);
   const partialCoveredProductIds = result.filter((item) => item.daysCovered < windowDays).map((item) => item.internalProductId);
@@ -325,6 +332,15 @@ function formatWindowAggregateResponse(result: Awaited<ReturnType<typeof aggrega
     text: [`公域窗口聚合：截至 ${endDate}，近 ${windowDays} 天`, ...lines].join('\n'),
     metadata: { toolName: 'publicTraffic.windowAggregate', status, endDate, windowDays, productCount: result.length, productIds, fullyCoveredProductIds, partialCoveredProductIds, missingDatesByProduct, items: result },
   };
+}
+
+function formatWindowAggregateMetric(item: WindowProductAggregate, metric: PublicTrafficMetricKey): string {
+  const definition = getPublicTrafficMetric(metric)!;
+  const value = readWindowMetric(item, metric);
+  if (value === undefined) return `${definition.label} 不可用`;
+  if (definition.format === 'money') return `${definition.label} ¥${value.toFixed(2)}`;
+  if (definition.format === 'percent') return `${definition.label} ${(value * 100).toFixed(2)}%`;
+  return `${definition.label} ${Number.isInteger(value) ? value : value.toFixed(2)}`;
 }
 
 function formatDataHealthResponse(result: Awaited<ReturnType<typeof buildDataHealthReport>>): BotResponse {
