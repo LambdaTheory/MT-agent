@@ -16,6 +16,7 @@ import { explainRefreshCandidates } from '../agentData/refreshCandidateExplain.j
 import { resolveSafeSourceForSameSkuGroup } from '../agentData/safeSource.js';
 import { findWindowedProducts, type WindowedPredicate } from '../agentData/windowedFindings.js';
 import { aggregateWindowProducts, readWindowMetric, type WindowProductAggregate } from '../agentData/windowAggregate.js';
+import { queryPublicTrafficWindow, type PublicTrafficWindowQueryResult } from '../agentData/windowQuery.js';
 import { getPublicTrafficMetric, publicTrafficMetricKeys, type PublicTrafficMetricKey } from '../agentData/publicTrafficMetricCatalog.js';
 import { openLinkRegistryGovernancePrompt } from '../linkRegistry/governanceSession.js';
 import { openLinkRegistryMaintenancePrompt } from '../linkRegistry/maintenanceSession.js';
@@ -341,6 +342,24 @@ function formatWindowAggregateMetric(item: WindowProductAggregate, metric: Publi
   if (definition.format === 'money') return `${definition.label} ¥${value.toFixed(2)}`;
   if (definition.format === 'percent') return `${definition.label} ${(value * 100).toFixed(2)}%`;
   return `${definition.label} ${Number.isInteger(value) ? value : value.toFixed(2)}`;
+}
+
+function formatWindowQueryResponse(result: PublicTrafficWindowQueryResult): BotResponse {
+  const lines = result.items.map((item, index) => {
+    const metricText = Object.entries(item.values).map(([metric, value]) => {
+      const definition = getPublicTrafficMetric(metric)!;
+      if (definition.format === 'money') return `${definition.label} ¥${value.toFixed(2)}`;
+      if (definition.format === 'percent') return `${definition.label} ${(value * 100).toFixed(2)}%`;
+      return `${definition.label} ${Number.isInteger(value) ? value : value.toFixed(2)}`;
+    }).join('，');
+    return `${index + 1}. ${item.productName}（端内ID ${item.internalProductId}）${metricText ? `：${metricText}` : ''}`;
+  });
+  const metric = Object.keys(result.availableCountByMetric)[0];
+  const productIds = result.items.map((item) => item.internalProductId);
+  return {
+    text: [`公域窗口查询：截至 ${result.endDate}，近 ${result.windowDays} 天`, `匹配 ${result.matchedCount} 条`, ...lines].join('\n'),
+    metadata: { toolName: 'publicTraffic.windowQuery', ...(metric ? { metric } : {}), windowDays: result.windowDays, endDate: result.endDate, availability: result.availableCountByMetric, productIds, items: result.items },
+  };
 }
 
 function formatDataHealthResponse(result: Awaited<ReturnType<typeof buildDataHealthReport>>): BotResponse {
@@ -2117,6 +2136,15 @@ export async function executeAgentToolRequest(
       if (!endDate) return { text: '还没有找到公域日报上下文。' };
       const result = await aggregateWindowProducts({ outputDir, endDate, windowDays });
       return formatWindowAggregateResponse(result, endDate, windowDays);
+    }
+    case 'publicTraffic.windowQuery': {
+      const windowDays = Number(request.arguments.windowDays);
+      const explicitEndDate = readOptionalDate(request.arguments.endDate ?? request.arguments.date);
+      const latest = explicitEndDate ? null : await findLatestReportContext(outputDir);
+      const endDate = explicitEndDate ?? latest?.context.date;
+      if (!endDate) return { text: '还没有找到公域日报上下文。' };
+      const registryContext = await loadClosedOrderRegistryContext(options.closedOrderRegistryPaths);
+      return formatWindowQueryResponse(await queryPublicTrafficWindow(outputDir, { ...request.arguments, endDate, windowDays }, registryContext.registry));
     }
     case 'system.dataHealth': {
       const explicitDate = readOptionalDate(request.arguments.date);

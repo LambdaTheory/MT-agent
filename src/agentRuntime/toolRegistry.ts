@@ -128,6 +128,37 @@ const publicTrafficReportQueryArgumentsSchema = {
   required: ['target'],
   additionalProperties: false,
 };
+const publicTrafficWindowQueryArgumentsSchema = {
+  type: 'object',
+  properties: {
+    date: reportDateSchema,
+    endDate: reportDateSchema,
+    windowDays: { type: 'integer', minimum: 1, maximum: 90 },
+    productQuery: { type: 'string' },
+    sameSkuGroupId: { type: 'string' },
+    metrics: { type: 'array', minItems: 1, maxItems: 16, items: reportMetricSchema },
+    filters: {
+      type: 'array',
+      maxItems: 6,
+      items: {
+        type: 'object',
+        properties: {
+          field: reportMetricSchema,
+          operator: { type: 'string', enum: ['eq', 'neq', 'gt', 'gte', 'lt', 'lte'] },
+          value: { type: 'number' },
+        },
+        required: ['field', 'operator', 'value'],
+        additionalProperties: false,
+      },
+    },
+    sortBy: reportMetricSchema,
+    sortDirection: { type: 'string', enum: ['asc', 'desc'] },
+    aggregation: reportAggregationSchema,
+    limit: { type: 'integer', minimum: 1, maximum: 50 },
+  },
+  required: ['windowDays'],
+  additionalProperties: false,
+};
 const keywordArgumentsSchema = { type: 'object', properties: { keyword: { type: 'string' }, date: reportDateSchema }, required: ['keyword'], additionalProperties: false };
 const productRankingArgumentsSchema = {
   type: 'object',
@@ -871,10 +902,18 @@ const agentTools: AgentToolDefinition[] = [
   },
   {
     name: 'publicTraffic.windowAggregate',
-    description: '从逐日公域数据上下文按 1d 明细聚合任意窗口商品指标，支持 7/15/20/30 等 windowDays；不使用既有 30d 汇总倒推。',
+    description: '从逐日公域数据上下文按 1d 明细聚合任意窗口商品指标，支持 7/15/20/30 等 windowDays；不使用既有 30d 汇总倒推。不筛选、不排序；需要条件查询时使用 publicTraffic.windowQuery。',
     risk: 'read',
     requiresConfirmation: false,
     inputSchema: windowAggregateArgumentsSchema,
+    resultMetadataSchema: windowAggregateResultMetadataSchema,
+  },
+  {
+    name: 'publicTraffic.windowQuery',
+    description: '按任意 1..90 天窗口查询每日公域商品总表全指标，支持字段选择、AND 筛选、排序和限制条数；不可用字段不会按 0 参与比较。',
+    risk: 'read',
+    requiresConfirmation: false,
+    inputSchema: publicTrafficWindowQueryArgumentsSchema,
     resultMetadataSchema: windowAggregateResultMetadataSchema,
   },
   {

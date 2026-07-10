@@ -103,6 +103,17 @@ describe('data and strategy capability tools', () => {
     });
   });
 
+  it('registers windowQuery with catalog metrics and bounded windowDays', () => {
+    expect(findAgentTool('publicTraffic.windowQuery')?.inputSchema).toMatchObject({
+      properties: {
+        windowDays: { minimum: 1, maximum: 90 },
+        metrics: { items: { enum: [...publicTrafficMetricKeys] } },
+        filters: { items: { properties: { field: { enum: [...publicTrafficMetricKeys] } } } },
+        sortBy: { enum: [...publicTrafficMetricKeys] },
+      },
+    });
+  });
+
   it('registers every new capability as read-only', () => {
     for (const name of ['publicTraffic.windowAggregate', 'system.dataHealth', 'strategy.safeSourceResolve', 'strategy.refreshCandidateExplain']) {
       expect(findAgentTool(name)).toMatchObject({ risk: 'read', requiresConfirmation: false });
