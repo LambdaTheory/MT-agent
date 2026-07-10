@@ -3,7 +3,7 @@ import { resolveSafeSourceForSameSkuGroup } from '../agentData/safeSource.js';
 import { aggregateWindowProducts, readWindowMetric, type WindowProductAggregate } from '../agentData/windowAggregate.js';
 import { getInactiveLinks, getNewProductPool, getProblemProducts, getProductPerformance, getRemovedLinks } from '../agentData/publicTrafficQueries.js';
 import { rankBestProductByRegistryQuery, rankBestProductByRegistryQueryWindowed, type ProductRankingResult, type ProductWindowRankingResult } from '../agentData/productRanking.js';
-import { getPublicTrafficMetric, type PublicTrafficMetricKey } from '../agentData/publicTrafficMetricCatalog.js';
+import { getPublicTrafficMetric, publicTrafficMetricKeys, type PublicTrafficMetricKey } from '../agentData/publicTrafficMetricCatalog.js';
 import { buildAgentTaskPool } from '../agentData/taskPool.js';
 import type { AgentIntent, AgentProblemType } from '../agentData/types.js';
 import { createLinkRegistry } from '../linkRegistry/store.js';
@@ -42,11 +42,12 @@ export type LlmBackedReadOnlyTool = ReadOnlyTool & { llm: ReadOnlyToolLlmMetadat
 
 const noArgumentsSchema = { type: 'object', additionalProperties: false };
 const productArgumentsSchema = { type: 'object', properties: { keyword: { type: 'string' } }, required: ['keyword'], additionalProperties: false };
+const legacyRankingMetricKeys = publicTrafficMetricKeys.filter((metric): metric is 'shippedOrders' | 'amount' | 'exposure' => metric === 'shippedOrders' || metric === 'amount' || metric === 'exposure');
 const productRankingArgumentsSchema = {
   type: 'object',
   properties: {
     query: { type: 'string' },
-    metric: { type: 'string', enum: ['shippedOrders', 'amount', 'exposure'] },
+    metric: { type: 'string', enum: legacyRankingMetricKeys },
     periodDays: { type: ['integer', 'string'], enum: [1, 7, 30, '1', '7', '30'] },
   },
   required: ['query'],

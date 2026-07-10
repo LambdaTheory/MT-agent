@@ -5,6 +5,7 @@ import { findReadOnlyToolByLlmName } from '../src/feishuBot/readOnlyToolRegistry
 import { runReadOnlyToolSelection } from '../src/feishuBot/llmReadOnlyToolAdapter.js';
 import { parseLlmToolSelection, type LlmToolSelection } from '../src/feishuBot/llmProvider.js';
 import { createLinkRegistry } from '../src/linkRegistry/store.js';
+import { publicTrafficMetricKeys } from '../src/agentData/publicTrafficMetricCatalog.js';
 import type { LinkRegistryEntry } from '../src/linkRegistry/types.js';
 import type { PublicTrafficDataReportContext } from '../src/publicTraffic/types.js';
 
@@ -101,6 +102,13 @@ describe('LLM read-only tool adapter', () => {
     expect(response.text).toContain('请使用数据查询工具');
     expect(response.text).not.toContain('金额为0');
     expect(response.text).not.toContain('创单为0');
+  });
+
+  it('derives the legacy same-SKU ranking metric subset from catalog keys', () => {
+    const tool = findReadOnlyToolByLlmName('rank_best_same_sku_product');
+    const schema = tool?.llm.argumentsSchema as { properties?: { metric?: { enum?: string[] } } };
+
+    expect(schema.properties?.metric?.enum).toEqual(publicTrafficMetricKeys.filter((metric) => ['shippedOrders', 'amount', 'exposure'].includes(metric)));
   });
 
   it('runs a registry-backed product query from an LLM selection', async () => {
