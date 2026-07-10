@@ -132,6 +132,7 @@ const NON_RENT_PRICE_FIELD_LABELS: Record<string, string[]> = {
 };
 const REFRESH_ACTIVITY_EXECUTION_MAX_PRODUCTS = 20;
 const RENTAL_DELIST_BATCH_MAX_PRODUCTS = 80;
+const arbitraryWindowDaysPattern = /^(?:[1-9]|[1-8]\d|90)$/;
 const RENT_FIELD_ORDER: Array<{ field: string; label: string }> = [
   { field: 'rent1day', label: '1天' },
   { field: 'rent2day', label: '2天' },
@@ -288,17 +289,26 @@ function readOptionalPublicTrafficMetric(value: unknown): PublicTrafficMetricKey
   return readPublicTrafficMetric(value);
 }
 
+function readBoundedDays(value: unknown, fieldName: 'periodDays' | 'windowDays'): number {
+  if (typeof value === 'string') {
+    if (!arbitraryWindowDaysPattern.test(value)) throw new Error(`${fieldName} must be between 1 and 90`);
+    return Number(value);
+  }
+  if (!Number.isInteger(value) || typeof value !== 'number' || value < 1 || value > 90) throw new Error(`${fieldName} must be between 1 and 90`);
+  return value;
+}
+
 function readPeriodDays(value: unknown): 1 | 7 | 30 {
-  const parsed = typeof value === 'string' ? Number(value) : value;
+  const parsed = typeof value === 'string'
+    ? (/^(?:1|7|30)$/.test(value) ? Number(value) : value)
+    : value;
   if (parsed === 1 || parsed === 7 || parsed === 30) return parsed;
   throw new Error('periodDays must be 1, 7, or 30');
 }
 
 function readOptionalPeriodDays(value: unknown): number | undefined {
   if (value === undefined) return undefined;
-  const parsed = typeof value === 'string' ? Number(value) : value;
-  if (Number.isInteger(parsed) && typeof parsed === 'number' && parsed > 0) return parsed;
-  throw new Error('periodDays must be a positive integer');
+  return readBoundedDays(value, 'periodDays');
 }
 
 function readOptionalLimit(value: unknown): number | undefined {
@@ -309,9 +319,7 @@ function readOptionalLimit(value: unknown): number | undefined {
 }
 
 function readWindowDays(value: unknown): number {
-  const parsed = typeof value === 'string' ? Number(value) : value;
-  if (!Number.isInteger(parsed) || typeof parsed !== 'number' || parsed < 1 || parsed > 90) throw new Error('windowDays must be between 1 and 90');
-  return parsed;
+  return readBoundedDays(value, 'windowDays');
 }
 
 function readOptionalWindowDays(value: unknown): number | undefined {
@@ -2212,9 +2220,7 @@ export async function executeAgentToolRequest(
       }, options);
     }
     case 'product.rankByCategory': {
-      const periodDays = readOptionalLimit(request.arguments.periodDays);
-      if (!periodDays) throw new Error('periodDays is required');
-      if (periodDays > 90) throw new Error('windowDays must be between 1 and 90');
+      const periodDays = readBoundedDays(request.arguments.periodDays, 'periodDays');
       const metric = readPublicTrafficMetric(request.arguments.metric);
       const registryContext = await loadClosedOrderRegistryContext(options.closedOrderRegistryPaths);
       if ((periodDays === 1 || periodDays === 7 || periodDays === 30) && isFixedCategoryMetric(metric)) {
