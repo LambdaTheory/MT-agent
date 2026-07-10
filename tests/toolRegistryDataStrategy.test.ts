@@ -115,6 +115,11 @@ describe('data and strategy capability tools', () => {
     });
   });
 
+  it('validates windowQuery string windows consistently with runtime normalization', () => {
+    expect(validateAgentToolArguments('publicTraffic.windowQuery', { windowDays: '15' })).toBe(true);
+    expect(validateAgentToolArguments('publicTraffic.windowQuery', { windowDays: '91' })).toBe(false);
+  });
+
   it('registers ranking tools with catalog metrics and arbitrary positive windows', () => {
     expect(findAgentTool('product.rankBestSameSku')?.inputSchema).toMatchObject({
       properties: {

@@ -158,7 +158,7 @@ const publicTrafficWindowQueryArgumentsSchema = {
   properties: {
     date: reportDateSchema,
     endDate: reportDateSchema,
-    windowDays: { type: 'integer', minimum: 1, maximum: 90 },
+    windowDays: arbitraryWindowDaysSchema,
     productQuery: { type: 'string' },
     sameSkuGroupId: { type: 'string' },
     metrics: { type: 'array', minItems: 1, maxItems: 16, items: reportMetricSchema },
