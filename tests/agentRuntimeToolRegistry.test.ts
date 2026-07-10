@@ -474,6 +474,12 @@ describe('agent runtime tool registry', () => {
       required: ['windowDays'],
       additionalProperties: false,
     });
+    expect(findAgentTool('product.rankBestSameSku')?.description).toContain('全指标');
+    expect(findAgentTool('product.rankBestSameSku')?.description).toContain('1..90');
+    expect(findAgentTool('product.rankBestSameSku')?.description).not.toContain('shippedOrders/amount/exposure');
+    expect(findAgentTool('product.rankByCategory')?.description).toContain('全指标');
+    expect(findAgentTool('product.rankByCategory')?.description).toContain('1..90');
+    expect(findAgentTool('product.rankByCategory')?.description).not.toContain('1/7/30');
     expect(findAgentTool('operations.refreshActivityPlan')?.description).toContain('query');
     expect(findAgentTool('operations.refreshActivityPlan')?.description).toContain('metric/operator/value/windowDays');
     expect(findAgentTool('operations.refreshActivityPlan')?.resultMetadataSchema).toMatchObject({

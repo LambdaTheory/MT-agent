@@ -811,7 +811,7 @@ const agentTools: AgentToolDefinition[] = [
   },
   {
     name: 'product.rankBestSameSku',
-    description: '按链接维护档案解析商品名、别名、端内ID或同款组，并返回同款组里公域数据表现最好的端内ID。适用于“s23最好的链接是哪条”“数据最好的 pocket3 的端内id是多少”“近20天金额最好的 r50 是哪条”。metric 支持 shippedOrders/amount/exposure，periodDays 支持 1/7/15/20/30 等正整数；非 1/7/30 窗口会回到逐日 1d 数据聚合。',
+    description: '按链接维护档案解析商品名、别名、端内ID或同款组，并返回同款组里公域数据表现最好的端内ID。适用于“s23最好的链接是哪条”“数据最好的 pocket3 的端内id是多少”“近20天公域访问最好的 r50 是哪条”。metric 支持公域日报全指标目录，periodDays 支持 1..90 天任意窗口。',
     risk: 'read',
     requiresConfirmation: false,
     inputSchema: productRankingArgumentsSchema,
@@ -819,7 +819,7 @@ const agentTools: AgentToolDefinition[] = [
   },
   {
     name: 'product.rankByCategory',
-    description: '按链接档案里的品类/类型筛选商品，并按公域日报指标排名。metric 支持 shippedOrders/amount/exposure，periodDays 支持 1/7/30。',
+    description: '按链接档案里的品类/类型筛选商品，并按公域日报指标排名。metric 支持公域日报全指标目录，periodDays 支持 1..90 天任意窗口。',
     risk: 'read',
     requiresConfirmation: false,
     inputSchema: categoryRankingArgumentsSchema,
