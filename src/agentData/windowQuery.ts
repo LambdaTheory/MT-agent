@@ -104,6 +104,7 @@ export async function queryPublicTrafficWindow(
   for (const filter of args.filters ?? []) {
     if ((availableCountByMetric[filter.field] ?? 0) === 0) throw unavailableError(filter.field, windowDays);
   }
+  if (args.sortBy && (availableCountByMetric[args.sortBy] ?? 0) === 0) throw unavailableError(args.sortBy, windowDays);
 
   let items = aggregates.filter((item) => (args.filters ?? []).every((filter) => {
     const value = readWindowMetric(item, filter.field);

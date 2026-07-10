@@ -1,7 +1,10 @@
 import type { LinkRegistryAliasResolutionCandidate, LinkRegistryStore } from '../linkRegistry/store.js';
+import { createLinkRegistry } from '../linkRegistry/store.js';
 import type { LinkRegistryEntry } from '../linkRegistry/types.js';
 import type { PeriodKey } from '../domain/types.js';
 import type { PublicTrafficDataReportContext, PublicTrafficProductDataRow } from '../publicTraffic/types.js';
+import { queryPublicTrafficWindow } from './windowQuery.js';
+import type { PublicTrafficMetricKey } from './publicTrafficMetricCatalog.js';
 
 export type ProductRankingMatchMethod = 'internal_id' | 'same_sku_group' | 'alias';
 
@@ -35,6 +38,19 @@ export interface ProductRankingOptions {
   periodDays?: 1 | 7 | 30;
   metric?: ProductRankingMetric;
 }
+
+export interface ProductWindowRankingOptions {
+  metric: PublicTrafficMetricKey;
+  periodDays: number;
+  endDate?: string;
+  limit?: number;
+}
+
+export type ProductWindowRankingResult =
+  | { status: 'ranked'; query: string; sameSkuGroupId: string | null; metric: PublicTrafficMetricKey; periodDays: number; date: string; best: { internalProductId: string; productName: string; value: number }; ranking: Array<{ internalProductId: string; productName: string; value: number }> }
+  | { status: 'ambiguous'; query: string; candidates: ProductRankingCandidate[] }
+  | { status: 'not_found'; query: string }
+  | { status: 'no_metrics'; query: string; sameSkuGroupId: string | null; excluded: Array<{ internalProductId: string; reason: 'removed' | 'missing_metrics' | 'missing_same_sku_group' }> };
 
 export type ProductRankingResult =
   | {
@@ -227,4 +243,31 @@ export function rankBestProductByRegistryQuery(
     rationale,
     date: context.date,
   };
+}
+
+export async function rankBestProductByRegistryQueryWindowed(
+  outputDir: string,
+  registryEntries: LinkRegistryEntry[],
+  query: string,
+  options: ProductWindowRankingOptions,
+): Promise<ProductWindowRankingResult> {
+  const resolved = resolveGroup(createLinkRegistry(registryEntries), query);
+  if ('status' in resolved) return resolved;
+  const activeIds = new Set(resolved.entries.filter((entry) => entry.status === 'active').map((entry) => entry.internalProductId));
+  const result = await queryPublicTrafficWindow(outputDir, {
+    endDate: options.endDate,
+    windowDays: options.periodDays,
+    sameSkuGroupId: resolved.sameSkuGroupId ?? undefined,
+    metrics: [options.metric],
+    sortBy: options.metric,
+    sortDirection: 'desc',
+    limit: options.limit ?? 50,
+  }, registryEntries);
+  const ranking = result.items
+    .filter((item) => activeIds.has(item.internalProductId))
+    .map((item) => ({ internalProductId: item.internalProductId, productName: item.productName, value: item.values[options.metric] ?? 0 }))
+    .filter((item) => Number.isFinite(item.value));
+  const best = ranking[0];
+  if (!best) return { status: 'no_metrics', query, sameSkuGroupId: resolved.sameSkuGroupId, excluded: [] };
+  return { status: 'ranked', query, sameSkuGroupId: resolved.sameSkuGroupId, metric: options.metric, periodDays: options.periodDays, date: result.endDate, best, ranking };
 }

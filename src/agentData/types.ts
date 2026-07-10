@@ -1,4 +1,5 @@
 import type { PeriodKey } from '../domain/types.js';
+import type { PublicTrafficMetricKey } from './publicTrafficMetricCatalog.js';
 
 export interface AgentOverviewMetric {
   period: PeriodKey;
@@ -73,7 +74,7 @@ export interface AgentTaskItem {
   status: '待处理';
 }
 
-export type AgentRankingMetric = 'shippedOrders' | 'amount' | 'exposure';
+export type AgentRankingMetric = PublicTrafficMetricKey;
 
 export type AgentIntent =
   | { type: 'overview' }

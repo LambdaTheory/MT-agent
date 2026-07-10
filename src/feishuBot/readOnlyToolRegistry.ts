@@ -2,7 +2,8 @@ import { explainRefreshCandidates } from '../agentData/refreshCandidateExplain.j
 import { resolveSafeSourceForSameSkuGroup } from '../agentData/safeSource.js';
 import { aggregateWindowProducts, type WindowProductAggregate } from '../agentData/windowAggregate.js';
 import { getInactiveLinks, getNewProductPool, getProblemProducts, getProductPerformance, getRemovedLinks } from '../agentData/publicTrafficQueries.js';
-import { rankBestProductByRegistryQuery, type ProductRankingResult } from '../agentData/productRanking.js';
+import { rankBestProductByRegistryQuery, rankBestProductByRegistryQueryWindowed, type ProductRankingResult, type ProductWindowRankingResult } from '../agentData/productRanking.js';
+import { getPublicTrafficMetric, publicTrafficMetricKeys, type PublicTrafficMetricKey } from '../agentData/publicTrafficMetricCatalog.js';
 import { buildAgentTaskPool } from '../agentData/taskPool.js';
 import type { AgentIntent, AgentProblemType } from '../agentData/types.js';
 import { createLinkRegistry } from '../linkRegistry/store.js';
@@ -45,7 +46,7 @@ const productRankingArgumentsSchema = {
   type: 'object',
   properties: {
     query: { type: 'string' },
-    metric: { type: 'string', enum: ['shippedOrders', 'amount', 'exposure'] },
+    metric: { type: 'string', enum: [...publicTrafficMetricKeys] },
     periodDays: { type: ['integer', 'string'], pattern: '^[1-9]\\d*$', minimum: 1 },
   },
   required: ['query'],
@@ -67,13 +68,17 @@ function isAgentProblemType(value: unknown): value is AgentProblemType {
   return value === 'low_exposure' || value === 'weak_conversion' || value === 'high_potential' || value === 'new_product_pool' || value === 'recommended_action';
 }
 
-function readRankingMetric(value: unknown): 'shippedOrders' | 'amount' | 'exposure' | undefined {
-  return value === 'shippedOrders' || value === 'amount' || value === 'exposure' ? value : undefined;
+function readRankingMetric(value: unknown): PublicTrafficMetricKey | undefined {
+  return typeof value === 'string' && getPublicTrafficMetric(value) ? value as PublicTrafficMetricKey : undefined;
 }
 
 function readRankingPeriodDays(value: unknown): number | undefined {
   const numeric = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN;
   return Number.isInteger(numeric) && numeric > 0 ? numeric : undefined;
+}
+
+function isLegacyRankingMetric(metric: PublicTrafficMetricKey | undefined): metric is 'shippedOrders' | 'amount' | 'exposure' {
+  return metric === 'shippedOrders' || metric === 'amount' || metric === 'exposure';
 }
 
 function formatTaskLines(items: Array<{ productId: string; suggestedAction: string; reason: string }>): string {
@@ -142,6 +147,34 @@ function formatRankingAnswer(result: ProductRankingResult): string {
   }
 }
 
+function formatWindowRankingAnswer(result: ProductWindowRankingResult): string {
+  switch (result.status) {
+    case 'ranked': {
+      const definition = getPublicTrafficMetric(result.metric)!;
+      const value = definition.format === 'money'
+        ? `¥${formatMoney(result.best.value)}`
+        : definition.format === 'percent'
+          ? `${(result.best.value * 100).toFixed(2)}%`
+          : formatMoney(result.best.value);
+      return [
+        `近 ${result.periodDays} 天数据最好的 ${result.query} 是：端内ID ${result.best.internalProductId}（${result.best.productName}）`,
+        `数据日期：${result.date}`,
+        `依据：同款组 ${result.sameSkuGroupId ?? '未知'}，按 ${definition.label} 排序。`,
+        `近 ${result.periodDays} 天：${definition.label} ${value}`,
+      ].join('\n');
+    }
+    case 'ambiguous':
+      return [
+        `“${result.query}”匹配到多个可能的同款组，需要你补充具体商品或端内ID：`,
+        ...result.candidates.slice(0, 5).map((candidate, index) => `${index + 1}. ${candidate.shortName ?? candidate.sameSkuGroupId}（${candidate.sameSkuGroupId}，端内ID ${candidate.internalProductIds.join('、')}）`),
+      ].join('\n');
+    case 'not_found':
+      return `链接维护档案未匹配到“${result.query}”，我不会猜测端内ID。可以换成更完整的商品名或直接给端内ID。`;
+    case 'no_metrics':
+      return `已找到“${result.query}”的链接维护档案，但同款组 ${result.sameSkuGroupId || '未知'} 没有可用于排名的公域数据。`;
+  }
+}
+
 function rankingAggregateMetricValue(item: WindowProductAggregate, metric: 'shippedOrders' | 'amount' | 'exposure'): number {
   if (metric === 'shippedOrders') return item.shippedOrders;
   if (metric === 'amount') return item.amount;
@@ -173,7 +206,7 @@ async function rankWindowAggregateAnswer(
 ): Promise<BotResponse | null> {
   const periodDays = intent.periodDays;
   const metric = intent.metric;
-  if (!periodDays || periodDays === 1 || periodDays === 7 || periodDays === 30 || !metric) return null;
+  if (!periodDays || periodDays === 1 || periodDays === 7 || periodDays === 30 || !isLegacyRankingMetric(metric)) return null;
   if (!options.outputDir) return { text: '需要 outputDir 才能按逐日数据聚合任意窗口。' };
 
   const groupEntries = resolveSameSkuGroupEntries(registry, intent.query).filter((entry) => entry.status !== 'removed');
@@ -265,11 +298,11 @@ export const readOnlyTools: ReadOnlyTool[] = [
   },
   {
     name: 'best_product_by_same_sku',
-    description: '按链接维护档案解析商品/同款组，并返回公域数据表现最好的端内ID；支持 periodDays=1/7/30 和 metric=shippedOrders/amount/exposure。',
+    description: '按链接维护档案解析商品/同款组，并返回公域数据表现最好的端内ID；支持完整公域日报指标目录和任意正整数 periodDays。',
     intentType: 'best_product_by_same_sku',
     llm: {
       name: 'rank_best_same_sku_product',
-      description: '查询某个商品或同款组中公域数据表现最好的端内ID。支持 periodDays=1/7/30 和 metric=shippedOrders/amount/exposure；适用于“数据最好的 X 是哪个端内ID”“近30天金额最好的 r50 是哪条”“近30天曝光最好的 pocket3 是哪个id”等只读问题。',
+      description: '查询某个商品或同款组中公域数据表现最好的端内ID。支持完整公域日报指标目录和任意正整数 periodDays；适用于“数据最好的 X 是哪个端内ID”“近15天访问最高的 pocket3 是哪个id”“近30天金额最好的 r50 是哪条”等只读问题。',
       argumentsSchema: productRankingArgumentsSchema,
       toIntent: (argumentsRecord) => {
         const query = readStringArgument(argumentsRecord, 'query');
@@ -282,10 +315,25 @@ export const readOnlyTools: ReadOnlyTool[] = [
       if (intent.type !== 'best_product_by_same_sku') return { text: '暂无匹配商品。' };
       const registry = options.linkRegistryStore;
       if (!registry) return { text: '需要先读取链接维护档案，才能安全判断同款组里哪个端内ID数据最好。' };
+      if (intent.metric && intent.periodDays && options.registryEntries && options.outputDir) {
+        const result = await rankBestProductByRegistryQueryWindowed(options.outputDir, options.registryEntries, intent.query, { metric: intent.metric, periodDays: intent.periodDays, endDate: context.date });
+        return {
+          text: formatWindowRankingAnswer(result),
+          metadata: {
+            toolName: 'product.rankBestSameSku',
+            status: result.status,
+            query: intent.query,
+            ...(result.status === 'ranked'
+              ? { bestProductId: result.best.internalProductId, best: result.best, ranking: result.ranking, productIds: result.ranking.map((item) => item.internalProductId), rankingCount: result.ranking.length, sameSkuGroupId: result.sameSkuGroupId, date: result.date, periodDays: result.periodDays, metric: result.metric }
+              : {}),
+            result,
+          },
+        };
+      }
       const windowResponse = await rankWindowAggregateAnswer(context, intent, registry, options);
       if (windowResponse) return windowResponse;
       const periodDays = intent.periodDays === 1 || intent.periodDays === 7 || intent.periodDays === 30 ? intent.periodDays : undefined;
-      const result = rankBestProductByRegistryQuery(context, registry, intent.query, { periodDays, metric: intent.metric });
+      const result = rankBestProductByRegistryQuery(context, registry, intent.query, { periodDays, metric: isLegacyRankingMetric(intent.metric) ? intent.metric : undefined });
       return {
         text: formatRankingAnswer(result),
         metadata: {

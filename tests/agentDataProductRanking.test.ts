@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { rankBestProductByRegistryQuery } from '../src/agentData/productRanking.js';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { rankBestProductByRegistryQuery, rankBestProductByRegistryQueryWindowed } from '../src/agentData/productRanking.js';
 import { createLinkRegistry } from '../src/linkRegistry/store.js';
 import type { LinkRegistryEntry } from '../src/linkRegistry/types.js';
 import type { PublicTrafficDataReportContext, PublicTrafficPeriodMetrics } from '../src/publicTraffic/types.js';
@@ -87,6 +90,56 @@ function registryStore() {
 }
 
 describe('rankBestProductByRegistryQuery', () => {
+  async function writeWindowDay(root: string, date: string, rows: Array<{ id: string; visits: number; signedOrders?: number }>) {
+    const dayDir = join(root, date);
+    await mkdir(dayDir, { recursive: true });
+    await writeFile(join(dayDir, `公域数据上下文_${date}.json`), JSON.stringify({
+      date,
+      rows: rows.map((item) => ({
+        productName: `Pocket3 ${item.id}`,
+        platformProductId: `p${item.id}`,
+        displayProductId: `端内ID ${item.id}`,
+        custodyDays: 20,
+        periods: { '1d': metric({ publicVisits: item.visits, exposure: 10, dashboardVisits: item.signedOrders === undefined ? Number.NaN : 1, signedOrders: item.signedOrders ?? 0 }) },
+      })),
+    }), 'utf8');
+  }
+
+  it('ranks same-SKU products by 15-day public visits', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-product-rank-'));
+    try {
+      const pocketRegistry: LinkRegistryEntry[] = [
+        { internalProductId: '215', platformProductId: 'p215', productName: 'Pocket3 215', aliases: ['pocket3'], sameSkuGroupId: 'dji-pocket-3', status: 'active', source: ['link_registry_override'] },
+        { internalProductId: '247', platformProductId: 'p247', productName: 'Pocket3 247', aliases: ['pocket3'], sameSkuGroupId: 'dji-pocket-3', status: 'active', source: ['link_registry_override'] },
+      ];
+      for (let day = 1; day <= 15; day += 1) await writeWindowDay(outputDir, `2026-07-${String(day).padStart(2, '0')}`, [{ id: '215', visits: 3 }, { id: '247', visits: 10 }]);
+
+      const result = await rankBestProductByRegistryQueryWindowed(outputDir, pocketRegistry, 'pocket3', {
+        metric: 'publicVisits', periodDays: 15, endDate: '2026-07-15',
+      });
+
+      expect(result).toMatchObject({ status: 'ranked', metric: 'publicVisits', best: { internalProductId: '247', value: 150 } });
+    } finally {
+      await rm(outputDir, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses dashboard-based same-SKU rank when the selected window has incomplete dashboard data', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-product-rank-'));
+    try {
+      const pocketRegistry: LinkRegistryEntry[] = [
+        { internalProductId: '215', platformProductId: 'p215', productName: 'Pocket3 215', aliases: ['pocket3'], sameSkuGroupId: 'dji-pocket-3', status: 'active', source: ['link_registry_override'] },
+      ];
+      for (let day = 1; day <= 15; day += 1) await writeWindowDay(outputDir, `2026-07-${String(day).padStart(2, '0')}`, [{ id: '215', visits: 0 }]);
+
+      await expect(rankBestProductByRegistryQueryWindowed(outputDir, pocketRegistry, 'pocket3', {
+        metric: 'signedOrders', periodDays: 15, endDate: '2026-07-15',
+      })).rejects.toThrow('签约订单数在近15天窗口内不可用');
+    } finally {
+      await rm(outputDir, { recursive: true, force: true });
+    }
+  });
+
   it('ranks active same-sku links by 7d shipped orders, amount, and visits', () => {
     const result = rankBestProductByRegistryQuery(context(), registryStore(), 'Ace pro 2');
 

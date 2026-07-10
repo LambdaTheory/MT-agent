@@ -164,7 +164,9 @@ const productRankingArgumentsSchema = {
   type: 'object',
   properties: {
     query: { type: 'string' },
-    metric: { type: 'string', enum: ['shippedOrders', 'amount', 'exposure'] },
+    metric: reportMetricSchema,
+    date: reportDateSchema,
+    endDate: reportDateSchema,
     periodDays: { type: ['integer', 'string'], pattern: '^[1-9]\\d*$', minimum: 1 },
   },
   required: ['query'],
@@ -175,8 +177,10 @@ const categoryRankingArgumentsSchema = {
   type: 'object',
   properties: {
     category: { type: 'string' },
-    metric: { type: 'string', enum: ['shippedOrders', 'amount', 'exposure'] },
-    periodDays: { type: ['integer', 'string'], enum: [1, 7, 30, '1', '7', '30'] },
+    metric: reportMetricSchema,
+    date: reportDateSchema,
+    endDate: reportDateSchema,
+    periodDays: positiveIntegerLikeSchema,
     limit: positiveIntegerLikeSchema,
   },
   required: ['metric', 'periodDays'],

@@ -10,7 +10,7 @@ import { loadClosedOrderIngestState } from '../closedOrderFeedback/ingest.js';
 import { buildClosedOrderObservationReport, writeClosedOrderObservationReportArtifacts } from '../closedOrderFeedback/observation.js';
 import { loadClosedOrderRegistryContext, type ClosedOrderRegistryPathsInput } from '../closedOrderFeedback/runtime.js';
 import type { AgentIntent, AgentProblemType } from '../agentData/types.js';
-import { rankProductsByCategory, type CategoryRankingMetric } from '../agentData/categoryRanking.js';
+import { rankProductsByCategory, rankProductsByCategoryWindowed, type CategoryRankingMetric } from '../agentData/categoryRanking.js';
 import { buildDataHealthReport } from '../agentData/dataHealth.js';
 import { explainRefreshCandidates } from '../agentData/refreshCandidateExplain.js';
 import { resolveSafeSourceForSameSkuGroup } from '../agentData/safeSource.js';
@@ -258,9 +258,23 @@ function readCategoryRankingMetric(value: unknown): CategoryRankingMetric {
   throw new Error('metric must be shippedOrders, amount, or exposure');
 }
 
+function readPublicTrafficMetric(value: unknown): PublicTrafficMetricKey {
+  if (typeof value === 'string' && getPublicTrafficMetric(value)) return value as PublicTrafficMetricKey;
+  throw new Error('metric must be a supported public traffic metric');
+}
+
+function isFixedCategoryMetric(metric: PublicTrafficMetricKey): metric is CategoryRankingMetric {
+  return metric === 'shippedOrders' || metric === 'amount' || metric === 'exposure';
+}
+
 function readOptionalCategoryRankingMetric(value: unknown): CategoryRankingMetric | undefined {
   if (value === undefined) return undefined;
   return readCategoryRankingMetric(value);
+}
+
+function readOptionalPublicTrafficMetric(value: unknown): PublicTrafficMetricKey | undefined {
+  if (value === undefined) return undefined;
+  return readPublicTrafficMetric(value);
 }
 
 function readPeriodDays(value: unknown): 1 | 7 | 30 {
@@ -359,6 +373,22 @@ function formatWindowQueryResponse(result: PublicTrafficWindowQueryResult): BotR
   return {
     text: [`公域窗口查询：截至 ${result.endDate}，近 ${result.windowDays} 天`, `匹配 ${result.matchedCount} 条`, ...lines].join('\n'),
     metadata: { toolName: 'publicTraffic.windowQuery', ...(metric ? { metric } : {}), windowDays: result.windowDays, endDate: result.endDate, availability: result.availableCountByMetric, productIds, items: result.items },
+  };
+}
+
+function formatWindowCategoryRankingResponse(result: Awaited<ReturnType<typeof rankProductsByCategoryWindowed>>): BotResponse {
+  const definition = getPublicTrafficMetric(result.metric)!;
+  const lines = result.items.map((item, index) => {
+    const value = definition.format === 'money'
+      ? `¥${item.value.toFixed(2)}`
+      : definition.format === 'percent'
+        ? `${(item.value * 100).toFixed(2)}%`
+        : `${Number.isInteger(item.value) ? item.value : item.value.toFixed(2)}`;
+    return `${index + 1}. ${item.productName}（端内ID ${item.internalProductId}，${item.category}）${definition.label} ${value}`;
+  });
+  return {
+    text: [`品类排名：${result.category ?? '全部'} 近${result.periodDays}天 ${definition.label}`, ...lines].join('\n'),
+    metadata: { toolName: 'product.rankByCategory', date: result.date, category: result.category, metric: result.metric, periodDays: result.periodDays, productIds: result.items.map((item) => item.internalProductId), items: result.items },
   };
 }
 
@@ -2048,20 +2078,37 @@ export async function executeAgentToolRequest(
         type: 'best_product_by_same_sku',
         query,
         periodDays: readOptionalPeriodDays(request.arguments.periodDays),
-        metric: readOptionalCategoryRankingMetric(request.arguments.metric),
+        metric: readOptionalPublicTrafficMetric(request.arguments.metric),
       }, options);
     }
     case 'product.rankByCategory': {
-      const report = await findReportContextForTool(outputDir, readOptionalDate(request.arguments.date));
-      if (!report) return { text: missingReportContextText(readOptionalDate(request.arguments.date)) };
+      const periodDays = readOptionalLimit(request.arguments.periodDays);
+      if (!periodDays) throw new Error('periodDays is required');
+      const metric = readPublicTrafficMetric(request.arguments.metric);
       const registryContext = await loadClosedOrderRegistryContext(options.closedOrderRegistryPaths);
-      const result = rankProductsByCategory(report.context, registryContext.registry, {
+      if ((periodDays === 1 || periodDays === 7 || periodDays === 30) && isFixedCategoryMetric(metric)) {
+        const report = await findReportContextForTool(outputDir, readOptionalDate(request.arguments.date));
+        if (!report) return { text: missingReportContextText(readOptionalDate(request.arguments.date)) };
+        const result = rankProductsByCategory(report.context, registryContext.registry, {
+          ...(typeof request.arguments.category === 'string' ? { category: request.arguments.category } : {}),
+          metric,
+          periodDays: readPeriodDays(request.arguments.periodDays),
+          limit: readOptionalLimit(request.arguments.limit),
+        });
+        return formatCategoryRankingResponse(result);
+      }
+      const explicitEndDate = readOptionalDate(request.arguments.endDate ?? request.arguments.date);
+      const latest = explicitEndDate ? null : await findLatestReportContext(outputDir);
+      const endDate = explicitEndDate ?? latest?.context.date;
+      if (!endDate) return { text: '还没有找到公域日报上下文。' };
+      const result = await rankProductsByCategoryWindowed(outputDir, registryContext.registry, {
         ...(typeof request.arguments.category === 'string' ? { category: request.arguments.category } : {}),
-        metric: readCategoryRankingMetric(request.arguments.metric),
-        periodDays: readPeriodDays(request.arguments.periodDays),
+        metric,
+        periodDays,
+        endDate,
         limit: readOptionalLimit(request.arguments.limit),
       });
-      return formatCategoryRankingResponse(result);
+      return formatWindowCategoryRankingResponse(result);
     }
     case 'productId.lookup': {
       const date = readOptionalDate(request.arguments.date);

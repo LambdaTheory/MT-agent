@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { rankProductsByCategory } from '../src/agentData/categoryRanking.js';
+import { rankProductsByCategory, rankProductsByCategoryWindowed } from '../src/agentData/categoryRanking.js';
 import { executeAgentToolRequest } from '../src/feishuBot/agentToolExecutor.js';
 import { findAgentTool } from '../src/agentRuntime/toolRegistry.js';
 import type { PublicTrafficDataReportContext, PublicTrafficPeriodMetrics } from '../src/publicTraffic/types.js';
@@ -76,6 +76,28 @@ describe('rankProductsByCategory', () => {
     expect(result.items[0]).toMatchObject({ category: '相机', value: 5 });
   });
 
+  it('ranks a category by 20-day reviewed order amount with an explicit end date', async () => {
+    dir = await mkdtemp(join(tmpdir(), 'mt-cat-window-rank-'));
+    for (let day = 1; day <= 20; day += 1) {
+      const dayDir = join(dir, `2026-07-${String(day).padStart(2, '0')}`);
+      await mkdir(dayDir, { recursive: true });
+      await writeFile(join(dayDir, `公域数据上下文_2026-07-${String(day).padStart(2, '0')}.json`), JSON.stringify({
+        date: `2026-07-${String(day).padStart(2, '0')}`,
+        rows: [
+          { productName: 'A 相机', platformProductId: 'p101', displayProductId: '端内ID 101', custodyDays: 20, periods: { '1d': { ...metric, exposure: 1, publicVisits: 0, dashboardVisits: 1, reviewedOrderAmount: 2 } } },
+          { productName: 'B 相机', platformProductId: 'p102', displayProductId: '端内ID 102', custodyDays: 20, periods: { '1d': { ...metric, exposure: 1, publicVisits: 0, dashboardVisits: 1, reviewedOrderAmount: 5 } } },
+        ],
+      }), 'utf8');
+    }
+
+    const result = await rankProductsByCategoryWindowed(dir, registry, {
+      category: '相机', metric: 'reviewedOrderAmount', periodDays: 20, endDate: '2026-07-20', limit: 10,
+    });
+
+    expect(result).toMatchObject({ metric: 'reviewedOrderAmount', periodDays: 20, date: '2026-07-20' });
+    expect(result.items.map((item) => item.internalProductId)).toEqual(['102', '101']);
+  });
+
   it('registers and dispatches product.rankByCategory as a read tool', async () => {
     dir = await mkdtemp(join(tmpdir(), 'mt-cat-rank-'));
     const configDir = join(dir, 'config');
@@ -108,5 +130,49 @@ describe('rankProductsByCategory', () => {
 
     expect(response.text).toContain('B 相机');
     expect(response.text).toContain('发货 5');
+  });
+
+  it('dispatches product.rankByCategory with catalog metrics over arbitrary windows', async () => {
+    dir = await mkdtemp(join(tmpdir(), 'mt-cat-window-tool-'));
+    const configDir = join(dir, 'config');
+    const stateDir = join(dir, 'state');
+    await mkdir(configDir, { recursive: true });
+    await mkdir(stateDir, { recursive: true });
+    for (let day = 1; day <= 20; day += 1) {
+      const date = `2026-07-${String(day).padStart(2, '0')}`;
+      const dayDir = join(dir, date);
+      await mkdir(dayDir, { recursive: true });
+      await writeFile(join(dayDir, `公域数据上下文_${date}.json`), JSON.stringify({
+        date,
+        rows: [
+          { productName: 'A 相机', platformProductId: 'p101', displayProductId: '端内ID 101', custodyDays: 20, periods: { '1d': { ...metric, exposure: 1, publicVisits: 0, dashboardVisits: 1, reviewedOrderAmount: 2 } } },
+          { productName: 'B 相机', platformProductId: 'p102', displayProductId: '端内ID 102', custodyDays: 20, periods: { '1d': { ...metric, exposure: 1, publicVisits: 0, dashboardVisits: 1, reviewedOrderAmount: 5 } } },
+        ],
+      }), 'utf8');
+    }
+    await writeFile(join(configDir, 'product-id-map.json'), JSON.stringify({ p101: '101', p102: '102', p201: '201' }), 'utf8');
+    await writeFile(join(configDir, 'product-name-map.json'), JSON.stringify({ '101': 'A 相机', '102': 'B 相机', '201': 'C 手机' }), 'utf8');
+    await writeFile(join(configDir, 'link-registry-overrides.json'), JSON.stringify({ version: 1, entries: registry }), 'utf8');
+
+    const response = await executeAgentToolRequest(
+      { toolName: 'product.rankByCategory', arguments: { endDate: '2026-07-20', category: '相机', metric: 'reviewedOrderAmount', periodDays: 20, limit: 1 }, reason: 'test' },
+      dir,
+      {
+        closedOrderRegistryPaths: {
+          productIdMapPath: join(configDir, 'product-id-map.json'),
+          productNameMapPath: join(configDir, 'product-name-map.json'),
+          goodsSnapshotPath: join(stateDir, 'goods-current-snapshot.json'),
+          firstSeenPath: join(stateDir, 'goods-first-seen.json'),
+          lifecyclePath: join(stateDir, 'goods-link-lifecycle.json'),
+          daemonCatalogPath: join(stateDir, 'link-registry-daemon-catalog.json'),
+          overridesPath: join(configDir, 'link-registry-overrides.json'),
+          artifactsDir: dir,
+        },
+      },
+    );
+
+    expect(response.text).toContain('B 相机');
+    expect(response.text).toContain('审核订单金额 ¥100.00');
+    expect(response.metadata).toMatchObject({ metric: 'reviewedOrderAmount', periodDays: 20, productIds: ['102'] });
   });
 });

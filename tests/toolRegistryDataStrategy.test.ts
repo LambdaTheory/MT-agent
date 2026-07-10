@@ -114,6 +114,21 @@ describe('data and strategy capability tools', () => {
     });
   });
 
+  it('registers ranking tools with catalog metrics and arbitrary positive windows', () => {
+    expect(findAgentTool('product.rankBestSameSku')?.inputSchema).toMatchObject({
+      properties: {
+        metric: { enum: [...publicTrafficMetricKeys] },
+        periodDays: { minimum: 1 },
+      },
+    });
+    expect(findAgentTool('product.rankByCategory')?.inputSchema).toMatchObject({
+      properties: {
+        metric: { enum: [...publicTrafficMetricKeys] },
+        periodDays: { minimum: 1 },
+      },
+    });
+  });
+
   it('registers every new capability as read-only', () => {
     for (const name of ['publicTraffic.windowAggregate', 'system.dataHealth', 'strategy.safeSourceResolve', 'strategy.refreshCandidateExplain']) {
       expect(findAgentTool(name)).toMatchObject({ risk: 'read', requiresConfirmation: false });
