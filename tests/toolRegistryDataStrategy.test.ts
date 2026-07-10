@@ -118,15 +118,23 @@ describe('data and strategy capability tools', () => {
     expect(findAgentTool('product.rankBestSameSku')?.inputSchema).toMatchObject({
       properties: {
         metric: { enum: [...publicTrafficMetricKeys] },
-        periodDays: { minimum: 1 },
+        periodDays: { minimum: 1, maximum: 90 },
       },
     });
     expect(findAgentTool('product.rankByCategory')?.inputSchema).toMatchObject({
       properties: {
         metric: { enum: [...publicTrafficMetricKeys] },
-        periodDays: { minimum: 1 },
+        periodDays: { minimum: 1, maximum: 90 },
       },
     });
+  });
+
+  it('bounds every arbitrary window tool schema to 1..90 days', () => {
+    for (const toolName of ['publicTraffic.windowAggregate', 'strategy.metricThresholdExplain', 'strategy.refreshCandidateExplain', 'operations.refreshActivityPlan']) {
+      expect(findAgentTool(toolName)?.inputSchema).toMatchObject({
+        properties: { windowDays: { minimum: 1, maximum: 90 } },
+      });
+    }
   });
 
   it('registers every new capability as read-only', () => {
@@ -242,5 +250,13 @@ describe('data and strategy capability tools', () => {
     expect(response.text).not.toContain('近30天');
     expect(response.text).not.toContain('近 30 天');
     expect(response.metadata).toMatchObject({ toolName: 'strategy.refreshCandidateExplain', windowDays: 2, candidateCount: 0, candidateProductIds: [] });
+  });
+
+  it('rejects oversized arbitrary windows at runtime for exposed tools', async () => {
+    const { outputDir, registryPaths } = await writeFixtures();
+
+    await expect(executeAgentToolRequest({ toolName: 'publicTraffic.windowAggregate', arguments: { endDate: '2026-07-02', windowDays: 91 }, reason: 'oversized' }, outputDir)).rejects.toThrow('windowDays must be between 1 and 90');
+    await expect(executeAgentToolRequest({ toolName: 'strategy.metricThresholdExplain', arguments: { date: '2026-07-02', metric: 'publicVisits', operator: 'eq', value: 0, windowDays: 91 }, reason: 'oversized' }, outputDir, { closedOrderRegistryPaths: registryPaths })).rejects.toThrow('windowDays must be between 1 and 90');
+    await expect(executeAgentToolRequest({ toolName: 'operations.refreshActivityPlan', arguments: { date: '2026-07-02', metric: 'publicVisits', operator: 'eq', value: 0, windowDays: 91 }, reason: 'oversized' }, outputDir, { closedOrderRegistryPaths: registryPaths })).rejects.toThrow('windowDays must be between 1 and 90');
   });
 });

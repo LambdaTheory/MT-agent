@@ -308,6 +308,16 @@ function readOptionalLimit(value: unknown): number | undefined {
   throw new Error('limit must be a positive integer');
 }
 
+function readWindowDays(value: unknown): number {
+  const parsed = typeof value === 'string' ? Number(value) : value;
+  if (!Number.isInteger(parsed) || typeof parsed !== 'number' || parsed < 1 || parsed > 90) throw new Error('windowDays must be between 1 and 90');
+  return parsed;
+}
+
+function readOptionalWindowDays(value: unknown): number | undefined {
+  return value === undefined ? undefined : readWindowDays(value);
+}
+
 function formatCategoryRankingMetric(metric: CategoryRankingMetric): string {
   if (metric === 'shippedOrders') return '发货';
   if (metric === 'amount') return '金额';
@@ -372,6 +382,9 @@ function formatWindowAggregateMetric(item: WindowProductAggregate, metric: Publi
 }
 
 function formatWindowQueryResponse(result: PublicTrafficWindowQueryResult): BotResponse {
+  const aggregationLine = result.aggregation
+    ? `统计：${getPublicTrafficMetric(result.aggregation.metric)!.label}${result.aggregation.label} = ${Number.isInteger(result.aggregation.value) ? result.aggregation.value : result.aggregation.value.toFixed(2)}`
+    : undefined;
   const lines = result.items.map((item, index) => {
     const metricText = Object.entries(item.values).map(([metric, value]) => {
       const definition = getPublicTrafficMetric(metric)!;
@@ -384,8 +397,8 @@ function formatWindowQueryResponse(result: PublicTrafficWindowQueryResult): BotR
   const metric = Object.keys(result.availableCountByMetric)[0];
   const productIds = result.items.map((item) => item.internalProductId);
   return {
-    text: [`公域窗口查询：截至 ${result.endDate}，近 ${result.windowDays} 天`, `匹配 ${result.matchedCount} 条`, ...lines].join('\n'),
-    metadata: { toolName: 'publicTraffic.windowQuery', ...(metric ? { metric } : {}), windowDays: result.windowDays, endDate: result.endDate, availability: result.availableCountByMetric, productIds, items: result.items },
+    text: [`公域窗口查询：截至 ${result.endDate}，近 ${result.windowDays} 天`, `匹配 ${result.matchedCount} 条`, aggregationLine, ...lines].filter((line): line is string => Boolean(line)).join('\n'),
+    metadata: { toolName: 'publicTraffic.windowQuery', ...(metric ? { metric } : {}), windowDays: result.windowDays, endDate: result.endDate, availability: result.availableCountByMetric, productIds, ...(result.aggregation ? { aggregation: result.aggregation } : {}), items: result.items },
   };
 }
 
@@ -1257,9 +1270,7 @@ function readMaxCandidates(value: unknown): number {
 
 function readRefreshActivityWindowDays(value: unknown): number {
   if (value === undefined) return REFRESH_ACTIVITY_DEFAULT_WINDOW_DAYS;
-  const numeric = typeof value === 'number' ? value : Number(value);
-  if (!Number.isInteger(numeric) || numeric < 1) throw new Error('windowDays must be a positive integer');
-  return numeric;
+  return readWindowDays(value);
 }
 
 function parseDateToUtcDay(value: string | undefined): number | null {
@@ -2203,6 +2214,7 @@ export async function executeAgentToolRequest(
     case 'product.rankByCategory': {
       const periodDays = readOptionalLimit(request.arguments.periodDays);
       if (!periodDays) throw new Error('periodDays is required');
+      if (periodDays > 90) throw new Error('windowDays must be between 1 and 90');
       const metric = readPublicTrafficMetric(request.arguments.metric);
       const registryContext = await loadClosedOrderRegistryContext(options.closedOrderRegistryPaths);
       if ((periodDays === 1 || periodDays === 7 || periodDays === 30) && isFixedCategoryMetric(metric)) {
@@ -2294,7 +2306,7 @@ export async function executeAgentToolRequest(
       return formatWindowedFindingsResponse(result);
     }
     case 'publicTraffic.windowAggregate': {
-      const windowDays = readOptionalLimit(request.arguments.windowDays);
+      const windowDays = readOptionalWindowDays(request.arguments.windowDays);
       if (!windowDays) throw new Error('windowDays is required');
       const explicitEndDate = readOptionalDate(request.arguments.endDate ?? request.arguments.date);
       const latest = explicitEndDate ? null : await findLatestReportContext(outputDir);
@@ -2304,7 +2316,7 @@ export async function executeAgentToolRequest(
       return formatWindowAggregateResponse(result, endDate, windowDays);
     }
     case 'publicTraffic.windowQuery': {
-      const windowDays = Number(request.arguments.windowDays);
+      const windowDays = readWindowDays(request.arguments.windowDays);
       const explicitEndDate = readOptionalDate(request.arguments.endDate ?? request.arguments.date);
       const latest = explicitEndDate ? null : await findLatestReportContext(outputDir);
       const endDate = explicitEndDate ?? latest?.context.date;
@@ -2340,7 +2352,7 @@ export async function executeAgentToolRequest(
         operator: readMetricThresholdOperator(request.arguments.operator),
         value: readRequiredNumber(request.arguments.value, 'value'),
         date: endDate,
-        windowDays: readOptionalLimit(request.arguments.windowDays) ?? REFRESH_ACTIVITY_DEFAULT_WINDOW_DAYS,
+        windowDays: readOptionalWindowDays(request.arguments.windowDays) ?? REFRESH_ACTIVITY_DEFAULT_WINDOW_DAYS,
         ...(request.arguments.requireActive !== undefined ? { requireActive: request.arguments.requireActive === true } : {}),
         ...(request.arguments.requireOnlineDays !== undefined ? { requireOnlineDays: readOptionalLimit(request.arguments.requireOnlineDays) ?? REFRESH_ACTIVITY_DEFAULT_WINDOW_DAYS } : {}),
       };

@@ -1,6 +1,7 @@
 import type { AgentToolDefinition } from './tool.js';
 import { publicTrafficMetricKeys } from '../agentData/publicTrafficMetricCatalog.js';
 
+const arbitraryWindowDaysSchema = { type: ['integer', 'string'], pattern: '^[1-9]\\d*$', minimum: 1, maximum: 90 };
 const noArgumentsSchema = { type: 'object', additionalProperties: false };
 const reportDateSchema = { type: 'string', pattern: '^(?:\\d{4}-\\d{2}-\\d{2}|\\d{2,4}[./-]\\d{1,2}[./-]\\d{1,2}|\\d{1,2}[./-]\\d{1,2}|\\d{1,2}月\\d{1,2}日)$' };
 const optionalReportDateArgumentsSchema = { type: 'object', properties: { date: reportDateSchema }, additionalProperties: false };
@@ -9,7 +10,7 @@ const windowAggregateArgumentsSchema = {
   properties: {
     date: reportDateSchema,
     endDate: reportDateSchema,
-    windowDays: { type: ['integer', 'string'], pattern: '^[1-9]\\d*$', minimum: 1 },
+    windowDays: arbitraryWindowDaysSchema,
   },
   required: ['windowDays'],
   additionalProperties: false,
@@ -31,7 +32,7 @@ const refreshCandidateExplainArgumentsSchema = {
     query: { type: 'string' },
     sameSkuGroupId: { type: 'string' },
     zeroMetric: { type: 'string', enum: ['created_orders', 'amount'] },
-    windowDays: { type: ['integer', 'string'], pattern: '^[1-9]\\d*$', minimum: 1 },
+    windowDays: arbitraryWindowDaysSchema,
   },
   required: ['zeroMetric'],
   additionalProperties: false,
@@ -46,7 +47,7 @@ const metricThresholdExplainArgumentsSchema = {
     metric: { type: 'string', enum: [...publicTrafficMetricKeys] },
     operator: metricThresholdOperatorSchema,
     value: { type: 'number' },
-    windowDays: { type: ['integer', 'string'], pattern: '^[1-9]\\d*$', minimum: 1 },
+    windowDays: arbitraryWindowDaysSchema,
     requireActive: { type: 'boolean' },
     requireOnlineDays: { type: ['integer', 'string'], pattern: '^[1-9]\\d*$', minimum: 1 },
   },
@@ -191,7 +192,7 @@ const productRankingArgumentsSchema = {
     metric: reportMetricSchema,
     date: reportDateSchema,
     endDate: reportDateSchema,
-    periodDays: { type: ['integer', 'string'], pattern: '^[1-9]\\d*$', minimum: 1 },
+    periodDays: arbitraryWindowDaysSchema,
   },
   required: ['query'],
   additionalProperties: false,
@@ -204,7 +205,7 @@ const categoryRankingArgumentsSchema = {
     metric: reportMetricSchema,
     date: reportDateSchema,
     endDate: reportDateSchema,
-    periodDays: positiveIntegerLikeSchema,
+    periodDays: arbitraryWindowDaysSchema,
     limit: positiveIntegerLikeSchema,
   },
   required: ['metric', 'periodDays'],
@@ -593,7 +594,7 @@ const refreshActivityPlanArgumentsSchema = {
     metric: reportMetricSchema,
     operator: metricThresholdOperatorSchema,
     value: { type: 'number' },
-    windowDays: { type: ['integer', 'string'], pattern: '^[1-9]\\d*$', minimum: 1 },
+    windowDays: arbitraryWindowDaysSchema,
   },
   required: ['metric', 'operator', 'value', 'windowDays'],
   additionalProperties: false,
