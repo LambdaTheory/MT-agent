@@ -366,9 +366,14 @@ export const readOnlyTools: ReadOnlyTool[] = [
       if (intent.type !== 'refresh_candidate_explain') return { text: '暂无匹配工具。' };
       const registryEntries = options.registryEntries;
       if (!registryEntries) return { text: '需要先读取链接维护档案，才能解释活跃度刷新候选。' };
-      const result = explainRefreshCandidates(registryEntries, context, { ...(intent.query ? { query: intent.query } : {}), ...(intent.sameSkuGroupId ? { sameSkuGroupId: intent.sameSkuGroupId } : {}), zeroMetric: intent.zeroMetric, date: context.date });
+      const result = explainRefreshCandidates(registryEntries, context, 'metric' in intent
+        ? { ...(intent.query ? { query: intent.query } : {}), ...(intent.sameSkuGroupId ? { sameSkuGroupId: intent.sameSkuGroupId } : {}), metric: intent.metric, operator: intent.operator, value: intent.value, date: context.date, ...(intent.windowDays ? { windowDays: intent.windowDays } : {}) }
+        : { ...(intent.query ? { query: intent.query } : {}), ...(intent.sameSkuGroupId ? { sameSkuGroupId: intent.sameSkuGroupId } : {}), zeroMetric: intent.zeroMetric, date: context.date, ...(intent.windowDays ? { windowDays: intent.windowDays } : {}) });
       const status = result.candidateCount > 0 ? 'found' : 'empty';
-      return { text: [result.scopeLine, ...result.reasonSummary].join('\n'), metadata: { toolName: 'strategy.refreshCandidateExplain', status, zeroMetric: intent.zeroMetric, ...(intent.query ? { query: intent.query } : {}), ...(intent.sameSkuGroupId ? { sameSkuGroupId: intent.sameSkuGroupId } : {}), ...result, skippedReasons: result.reasonSummary } };
+      const conditionMetadata = 'metric' in intent
+        ? { metric: intent.metric, operator: intent.operator, value: intent.value }
+        : { zeroMetric: intent.zeroMetric };
+      return { text: [result.scopeLine, ...result.reasonSummary].join('\n'), metadata: { toolName: 'strategy.refreshCandidateExplain', status, ...conditionMetadata, ...(intent.query ? { query: intent.query } : {}), ...(intent.sameSkuGroupId ? { sameSkuGroupId: intent.sameSkuGroupId } : {}), ...result, skippedReasons: result.reasonSummary } };
     },
   },
   {

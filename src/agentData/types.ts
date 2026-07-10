@@ -80,7 +80,10 @@ export type AgentIntent =
   | { type: 'overview' }
   | { type: 'product'; keyword: string }
   | { type: 'best_product_by_same_sku'; query: string; periodDays?: number; metric?: AgentRankingMetric }
-  | { type: 'refresh_candidate_explain'; query?: string; sameSkuGroupId?: string; zeroMetric: 'created_orders' | 'amount' }
+  | ({ type: 'refresh_candidate_explain'; query?: string; sameSkuGroupId?: string; windowDays?: number } & (
+      | { metric: PublicTrafficMetricKey; operator: 'eq'; value: 0 }
+      | { zeroMetric: 'created_orders' | 'amount' }
+    ))
   | { type: 'safe_source_resolve'; query?: string; sameSkuGroupId?: string }
   | { type: 'safe_source_groups' }
   | { type: 'tasks' }

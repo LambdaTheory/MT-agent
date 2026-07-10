@@ -1340,17 +1340,14 @@ function refreshActivityWindowSourceScore(metric: PublicTrafficPeriodMetrics): n
 }
 
 function readRefreshActivityZeroMetric(value: unknown): RefreshActivityZeroMetric {
-  if (value === undefined) return 'created_orders';
   if (value === 'created_orders' || value === 'amount') return value;
   throw new Error('zeroMetric must be created_orders or amount');
 }
 
-function refreshActivityZeroMetricLabel(zeroMetric: RefreshActivityZeroMetric, windowDays = REFRESH_ACTIVITY_DEFAULT_WINDOW_DAYS): string {
-  return zeroMetric === 'amount' ? `近${windowDays}天订单金额为0` : `近${windowDays}天创单为0`;
-}
-
-function isRefreshActivityZeroMetricMatch(thirty: PublicTrafficProductDataRow['periods']['30d'], zeroMetric: RefreshActivityZeroMetric): boolean {
-  return zeroMetric === 'amount' ? thirty.amount === 0 : thirty.createdOrders === 0;
+function adaptRefreshActivityLegacyZeroMetric(value: unknown): Pick<MetricThresholdStrategyInput, 'metric' | 'operator' | 'value'> | null {
+  if (value === undefined) return null;
+  const zeroMetric = readRefreshActivityZeroMetric(value);
+  return { metric: zeroMetric === 'created_orders' ? 'createdOrders' : 'amount', operator: 'eq', value: 0 };
 }
 
 function refreshActivityMetricFromWindowAggregate(aggregate: WindowProductAggregate, windowDays: number): PublicTrafficPeriodMetrics {
@@ -1396,6 +1393,31 @@ function buildRefreshActivityWindowAggregateIndex(aggregates: WindowProductAggre
     if (aggregate.platformProductId) byPlatformProductId.set(aggregate.platformProductId, aggregate);
   }
   return { byInternalProductId, byPlatformProductId };
+}
+
+function findRefreshActivityEntryByProductId(entries: LinkRegistryEntry[], productId: string): LinkRegistryEntry | undefined {
+  return entries.find((entry) => entry.internalProductId === productId);
+}
+
+function formatRefreshActivitySkipLine(skipped: MetricThresholdStrategyResult['skipped'], sourceLabel: string, windowDays: number): string {
+  return `跳过：非 active ${skipped.inactive} 条，无日报行 ${skipped.missingRow} 条，${windowDays}日${sourceLabel}缺失 ${skipped.unavailableMetric} 条，上线不足 ${windowDays} 天 ${skipped.onlineLessThanRequired} 条，上线天数未知 ${skipped.onlineDaysUnknown} 条。`;
+}
+
+function metricThresholdInputFromRefreshActivityArgs(args: Record<string, unknown>, date: string, windowDays: number): MetricThresholdStrategyInput {
+  const legacy = adaptRefreshActivityLegacyZeroMetric(args.zeroMetric);
+  const explicitMetric = args.metric === undefined ? undefined : readPublicTrafficMetric(args.metric);
+  if (!explicitMetric && !legacy) throw new Error('metric is required');
+  return {
+    ...(readString(args.query) ? { query: readString(args.query)! } : {}),
+    ...(readString(args.sameSkuGroupId) ? { sameSkuGroupId: readString(args.sameSkuGroupId)! } : {}),
+    metric: explicitMetric ?? legacy!.metric,
+    operator: explicitMetric ? readMetricThresholdOperator(args.operator) : legacy!.operator,
+    value: explicitMetric ? readRequiredNumber(args.value, 'value') : legacy!.value,
+    date,
+    windowDays,
+    requireActive: true,
+    requireOnlineDays: windowDays,
+  };
 }
 
 function findRefreshActivityWindowAggregate(index: RefreshActivityWindowAggregateIndex, entry: LinkRegistryEntry): WindowProductAggregate | undefined {
@@ -1684,63 +1706,69 @@ async function refreshActivityPlanResponse(
   if (!report) return { text: missingReportContextText(date) };
   const registryContext = await loadClosedOrderRegistryContext(options.closedOrderRegistryPaths);
   const maxCandidates = readMaxCandidates(args.maxCandidates);
-  const zeroMetric = readRefreshActivityZeroMetric(args.zeroMetric);
   const windowDays = readRefreshActivityWindowDays(args.windowDays);
+  const input = metricThresholdInputFromRefreshActivityArgs(args, report.context.date, windowDays);
+  const definition = getPublicTrafficMetric(input.metric)!;
+  const condition = formatMetricThresholdCondition(input);
+  const sourceLabel = metricSourceLabel(definition.source);
   const scoped = scopedRefreshActivityEntries(args, registryContext.registry);
   if ('text' in scoped) return { text: scoped.text, metadata: { toolName: 'operations.refreshActivityPlan', ok: false } };
 
-  const windowMetrics = windowDays === REFRESH_ACTIVITY_DEFAULT_WINDOW_DAYS
-    ? null
-    : buildRefreshActivityWindowAggregateIndex(await aggregateWindowProducts({ outputDir, endDate: report.context.date, windowDays }));
+  const [strategyResult, aggregates] = await Promise.all([
+    evaluateMetricThresholdStrategy(outputDir, registryContext.registry, input),
+    aggregateWindowProducts({ outputDir, endDate: report.context.date, windowDays }),
+  ]);
+  const windowMetrics = buildRefreshActivityWindowAggregateIndex(aggregates);
+  const candidates = strategyResult.candidateProductIds
+    .map((productId) => {
+      const entry = findRefreshActivityEntryByProductId(scoped.entries, productId);
+      if (!entry) return null;
+      const row = findReportRowForEntry(report.context, entry);
+      const aggregate = findRefreshActivityWindowAggregate(windowMetrics, entry);
+      if (!row || !aggregate) return null;
+      return { entry, row: rowWithRefreshActivityWindowMetric(row, aggregate, windowDays) };
+    })
+    .filter((item): item is { entry: LinkRegistryEntry; row: PublicTrafficProductDataRow } => Boolean(item));
 
-  const candidates: Array<{ entry: LinkRegistryEntry; row: PublicTrafficProductDataRow }> = [];
-  const skipped = { missingRow: 0, missing30dDashboard: 0, inactive: 0, onlineLessThan30d: 0, onlineDaysUnknown: 0 };
-  for (const entry of scoped.entries) {
-    if (entry.status !== 'active') {
-      skipped.inactive += 1;
-      continue;
-    }
-    const row = findReportRowForEntry(report.context, entry);
-    if (!row) {
-      skipped.missingRow += 1;
-      continue;
-    }
-    const windowAggregate = windowMetrics ? findRefreshActivityWindowAggregate(windowMetrics, entry) : undefined;
-    if (windowMetrics && !windowAggregate) {
-      skipped.missing30dDashboard += 1;
-      continue;
-    }
-    const evaluatedRow = windowAggregate ? rowWithRefreshActivityWindowMetric(row, windowAggregate, windowDays) : row;
-    const thirty = evaluatedRow.periods['30d'];
-    if (!thirty.hasDashboardData) {
-      skipped.missing30dDashboard += 1;
-      continue;
-    }
-    const onlineDays = estimateOnlineDays(row, entry, report.context.date);
-    if (onlineDays === null) {
-      skipped.onlineDaysUnknown += 1;
-      continue;
-    }
-    if (onlineDays < windowDays) {
-      skipped.onlineLessThan30d += 1;
-      continue;
-    }
-    if (isRefreshActivityZeroMetricMatch(thirty, zeroMetric)) candidates.push({ entry, row: evaluatedRow });
+  if (!definition.executableDelistAllowed) {
+    return {
+      text: [
+        `活跃度刷新计划：${report.context.date}`,
+        scoped.scopeLine,
+        `筛选口径：active 链接，${condition}，${sourceLabel}完整，上线满 ${windowDays} 天（上线满${windowDays}天）。`,
+        `${definition.label}可以查询和分析，但暂未授权作为自动下架条件。请改为人工复核，或选择已授权的下架指标。`,
+        ...strategyResult.reasonSummary,
+        formatRefreshActivitySkipLine(strategyResult.skipped, sourceLabel, windowDays),
+      ].filter((line): line is string => Boolean(line)).join('\n'),
+      metadata: {
+        toolName: 'operations.refreshActivityPlan',
+        status: 'explanation_only',
+        date: report.context.date,
+        metric: input.metric,
+        metricLabel: definition.label,
+        operator: input.operator,
+        value: input.value,
+        windowDays,
+        candidateCount: strategyResult.candidateProductIds.length,
+        skipped: {
+          inactive: strategyResult.skipped.inactive,
+          missingRow: strategyResult.skipped.missingRow,
+          missing30dDashboard: strategyResult.skipped.unavailableMetric,
+          onlineLessThan30d: strategyResult.skipped.onlineLessThanRequired,
+          onlineDaysUnknown: strategyResult.skipped.onlineDaysUnknown,
+        },
+        scope: scoped.scopeLine ?? null,
+        candidateProductIds: strategyResult.candidateProductIds,
+        skippedReasons: strategyResult.reasonSummary,
+      },
+    };
   }
 
   const groups = groupRefreshActivityCandidates(candidates);
   const zeroCandidateExplanation = candidates.length === 0
     ? [
       '0 候选解释：',
-      ...explainRefreshCandidates(registryContext.registry, windowMetrics ? contextWithRefreshActivityWindowMetrics(report.context, windowMetrics, windowDays) : report.context, {
-        ...(readString(args.query) ? { query: readString(args.query)! } : {}),
-        ...(readString(args.sameSkuGroupId) ? { sameSkuGroupId: readString(args.sameSkuGroupId)! } : {}),
-        metric: zeroMetric === 'created_orders' ? 'createdOrders' : 'amount',
-        operator: 'eq',
-        value: 0,
-        date: report.context.date,
-        windowDays,
-      }).reasonSummary.map((line) => `- 策略说明：${line}`),
+      ...strategyResult.reasonSummary.map((line) => `- 策略说明：${line}`),
       `- 数据健康：${(await buildDataHealthReport(outputDir, report.context.date)).dataQualityNotes.join('；') || '无额外质量备注'}`,
     ]
     : [];
@@ -1751,8 +1779,8 @@ async function refreshActivityPlanResponse(
       || Number(left.entry.internalProductId) - Number(right.entry.internalProductId))
     .slice(0, maxCandidates);
   const shownGroups = groupRefreshActivityCandidates(shownCandidates);
-  const delistOnlyExecution = buildRefreshActivityExecuteRequest(report.context.date, shownGroups, report.context, registryContext.registry, 'delist_only', windowMetrics ?? undefined, windowDays);
-  const refillExecution = buildRefreshActivityExecuteRequest(report.context.date, shownGroups, report.context, registryContext.registry, 'delist_and_refill', windowMetrics ?? undefined, windowDays);
+  const delistOnlyExecution = buildRefreshActivityExecuteRequest(report.context.date, shownGroups, report.context, registryContext.registry, 'delist_only', windowMetrics, windowDays);
+  const refillExecution = buildRefreshActivityExecuteRequest(report.context.date, shownGroups, report.context, registryContext.registry, 'delist_and_refill', windowMetrics, windowDays);
   const groupLines = shownGroups.slice(0, 12).map((group, index) => {
     const ids = group.items.map((item) => item.entry.internalProductId).join('、');
     const newLinkItem = refillExecution.request?.newLinkItems.find((item) => item.sameSkuGroupId === group.sameSkuGroupId);
@@ -1784,14 +1812,14 @@ async function refreshActivityPlanResponse(
     text: [
       `活跃度刷新计划：${report.context.date}`,
       scoped.scopeLine,
-      `筛选口径：active 链接，${windowDays}日访问页数据已抓取，上线满 ${windowDays} 天，${refreshActivityZeroMetricLabel(zeroMetric, windowDays)}。`,
+      `筛选口径：active 链接，${condition}，${sourceLabel}完整，上线满 ${windowDays} 天（上线满${windowDays}天）。`,
       `待下架候选：${candidates.length} 条；涉及种类/同款组 ${groups.length} 个。`,
       `本次展示：${shownCandidates.length}/${candidates.length} 条。`,
       '',
-      ...(groupLines.length ? groupLines : [`没有找到符合条件的${refreshActivityZeroMetricLabel(zeroMetric, windowDays)} active 链接。`]),
+      ...(groupLines.length ? groupLines : [`没有找到符合条件的${condition} active 链接。`]),
       ...(zeroCandidateExplanation.length ? ['', ...zeroCandidateExplanation] : []),
       '',
-      `跳过：非 active ${skipped.inactive} 条，无日报行 ${skipped.missingRow} 条，${windowDays}日访问页缺失 ${skipped.missing30dDashboard} 条，上线不足 ${windowDays} 天 ${skipped.onlineLessThan30d} 条，上线天数未知 ${skipped.onlineDaysUnknown} 条。`,
+      formatRefreshActivitySkipLine(strategyResult.skipped, sourceLabel, windowDays),
       delistOnlyExecution.request
         ? `计划已生成，请在策略卡选择执行策略（待下架 ${delistOnlyExecution.request.delistProductIds.length} 条：端内ID ${delistOnlyExecution.request.delistProductIds.join('、')}）。`
         : '未能生成执行计划；请先处理以下阻断项。',
@@ -1803,9 +1831,18 @@ async function refreshActivityPlanResponse(
       date: report.context.date,
       candidateCount: candidates.length,
       shownCandidateCount: shownCandidates.length,
-      skipped,
+      skipped: {
+        inactive: strategyResult.skipped.inactive,
+        missingRow: strategyResult.skipped.missingRow,
+        missing30dDashboard: strategyResult.skipped.unavailableMetric,
+        onlineLessThan30d: strategyResult.skipped.onlineLessThanRequired,
+        onlineDaysUnknown: strategyResult.skipped.onlineDaysUnknown,
+      },
       scope: scoped.scopeLine ?? null,
-      zeroMetric,
+      metric: input.metric,
+      metricLabel: definition.label,
+      operator: input.operator,
+      value: input.value,
       windowDays,
       executeRequest: null,
       strategyRequests: { delistOnly: delistOnlyExecution.request ?? null, delistAndRefill: refillExecution.request ?? null },

@@ -367,7 +367,10 @@ const refreshActivityPlanResultMetadataSchema = {
     blockers: { type: 'array', items: { type: 'string' } },
     skippedGroups: { type: 'array', items: { type: 'string' } },
     scope: { type: ['string', 'null'] },
-    zeroMetric: { type: 'string', enum: ['created_orders', 'amount'] },
+    metric: { type: 'string' },
+    metricLabel: { type: 'string' },
+    operator: { type: 'string' },
+    value: { type: 'number' },
     windowDays: { type: 'integer' },
   },
 };
@@ -558,9 +561,12 @@ const refreshActivityPlanArgumentsSchema = {
     maxCandidates: { type: 'number' },
     query: { type: 'string' },
     sameSkuGroupId: { type: 'string' },
-    zeroMetric: { type: 'string', enum: ['created_orders', 'amount'] },
+    metric: reportMetricSchema,
+    operator: metricThresholdOperatorSchema,
+    value: { type: 'number' },
     windowDays: { type: ['integer', 'string'], pattern: '^[1-9]\\d*$', minimum: 1 },
   },
+  required: ['metric', 'operator', 'value', 'windowDays'],
   additionalProperties: false,
 };
 const refreshActivityExecuteArgumentsSchema = {
@@ -1020,7 +1026,7 @@ const agentTools: AgentToolDefinition[] = [
   },
   {
     name: 'operations.refreshActivityPlan',
-    description: '按最新或指定日期公域日报筛选指定 windowDays 窗口内创单为0或订单金额为0的 active 链接，按链接档案汇总待下架链接和补链建议；可传 query 或 sameSkuGroupId 将范围收窄到指定商品/同款组，可传 windowDays 调整窗口天数，可传 zeroMetric=amount 表示订单金额为0、zeroMetric=created_orders 表示创单为0；返回只下架 / 下架+补链策略选择卡，确认前不下架、不补链。',
+    description: '按最新或指定日期公域日报筛选指定 windowDays 窗口内满足显式 metric/operator/value 阈值的 active 链接，按链接档案汇总待下架链接和补链建议；可传 query 或 sameSkuGroupId 将范围收窄到指定商品/同款组。metric 必须保持用户指定指标，不能改写为创单、金额或其它指标；未授权为自动下架条件的指标只返回解释，不生成执行策略卡。确认前不下架、不补链。',
     risk: 'read',
     requiresConfirmation: false,
     inputSchema: refreshActivityPlanArgumentsSchema,
