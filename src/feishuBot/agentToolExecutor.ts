@@ -1777,6 +1777,8 @@ async function refreshActivityPlanResponse(
   const windowDays = readRefreshActivityWindowDays(args.windowDays);
   const input = metricThresholdInputFromRefreshActivityArgs(args, report.context.date, windowDays);
   const definition = getPublicTrafficMetric(input.metric)!;
+  const unauthorizedCondition = input.conditions?.find((condition) => !getPublicTrafficMetric(condition.metric)?.executableDelistAllowed);
+  const unauthorizedDefinition = unauthorizedCondition ? getPublicTrafficMetric(unauthorizedCondition.metric)! : undefined;
   const sourceLabel = metricSourceLabel(definition.source);
   const scoped = scopedRefreshActivityEntries(args, registryContext.registry);
   if ('text' in scoped) return { text: scoped.text, metadata: { toolName: 'operations.refreshActivityPlan', ok: false } };
@@ -1798,13 +1800,13 @@ async function refreshActivityPlanResponse(
     .filter((item): item is { entry: LinkRegistryEntry; row: PublicTrafficProductDataRow } => Boolean(item));
   const conditionSummary = strategyResult.conditionSummary ?? formatMetricThresholdCondition(input);
 
-  if (!definition.executableDelistAllowed) {
+  if (unauthorizedCondition && unauthorizedDefinition) {
     return {
       text: [
         `活跃度刷新计划：${report.context.date}`,
         scoped.scopeLine,
         `筛选口径：active 链接，${conditionSummary}，${sourceLabel}完整，上线满 ${windowDays} 天（上线满${windowDays}天）。`,
-        `${definition.label}可以查询和分析，但暂未授权作为自动下架条件。请改为人工复核，或选择已授权的下架指标。`,
+        `${unauthorizedDefinition.label}可以查询和分析，但暂未授权作为自动下架条件。请改为人工复核，或选择已授权的下架指标。`,
         ...strategyResult.reasonSummary,
         formatRefreshActivitySkipLine(strategyResult.skipped, sourceLabel, windowDays),
       ].filter((line): line is string => Boolean(line)).join('\n'),
@@ -1812,12 +1814,13 @@ async function refreshActivityPlanResponse(
         toolName: 'operations.refreshActivityPlan',
         status: 'explanation_only',
         date: report.context.date,
-        metric: input.metric,
-        metricLabel: definition.label,
-        operator: input.operator,
-        value: input.value,
+        metric: unauthorizedCondition.metric,
+        metricLabel: unauthorizedDefinition.label,
+        operator: unauthorizedCondition.operator,
+        value: unauthorizedCondition.value,
         conditions: strategyResult.conditions,
         conditionSummary,
+        availability: strategyResult.availability,
         windowDays,
         candidateCount: strategyResult.candidateProductIds.length,
         skipped: {

@@ -407,4 +407,29 @@ describe('targeted refresh activity plan', () => {
     expect(response.card).toBeUndefined();
     expect(response.metadata?.strategyRequests).toBeUndefined();
   });
+
+  it('keeps compound plans explanation-only when any metric is unauthorized', async () => {
+    const { outputDir, registryPaths } = await writeTargetedRefreshFixtures({ includePublicVisitZeroCandidates: true });
+    const conditions = [
+      { metric: 'publicVisits', operator: 'eq', value: 0 },
+      { metric: 'visitShipmentRate', operator: 'lt', value: 0.05 },
+    ];
+
+    const response = await executeAgentToolRequest(
+      {
+        toolName: 'operations.refreshActivityPlan',
+        arguments: { query: 'visit-zero', conditions, windowDays: 15 },
+        reason: '下架近15天访问量为0且访问到发货率低于5%的商品',
+      },
+      outputDir,
+      { closedOrderRegistryPaths: registryPaths },
+    );
+
+    expect(response.text).toContain('近15天公域访问量 = 0');
+    expect(response.text).toContain('近15天后链路访问到发货率 < 0.05');
+    expect(response.text).toContain('暂未授权作为自动下架条件');
+    expect(response.metadata?.conditions).toEqual(conditions);
+    expect(response.card).toBeUndefined();
+    expect(response.metadata?.strategyRequests).toBeUndefined();
+  });
 });
