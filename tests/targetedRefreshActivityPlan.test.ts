@@ -377,6 +377,33 @@ describe('targeted refresh activity plan', () => {
     expect(response.card).toBeDefined();
   });
 
+  it('uses source-neutral completeness wording for mixed-source compound plans', async () => {
+    const { outputDir, registryPaths } = await writeTargetedRefreshFixtures({ includeCompoundConditionCandidates: true, dirtyWindowDashboardCandidate: true });
+    const conditions = [
+      { metric: 'publicVisits', operator: 'eq', value: 0 },
+      { metric: 'createdOrders', operator: 'eq', value: 0 },
+    ];
+
+    const response = await executeAgentToolRequest(
+      {
+        toolName: 'operations.refreshActivityPlan',
+        arguments: { query: 'r50', windowDays: 15, conditions },
+        reason: '下架近15天访问量为0且创单为0的 r50 链接',
+      },
+      outputDir,
+      { closedOrderRegistryPaths: registryPaths },
+    );
+
+    expect(response.text).toContain('近15天公域访问量 = 0');
+    expect(response.text).toContain('近15天创建订单数 = 0');
+    expect(response.text).toContain('指标数据完整');
+    expect(response.text).toContain('创建订单数在窗口内不可用');
+    expect(response.text).toContain('访问页数据缺失或不完整');
+    expect(response.text).not.toContain('公域曝光页数据完整');
+    expect(response.text).not.toContain('15日公域曝光页数据缺失 1 条');
+    expect(response.metadata?.conditions).toEqual(conditions);
+  });
+
   it('rejects absent conditions instead of defaulting to created orders', async () => {
     const { outputDir, registryPaths } = await writeTargetedRefreshFixtures();
 
