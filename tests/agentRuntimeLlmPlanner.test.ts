@@ -94,20 +94,20 @@ describe('agent runtime LLM planner', () => {
     expect(user.workflows).toEqual([]);
   });
 
-  it('instructs the planner to map 访问量为0 to publicVisits rather than createdOrders', async () => {
+  it('teaches compound refresh activity conditions without metric substitution', async () => {
     const requests: LlmGenerateJsonInput[] = [];
     const provider: LlmProvider = {
       async generateJson(input) {
         requests.push(input);
         return {
-          text: '{"goal":"refresh","selectedTool":"operations.refreshActivityPlan","arguments":{"metric":"publicVisits","operator":"eq","value":0,"windowDays":15},"confidence":0.9,"reason":"test"}',
+          text: '{"goal":"refresh","selectedTool":"operations.refreshActivityPlan","arguments":{"conditions":[{"metric":"publicVisits","operator":"eq","value":0},{"metric":"amount","operator":"eq","value":0}],"windowDays":20},"confidence":0.9,"reason":"test"}',
           json: { goal: 'refresh' },
         };
       },
     };
     const planner = createAgentPlannerProvider(provider);
 
-    await planner.proposePlan({ message: '下架掉访问量15天内为0的链接', tools: [], workflows: [] });
+    await planner.proposePlan({ message: '下架并补链近20天访问量为0且金额为0的商品', tools: [], workflows: [] });
 
     const system = requests[0].messages.find((message) => message.role === 'system')?.content ?? '';
     const user = JSON.parse(requests[0].messages.find((message) => message.role === 'user')?.content ?? '{}') as AgentPlannerRequest;
@@ -115,12 +115,25 @@ describe('agent runtime LLM planner', () => {
 
     expect(system).toContain('访问量/公域访问量为0 → metric=publicVisits');
     expect(system).toContain('不得将用户指定指标改写为创单、金额或其它指标');
+    expect(system).toContain('When the user asks for multiple metric conditions joined by 且/并且/同时满足, emit conditions[] and preserve every condition.');
+    expect(system).toContain('访问量为0且金额为0');
+    expect(system).toContain('Do not collapse conditions');
+    expect(system).toContain('keep it in conditions[]');
     expect(refreshTool?.inputSchema).toMatchObject({
-      required: ['metric', 'operator', 'value', 'windowDays'],
+      required: ['conditions', 'windowDays'],
       properties: {
-        metric: { type: 'string' },
-        operator: { type: 'string' },
-        value: { type: 'number' },
+        conditions: {
+          type: 'array',
+          minItems: 1,
+          maxItems: 6,
+          items: {
+            properties: {
+              metric: { type: 'string' },
+              operator: { type: 'string' },
+              value: { type: 'number' },
+            },
+          },
+        },
       },
     });
     expect(JSON.stringify(refreshTool?.inputSchema)).not.toContain('zeroMetric');
