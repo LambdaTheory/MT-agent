@@ -535,6 +535,57 @@ async function writeRefreshActivityFixtures(): Promise<{
   const zero30d = { ...metric, exposure: 300, publicVisits: 30, dashboardVisits: 20, createdOrders: 0, hasDashboardData: true };
   const active30d = { ...metric, exposure: 600, publicVisits: 80, dashboardVisits: 60, createdOrders: 3, hasDashboardData: true };
   const missing30d = { ...metric, exposure: 100, publicVisits: 0, dashboardVisits: 0, createdOrders: 0, hasDashboardData: false };
+
+  const dailyRows = [
+    { id: '900', name: 'Pocket3 健康源', exposure: 10, publicVisits: 2, dashboardVisits: 1, createdOrders: 1, amount: 10, custodyDays: 50 },
+    { id: '901', name: 'Pocket3 零创单 A', exposure: 10, publicVisits: 1, dashboardVisits: 1, createdOrders: 0, amount: 0, custodyDays: 35 },
+    { id: '902', name: 'Pocket3 零创单 B', exposure: 10, publicVisits: 1, dashboardVisits: 1, createdOrders: 0, amount: 0, custodyDays: 40 },
+    { id: '903', name: 'SQ1 有创单', exposure: 10, publicVisits: 2, dashboardVisits: 1, createdOrders: 1, amount: 10, custodyDays: 40 },
+    { id: '904', name: 'Wide 300 缺访问页', exposure: 10, publicVisits: 0, dashboardVisits: '异常', createdOrders: 0, amount: 0, custodyDays: 40 },
+    { id: '906', name: 'Pocket3 新链零创单', exposure: 10, publicVisits: 1, dashboardVisits: 1, createdOrders: 0, amount: 0, custodyDays: 12 },
+    { id: '907', name: 'Pocket3 上线天数未知', exposure: 10, publicVisits: 1, dashboardVisits: 1, createdOrders: 0, amount: 0, custodyDays: null },
+  ] as const;
+
+  for (let offset = 0; offset < 30; offset += 1) {
+    const date = new Date(Date.UTC(2026, 4, 13));
+    date.setUTCDate(date.getUTCDate() + offset);
+    const dateText = date.toISOString().slice(0, 10);
+    await mkdir(join(outputDir, dateText), { recursive: true });
+    await writeFile(join(outputDir, dateText, `公域数据上下文_${dateText}.json`), JSON.stringify({
+      date: dateText,
+      summary: { '1d': metric, '7d': metric, '30d': metric },
+      conclusions: [],
+      dataQualityNotes: [],
+      rows: dailyRows.map((row) => ({
+        productName: row.name,
+        platformProductId: `p${row.id}`,
+        displayProductId: `端内ID ${row.id}`,
+        custodyDays: row.custodyDays,
+        periods: {
+          '1d': {
+            ...metric,
+            exposure: row.exposure,
+            publicVisits: row.publicVisits,
+            dashboardVisits: row.dashboardVisits === '异常' ? Number.NaN : row.dashboardVisits,
+            createdOrders: row.createdOrders,
+            amount: row.amount,
+            hasDashboardData: row.dashboardVisits !== '异常',
+          },
+          '7d': metric,
+          '30d': row.id === '904' ? missing30d : row.id === '900' ? active30d : zero30d,
+        },
+      })),
+      lowExposure: [],
+      weakClick: [],
+      weakConversion: [],
+      highPotential: [],
+      newProductObservation: [],
+      lifecycleGovernance: [],
+      recommendedActions: [],
+      emptySectionNotes: {},
+    }), 'utf8');
+  }
+
   await writeFile(join(outputDir, '2026-06-11', 'report-context.json'), JSON.stringify({
     date: '2026-06-11',
     summary: { '1d': summary, '7d': summary, '30d': summary },
@@ -547,6 +598,29 @@ async function writeRefreshActivityFixtures(): Promise<{
       { productName: 'Wide 300 缺访问页', platformProductId: 'p904', displayProductId: '端内ID 904', custodyDays: 40, periods: { '1d': metric, '7d': metric, '30d': missing30d } },
       { productName: 'Pocket3 新链零创单', platformProductId: 'p906', displayProductId: '端内ID 906', custodyDays: 12, periods: { '1d': metric, '7d': metric, '30d': zero30d } },
       { productName: 'Pocket3 上线天数未知', platformProductId: 'p907', displayProductId: '端内ID 907', custodyDays: null, periods: { '1d': metric, '7d': metric, '30d': zero30d } },
+    ],
+    lowExposure: [],
+    weakClick: [],
+    weakConversion: [],
+    highPotential: [],
+    newProductObservation: [],
+    lifecycleGovernance: [],
+    recommendedActions: [],
+    emptySectionNotes: {},
+  }), 'utf8');
+  await writeFile(join(outputDir, '2026-06-11', '公域数据上下文_2026-06-11.json'), JSON.stringify({
+    date: '2026-06-11',
+    summary: { '1d': summary, '7d': summary, '30d': summary },
+    conclusions: [],
+    dataQualityNotes: [],
+    rows: [
+      { productName: 'Pocket3 健康源', platformProductId: 'p900', displayProductId: '端内ID 900', custodyDays: 50, periods: { '1d': { ...metric, exposure: 10, publicVisits: 2, dashboardVisits: 1, createdOrders: 1, amount: 10, hasDashboardData: true }, '7d': metric, '30d': active30d } },
+      { productName: 'Pocket3 零创单 A', platformProductId: 'p901', displayProductId: '端内ID 901', custodyDays: 35, periods: { '1d': { ...metric, exposure: 10, publicVisits: 1, dashboardVisits: 1, createdOrders: 0, amount: 0, hasDashboardData: true }, '7d': metric, '30d': zero30d } },
+      { productName: 'Pocket3 零创单 B', platformProductId: 'p902', displayProductId: '端内ID 902', custodyDays: 40, periods: { '1d': { ...metric, exposure: 10, publicVisits: 1, dashboardVisits: 1, createdOrders: 0, amount: 0, hasDashboardData: true }, '7d': metric, '30d': zero30d } },
+      { productName: 'SQ1 有创单', platformProductId: 'p903', displayProductId: '端内ID 903', custodyDays: 40, periods: { '1d': { ...metric, exposure: 10, publicVisits: 2, dashboardVisits: 1, createdOrders: 1, amount: 10, hasDashboardData: true }, '7d': metric, '30d': active30d } },
+      { productName: 'Wide 300 缺访问页', platformProductId: 'p904', displayProductId: '端内ID 904', custodyDays: 40, periods: { '1d': { ...metric, exposure: 10, publicVisits: 0, dashboardVisits: Number.NaN, createdOrders: 0, amount: 0, hasDashboardData: false }, '7d': metric, '30d': missing30d } },
+      { productName: 'Pocket3 新链零创单', platformProductId: 'p906', displayProductId: '端内ID 906', custodyDays: 12, periods: { '1d': { ...metric, exposure: 10, publicVisits: 1, dashboardVisits: 1, createdOrders: 0, amount: 0, hasDashboardData: true }, '7d': metric, '30d': zero30d } },
+      { productName: 'Pocket3 上线天数未知', platformProductId: 'p907', displayProductId: '端内ID 907', custodyDays: null, periods: { '1d': { ...metric, exposure: 10, publicVisits: 1, dashboardVisits: 1, createdOrders: 0, amount: 0, hasDashboardData: true }, '7d': metric, '30d': zero30d } },
     ],
     lowExposure: [],
     weakClick: [],
@@ -1539,7 +1613,7 @@ describe('handleBotIntent', () => {
     expect(plannerCalled).toBe(true);
     expect(response.text).toContain('公域日报商品查询 2026-06-11');
     expect(response.text).toContain('端内ID 702');
-    expect(response.text).toContain('7d 公域访问 80');
+    expect(response.text).toContain('7d 公域访问量 80');
     expect(response.card).toBeUndefined();
   });
 
@@ -1573,7 +1647,7 @@ describe('handleBotIntent', () => {
     expect(plannerCalled).toBe(true);
     expect(response.text).toContain('公域日报商品聚合统计 2026-06-11');
     expect(response.text).toContain('匹配 2 条商品');
-    expect(response.text).toContain('访问总和 = 82');
+    expect(response.text).toContain('公域访问量总和 = 82');
     expect(response.card).toBeUndefined();
   });
 
@@ -2762,7 +2836,12 @@ describe('handleBotIntent', () => {
         return JSON.stringify({
           goal: '生成活跃度刷新计划',
           selectedTool: 'operations.refreshActivityPlan',
-          arguments: {},
+          arguments: {
+            metric: 'createdOrders',
+            operator: 'eq',
+            value: 0,
+            windowDays: 30,
+          },
           confidence: 0.9,
           reason: '用户要求刷新活跃度，应先筛选近30天零创单链接并生成计划',
         });
@@ -2790,7 +2869,7 @@ describe('handleBotIntent', () => {
     expect(response.text).toContain('dji-pocket-3：待下架 2 条，建议补回 2 条新链');
     expect(response.text).toContain('补链源 900 Pocket3 健康源');
     expect(response.text).toContain('端内ID 901、902');
-    expect(response.text).toContain('30日访问页缺失 1 条');
+    expect(response.text).toContain('30日访问页数据缺失 1 条');
     expect(response.text).toContain('上线不足 30 天 1 条');
     expect(response.text).toContain('上线天数未知 1 条');
     expect(response.text).toContain('端内ID 901、902');
@@ -2807,7 +2886,11 @@ describe('handleBotIntent', () => {
     }), 'utf8');
 
     const response = await executeAgentToolRequest(
-      { toolName: 'operations.refreshActivityPlan', arguments: {}, reason: '测试 firstSeenDate 满 30 天后才允许进入候选' },
+      {
+        toolName: 'operations.refreshActivityPlan',
+        arguments: { metric: 'createdOrders', operator: 'eq', value: 0, windowDays: 30 },
+        reason: '测试 firstSeenDate 满 30 天后才允许进入候选',
+      },
       outputDir,
       { closedOrderRegistryPaths: registryPaths },
     );
@@ -2918,7 +3001,12 @@ describe('handleBotIntent', () => {
         return JSON.stringify({
           goal: '刷新活跃度后查询健康源',
           steps: [
-            { id: 'refresh', toolName: 'operations.refreshActivityPlan', arguments: {}, reason: '先生成活跃度刷新计划和确认卡' },
+            {
+              id: 'refresh',
+              toolName: 'operations.refreshActivityPlan',
+              arguments: { metric: 'createdOrders', operator: 'eq', value: 0, windowDays: 30 },
+              reason: '先生成活跃度刷新计划和确认卡',
+            },
             { toolName: 'product.query', arguments: { keyword: '900' }, reason: '确认执行后再查询健康源表现' },
           ],
           confidence: 0.9,
@@ -2949,6 +3037,7 @@ describe('handleBotIntent', () => {
       closedOrderRegistryPaths: registryPaths,
     });
     const confirmResponse = await handleRefreshActivityStrategySelect(outputDir, readAgentToolConfirmValueFromCard(response.card));
+    expect(confirmResponse.card).toBeDefined();
     const request = await loadAgentToolConfirmRequestFromCard(outputDir, confirmResponse.card);
 
     expect(request?.toolName).toBe('operations.refreshActivityExecute');

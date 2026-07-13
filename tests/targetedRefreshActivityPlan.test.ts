@@ -21,7 +21,7 @@ const metric: PublicTrafficPeriodMetrics = {
   hasDashboardData: true,
 };
 
-async function writeTargetedRefreshFixtures(options: { includeWindowOnlineCandidate?: boolean; includeWindowCreatedOrdersCandidate?: boolean; dirtyWindowDashboardCandidate?: boolean; includePlatformFallbackCandidate?: boolean; preferWindowSourceCandidate?: boolean; legacySourceSnapshotDominates?: boolean } = {}) {
+async function writeTargetedRefreshFixtures(options: { includeWindowOnlineCandidate?: boolean; includeWindowCreatedOrdersCandidate?: boolean; dirtyWindowDashboardCandidate?: boolean; includePlatformFallbackCandidate?: boolean; preferWindowSourceCandidate?: boolean; legacySourceSnapshotDominates?: boolean; includePublicVisitZeroCandidates?: boolean } = {}) {
   const rootDir = await mkdtemp(join(tmpdir(), 'mt-agent-targeted-refresh-'));
   const outputDir = join(rootDir, 'output');
   const configDir = join(rootDir, 'config');
@@ -62,6 +62,10 @@ async function writeTargetedRefreshFixtures(options: { includeWindowOnlineCandid
         ...(options.includeWindowOnlineCandidate ? [{ productName: 'R50 上线20天窗口候选', platformProductId: 'p683', displayProductId: '端内ID 683', custodyDays: 20, periods: { '1d': { ...metric, exposure: 4, publicVisits: 1, dashboardVisits: 1, createdOrders: 0, amount: 0, hasDashboardData: true }, '7d': metric, '30d': zeroCreatedOrders30d } }] : []),
         ...(options.includeWindowCreatedOrdersCandidate ? [{ productName: 'R50 窗口创单为0', platformProductId: 'p684', displayProductId: '端内ID 684', custodyDays: 45, periods: { '1d': { ...metric, exposure: 5, publicVisits: 1, dashboardVisits: 1, createdOrders: 0, amount: 10, hasDashboardData: true }, '7d': metric, '30d': active30d } }] : []),
         ...(options.includePlatformFallbackCandidate ? [{ productName: '平台兜底候选', platformProductId: 'p685', displayProductId: '端内ID 999', custodyDays: 45, periods: { '1d': { ...metric, exposure: 6, publicVisits: 1, dashboardVisits: 1, createdOrders: 0, amount: 0, hasDashboardData: true }, '7d': metric, '30d': active30d } }] : []),
+        ...(options.includePublicVisitZeroCandidates ? [
+          { productName: '访问为零 215', platformProductId: 'p215', displayProductId: '端内ID 215', custodyDays: 45, periods: { '1d': { ...metric, exposure: 3, publicVisits: 0, dashboardVisits: 1, createdOrders: 1, amount: 10, hasDashboardData: true }, '7d': metric, '30d': active30d } },
+          { productName: '访问为零 218', platformProductId: 'p218', displayProductId: '端内ID 218', custodyDays: 45, periods: { '1d': { ...metric, exposure: 4, publicVisits: 0, dashboardVisits: 1, createdOrders: 1, amount: 10, hasDashboardData: true }, '7d': metric, '30d': active30d } },
+        ] : []),
       ],
       lowExposure: [],
       weakClick: [],
@@ -88,6 +92,10 @@ async function writeTargetedRefreshFixtures(options: { includeWindowOnlineCandid
       ...(options.includeWindowOnlineCandidate ? [{ productName: 'R50 上线20天窗口候选', platformProductId: 'p683', displayProductId: '端内ID 683', custodyDays: 20, periods: { '1d': metric, '7d': metric, '30d': zeroCreatedOrders30d } }] : []),
       ...(options.includeWindowCreatedOrdersCandidate ? [{ productName: 'R50 窗口创单为0', platformProductId: 'p684', displayProductId: '端内ID 684', custodyDays: 45, periods: { '1d': metric, '7d': metric, '30d': active30d } }] : []),
       ...(options.includePlatformFallbackCandidate ? [{ productName: '平台兜底候选', platformProductId: 'p685', displayProductId: '端内ID 999', custodyDays: 45, periods: { '1d': metric, '7d': metric, '30d': active30d } }] : []),
+      ...(options.includePublicVisitZeroCandidates ? [
+        { productName: '访问为零 215', platformProductId: 'p215', displayProductId: '端内ID 215', custodyDays: 45, periods: { '1d': metric, '7d': metric, '30d': active30d } },
+        { productName: '访问为零 218', platformProductId: 'p218', displayProductId: '端内ID 218', custodyDays: 45, periods: { '1d': metric, '7d': metric, '30d': active30d } },
+      ] : []),
       { productName: 'Pocket 3 全局零金额', platformProductId: 'p901', displayProductId: '端内ID 901', custodyDays: 45, periods: { '1d': metric, '7d': metric, '30d': globalZero30d } },
       { productName: 'SQ1 全局零金额', platformProductId: 'p903', displayProductId: '端内ID 903', custodyDays: 45, periods: { '1d': metric, '7d': metric, '30d': globalZero30d } },
     ],
@@ -101,8 +109,8 @@ async function writeTargetedRefreshFixtures(options: { includeWindowOnlineCandid
     emptySectionNotes: {},
   }), 'utf8');
 
-  await writeFile(join(configDir, 'product-id-map.json'), JSON.stringify({ p680: '680', p681: '681', p682: '682', ...(options.includeWindowOnlineCandidate ? { p683: '683' } : {}), ...(options.includeWindowCreatedOrdersCandidate ? { p684: '684' } : {}), ...(options.includePlatformFallbackCandidate ? { p685: '685' } : {}), p901: '901', p903: '903' }), 'utf8');
-  await writeFile(join(configDir, 'product-name-map.json'), JSON.stringify({ '680': 'R50 健康源', '681': 'R50 金额为0', '682': 'R50 创单为0', ...(options.includeWindowOnlineCandidate ? { '683': 'R50 上线20天窗口候选' } : {}), ...(options.includeWindowCreatedOrdersCandidate ? { '684': 'R50 窗口创单为0' } : {}), ...(options.includePlatformFallbackCandidate ? { '685': '平台兜底候选' } : {}), '901': 'Pocket 3 全局零金额', '903': 'SQ1 全局零金额' }), 'utf8');
+  await writeFile(join(configDir, 'product-id-map.json'), JSON.stringify({ p680: '680', p681: '681', p682: '682', ...(options.includeWindowOnlineCandidate ? { p683: '683' } : {}), ...(options.includeWindowCreatedOrdersCandidate ? { p684: '684' } : {}), ...(options.includePlatformFallbackCandidate ? { p685: '685' } : {}), ...(options.includePublicVisitZeroCandidates ? { p215: '215', p218: '218' } : {}), p901: '901', p903: '903' }), 'utf8');
+  await writeFile(join(configDir, 'product-name-map.json'), JSON.stringify({ '680': 'R50 健康源', '681': 'R50 金额为0', '682': 'R50 创单为0', ...(options.includeWindowOnlineCandidate ? { '683': 'R50 上线20天窗口候选' } : {}), ...(options.includeWindowCreatedOrdersCandidate ? { '684': 'R50 窗口创单为0' } : {}), ...(options.includePlatformFallbackCandidate ? { '685': '平台兜底候选' } : {}), ...(options.includePublicVisitZeroCandidates ? { '215': '访问为零 215', '218': '访问为零 218' } : {}), '901': 'Pocket 3 全局零金额', '903': 'SQ1 全局零金额' }), 'utf8');
   await writeFile(join(configDir, 'link-registry-overrides.json'), JSON.stringify({
     version: 1,
     entries: [
@@ -112,6 +120,10 @@ async function writeTargetedRefreshFixtures(options: { includeWindowOnlineCandid
       ...(options.includeWindowOnlineCandidate ? [{ internalProductId: '683', shortName: 'R50', aliases: ['r50'], sameSkuGroupId: 'canon-eos-r50', categoryName: '相机', status: 'active' }] : []),
       ...(options.includeWindowCreatedOrdersCandidate ? [{ internalProductId: '684', shortName: 'R50', aliases: ['r50'], sameSkuGroupId: 'canon-eos-r50', categoryName: '相机', status: 'active' }] : []),
       ...(options.includePlatformFallbackCandidate ? [{ internalProductId: '685', platformProductId: 'p685', shortName: '平台兜底候选', aliases: ['platform-fallback'], sameSkuGroupId: 'platform-fallback', categoryName: '相机', status: 'active' }] : []),
+      ...(options.includePublicVisitZeroCandidates ? [
+        { internalProductId: '215', platformProductId: 'p215', shortName: '访问为零', aliases: ['visit-zero'], sameSkuGroupId: 'visit-zero', categoryName: '相机', status: 'active' },
+        { internalProductId: '218', platformProductId: 'p218', shortName: '访问为零', aliases: ['visit-zero'], sameSkuGroupId: 'visit-zero', categoryName: '相机', status: 'active' },
+      ] : []),
       { internalProductId: '901', shortName: 'Pocket 3', aliases: ['pocket3'], sameSkuGroupId: 'dji-pocket-3', categoryName: '云台相机', status: 'active' },
       { internalProductId: '903', shortName: 'SQ1', sameSkuGroupId: 'instax-sq1', categoryName: '拍立得', status: 'active' },
     ],
@@ -138,7 +150,7 @@ describe('targeted refresh activity plan', () => {
     const { outputDir, registryPaths } = await writeTargetedRefreshFixtures();
 
     const response = await executeAgentToolRequest(
-      { toolName: 'operations.refreshActivityPlan', arguments: { query: 'r50' }, reason: '帮我下架r50近30天产生订单金额为0的链接' },
+      { toolName: 'operations.refreshActivityPlan', arguments: { query: 'r50', metric: 'createdOrders', operator: 'eq', value: 0, windowDays: 15 }, reason: '帮我下架r50近15天创单为0的链接' },
       outputDir,
       { closedOrderRegistryPaths: registryPaths },
     );
@@ -154,14 +166,14 @@ describe('targeted refresh activity plan', () => {
     const { outputDir, registryPaths } = await writeTargetedRefreshFixtures();
 
     const response = await executeAgentToolRequest(
-      { toolName: 'operations.refreshActivityPlan', arguments: { query: 'r50', zeroMetric: 'amount' }, reason: '帮我下架r50近30天产生订单金额为0的链接' },
+      { toolName: 'operations.refreshActivityPlan', arguments: { query: 'r50', zeroMetric: 'amount', windowDays: 15 }, reason: '帮我下架r50近15天产生订单金额为0的链接' },
       outputDir,
       { closedOrderRegistryPaths: registryPaths },
     );
 
-    expect(response.text).toContain('筛选口径：active 链接，30日访问页数据已抓取，上线满 30 天，近30天订单金额为0。');
-    expect(response.text).toContain('端内ID 681');
-    expect(response.text).not.toContain('端内ID 682');
+    expect(response.text).toContain('筛选口径：active 链接，近15天公域交易金额 = 0，公域曝光页数据完整，上线满 15 天');
+    expect(response.text).toContain('端内ID 682');
+    expect(response.text).not.toContain('端内ID 681');
     expect(response.metadata?.candidateCount).toBe(1);
   });
 
@@ -174,7 +186,7 @@ describe('targeted refresh activity plan', () => {
       { closedOrderRegistryPaths: registryPaths },
     );
 
-    expect(response.text).toContain('筛选口径：active 链接，15日访问页数据已抓取，上线满 15 天，近15天订单金额为0。');
+    expect(response.text).toContain('筛选口径：active 链接，近15天公域交易金额 = 0，公域曝光页数据完整，上线满 15 天');
     expect(response.metadata).toMatchObject({ toolName: 'operations.refreshActivityPlan', windowDays: 15 });
   });
 
@@ -229,7 +241,7 @@ describe('targeted refresh activity plan', () => {
     );
 
     expect(response.text).not.toContain('端内ID 682');
-    expect(response.text).toContain('15日访问页缺失 1 条');
+    expect(response.text).toContain('15日访问页数据缺失 1 条');
     expect(response.metadata?.candidateCount).toBe(0);
     expect(response.metadata?.skipped).toMatchObject({ missing30dDashboard: 1 });
   });
@@ -245,7 +257,7 @@ describe('targeted refresh activity plan', () => {
 
     expect(response.text).toContain('端内ID 685');
     expect(response.text).toContain('待下架候选：1 条');
-    expect(response.text).toContain('15日访问页缺失 0 条');
+    expect(response.text).toContain('15日访问页数据缺失 0 条');
     expect(response.metadata?.candidateCount).toBe(1);
   });
 
@@ -286,14 +298,66 @@ describe('targeted refresh activity plan', () => {
 
     expect(response.text).toContain('0 候选解释：');
     expect(response.text).toContain('数据健康：15日窗口测试缺失 1 条');
-    expect(response.text).toContain('没有找到符合条件的近15天订单金额为0 active 链接。');
-    expect(response.text).toContain('没有找到符合 近15天订单金额为0 的 active 链接。');
-    expect(response.text).toContain('15日访问页缺失');
+    expect(response.text).toContain('没有找到符合条件的近15天公域交易金额 = 0 active 链接。');
+    expect(response.text).toContain('没有找到符合 近15天公域交易金额 = 0 的链接。');
+    expect(response.text).toContain('15日公域曝光页数据缺失');
     expect(response.text).not.toContain('近30天');
     expect(response.text).not.toContain('近 30 天');
     expect(response.text).not.toContain('30日访问页缺失');
     expect(response.text).not.toContain('上线不足 30 天');
     expect(response.text).not.toContain('零创单 active 链接');
     expect(response.metadata?.candidateCount).toBe(0);
+  });
+
+  it('plans delist candidates for 15-day public visits equal to zero using exposure coverage only', async () => {
+    const { outputDir, registryPaths } = await writeTargetedRefreshFixtures({ includePublicVisitZeroCandidates: true });
+
+    const response = await executeAgentToolRequest(
+      {
+        toolName: 'operations.refreshActivityPlan',
+        arguments: { metric: 'publicVisits', operator: 'eq', value: 0, windowDays: 15 },
+        reason: '下架掉访问量15天内为0的链接',
+      },
+      outputDir,
+      { closedOrderRegistryPaths: registryPaths },
+    );
+
+    expect(response.text).toContain('近15天公域访问量 = 0');
+    expect(response.text).toContain('公域曝光页数据完整');
+    expect(response.text).toContain('上线满15天');
+    expect(response.text).toContain('端内ID 215、218');
+    expect(response.metadata?.candidateCount).toBe(2);
+    expect(response.text).not.toContain('近15天创单为0');
+  });
+
+  it('rejects an absent metric instead of defaulting to created orders', async () => {
+    const { outputDir, registryPaths } = await writeTargetedRefreshFixtures();
+
+    await expect(executeAgentToolRequest(
+      { toolName: 'operations.refreshActivityPlan', arguments: { windowDays: 15 }, reason: '下架掉访问量15天内为0的链接' },
+      outputDir,
+      { closedOrderRegistryPaths: registryPaths },
+    )).rejects.toThrow('metric is required');
+  });
+
+  it('returns explanation without execution confirmation for unsupported executable delist metrics', async () => {
+    const { outputDir, registryPaths } = await writeTargetedRefreshFixtures();
+
+    const response = await executeAgentToolRequest(
+      {
+        toolName: 'operations.refreshActivityPlan',
+        arguments: { query: 'r50', metric: 'visitShipmentRate', operator: 'lt', value: 0.05, windowDays: 15 },
+        reason: '近15天访问到发货率低于5%就下架',
+      },
+      outputDir,
+      { closedOrderRegistryPaths: registryPaths },
+    );
+
+    expect(response.text).toContain('后链路访问到发货率');
+    expect(response.text).toContain('可以查询和分析');
+    expect(response.text).toContain('暂未授权作为自动下架条件');
+    expect(response.text).not.toContain('计划已生成，请在策略卡选择执行策略');
+    expect(response.card).toBeUndefined();
+    expect(response.metadata?.strategyRequests).toBeUndefined();
   });
 });

@@ -117,7 +117,7 @@ describe('public traffic report freeform query', () => {
     });
 
     expect(text).toContain('公域日报较前日变化 2026-06-22');
-    expect(text).toContain('曝光：当前 1000，前日 800，变化 +200（+25.00%）');
+    expect(text).toContain('曝光量：当前 1000，前日 800，变化 +200（+25.00%）');
     expect(text).toContain('曝光到访问率：当前 5.00%，前日 4.00%，变化 +1.00 个百分点（+25.00%）');
   });
 
@@ -163,9 +163,10 @@ describe('public traffic report freeform query', () => {
     });
 
     expect(text).toContain('公域日报商品查询 2026-06-22');
-    expect(text.indexOf('端内ID 102')).toBeLessThan(text.indexOf('端内ID 101'));
-    expect(text).toContain('访问 900');
-    expect(text).not.toContain('端内ID 103');
+    expect(text).toContain('按 公域访问量 降序');
+    expect(text).toContain('公域访问量 500');
+    expect(text).toContain('端内ID 103');
+    expect(text).not.toContain('端内ID 102');
   });
 
   it('aggregates product rows by count, sum, average, min, and max', () => {
@@ -184,7 +185,7 @@ describe('public traffic report freeform query', () => {
       metrics: ['publicVisits'],
       aggregation: 'sum',
     });
-    expect(sum).toContain('访问总和 = 1400');
+    expect(sum).toContain('公域访问量总和 = 500');
 
     const avg = runPublicTrafficReportQuery(reportContext, {
       target: 'productAggregation',
@@ -193,8 +194,8 @@ describe('public traffic report freeform query', () => {
       metrics: ['publicVisits'],
       aggregation: 'avg',
     });
-    expect(avg).toContain('访问平均值 = 700');
-    expect(avg).toContain('参与计算：2 条');
+    expect(avg).toContain('公域访问量平均值 = 500');
+    expect(avg).toContain('参与计算：1 条');
 
     const max = runPublicTrafficReportQuery(reportContext, {
       target: 'productAggregation',
@@ -203,8 +204,8 @@ describe('public traffic report freeform query', () => {
       metrics: ['amount'],
       aggregation: 'max',
     });
-    expect(max).toContain('金额最大值 = ¥2200.00');
-    expect(max).toContain('端内ID 102');
+    expect(max).toContain('公域交易金额最大值 = ¥1200.00');
+    expect(max).toContain('端内ID 101');
 
     const min = runPublicTrafficReportQuery(reportContext, {
       target: 'productAggregation',
@@ -212,7 +213,7 @@ describe('public traffic report freeform query', () => {
       metrics: ['publicVisits'],
       aggregation: 'min',
     });
-    expect(min).toContain('访问最小值 = 20');
+    expect(min).toContain('公域访问量最小值 = 20');
     expect(min).toContain('端内ID 103');
   });
 
@@ -225,11 +226,11 @@ describe('public traffic report freeform query', () => {
     expect(text).toContain('公域日报商品全量明细 2026-06-22');
     expect(text).toContain('端内ID 102 Pocket 3 套装版');
     expect(text).toContain('平台商品ID platform-102，托管天数 8');
-    expect(text).toContain('1d：曝光 204');
-    expect(text).toContain('7d：曝光 3000');
-    expect(text).toContain('30d：曝光 30000');
-    expect(text).toContain('签约订单 0');
-    expect(text).toContain('访问到发货率');
+    expect(text).toContain('1d：曝光量 204');
+    expect(text).toContain('7d：曝光量 不可用');
+    expect(text).toContain('30d：曝光量 30000');
+    expect(text).toContain('签约订单数 0');
+    expect(text).toContain('后链路访问到发货率');
   });
 
   it('does not substring-match short numeric product queries against platform product ids', () => {
@@ -255,6 +256,35 @@ describe('public traffic report freeform query', () => {
     });
     expect(fullPlatform).toContain('Platform id contains 914');
     expect(fullPlatform).not.toContain('Internal 914 product');
+  });
+
+  it('does not render unavailable dashboard zero as observed zero in product filters', () => {
+    const dashboardMissingContext: PublicTrafficDataReportContext = {
+      ...reportContext,
+      rows: [
+        row('103', 'SX70 长焦相机', { exposure: 100, publicVisits: 20, amount: 80, createdOrders: 0, hasDashboardData: false }),
+      ],
+    };
+    const text = runPublicTrafficReportQuery(dashboardMissingContext, {
+      target: 'products',
+      period: '7d',
+      metrics: ['createdOrders', 'publicVisits'],
+      filters: [{ field: 'createdOrders', operator: 'eq', value: 0 }],
+    });
+
+    expect(text).toContain('没有可用于筛选的创建订单数数据');
+    expect(text).not.toContain('端内ID 103');
+  });
+
+  it('labels absent optional order amount as unavailable instead of ¥0.00', () => {
+    const text = runPublicTrafficReportQuery(reportContext, {
+      target: 'productDetail',
+      productQuery: '101',
+      metrics: ['signedOrderAmount'],
+    });
+
+    expect(text).toContain('签约订单金额 不可用');
+    expect(text).not.toContain('签约金额 ¥0.00');
   });
 
   it('reports product-level source coverage and missing rows', () => {

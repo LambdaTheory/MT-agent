@@ -1,3 +1,4 @@
+import type { PublicTrafficMetricKey } from './publicTrafficMetricCatalog.js';
 import type { AgentIntent } from './types.js';
 
 type SameSkuBestIntent = Extract<AgentIntent, { type: 'best_product_by_same_sku' }>;
@@ -84,10 +85,27 @@ export function parseAgentDataIntent(input: string): AgentIntent {
 
 function parseRefreshCandidateExplain(text: string): AgentIntent | null {
   if (!/(为什么|为何|原因|解释)/u.test(text) || !/(候选|candidate)/iu.test(text)) return null;
-  const queryMatch = /(?:为什么|为何)?\s*(.+?)\s*(?:一个|0|零)?\s*候选/u.exec(text);
-  const query = cleanupRankingQuery(queryMatch?.[1] ?? '');
-  const zeroMetric = /金额|订单金额/u.test(text) ? 'amount' : 'created_orders';
-  return { type: 'refresh_candidate_explain', ...(query ? { query } : {}), zeroMetric };
+  const metric = parseRefreshExplainMetric(text);
+  if (!metric) return null;
+  const condition = /(?:近\s*\d+\s*天)?\s*(?:访问量|公域访问量|曝光量|曝光|创建订单金额|创单金额|签约订单金额|签约金额|签单金额|审核订单金额|审核金额|审出金额|发货订单金额|发货金额|订单金额|交易金额|公域金额|金额)\s*(?:为|=)\s*0/u.exec(text);
+  if (!condition) return null;
+  const queryText = text.slice(0, condition.index).replace(/^(?:为什么|为何|原因|解释)\s*/u, '').trim();
+  const query = cleanupRankingQuery(queryText);
+  const windowDays = parsePeriodDays(text);
+  return { type: 'refresh_candidate_explain', ...(query ? { query } : {}), metric, operator: 'eq', value: 0, ...(windowDays ? { windowDays } : {}) };
+}
+
+function parseRefreshExplainMetric(text: string): PublicTrafficMetricKey | null {
+  const metricPatterns: Array<{ pattern: RegExp; metric: PublicTrafficMetricKey }> = [
+    { pattern: /访问量|公域访问量/u, metric: 'publicVisits' },
+    { pattern: /曝光量|曝光/u, metric: 'exposure' },
+    { pattern: /创建订单金额|创单金额/u, metric: 'createdOrderAmount' },
+    { pattern: /签约订单金额|签约金额|签单金额/u, metric: 'signedOrderAmount' },
+    { pattern: /审核订单金额|审核金额|审出金额/u, metric: 'reviewedOrderAmount' },
+    { pattern: /发货订单金额|发货金额/u, metric: 'shippedOrderAmount' },
+    { pattern: /订单金额|交易金额|公域金额|金额/u, metric: 'amount' },
+  ];
+  return metricPatterns.find((item) => item.pattern.test(text))?.metric ?? null;
 }
 
 function parseSafeSourceIntent(text: string): AgentIntent | null {

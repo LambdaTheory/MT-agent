@@ -3,6 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { findAgentTool } from '../src/agentRuntime/toolRegistry.js';
+import { validateAgentToolArguments } from '../src/agentRuntime/planner.js';
+import { publicTrafficMetricKeys } from '../src/agentData/publicTrafficMetricCatalog.js';
 import { executeAgentToolRequest } from '../src/feishuBot/agentToolExecutor.js';
 
 const metric = {
@@ -96,6 +98,63 @@ async function writeFixtures() {
 }
 
 describe('data and strategy capability tools', () => {
+  it('derives reportQuery metric schema from the metric catalog', () => {
+    expect(findAgentTool('publicTraffic.reportQuery')?.inputSchema).toMatchObject({
+      properties: { metrics: { items: { enum: [...publicTrafficMetricKeys] } } },
+    });
+  });
+
+  it('registers windowQuery with catalog metrics and bounded windowDays', () => {
+    expect(findAgentTool('publicTraffic.windowQuery')?.inputSchema).toMatchObject({
+      properties: {
+        windowDays: { minimum: 1, maximum: 90 },
+        metrics: { items: { enum: [...publicTrafficMetricKeys] } },
+        filters: { items: { properties: { field: { enum: [...publicTrafficMetricKeys] } } } },
+        sortBy: { enum: [...publicTrafficMetricKeys] },
+      },
+    });
+  });
+
+  it('validates windowQuery string windows consistently with runtime normalization', () => {
+    expect(validateAgentToolArguments('publicTraffic.windowQuery', { windowDays: '15' })).toBe(true);
+    expect(validateAgentToolArguments('publicTraffic.windowQuery', { windowDays: '91' })).toBe(false);
+    expect(validateAgentToolArguments('publicTraffic.windowQuery', { windowDays: '1e1' })).toBe(false);
+    expect(validateAgentToolArguments('publicTraffic.windowQuery', { windowDays: '0x10' })).toBe(false);
+    expect(validateAgentToolArguments('publicTraffic.windowQuery', { windowDays: '01' })).toBe(false);
+  });
+
+  it('registers ranking tools with catalog metrics and arbitrary positive windows', () => {
+    expect(findAgentTool('product.rankBestSameSku')?.inputSchema).toMatchObject({
+      properties: {
+        metric: { enum: [...publicTrafficMetricKeys] },
+        periodDays: { minimum: 1, maximum: 90 },
+      },
+    });
+    expect(findAgentTool('product.rankByCategory')?.inputSchema).toMatchObject({
+      properties: {
+        metric: { enum: [...publicTrafficMetricKeys] },
+        periodDays: { minimum: 1, maximum: 90 },
+      },
+    });
+  });
+
+  it('bounds every arbitrary window tool schema to 1..90 days', () => {
+    for (const toolName of ['publicTraffic.windowAggregate', 'strategy.metricThresholdExplain', 'strategy.refreshCandidateExplain', 'operations.refreshActivityPlan']) {
+      expect(findAgentTool(toolName)?.inputSchema).toMatchObject({
+        properties: { windowDays: { minimum: 1, maximum: 90 } },
+      });
+    }
+  });
+
+  it('rejects oversized string windows at the planner schema boundary', () => {
+    expect(validateAgentToolArguments('publicTraffic.windowAggregate', { windowDays: '91' })).toBe(false);
+    expect(validateAgentToolArguments('strategy.metricThresholdExplain', { metric: 'publicVisits', operator: 'eq', value: 0, windowDays: '91' })).toBe(false);
+    expect(validateAgentToolArguments('strategy.refreshCandidateExplain', { zeroMetric: 'amount', windowDays: '91' })).toBe(false);
+    expect(validateAgentToolArguments('operations.refreshActivityPlan', { metric: 'publicVisits', operator: 'eq', value: 0, windowDays: '91' })).toBe(false);
+    expect(validateAgentToolArguments('product.rankBestSameSku', { query: 'r50', periodDays: '91' })).toBe(false);
+    expect(validateAgentToolArguments('product.rankByCategory', { metric: 'publicVisits', periodDays: '91' })).toBe(false);
+  });
+
   it('registers every new capability as read-only', () => {
     for (const name of ['publicTraffic.windowAggregate', 'system.dataHealth', 'strategy.safeSourceResolve', 'strategy.refreshCandidateExplain']) {
       expect(findAgentTool(name)).toMatchObject({ risk: 'read', requiresConfirmation: false });
@@ -209,5 +268,22 @@ describe('data and strategy capability tools', () => {
     expect(response.text).not.toContain('近30天');
     expect(response.text).not.toContain('近 30 天');
     expect(response.metadata).toMatchObject({ toolName: 'strategy.refreshCandidateExplain', windowDays: 2, candidateCount: 0, candidateProductIds: [] });
+  });
+
+  it('rejects oversized arbitrary windows at runtime for exposed tools', async () => {
+    const { outputDir, registryPaths } = await writeFixtures();
+
+    await expect(executeAgentToolRequest({ toolName: 'publicTraffic.windowAggregate', arguments: { endDate: '2026-07-02', windowDays: 91 }, reason: 'oversized' }, outputDir)).rejects.toThrow('windowDays must be between 1 and 90');
+    await expect(executeAgentToolRequest({ toolName: 'strategy.metricThresholdExplain', arguments: { date: '2026-07-02', metric: 'publicVisits', operator: 'eq', value: 0, windowDays: 91 }, reason: 'oversized' }, outputDir, { closedOrderRegistryPaths: registryPaths })).rejects.toThrow('windowDays must be between 1 and 90');
+    await expect(executeAgentToolRequest({ toolName: 'operations.refreshActivityPlan', arguments: { date: '2026-07-02', metric: 'publicVisits', operator: 'eq', value: 0, windowDays: 91 }, reason: 'oversized' }, outputDir, { closedOrderRegistryPaths: registryPaths })).rejects.toThrow('windowDays must be between 1 and 90');
+  });
+
+  it('rejects schema-invalid numeric string windows at runtime for exposed tools', async () => {
+    const { outputDir, registryPaths } = await writeFixtures();
+
+    await expect(executeAgentToolRequest({ toolName: 'publicTraffic.windowAggregate', arguments: { endDate: '2026-07-02', windowDays: '1e1' }, reason: 'noncanonical' }, outputDir)).rejects.toThrow('windowDays must be between 1 and 90');
+    await expect(executeAgentToolRequest({ toolName: 'strategy.metricThresholdExplain', arguments: { date: '2026-07-02', metric: 'publicVisits', operator: 'eq', value: 0, windowDays: '0x10' }, reason: 'noncanonical' }, outputDir, { closedOrderRegistryPaths: registryPaths })).rejects.toThrow('windowDays must be between 1 and 90');
+    await expect(executeAgentToolRequest({ toolName: 'product.rankBestSameSku', arguments: { query: 'r50', metric: 'publicVisits', periodDays: '1e1' }, reason: 'noncanonical' }, outputDir, { closedOrderRegistryPaths: registryPaths })).rejects.toThrow('periodDays must be between 1 and 90');
+    await expect(executeAgentToolRequest({ toolName: 'product.rankByCategory', arguments: { category: '相机', metric: 'publicVisits', periodDays: '0x10' }, reason: 'noncanonical' }, outputDir, { closedOrderRegistryPaths: registryPaths })).rejects.toThrow('periodDays must be between 1 and 90');
   });
 });

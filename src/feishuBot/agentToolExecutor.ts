@@ -10,12 +10,15 @@ import { loadClosedOrderIngestState } from '../closedOrderFeedback/ingest.js';
 import { buildClosedOrderObservationReport, writeClosedOrderObservationReportArtifacts } from '../closedOrderFeedback/observation.js';
 import { loadClosedOrderRegistryContext, type ClosedOrderRegistryPathsInput } from '../closedOrderFeedback/runtime.js';
 import type { AgentIntent, AgentProblemType } from '../agentData/types.js';
-import { rankProductsByCategory, type CategoryRankingMetric } from '../agentData/categoryRanking.js';
+import { rankProductsByCategory, rankProductsByCategoryWindowed, type CategoryRankingMetric } from '../agentData/categoryRanking.js';
 import { buildDataHealthReport } from '../agentData/dataHealth.js';
-import { explainRefreshCandidates } from '../agentData/refreshCandidateExplain.js';
+import { adaptLegacyRefreshCandidateExplainInput, explainRefreshCandidates } from '../agentData/refreshCandidateExplain.js';
+import { evaluateMetricThresholdStrategy, formatMetricThresholdCondition, metricSourceLabel, type MetricThresholdStrategyInput, type MetricThresholdStrategyResult } from '../agentData/metricThresholdStrategy.js';
 import { resolveSafeSourceForSameSkuGroup } from '../agentData/safeSource.js';
 import { findWindowedProducts, type WindowedPredicate } from '../agentData/windowedFindings.js';
-import { aggregateWindowProducts, type WindowProductAggregate } from '../agentData/windowAggregate.js';
+import { aggregateWindowProducts, readWindowMetric, type WindowProductAggregate } from '../agentData/windowAggregate.js';
+import { queryPublicTrafficWindow, type PublicTrafficWindowQueryResult } from '../agentData/windowQuery.js';
+import { getPublicTrafficMetric, publicTrafficMetricKeys, type PublicTrafficMetricKey } from '../agentData/publicTrafficMetricCatalog.js';
 import { openLinkRegistryGovernancePrompt } from '../linkRegistry/governanceSession.js';
 import { openLinkRegistryMaintenancePrompt } from '../linkRegistry/maintenanceSession.js';
 import { createLinkRegistry } from '../linkRegistry/store.js';
@@ -129,6 +132,7 @@ const NON_RENT_PRICE_FIELD_LABELS: Record<string, string[]> = {
 };
 const REFRESH_ACTIVITY_EXECUTION_MAX_PRODUCTS = 20;
 const RENTAL_DELIST_BATCH_MAX_PRODUCTS = 80;
+const arbitraryWindowDaysPattern = /^(?:[1-9]|[1-8]\d|90)$/;
 const RENT_FIELD_ORDER: Array<{ field: string; label: string }> = [
   { field: 'rent1day', label: '1天' },
   { field: 'rent2day', label: '2天' },
@@ -256,22 +260,55 @@ function readCategoryRankingMetric(value: unknown): CategoryRankingMetric {
   throw new Error('metric must be shippedOrders, amount, or exposure');
 }
 
+function readPublicTrafficMetric(value: unknown): PublicTrafficMetricKey {
+  if (typeof value === 'string' && getPublicTrafficMetric(value)) return value as PublicTrafficMetricKey;
+  throw new Error('metric must be a supported public traffic metric');
+}
+
+function readMetricThresholdOperator(value: unknown): MetricThresholdStrategyInput['operator'] {
+  if (value === 'eq' || value === 'neq' || value === 'gt' || value === 'gte' || value === 'lt' || value === 'lte') return value;
+  throw new Error('operator must be eq, neq, gt, gte, lt, or lte');
+}
+
+function readRequiredNumber(value: unknown, fieldName: string): number {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  throw new Error(`${fieldName} must be a finite number`);
+}
+
+function isFixedCategoryMetric(metric: PublicTrafficMetricKey): metric is CategoryRankingMetric {
+  return metric === 'shippedOrders' || metric === 'amount' || metric === 'exposure';
+}
+
 function readOptionalCategoryRankingMetric(value: unknown): CategoryRankingMetric | undefined {
   if (value === undefined) return undefined;
   return readCategoryRankingMetric(value);
 }
 
+function readOptionalPublicTrafficMetric(value: unknown): PublicTrafficMetricKey | undefined {
+  if (value === undefined) return undefined;
+  return readPublicTrafficMetric(value);
+}
+
+function readBoundedDays(value: unknown, fieldName: 'periodDays' | 'windowDays'): number {
+  if (typeof value === 'string') {
+    if (!arbitraryWindowDaysPattern.test(value)) throw new Error(`${fieldName} must be between 1 and 90`);
+    return Number(value);
+  }
+  if (!Number.isInteger(value) || typeof value !== 'number' || value < 1 || value > 90) throw new Error(`${fieldName} must be between 1 and 90`);
+  return value;
+}
+
 function readPeriodDays(value: unknown): 1 | 7 | 30 {
-  const parsed = typeof value === 'string' ? Number(value) : value;
+  const parsed = typeof value === 'string'
+    ? (/^(?:1|7|30)$/.test(value) ? Number(value) : value)
+    : value;
   if (parsed === 1 || parsed === 7 || parsed === 30) return parsed;
   throw new Error('periodDays must be 1, 7, or 30');
 }
 
 function readOptionalPeriodDays(value: unknown): number | undefined {
   if (value === undefined) return undefined;
-  const parsed = typeof value === 'string' ? Number(value) : value;
-  if (Number.isInteger(parsed) && typeof parsed === 'number' && parsed > 0) return parsed;
-  throw new Error('periodDays must be a positive integer');
+  return readBoundedDays(value, 'periodDays');
 }
 
 function readOptionalLimit(value: unknown): number | undefined {
@@ -279,6 +316,14 @@ function readOptionalLimit(value: unknown): number | undefined {
   const parsed = typeof value === 'string' ? Number(value) : value;
   if (Number.isInteger(parsed) && typeof parsed === 'number' && parsed > 0) return parsed;
   throw new Error('limit must be a positive integer');
+}
+
+function readWindowDays(value: unknown): number {
+  return readBoundedDays(value, 'windowDays');
+}
+
+function readOptionalWindowDays(value: unknown): number | undefined {
+  return value === undefined ? undefined : readWindowDays(value);
 }
 
 function formatCategoryRankingMetric(metric: CategoryRankingMetric): string {
@@ -290,12 +335,13 @@ function formatCategoryRankingMetric(metric: CategoryRankingMetric): string {
 function formatCategoryRankingResponse(result: ReturnType<typeof rankProductsByCategory>): BotResponse {
   const label = formatCategoryRankingMetric(result.metric);
   const lines = result.items.map((item, index) => `${index + 1}. ${item.productName}（端内ID ${item.internalProductId}，${item.category}）${label} ${item.value}`);
+  const windowDays = Number(result.period.replace('d', ''));
   return {
     text: [
       `品类排名：${result.category ?? '全部'} ${result.period} ${label}`,
       ...lines,
     ].join('\n'),
-    metadata: { toolName: 'product.rankByCategory', date: result.date, category: result.category, metric: result.metric, period: result.period, items: result.items },
+    metadata: { toolName: 'product.rankByCategory', date: result.date, endDate: result.date, category: result.category, metric: result.metric, period: result.period, periodDays: windowDays, windowDays, availability: {}, productIds: result.items.map((item) => item.internalProductId), items: result.items },
   };
 }
 
@@ -313,17 +359,70 @@ function formatWindowedFindingsResponse(result: Awaited<ReturnType<typeof findWi
 }
 
 function formatWindowAggregateResponse(result: Awaited<ReturnType<typeof aggregateWindowProducts>>, endDate: string, windowDays: number): BotResponse {
-  const lines = result.slice(0, 10).map((item, index) => `${index + 1}. ${item.productName}（端内ID ${item.internalProductId}）覆盖 ${item.daysCovered}/${windowDays} 天，曝光 ${item.exposure}，访问 ${item.publicVisits}，金额 ${item.amount}`);
+  const displayMetrics = publicTrafficMetricKeys.filter((metric) => metric !== 'custodyDays');
+  const lines = result.slice(0, 10).map((item, index) => {
+    const metricText = displayMetrics
+      .map((metric) => formatWindowAggregateMetric(item, metric))
+      .join('，');
+    return `${index + 1}. ${item.productName}（端内ID ${item.internalProductId}）覆盖 ${item.daysCovered}/${windowDays} 天，${metricText}`;
+  });
   const productIds = result.map((item) => item.internalProductId);
   const fullyCoveredProductIds = result.filter((item) => item.daysCovered === windowDays).map((item) => item.internalProductId);
   const partialCoveredProductIds = result.filter((item) => item.daysCovered < windowDays).map((item) => item.internalProductId);
   const missingDatesByProduct = Object.fromEntries(result
     .filter((item) => item.missingDates.length > 0)
     .map((item) => [item.internalProductId, item.missingDates]));
+  const availability = Object.fromEntries(publicTrafficMetricKeys.map((metric) => [metric, result.filter((item) => item.availability[metric]?.available).length]));
   const status = result.length === 0 ? 'empty' : partialCoveredProductIds.length > 0 ? 'partial' : 'ok';
   return {
     text: [`公域窗口聚合：截至 ${endDate}，近 ${windowDays} 天`, ...lines].join('\n'),
-    metadata: { toolName: 'publicTraffic.windowAggregate', status, endDate, windowDays, productCount: result.length, productIds, fullyCoveredProductIds, partialCoveredProductIds, missingDatesByProduct, items: result },
+    metadata: { toolName: 'publicTraffic.windowAggregate', status, endDate, windowDays, availability, productCount: result.length, productIds, fullyCoveredProductIds, partialCoveredProductIds, missingDatesByProduct, items: result },
+  };
+}
+
+function formatWindowAggregateMetric(item: WindowProductAggregate, metric: PublicTrafficMetricKey): string {
+  const definition = getPublicTrafficMetric(metric)!;
+  const value = readWindowMetric(item, metric);
+  if (value === undefined) return `${definition.label} 不可用`;
+  if (definition.format === 'money') return `${definition.label} ¥${value.toFixed(2)}`;
+  if (definition.format === 'percent') return `${definition.label} ${(value * 100).toFixed(2)}%`;
+  return `${definition.label} ${Number.isInteger(value) ? value : value.toFixed(2)}`;
+}
+
+function formatWindowQueryResponse(result: PublicTrafficWindowQueryResult): BotResponse {
+  const aggregationLine = result.aggregation
+    ? `统计：${result.aggregation.metric ? getPublicTrafficMetric(result.aggregation.metric)!.label : ''}${result.aggregation.label} = ${Number.isInteger(result.aggregation.value) ? result.aggregation.value : result.aggregation.value.toFixed(2)}`
+    : undefined;
+  const lines = result.items.map((item, index) => {
+    const metricText = Object.entries(item.values).map(([metric, value]) => {
+      const definition = getPublicTrafficMetric(metric)!;
+      if (definition.format === 'money') return `${definition.label} ¥${value.toFixed(2)}`;
+      if (definition.format === 'percent') return `${definition.label} ${(value * 100).toFixed(2)}%`;
+      return `${definition.label} ${Number.isInteger(value) ? value : value.toFixed(2)}`;
+    }).join('，');
+    return `${index + 1}. ${item.productName}（端内ID ${item.internalProductId}）${metricText ? `：${metricText}` : ''}`;
+  });
+  const metric = Object.keys(result.availableCountByMetric)[0];
+  const productIds = result.items.map((item) => item.internalProductId);
+  return {
+    text: [`公域窗口查询：截至 ${result.endDate}，近 ${result.windowDays} 天`, `匹配 ${result.matchedCount} 条`, aggregationLine, ...lines].filter((line): line is string => Boolean(line)).join('\n'),
+    metadata: { toolName: 'publicTraffic.windowQuery', ...(metric ? { metric } : {}), windowDays: result.windowDays, endDate: result.endDate, availability: result.availableCountByMetric, productIds, ...(result.aggregation ? { aggregation: result.aggregation } : {}), items: result.items },
+  };
+}
+
+function formatWindowCategoryRankingResponse(result: Awaited<ReturnType<typeof rankProductsByCategoryWindowed>>): BotResponse {
+  const definition = getPublicTrafficMetric(result.metric)!;
+  const lines = result.items.map((item, index) => {
+    const value = definition.format === 'money'
+      ? `¥${item.value.toFixed(2)}`
+      : definition.format === 'percent'
+        ? `${(item.value * 100).toFixed(2)}%`
+        : `${Number.isInteger(item.value) ? item.value : item.value.toFixed(2)}`;
+    return `${index + 1}. ${item.productName}（端内ID ${item.internalProductId}，${item.category}）${definition.label} ${value}`;
+  });
+  return {
+    text: [`品类排名：${result.category ?? '全部'} 近${result.periodDays}天 ${definition.label}`, ...lines].join('\n'),
+    metadata: { toolName: 'product.rankByCategory', date: result.date, endDate: result.date, category: result.category, metric: result.metric, periodDays: result.periodDays, windowDays: result.periodDays, availability: {}, productIds: result.items.map((item) => item.internalProductId), items: result.items },
   };
 }
 
@@ -353,11 +452,72 @@ function formatSafeSourceResponse(result: ReturnType<typeof resolveSafeSourceFor
   return { text, metadata: { toolName: 'strategy.safeSourceResolve', ...result } };
 }
 
-function formatRefreshCandidateExplainResponse(result: ReturnType<typeof explainRefreshCandidates>, zeroMetric: 'created_orders' | 'amount', input: { query?: string; sameSkuGroupId?: string } = {}): BotResponse {
-  const status = result.candidateCount > 0 ? 'found' : 'empty';
+function formatLegacyRefreshCandidateLine(result: MetricThresholdStrategyResult, input: MetricThresholdStrategyInput): string | null {
+  if (result.metric !== 'amount' && result.metric !== 'createdOrders') return null;
+  const label = result.metric === 'amount' ? `近${input.windowDays}天订单金额为0` : `近${input.windowDays}天创单为0`;
+  return result.candidateProductIds.length > 0
+    ? `找到 ${result.candidateProductIds.length} 条符合 ${label} 的 active 链接。`
+    : `没有找到符合 ${label} 的 active 链接。`;
+}
+
+function formatMetricThresholdExplainResponse(
+  result: MetricThresholdStrategyResult,
+  input: MetricThresholdStrategyInput,
+  toolName: 'strategy.metricThresholdExplain' | 'strategy.refreshCandidateExplain',
+  resolvedSameSkuGroupId?: string,
+): BotResponse {
+  const definition = getPublicTrafficMetric(result.metric)!;
+  const status = result.candidateProductIds.length > 0 ? 'found' : 'empty';
+  const condition = formatMetricThresholdCondition(input);
+  const sourceLabel = metricSourceLabel(definition.source);
+  const sameSkuGroupId = input.sameSkuGroupId ?? resolvedSameSkuGroupId;
+  const scopeLine = sameSkuGroupId
+    ? `筛选范围：${sameSkuGroupId}`
+    : input.query ? `筛选范围：${input.query}` : '筛选范围：全部链接档案';
+  const legacyLine = toolName === 'strategy.refreshCandidateExplain' ? formatLegacyRefreshCandidateLine(result, input) : null;
   return {
-    text: [result.scopeLine, ...result.reasonSummary].join('\n'),
-    metadata: { toolName: 'strategy.refreshCandidateExplain', status, zeroMetric, ...(input.query ? { query: input.query } : {}), ...(input.sameSkuGroupId ? { sameSkuGroupId: input.sameSkuGroupId } : {}), ...result, skippedReasons: result.reasonSummary },
+    text: [
+      scopeLine,
+      `筛选口径：${input.requireActive ? 'active 链接' : '链接档案范围'}，${condition}，${sourceLabel}完整${input.requireOnlineDays ? `，上线满${input.requireOnlineDays}天` : ''}。`,
+      `数据说明：${definition.label}来自${sourceLabel}；缺失的访问页/公域数据不会按0参与筛选。`,
+      ...result.reasonSummary,
+      legacyLine,
+    ].join('\n'),
+    metadata: {
+      toolName,
+      status,
+      endDate: input.date,
+      availability: { unavailableMetricProductIds: result.unavailableMetricProductIds, unavailableMetricCount: result.skipped.unavailableMetric },
+      productIds: result.candidateProductIds,
+      metricLabel: definition.label,
+      metricSource: definition.source,
+      operator: input.operator,
+      value: input.value,
+      ...(toolName === 'strategy.refreshCandidateExplain' ? { zeroMetric: result.metric === 'createdOrders' ? 'created_orders' : 'amount' } : {}),
+      ...(toolName === 'strategy.refreshCandidateExplain' ? { legacyArgumentAdapted: true } : {}),
+      ...(input.query ? { query: input.query } : {}),
+      ...(sameSkuGroupId ? { sameSkuGroupId } : {}),
+      ...result,
+      candidateCount: result.candidateProductIds.length,
+      skippedReasons: result.reasonSummary,
+    },
+  };
+}
+
+function metricThresholdResultFromRefreshExplain(result: ReturnType<typeof explainRefreshCandidates>): MetricThresholdStrategyResult {
+  return {
+    metric: result.metric,
+    windowDays: result.windowDays,
+    candidateProductIds: result.candidateProductIds,
+    skipped: {
+      inactive: result.skipped.inactive,
+      missingRow: result.skipped.missingRow,
+      unavailableMetric: result.skipped.missing30dDashboard,
+      onlineLessThanRequired: result.skipped.onlineLessThan30d,
+      onlineDaysUnknown: result.skipped.onlineDaysUnknown,
+    },
+    unavailableMetricProductIds: result.missing30dDashboardProductIds,
+    reasonSummary: result.reasonSummary,
   };
 }
 
@@ -1118,9 +1278,7 @@ function readMaxCandidates(value: unknown): number {
 
 function readRefreshActivityWindowDays(value: unknown): number {
   if (value === undefined) return REFRESH_ACTIVITY_DEFAULT_WINDOW_DAYS;
-  const numeric = typeof value === 'number' ? value : Number(value);
-  if (!Number.isInteger(numeric) || numeric < 1) throw new Error('windowDays must be a positive integer');
-  return numeric;
+  return readWindowDays(value);
 }
 
 function parseDateToUtcDay(value: string | undefined): number | null {
@@ -1169,8 +1327,6 @@ interface RefreshActivityNewLinkItem {
   sameSkuGroupId?: string;
 }
 
-type RefreshActivityZeroMetric = 'created_orders' | 'amount';
-
 interface RefreshActivityExecuteRequest {
   date: string;
   delistProductIds: string[];
@@ -1206,35 +1362,36 @@ function refreshActivityWindowSourceScore(metric: PublicTrafficPeriodMetrics): n
   );
 }
 
-function readRefreshActivityZeroMetric(value: unknown): RefreshActivityZeroMetric {
-  if (value === undefined) return 'created_orders';
-  if (value === 'created_orders' || value === 'amount') return value;
+function adaptRefreshActivityLegacyZeroMetric(value: unknown): Pick<MetricThresholdStrategyInput, 'metric' | 'operator' | 'value'> | null {
+  if (value === undefined) return null;
+  if (value === 'created_orders') return { metric: 'createdOrders', operator: 'eq', value: 0 };
+  if (value === 'amount') return { metric: 'amount', operator: 'eq', value: 0 };
   throw new Error('zeroMetric must be created_orders or amount');
 }
 
-function refreshActivityZeroMetricLabel(zeroMetric: RefreshActivityZeroMetric, windowDays = REFRESH_ACTIVITY_DEFAULT_WINDOW_DAYS): string {
-  return zeroMetric === 'amount' ? `近${windowDays}天订单金额为0` : `近${windowDays}天创单为0`;
-}
-
-function isRefreshActivityZeroMetricMatch(thirty: PublicTrafficProductDataRow['periods']['30d'], zeroMetric: RefreshActivityZeroMetric): boolean {
-  return zeroMetric === 'amount' ? thirty.amount === 0 : thirty.createdOrders === 0;
-}
-
 function refreshActivityMetricFromWindowAggregate(aggregate: WindowProductAggregate, windowDays: number): PublicTrafficPeriodMetrics {
-  const hasFullWindow = aggregate.daysCovered === windowDays;
-  const hasFullDashboardWindow = aggregate.dashboardDaysCovered === windowDays;
+  const exposure = readWindowMetric(aggregate, 'exposure') ?? 0;
+  const publicVisits = readWindowMetric(aggregate, 'publicVisits') ?? 0;
+  const amount = readWindowMetric(aggregate, 'amount') ?? 0;
+  const dashboardVisits = readWindowMetric(aggregate, 'dashboardVisits') ?? 0;
+  const createdOrders = readWindowMetric(aggregate, 'createdOrders') ?? 0;
+  const signedOrders = readWindowMetric(aggregate, 'signedOrders') ?? 0;
+  const reviewedOrders = readWindowMetric(aggregate, 'reviewedOrders') ?? 0;
+  const shippedOrders = readWindowMetric(aggregate, 'shippedOrders') ?? 0;
+  const hasFullWindow = aggregate.availability.exposure.available && aggregate.availability.publicVisits.available && aggregate.availability.amount.available;
+  const hasFullDashboardWindow = aggregate.availability.dashboardVisits.available && aggregate.availability.createdOrders.available && aggregate.availability.shippedOrders.available;
   return {
-    exposure: aggregate.exposure,
-    publicVisits: aggregate.publicVisits,
-    dashboardVisits: aggregate.dashboardVisits,
-    createdOrders: aggregate.createdOrders,
-    signedOrders: 0,
-    reviewedOrders: 0,
-    shippedOrders: aggregate.shippedOrders,
-    amount: aggregate.amount,
-    exposureVisitRate: aggregate.exposure > 0 ? aggregate.publicVisits / aggregate.exposure : 0,
-    visitCreatedOrderRate: aggregate.publicVisits > 0 ? aggregate.createdOrders / aggregate.publicVisits : 0,
-    visitShipmentRate: aggregate.publicVisits > 0 ? aggregate.shippedOrders / aggregate.publicVisits : 0,
+    exposure,
+    publicVisits,
+    dashboardVisits,
+    createdOrders,
+    signedOrders,
+    reviewedOrders,
+    shippedOrders,
+    amount,
+    exposureVisitRate: exposure > 0 ? publicVisits / exposure : 0,
+    visitCreatedOrderRate: dashboardVisits > 0 ? createdOrders / dashboardVisits : 0,
+    visitShipmentRate: dashboardVisits > 0 ? shippedOrders / dashboardVisits : 0,
     hasExposureData: hasFullWindow,
     hasDashboardData: hasFullDashboardWindow,
   };
@@ -1263,6 +1420,31 @@ function buildRefreshActivityWindowAggregateIndex(aggregates: WindowProductAggre
     if (aggregate.platformProductId) byPlatformProductId.set(aggregate.platformProductId, aggregate);
   }
   return { byInternalProductId, byPlatformProductId };
+}
+
+function findRefreshActivityEntryByProductId(entries: LinkRegistryEntry[], productId: string): LinkRegistryEntry | undefined {
+  return entries.find((entry) => entry.internalProductId === productId);
+}
+
+function formatRefreshActivitySkipLine(skipped: MetricThresholdStrategyResult['skipped'], sourceLabel: string, windowDays: number): string {
+  return `跳过：非 active ${skipped.inactive} 条，无日报行 ${skipped.missingRow} 条，${windowDays}日${sourceLabel}缺失 ${skipped.unavailableMetric} 条，上线不足 ${windowDays} 天 ${skipped.onlineLessThanRequired} 条，上线天数未知 ${skipped.onlineDaysUnknown} 条。`;
+}
+
+function metricThresholdInputFromRefreshActivityArgs(args: Record<string, unknown>, date: string, windowDays: number): MetricThresholdStrategyInput {
+  const legacy = adaptRefreshActivityLegacyZeroMetric(args.zeroMetric);
+  const explicitMetric = args.metric === undefined ? undefined : readPublicTrafficMetric(args.metric);
+  if (!explicitMetric && !legacy) throw new Error('metric is required');
+  return {
+    ...(readString(args.query) ? { query: readString(args.query)! } : {}),
+    ...(readString(args.sameSkuGroupId) ? { sameSkuGroupId: readString(args.sameSkuGroupId)! } : {}),
+    metric: explicitMetric ?? legacy!.metric,
+    operator: explicitMetric ? readMetricThresholdOperator(args.operator) : legacy!.operator,
+    value: explicitMetric ? readRequiredNumber(args.value, 'value') : legacy!.value,
+    date,
+    windowDays,
+    requireActive: true,
+    requireOnlineDays: windowDays,
+  };
 }
 
 function findRefreshActivityWindowAggregate(index: RefreshActivityWindowAggregateIndex, entry: LinkRegistryEntry): WindowProductAggregate | undefined {
@@ -1551,61 +1733,69 @@ async function refreshActivityPlanResponse(
   if (!report) return { text: missingReportContextText(date) };
   const registryContext = await loadClosedOrderRegistryContext(options.closedOrderRegistryPaths);
   const maxCandidates = readMaxCandidates(args.maxCandidates);
-  const zeroMetric = readRefreshActivityZeroMetric(args.zeroMetric);
   const windowDays = readRefreshActivityWindowDays(args.windowDays);
+  const input = metricThresholdInputFromRefreshActivityArgs(args, report.context.date, windowDays);
+  const definition = getPublicTrafficMetric(input.metric)!;
+  const condition = formatMetricThresholdCondition(input);
+  const sourceLabel = metricSourceLabel(definition.source);
   const scoped = scopedRefreshActivityEntries(args, registryContext.registry);
   if ('text' in scoped) return { text: scoped.text, metadata: { toolName: 'operations.refreshActivityPlan', ok: false } };
 
-  const windowMetrics = windowDays === REFRESH_ACTIVITY_DEFAULT_WINDOW_DAYS
-    ? null
-    : buildRefreshActivityWindowAggregateIndex(await aggregateWindowProducts({ outputDir, endDate: report.context.date, windowDays }));
+  const [strategyResult, aggregates] = await Promise.all([
+    evaluateMetricThresholdStrategy(outputDir, registryContext.registry, input),
+    aggregateWindowProducts({ outputDir, endDate: report.context.date, windowDays }),
+  ]);
+  const windowMetrics = buildRefreshActivityWindowAggregateIndex(aggregates);
+  const candidates = strategyResult.candidateProductIds
+    .map((productId) => {
+      const entry = findRefreshActivityEntryByProductId(scoped.entries, productId);
+      if (!entry) return null;
+      const row = findReportRowForEntry(report.context, entry);
+      const aggregate = findRefreshActivityWindowAggregate(windowMetrics, entry);
+      if (!row || !aggregate) return null;
+      return { entry, row: rowWithRefreshActivityWindowMetric(row, aggregate, windowDays) };
+    })
+    .filter((item): item is { entry: LinkRegistryEntry; row: PublicTrafficProductDataRow } => Boolean(item));
 
-  const candidates: Array<{ entry: LinkRegistryEntry; row: PublicTrafficProductDataRow }> = [];
-  const skipped = { missingRow: 0, missing30dDashboard: 0, inactive: 0, onlineLessThan30d: 0, onlineDaysUnknown: 0 };
-  for (const entry of scoped.entries) {
-    if (entry.status !== 'active') {
-      skipped.inactive += 1;
-      continue;
-    }
-    const row = findReportRowForEntry(report.context, entry);
-    if (!row) {
-      skipped.missingRow += 1;
-      continue;
-    }
-    const windowAggregate = windowMetrics ? findRefreshActivityWindowAggregate(windowMetrics, entry) : undefined;
-    if (windowMetrics && !windowAggregate) {
-      skipped.missing30dDashboard += 1;
-      continue;
-    }
-    const evaluatedRow = windowAggregate ? rowWithRefreshActivityWindowMetric(row, windowAggregate, windowDays) : row;
-    const thirty = evaluatedRow.periods['30d'];
-    if (!thirty.hasDashboardData) {
-      skipped.missing30dDashboard += 1;
-      continue;
-    }
-    const onlineDays = estimateOnlineDays(row, entry, report.context.date);
-    if (onlineDays === null) {
-      skipped.onlineDaysUnknown += 1;
-      continue;
-    }
-    if (onlineDays < windowDays) {
-      skipped.onlineLessThan30d += 1;
-      continue;
-    }
-    if (isRefreshActivityZeroMetricMatch(thirty, zeroMetric)) candidates.push({ entry, row: evaluatedRow });
+  if (!definition.executableDelistAllowed) {
+    return {
+      text: [
+        `活跃度刷新计划：${report.context.date}`,
+        scoped.scopeLine,
+        `筛选口径：active 链接，${condition}，${sourceLabel}完整，上线满 ${windowDays} 天（上线满${windowDays}天）。`,
+        `${definition.label}可以查询和分析，但暂未授权作为自动下架条件。请改为人工复核，或选择已授权的下架指标。`,
+        ...strategyResult.reasonSummary,
+        formatRefreshActivitySkipLine(strategyResult.skipped, sourceLabel, windowDays),
+      ].filter((line): line is string => Boolean(line)).join('\n'),
+      metadata: {
+        toolName: 'operations.refreshActivityPlan',
+        status: 'explanation_only',
+        date: report.context.date,
+        metric: input.metric,
+        metricLabel: definition.label,
+        operator: input.operator,
+        value: input.value,
+        windowDays,
+        candidateCount: strategyResult.candidateProductIds.length,
+        skipped: {
+          inactive: strategyResult.skipped.inactive,
+          missingRow: strategyResult.skipped.missingRow,
+          missing30dDashboard: strategyResult.skipped.unavailableMetric,
+          onlineLessThan30d: strategyResult.skipped.onlineLessThanRequired,
+          onlineDaysUnknown: strategyResult.skipped.onlineDaysUnknown,
+        },
+        scope: scoped.scopeLine ?? null,
+        candidateProductIds: strategyResult.candidateProductIds,
+        skippedReasons: strategyResult.reasonSummary,
+      },
+    };
   }
 
   const groups = groupRefreshActivityCandidates(candidates);
   const zeroCandidateExplanation = candidates.length === 0
     ? [
       '0 候选解释：',
-      ...explainRefreshCandidates(registryContext.registry, windowMetrics ? contextWithRefreshActivityWindowMetrics(report.context, windowMetrics, windowDays) : report.context, {
-        ...(readString(args.query) ? { query: readString(args.query)! } : {}),
-        ...(readString(args.sameSkuGroupId) ? { sameSkuGroupId: readString(args.sameSkuGroupId)! } : {}),
-        zeroMetric,
-        date: report.context.date,
-        windowDays,
-      }).reasonSummary.map((line) => `- 策略说明：${line}`),
+      ...strategyResult.reasonSummary.map((line) => `- 策略说明：${line}`),
       `- 数据健康：${(await buildDataHealthReport(outputDir, report.context.date)).dataQualityNotes.join('；') || '无额外质量备注'}`,
     ]
     : [];
@@ -1616,8 +1806,8 @@ async function refreshActivityPlanResponse(
       || Number(left.entry.internalProductId) - Number(right.entry.internalProductId))
     .slice(0, maxCandidates);
   const shownGroups = groupRefreshActivityCandidates(shownCandidates);
-  const delistOnlyExecution = buildRefreshActivityExecuteRequest(report.context.date, shownGroups, report.context, registryContext.registry, 'delist_only', windowMetrics ?? undefined, windowDays);
-  const refillExecution = buildRefreshActivityExecuteRequest(report.context.date, shownGroups, report.context, registryContext.registry, 'delist_and_refill', windowMetrics ?? undefined, windowDays);
+  const delistOnlyExecution = buildRefreshActivityExecuteRequest(report.context.date, shownGroups, report.context, registryContext.registry, 'delist_only', windowMetrics, windowDays);
+  const refillExecution = buildRefreshActivityExecuteRequest(report.context.date, shownGroups, report.context, registryContext.registry, 'delist_and_refill', windowMetrics, windowDays);
   const groupLines = shownGroups.slice(0, 12).map((group, index) => {
     const ids = group.items.map((item) => item.entry.internalProductId).join('、');
     const newLinkItem = refillExecution.request?.newLinkItems.find((item) => item.sameSkuGroupId === group.sameSkuGroupId);
@@ -1649,14 +1839,14 @@ async function refreshActivityPlanResponse(
     text: [
       `活跃度刷新计划：${report.context.date}`,
       scoped.scopeLine,
-      `筛选口径：active 链接，${windowDays}日访问页数据已抓取，上线满 ${windowDays} 天，${refreshActivityZeroMetricLabel(zeroMetric, windowDays)}。`,
+      `筛选口径：active 链接，${condition}，${sourceLabel}完整，上线满 ${windowDays} 天（上线满${windowDays}天）。`,
       `待下架候选：${candidates.length} 条；涉及种类/同款组 ${groups.length} 个。`,
       `本次展示：${shownCandidates.length}/${candidates.length} 条。`,
       '',
-      ...(groupLines.length ? groupLines : [`没有找到符合条件的${refreshActivityZeroMetricLabel(zeroMetric, windowDays)} active 链接。`]),
+      ...(groupLines.length ? groupLines : [`没有找到符合条件的${condition} active 链接。`]),
       ...(zeroCandidateExplanation.length ? ['', ...zeroCandidateExplanation] : []),
       '',
-      `跳过：非 active ${skipped.inactive} 条，无日报行 ${skipped.missingRow} 条，${windowDays}日访问页缺失 ${skipped.missing30dDashboard} 条，上线不足 ${windowDays} 天 ${skipped.onlineLessThan30d} 条，上线天数未知 ${skipped.onlineDaysUnknown} 条。`,
+      formatRefreshActivitySkipLine(strategyResult.skipped, sourceLabel, windowDays),
       delistOnlyExecution.request
         ? `计划已生成，请在策略卡选择执行策略（待下架 ${delistOnlyExecution.request.delistProductIds.length} 条：端内ID ${delistOnlyExecution.request.delistProductIds.join('、')}）。`
         : '未能生成执行计划；请先处理以下阻断项。',
@@ -1666,17 +1856,30 @@ async function refreshActivityPlanResponse(
     metadata: {
       toolName: 'operations.refreshActivityPlan',
       date: report.context.date,
+      endDate: report.context.date,
       candidateCount: candidates.length,
       shownCandidateCount: shownCandidates.length,
-      skipped,
+      productIds: candidates.map((candidate) => candidate.entry.internalProductId),
+      availability: { unavailableMetricProductIds: strategyResult.unavailableMetricProductIds, unavailableMetricCount: strategyResult.skipped.unavailableMetric },
+      skipped: {
+        inactive: strategyResult.skipped.inactive,
+        missingRow: strategyResult.skipped.missingRow,
+        missing30dDashboard: strategyResult.skipped.unavailableMetric,
+        onlineLessThan30d: strategyResult.skipped.onlineLessThanRequired,
+        onlineDaysUnknown: strategyResult.skipped.onlineDaysUnknown,
+      },
       scope: scoped.scopeLine ?? null,
-      zeroMetric,
+      metric: input.metric,
+      metricLabel: definition.label,
+      operator: input.operator,
+      value: input.value,
       windowDays,
       executeRequest: null,
       strategyRequests: { delistOnly: delistOnlyExecution.request ?? null, delistAndRefill: refillExecution.request ?? null },
       blockers: [...delistOnlyExecution.blockers, ...refillExecution.blockers],
       skippedGroups: refillExecution.skippedGroups,
       zeroCandidateExplanation,
+      ...(args.zeroMetric !== undefined ? { legacyArgumentAdapted: true } : {}),
     },
     ...(strategyCard ? { card: strategyCard } : {}),
   };
@@ -2013,20 +2216,36 @@ export async function executeAgentToolRequest(
         type: 'best_product_by_same_sku',
         query,
         periodDays: readOptionalPeriodDays(request.arguments.periodDays),
-        metric: readOptionalCategoryRankingMetric(request.arguments.metric),
+        metric: readOptionalPublicTrafficMetric(request.arguments.metric),
       }, options);
     }
     case 'product.rankByCategory': {
-      const report = await findReportContextForTool(outputDir, readOptionalDate(request.arguments.date));
-      if (!report) return { text: missingReportContextText(readOptionalDate(request.arguments.date)) };
+      const periodDays = readBoundedDays(request.arguments.periodDays, 'periodDays');
+      const metric = readPublicTrafficMetric(request.arguments.metric);
       const registryContext = await loadClosedOrderRegistryContext(options.closedOrderRegistryPaths);
-      const result = rankProductsByCategory(report.context, registryContext.registry, {
+      if ((periodDays === 1 || periodDays === 7 || periodDays === 30) && isFixedCategoryMetric(metric)) {
+        const report = await findReportContextForTool(outputDir, readOptionalDate(request.arguments.date));
+        if (!report) return { text: missingReportContextText(readOptionalDate(request.arguments.date)) };
+        const result = rankProductsByCategory(report.context, registryContext.registry, {
+          ...(typeof request.arguments.category === 'string' ? { category: request.arguments.category } : {}),
+          metric,
+          periodDays: readPeriodDays(request.arguments.periodDays),
+          limit: readOptionalLimit(request.arguments.limit),
+        });
+        return formatCategoryRankingResponse(result);
+      }
+      const explicitEndDate = readOptionalDate(request.arguments.endDate ?? request.arguments.date);
+      const latest = explicitEndDate ? null : await findLatestReportContext(outputDir);
+      const endDate = explicitEndDate ?? latest?.context.date;
+      if (!endDate) return { text: '还没有找到公域日报上下文。' };
+      const result = await rankProductsByCategoryWindowed(outputDir, registryContext.registry, {
         ...(typeof request.arguments.category === 'string' ? { category: request.arguments.category } : {}),
-        metric: readCategoryRankingMetric(request.arguments.metric),
-        periodDays: readPeriodDays(request.arguments.periodDays),
+        metric,
+        periodDays,
+        endDate,
         limit: readOptionalLimit(request.arguments.limit),
       });
-      return formatCategoryRankingResponse(result);
+      return formatWindowCategoryRankingResponse(result);
     }
     case 'productId.lookup': {
       const date = readOptionalDate(request.arguments.date);
@@ -2093,7 +2312,7 @@ export async function executeAgentToolRequest(
       return formatWindowedFindingsResponse(result);
     }
     case 'publicTraffic.windowAggregate': {
-      const windowDays = readOptionalLimit(request.arguments.windowDays);
+      const windowDays = readOptionalWindowDays(request.arguments.windowDays);
       if (!windowDays) throw new Error('windowDays is required');
       const explicitEndDate = readOptionalDate(request.arguments.endDate ?? request.arguments.date);
       const latest = explicitEndDate ? null : await findLatestReportContext(outputDir);
@@ -2101,6 +2320,15 @@ export async function executeAgentToolRequest(
       if (!endDate) return { text: '还没有找到公域日报上下文。' };
       const result = await aggregateWindowProducts({ outputDir, endDate, windowDays });
       return formatWindowAggregateResponse(result, endDate, windowDays);
+    }
+    case 'publicTraffic.windowQuery': {
+      const windowDays = readWindowDays(request.arguments.windowDays);
+      const explicitEndDate = readOptionalDate(request.arguments.endDate ?? request.arguments.date);
+      const latest = explicitEndDate ? null : await findLatestReportContext(outputDir);
+      const endDate = explicitEndDate ?? latest?.context.date;
+      if (!endDate) return { text: '还没有找到公域日报上下文。' };
+      const registryContext = await loadClosedOrderRegistryContext(options.closedOrderRegistryPaths);
+      return formatWindowQueryResponse(await queryPublicTrafficWindow(outputDir, { ...request.arguments, endDate, windowDays }, registryContext.registry));
     }
     case 'system.dataHealth': {
       const explicitDate = readOptionalDate(request.arguments.date);
@@ -2117,20 +2345,51 @@ export async function executeAgentToolRequest(
       const excludedProductIds = new Set(readStringArrayArgument(request.arguments.excludedProductIds, 'excludedProductIds'));
       return formatSafeSourceResponse(resolveSafeSourceForSameSkuGroup(registryContext.registry, report.context, sameSkuGroupId, excludedProductIds));
     }
-    case 'strategy.refreshCandidateExplain': {
-      const date = readOptionalDate(request.arguments.date);
-      const report = await findReportContextForTool(outputDir, date);
-      if (!report) return { text: missingReportContextText(date) };
+    case 'strategy.metricThresholdExplain': {
+      const explicitDate = readOptionalDate(request.arguments.date);
+      const latest = explicitDate ? null : await findLatestReportContext(outputDir);
+      const endDate = explicitDate ?? latest?.context.date;
+      if (!endDate) return { text: '还没有找到公域日报上下文。' };
       const registryContext = await loadClosedOrderRegistryContext(options.closedOrderRegistryPaths);
-      const zeroMetric = readRefreshActivityZeroMetric(request.arguments.zeroMetric);
-      const windowDays = request.arguments.windowDays === undefined ? undefined : readRefreshActivityWindowDays(request.arguments.windowDays);
-      const query = readString(request.arguments.query) ?? undefined;
-      const sameSkuGroupId = readString(request.arguments.sameSkuGroupId) ?? undefined;
-      const explainContext = windowDays && windowDays !== REFRESH_ACTIVITY_DEFAULT_WINDOW_DAYS
-        ? contextWithRefreshActivityWindowMetrics(report.context, buildRefreshActivityWindowAggregateIndex(await aggregateWindowProducts({ outputDir, endDate: report.context.date, windowDays })), windowDays)
-        : report.context;
-      const result = explainRefreshCandidates(registryContext.registry, explainContext, { ...(query ? { query } : {}), ...(sameSkuGroupId ? { sameSkuGroupId } : {}), zeroMetric, date: report.context.date, ...(windowDays ? { windowDays } : {}) });
-      return formatRefreshCandidateExplainResponse(result, zeroMetric, { ...(query ? { query } : {}), ...(sameSkuGroupId ? { sameSkuGroupId } : {}) });
+      const input: MetricThresholdStrategyInput = {
+        ...(readString(request.arguments.query) ? { query: readString(request.arguments.query)! } : {}),
+        ...(readString(request.arguments.sameSkuGroupId) ? { sameSkuGroupId: readString(request.arguments.sameSkuGroupId)! } : {}),
+        metric: readPublicTrafficMetric(request.arguments.metric),
+        operator: readMetricThresholdOperator(request.arguments.operator),
+        value: readRequiredNumber(request.arguments.value, 'value'),
+        date: endDate,
+        windowDays: readOptionalWindowDays(request.arguments.windowDays) ?? REFRESH_ACTIVITY_DEFAULT_WINDOW_DAYS,
+        ...(request.arguments.requireActive !== undefined ? { requireActive: request.arguments.requireActive === true } : {}),
+        ...(request.arguments.requireOnlineDays !== undefined ? { requireOnlineDays: readOptionalLimit(request.arguments.requireOnlineDays) ?? REFRESH_ACTIVITY_DEFAULT_WINDOW_DAYS } : {}),
+      };
+      return formatMetricThresholdExplainResponse(await evaluateMetricThresholdStrategy(outputDir, registryContext.registry, input), input, 'strategy.metricThresholdExplain');
+    }
+    case 'strategy.refreshCandidateExplain': {
+      const explicitDate = readOptionalDate(request.arguments.date);
+      const latest = explicitDate ? null : await findLatestReportContext(outputDir);
+      const endDate = explicitDate ?? latest?.context.date;
+      if (!endDate) return { text: '还没有找到公域日报上下文。' };
+      const registryContext = await loadClosedOrderRegistryContext(options.closedOrderRegistryPaths);
+      const legacyInput = adaptLegacyRefreshCandidateExplainInput({
+        ...(readString(request.arguments.query) ? { query: readString(request.arguments.query)! } : {}),
+        ...(readString(request.arguments.sameSkuGroupId) ? { sameSkuGroupId: readString(request.arguments.sameSkuGroupId)! } : {}),
+        zeroMetric: request.arguments.zeroMetric === 'created_orders' || request.arguments.zeroMetric === 'amount' ? request.arguments.zeroMetric : undefined,
+        date: endDate,
+        ...(request.arguments.windowDays !== undefined ? { windowDays: readRefreshActivityWindowDays(request.arguments.windowDays) } : {}),
+      });
+      const input: MetricThresholdStrategyInput = {
+        ...legacyInput,
+        windowDays: legacyInput.windowDays ?? REFRESH_ACTIVITY_DEFAULT_WINDOW_DAYS,
+        requireActive: true,
+        requireOnlineDays: legacyInput.windowDays ?? REFRESH_ACTIVITY_DEFAULT_WINDOW_DAYS,
+      };
+      if (request.arguments.windowDays === undefined) {
+        const report = await findReportContextForTool(outputDir, explicitDate);
+        if (!report) return { text: missingReportContextText(explicitDate) };
+        const result = explainRefreshCandidates(registryContext.registry, report.context, legacyInput);
+        return formatMetricThresholdExplainResponse(metricThresholdResultFromRefreshExplain(result), input, 'strategy.refreshCandidateExplain', result.sameSkuGroupId);
+      }
+      return formatMetricThresholdExplainResponse(await evaluateMetricThresholdStrategy(outputDir, registryContext.registry, input), input, 'strategy.refreshCandidateExplain');
     }
     case 'publicTraffic.runReport':
       if (publicTrafficReportRunning) return { text: '公域日报正在运行中，请稍后再试。' };

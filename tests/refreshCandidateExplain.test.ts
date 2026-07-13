@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { explainRefreshCandidates } from '../src/agentData/refreshCandidateExplain.js';
+import { adaptLegacyRefreshCandidateExplainInput, explainRefreshCandidates } from '../src/agentData/refreshCandidateExplain.js';
 import type { LinkRegistryEntry } from '../src/linkRegistry/types.js';
 import type { PublicTrafficDataReportContext, PublicTrafficPeriodMetrics, PublicTrafficProductDataRow } from '../src/publicTraffic/types.js';
 
@@ -66,10 +66,13 @@ const context: PublicTrafficDataReportContext = {
 
 describe('explainRefreshCandidates', () => {
   it('explains why a same-sku group has zero created-order candidates', () => {
-    expect(explainRefreshCandidates(registryEntries, context, { sameSkuGroupId: 'canon-eos-r50', zeroMetric: 'created_orders', date: '2026-07-06' })).toEqual({
+    expect(explainRefreshCandidates(registryEntries, context, { sameSkuGroupId: 'canon-eos-r50', metric: 'createdOrders', operator: 'eq', value: 0, date: '2026-07-06' })).toEqual({
       scopeLine: '筛选范围：R50 / canon-eos-r50',
       sameSkuGroupId: 'canon-eos-r50',
       windowDays: 30,
+      metric: 'createdOrders',
+      operator: 'eq',
+      value: 0,
       candidateCount: 0,
       candidateProductIds: [],
       missing30dDashboardProductIds: ['682'],
@@ -82,35 +85,54 @@ describe('explainRefreshCandidates', () => {
         onlineDaysUnknown: 1,
       },
       reasonSummary: [
-        '没有找到符合 近 30 天创单为 0 的 active 链接。',
+        '没有找到符合 近30天创建订单数 = 0 的 active 链接。',
         '另有 1 条非 active、1 条无日报行、1 条 30日访问页缺失、1 条上线不足 30 天、1 条上线天数未知。',
       ],
     });
   });
 
   it('counts amount-zero candidates independently from the workflow', () => {
-    const result = explainRefreshCandidates(registryEntries, context, { query: 'r50', zeroMetric: 'amount', date: '2026-07-06' });
+    const result = explainRefreshCandidates(registryEntries, context, { query: 'r50', metric: 'amount', operator: 'eq', value: 0, date: '2026-07-06' });
 
-    expect(result.candidateCount).toBe(1);
-    expect(result.candidateProductIds).toEqual(['681']);
-    expect(result.missing30dDashboardProductIds).toEqual(['682']);
+    expect(result.candidateCount).toBe(2);
+    expect(result.candidateProductIds).toEqual(['681', '682']);
+    expect(result.missing30dDashboardProductIds).toEqual([]);
     expect(result.missingRowProductIds).toEqual(['685']);
     expect(result.sameSkuGroupId).toBe('canon-eos-r50');
     expect(result.scopeLine).toBe('筛选范围：R50 / canon-eos-r50');
-    expect(result.reasonSummary[0]).toBe('找到 1 条符合 近30天订单金额为0 的 active 链接。');
+    expect(result.reasonSummary[0]).toBe('找到 2 条符合 近30天公域交易金额 = 0 的 active 链接。');
   });
 
   it('uses windowDays in zero-candidate explanations', () => {
-    const input = { sameSkuGroupId: 'canon-eos-r50', zeroMetric: 'created_orders' as const, date: '2026-07-06', windowDays: 15 };
+    const input = { sameSkuGroupId: 'canon-eos-r50', metric: 'createdOrders' as const, operator: 'eq' as const, value: 0 as const, date: '2026-07-06', windowDays: 15 };
 
     const result = explainRefreshCandidates(registryEntries, context, input);
 
     expect(result.reasonSummary).toEqual([
-      '没有找到符合 近15天创单为0 的 active 链接。',
+      '没有找到符合 近15天创建订单数 = 0 的 active 链接。',
       '另有 1 条非 active、1 条无日报行、1 条 15日访问页缺失、1 条上线不足 15 天、1 条上线天数未知。',
     ]);
     expect(result.reasonSummary.join('\n')).not.toContain('近 30 天');
     expect(result.reasonSummary.join('\n')).not.toContain('30日访问页缺失');
     expect(result.reasonSummary.join('\n')).not.toContain('上线不足 30 天');
+  });
+
+  it('does not require dashboard data when explaining public-visit thresholds', () => {
+    const result = explainRefreshCandidates(registryEntries, context, { query: 'r50', metric: 'publicVisits', operator: 'eq', value: 0, date: '2026-07-06' });
+
+    expect(result.candidateProductIds).toContain('682');
+    expect(result.missing30dDashboardProductIds).toEqual([]);
+    expect(result.reasonSummary.join('\n')).toContain('公域访问量 = 0');
+  });
+
+  it('keeps the only legacy adapter explicit and rejects missing zeroMetric', () => {
+    expect(adaptLegacyRefreshCandidateExplainInput({ query: 'r50', zeroMetric: 'created_orders', date: '2026-07-06' })).toEqual({
+      query: 'r50',
+      metric: 'createdOrders',
+      operator: 'eq',
+      value: 0,
+      date: '2026-07-06',
+    });
+    expect(() => adaptLegacyRefreshCandidateExplainInput({ query: 'r50', date: '2026-07-06' })).toThrow('zeroMetric is required');
   });
 });

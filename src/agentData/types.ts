@@ -1,4 +1,5 @@
 import type { PeriodKey } from '../domain/types.js';
+import type { PublicTrafficMetricKey } from './publicTrafficMetricCatalog.js';
 
 export interface AgentOverviewMetric {
   period: PeriodKey;
@@ -73,13 +74,16 @@ export interface AgentTaskItem {
   status: '待处理';
 }
 
-export type AgentRankingMetric = 'shippedOrders' | 'amount' | 'exposure';
+export type AgentRankingMetric = PublicTrafficMetricKey;
 
 export type AgentIntent =
   | { type: 'overview' }
   | { type: 'product'; keyword: string }
   | { type: 'best_product_by_same_sku'; query: string; periodDays?: number; metric?: AgentRankingMetric }
-  | { type: 'refresh_candidate_explain'; query?: string; sameSkuGroupId?: string; zeroMetric: 'created_orders' | 'amount' }
+  | ({ type: 'refresh_candidate_explain'; query?: string; sameSkuGroupId?: string; windowDays?: number } & (
+      | { metric: PublicTrafficMetricKey; operator: 'eq'; value: 0 }
+      | { zeroMetric: 'created_orders' | 'amount' }
+    ))
   | { type: 'safe_source_resolve'; query?: string; sameSkuGroupId?: string }
   | { type: 'safe_source_groups' }
   | { type: 'tasks' }
