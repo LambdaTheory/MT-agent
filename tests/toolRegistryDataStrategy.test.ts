@@ -41,14 +41,14 @@ async function writeDay(outputDir: string, date: string, exposure: number, amoun
         platformProductId: 'p680',
         displayProductId: '端内ID 680',
         custodyDays: 40,
-        periods: { '1d': { ...metric, exposure, amount, shippedOrders: 1 }, '7d': { ...metric, shippedOrders: 2, amount: 88, publicVisits: 12 }, '30d': { ...metric, createdOrders: 1, amount: 88 } },
+        periods: { '1d': { ...metric, exposure, publicVisits: 3, dashboardVisits: 2, createdOrders: 1, amount, shippedOrders: 1 }, '7d': { ...metric, shippedOrders: 2, amount: 88, publicVisits: 12 }, '30d': { ...metric, createdOrders: 1, amount: 88 } },
       },
       {
         productName: 'R50 零金额',
         platformProductId: 'p681',
         displayProductId: '端内ID 681',
         custodyDays: 40,
-        periods: { '1d': { ...metric, amount: 50 }, '7d': metric, '30d': { ...metric, createdOrders: 1, amount: 0 } },
+        periods: { '1d': { ...metric, exposure: 2, publicVisits: 0, dashboardVisits: 1, createdOrders: 1, amount: 50 }, '7d': metric, '30d': { ...metric, createdOrders: 1, amount: 0 } },
       },
     ],
     lowExposure: [],
@@ -158,6 +158,54 @@ describe('data and strategy capability tools', () => {
     expect(validateAgentToolArguments('product.rankByCategory', { metric: 'publicVisits', periodDays: '91' })).toBe(false);
   });
 
+  it('accepts metricThresholdExplain conditions while retaining legacy threshold arguments', () => {
+    const schema = findAgentTool('strategy.metricThresholdExplain')?.inputSchema;
+    expect(schema).toMatchObject({
+      properties: {
+        conditions: {
+          type: 'array',
+          minItems: 1,
+          maxItems: 6,
+          items: {
+            properties: {
+              metric: { enum: [...publicTrafficMetricKeys] },
+              operator: { enum: ['eq', 'neq', 'gt', 'gte', 'lt', 'lte'] },
+              value: { type: 'number' },
+            },
+            required: ['metric', 'operator', 'value'],
+          },
+        },
+        metric: { enum: [...publicTrafficMetricKeys] },
+        operator: { enum: ['eq', 'neq', 'gt', 'gte', 'lt', 'lte'] },
+        value: { type: 'number' },
+      },
+    });
+    expect(validateAgentToolArguments('strategy.metricThresholdExplain', { conditions: [{ metric: 'publicVisits', operator: 'eq', value: 0 }] })).toBe(true);
+    expect(validateAgentToolArguments('strategy.metricThresholdExplain', {
+      conditions: [
+        { metric: 'publicVisits', operator: 'eq', value: 0 },
+        { metric: 'createdOrders', operator: 'eq', value: 0 },
+        { metric: 'amount', operator: 'eq', value: 0 },
+        { metric: 'exposure', operator: 'gte', value: 1 },
+        { metric: 'dashboardVisits', operator: 'gte', value: 0 },
+        { metric: 'shippedOrders', operator: 'gte', value: 0 },
+      ],
+    })).toBe(true);
+    expect(validateAgentToolArguments('strategy.metricThresholdExplain', { conditions: [] })).toBe(false);
+    expect(validateAgentToolArguments('strategy.metricThresholdExplain', {
+      conditions: [
+        { metric: 'publicVisits', operator: 'eq', value: 0 },
+        { metric: 'createdOrders', operator: 'eq', value: 0 },
+        { metric: 'amount', operator: 'eq', value: 0 },
+        { metric: 'exposure', operator: 'gte', value: 1 },
+        { metric: 'dashboardVisits', operator: 'gte', value: 0 },
+        { metric: 'shippedOrders', operator: 'gte', value: 0 },
+        { metric: 'signedOrders', operator: 'gte', value: 0 },
+      ],
+    })).toBe(false);
+    expect(validateAgentToolArguments('strategy.metricThresholdExplain', { metric: 'publicVisits', operator: 'eq', value: 0 })).toBe(true);
+  });
+
   it('registers every new capability as read-only', () => {
     for (const name of ['publicTraffic.windowAggregate', 'system.dataHealth', 'strategy.safeSourceResolve', 'strategy.refreshCandidateExplain']) {
       expect(findAgentTool(name)).toMatchObject({ risk: 'read', requiresConfirmation: false });
@@ -213,6 +261,12 @@ describe('data and strategy capability tools', () => {
         windowDays: expect.any(Object),
       },
       required: ['conditions', 'windowDays'],
+    });
+    expect(findAgentTool('strategy.metricThresholdExplain')?.resultMetadataSchema).toMatchObject({
+      properties: {
+        conditions: expect.any(Object),
+        conditionSummary: expect.any(Object),
+      },
     });
     expect(refreshActivityPlanInputSchema).not.toHaveProperty('properties.metric');
     expect(refreshActivityPlanInputSchema).not.toHaveProperty('properties.operator');
@@ -287,12 +341,51 @@ describe('data and strategy capability tools', () => {
     expect(response.metadata).toMatchObject({ toolName: 'strategy.refreshCandidateExplain', windowDays: 2, candidateCount: 0, candidateProductIds: [] });
   });
 
+  it('dispatches metric-threshold explanation with compound conditions before legacy fallback', async () => {
+    const { outputDir, registryPaths } = await writeFixtures();
+    const conditions = [
+      { metric: 'publicVisits', operator: 'eq', value: 0 },
+      { metric: 'createdOrders', operator: 'gte', value: 2 },
+    ];
+
+    const response = await executeAgentToolRequest(
+      { toolName: 'strategy.metricThresholdExplain', arguments: { date: '2026-07-02', query: 'r50', conditions, metric: 'publicVisits', operator: 'gt', value: 999, windowDays: 2 }, reason: '测试复合阈值解释' },
+      outputDir,
+      { closedOrderRegistryPaths: registryPaths },
+    );
+
+    expect(response.text).toContain('近2天公域访问量 = 0 且 近2天创建订单数 >= 2');
+    expect(response.text).toContain('端内ID');
+    expect(response.text).toContain('指标数据完整');
+    expect(response.text).not.toContain('公域曝光页数据完整');
+    expect(response.metadata).toMatchObject({
+      toolName: 'strategy.metricThresholdExplain',
+      metric: 'publicVisits',
+      operator: 'eq',
+      value: 0,
+      conditions,
+      conditionSummary: '近2天公域访问量 = 0 且 近2天创建订单数 >= 2',
+      productIds: ['681'],
+      candidateCount: 1,
+    });
+  });
+
+  it('rejects metric-threshold explanation missing both compound and legacy forms', async () => {
+    const { outputDir, registryPaths } = await writeFixtures();
+
+    await expect(executeAgentToolRequest(
+      { toolName: 'strategy.metricThresholdExplain', arguments: { date: '2026-07-02', query: 'r50', windowDays: 2 }, reason: '测试缺少阈值' },
+      outputDir,
+      { closedOrderRegistryPaths: registryPaths },
+    )).rejects.toThrow('conditions or metric/operator/value are required');
+  });
+
   it('rejects oversized arbitrary windows at runtime for exposed tools', async () => {
     const { outputDir, registryPaths } = await writeFixtures();
 
     await expect(executeAgentToolRequest({ toolName: 'publicTraffic.windowAggregate', arguments: { endDate: '2026-07-02', windowDays: 91 }, reason: 'oversized' }, outputDir)).rejects.toThrow('windowDays must be between 1 and 90');
     await expect(executeAgentToolRequest({ toolName: 'strategy.metricThresholdExplain', arguments: { date: '2026-07-02', metric: 'publicVisits', operator: 'eq', value: 0, windowDays: 91 }, reason: 'oversized' }, outputDir, { closedOrderRegistryPaths: registryPaths })).rejects.toThrow('windowDays must be between 1 and 90');
-    await expect(executeAgentToolRequest({ toolName: 'operations.refreshActivityPlan', arguments: { date: '2026-07-02', metric: 'publicVisits', operator: 'eq', value: 0, windowDays: 91 }, reason: 'oversized' }, outputDir, { closedOrderRegistryPaths: registryPaths })).rejects.toThrow('windowDays must be between 1 and 90');
+    await expect(executeAgentToolRequest({ toolName: 'operations.refreshActivityPlan', arguments: { date: '2026-07-02', conditions: [{ metric: 'publicVisits', operator: 'eq', value: 0 }], windowDays: 91 }, reason: 'oversized' }, outputDir, { closedOrderRegistryPaths: registryPaths })).rejects.toThrow('windowDays must be between 1 and 90');
   });
 
   it('rejects schema-invalid numeric string windows at runtime for exposed tools', async () => {

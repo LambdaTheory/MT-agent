@@ -38,23 +38,6 @@ const refreshCandidateExplainArgumentsSchema = {
   additionalProperties: false,
 };
 const metricThresholdOperatorSchema = { type: 'string', enum: ['eq', 'neq', 'gt', 'gte', 'lt', 'lte'] };
-const metricThresholdExplainArgumentsSchema = {
-  type: 'object',
-  properties: {
-    date: reportDateSchema,
-    query: { type: 'string' },
-    sameSkuGroupId: { type: 'string' },
-    metric: { type: 'string', enum: [...publicTrafficMetricKeys] },
-    operator: metricThresholdOperatorSchema,
-    value: { type: 'number' },
-    windowDays: arbitraryWindowDaysSchema,
-    requireActive: { type: 'boolean' },
-    requireOnlineDays: { type: ['integer', 'string'], pattern: '^[1-9]\\d*$', minimum: 1 },
-  },
-  required: ['metric', 'operator', 'value'],
-  additionalProperties: false,
-};
-const reportPeriodSchema = { type: 'string', enum: ['1d', '7d', '30d'] };
 const reportMetricSchema = {
   type: 'string',
   enum: [...publicTrafficMetricKeys],
@@ -69,6 +52,23 @@ const metricThresholdConditionSchema = {
   required: ['metric', 'operator', 'value'],
   additionalProperties: false,
 };
+const metricThresholdExplainArgumentsSchema = {
+  type: 'object',
+  properties: {
+    date: reportDateSchema,
+    query: { type: 'string' },
+    sameSkuGroupId: { type: 'string' },
+    metric: { type: 'string', enum: [...publicTrafficMetricKeys] },
+    operator: metricThresholdOperatorSchema,
+    value: { type: 'number' },
+    conditions: { type: 'array', minItems: 1, maxItems: 6, items: metricThresholdConditionSchema },
+    windowDays: arbitraryWindowDaysSchema,
+    requireActive: { type: 'boolean' },
+    requireOnlineDays: { type: ['integer', 'string'], pattern: '^[1-9]\\d*$', minimum: 1 },
+  },
+  additionalProperties: false,
+};
+const reportPeriodSchema = { type: 'string', enum: ['1d', '7d', '30d'] };
 const stableMetricMetadataProperties = {
   metric: { type: 'string', enum: [...publicTrafficMetricKeys] },
   windowDays: { type: 'integer' },
@@ -346,6 +346,8 @@ const metricThresholdExplainResultMetadataSchema = {
     metricSource: { type: 'string' },
     operator: { type: 'string' },
     value: { type: 'number' },
+    conditions: { type: 'array' },
+    conditionSummary: { type: 'string' },
     query: { type: 'string' },
     sameSkuGroupId: { type: 'string' },
     candidateCount: { type: 'integer', description: 'Number of products matching the threshold.' },

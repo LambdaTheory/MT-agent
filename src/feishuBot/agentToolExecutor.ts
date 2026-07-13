@@ -460,6 +460,23 @@ function formatLegacyRefreshCandidateLine(result: MetricThresholdStrategyResult,
     : `没有找到符合 ${label} 的 active 链接。`;
 }
 
+function metricThresholdCompletenessText(conditions: MetricThresholdCondition[]): string {
+  const sourceLabels = new Set(conditions.map((condition) => {
+    const definition = getPublicTrafficMetric(condition.metric)!;
+    return metricSourceLabel(definition.source);
+  }));
+  return sourceLabels.size === 1 ? `${[...sourceLabels][0]}完整` : '指标数据完整';
+}
+
+function metricThresholdDataDescription(conditions: MetricThresholdCondition[]): string {
+  if (conditions.length === 1) {
+    const definition = getPublicTrafficMetric(conditions[0]!.metric)!;
+    const sourceLabel = metricSourceLabel(definition.source);
+    return `数据说明：${definition.label}来自${sourceLabel}；缺失的访问页/公域数据不会按0参与筛选。`;
+  }
+  return '数据说明：复合指标可能来自多个数据源；缺失的访问页/公域数据不会按0参与筛选。';
+}
+
 function formatMetricThresholdExplainResponse(
   result: MetricThresholdStrategyResult,
   input: MetricThresholdStrategyInput,
@@ -468,8 +485,9 @@ function formatMetricThresholdExplainResponse(
 ): BotResponse {
   const definition = getPublicTrafficMetric(result.metric)!;
   const status = result.candidateProductIds.length > 0 ? 'found' : 'empty';
-  const condition = formatMetricThresholdCondition(input);
-  const sourceLabel = metricSourceLabel(definition.source);
+  const conditions = result.conditions ?? input.conditions ?? [{ metric: input.metric, operator: input.operator, value: input.value }];
+  const condition = result.conditionSummary ?? formatMetricThresholdCondition(input);
+  const completenessText = metricThresholdCompletenessText(conditions);
   const sameSkuGroupId = input.sameSkuGroupId ?? resolvedSameSkuGroupId;
   const scopeLine = sameSkuGroupId
     ? `筛选范围：${sameSkuGroupId}`
@@ -478,11 +496,12 @@ function formatMetricThresholdExplainResponse(
   return {
     text: [
       scopeLine,
-      `筛选口径：${input.requireActive ? 'active 链接' : '链接档案范围'}，${condition}，${sourceLabel}完整${input.requireOnlineDays ? `，上线满${input.requireOnlineDays}天` : ''}。`,
-      `数据说明：${definition.label}来自${sourceLabel}；缺失的访问页/公域数据不会按0参与筛选。`,
+      `筛选口径：${input.requireActive ? 'active 链接' : '链接档案范围'}，${condition}，${completenessText}${input.requireOnlineDays ? `，上线满${input.requireOnlineDays}天` : ''}。`,
+      metricThresholdDataDescription(conditions),
       ...result.reasonSummary,
+      result.candidateProductIds.length > 0 ? `候选端内ID：${result.candidateProductIds.join('、')}` : undefined,
       legacyLine,
-    ].join('\n'),
+    ].filter((line): line is string => Boolean(line)).join('\n'),
     metadata: {
       toolName,
       status,
@@ -1440,8 +1459,13 @@ function findRefreshActivityEntryByProductId(entries: LinkRegistryEntry[], produ
   return entries.find((entry) => entry.internalProductId === productId);
 }
 
-function formatRefreshActivitySkipLine(skipped: MetricThresholdStrategyResult['skipped'], sourceLabel: string, windowDays: number): string {
-  return `跳过：非 active ${skipped.inactive} 条，无日报行 ${skipped.missingRow} 条，${windowDays}日${sourceLabel}缺失 ${skipped.unavailableMetric} 条，上线不足 ${windowDays} 天 ${skipped.onlineLessThanRequired} 条，上线天数未知 ${skipped.onlineDaysUnknown} 条。`;
+function formatRefreshActivitySkipLine(skipped: MetricThresholdStrategyResult['skipped'], conditions: MetricThresholdCondition[], windowDays: number): string {
+  const sourceLabels = new Set(conditions.map((condition) => {
+    const definition = getPublicTrafficMetric(condition.metric)!;
+    return metricSourceLabel(definition.source);
+  }));
+  const missingLabel = sourceLabels.size === 1 ? `${[...sourceLabels][0]}缺失` : '指标数据缺失';
+  return `跳过：非 active ${skipped.inactive} 条，无日报行 ${skipped.missingRow} 条，${windowDays}日${missingLabel} ${skipped.unavailableMetric} 条，上线不足 ${windowDays} 天 ${skipped.onlineLessThanRequired} 条，上线天数未知 ${skipped.onlineDaysUnknown} 条。`;
 }
 
 function metricThresholdInputFromRefreshActivityArgs(args: Record<string, unknown>, date: string, windowDays: number): MetricThresholdStrategyInput {
@@ -1464,6 +1488,33 @@ function metricThresholdInputFromRefreshActivityArgs(args: Record<string, unknow
     windowDays,
     requireActive: true,
     requireOnlineDays: windowDays,
+  };
+}
+
+function metricThresholdInputFromExplainArgs(args: Record<string, unknown>, date: string): MetricThresholdStrategyInput {
+  const conditions = args.conditions === undefined ? null : readMetricThresholdConditions(args.conditions);
+  const legacyMetric = args.metric;
+  const legacyOperator = args.operator;
+  const legacyValue = args.value;
+  const hasLegacyTriple = legacyMetric !== undefined && legacyOperator !== undefined && legacyValue !== undefined;
+  if (!conditions && !hasLegacyTriple) throw new Error('conditions or metric/operator/value are required');
+  const resolvedConditions = conditions ?? [{
+    metric: readPublicTrafficMetric(legacyMetric),
+    operator: readMetricThresholdOperator(legacyOperator),
+    value: readRequiredNumber(legacyValue, 'value'),
+  }];
+  const firstCondition = resolvedConditions[0]!;
+  return {
+    ...(readString(args.query) ? { query: readString(args.query)! } : {}),
+    ...(readString(args.sameSkuGroupId) ? { sameSkuGroupId: readString(args.sameSkuGroupId)! } : {}),
+    metric: firstCondition.metric,
+    operator: firstCondition.operator,
+    value: firstCondition.value,
+    conditions: resolvedConditions,
+    date,
+    windowDays: readOptionalWindowDays(args.windowDays) ?? REFRESH_ACTIVITY_DEFAULT_WINDOW_DAYS,
+    ...(args.requireActive !== undefined ? { requireActive: args.requireActive === true } : {}),
+    ...(args.requireOnlineDays !== undefined ? { requireOnlineDays: readOptionalLimit(args.requireOnlineDays) ?? REFRESH_ACTIVITY_DEFAULT_WINDOW_DAYS } : {}),
   };
 }
 
@@ -1779,7 +1830,8 @@ async function refreshActivityPlanResponse(
   const definition = getPublicTrafficMetric(input.metric)!;
   const unauthorizedCondition = input.conditions?.find((condition) => !getPublicTrafficMetric(condition.metric)?.executableDelistAllowed);
   const unauthorizedDefinition = unauthorizedCondition ? getPublicTrafficMetric(unauthorizedCondition.metric)! : undefined;
-  const sourceLabel = metricSourceLabel(definition.source);
+  const conditions = input.conditions ?? [{ metric: input.metric, operator: input.operator, value: input.value }];
+  const completenessText = metricThresholdCompletenessText(conditions);
   const scoped = scopedRefreshActivityEntries(args, registryContext.registry);
   if ('text' in scoped) return { text: scoped.text, metadata: { toolName: 'operations.refreshActivityPlan', ok: false } };
 
@@ -1805,10 +1857,10 @@ async function refreshActivityPlanResponse(
       text: [
         `活跃度刷新计划：${report.context.date}`,
         scoped.scopeLine,
-        `筛选口径：active 链接，${conditionSummary}，${sourceLabel}完整，上线满 ${windowDays} 天（上线满${windowDays}天）。`,
+        `筛选口径：active 链接，${conditionSummary}，${completenessText}，上线满 ${windowDays} 天（上线满${windowDays}天）。`,
         `${unauthorizedDefinition.label}可以查询和分析，但暂未授权作为自动下架条件。请改为人工复核，或选择已授权的下架指标。`,
         ...strategyResult.reasonSummary,
-        formatRefreshActivitySkipLine(strategyResult.skipped, sourceLabel, windowDays),
+        formatRefreshActivitySkipLine(strategyResult.skipped, conditions, windowDays),
       ].filter((line): line is string => Boolean(line)).join('\n'),
       metadata: {
         toolName: 'operations.refreshActivityPlan',
@@ -1889,14 +1941,15 @@ async function refreshActivityPlanResponse(
     text: [
       `活跃度刷新计划：${report.context.date}`,
       scoped.scopeLine,
-      `筛选口径：active 链接，${conditionSummary}，${sourceLabel}完整，上线满 ${windowDays} 天（上线满${windowDays}天）。`,
+      `筛选口径：active 链接，${conditionSummary}，${completenessText}，上线满 ${windowDays} 天（上线满${windowDays}天）。`,
       `待下架候选：${candidates.length} 条；涉及种类/同款组 ${groups.length} 个。`,
       `本次展示：${shownCandidates.length}/${candidates.length} 条。`,
       '',
       ...(groupLines.length ? groupLines : [`没有找到符合条件的${conditionSummary} active 链接。`]),
+      ...strategyResult.reasonSummary,
       ...(zeroCandidateExplanation.length ? ['', ...zeroCandidateExplanation] : []),
       '',
-      formatRefreshActivitySkipLine(strategyResult.skipped, sourceLabel, windowDays),
+      formatRefreshActivitySkipLine(strategyResult.skipped, conditions, windowDays),
       delistOnlyExecution.request
         ? `计划已生成，请在策略卡选择执行策略（待下架 ${delistOnlyExecution.request.delistProductIds.length} 条：端内ID ${delistOnlyExecution.request.delistProductIds.join('、')}）。`
         : '未能生成执行计划；请先处理以下阻断项。',
@@ -2404,17 +2457,7 @@ export async function executeAgentToolRequest(
       const endDate = explicitDate ?? latest?.context.date;
       if (!endDate) return { text: '还没有找到公域日报上下文。' };
       const registryContext = await loadClosedOrderRegistryContext(options.closedOrderRegistryPaths);
-      const input: MetricThresholdStrategyInput = {
-        ...(readString(request.arguments.query) ? { query: readString(request.arguments.query)! } : {}),
-        ...(readString(request.arguments.sameSkuGroupId) ? { sameSkuGroupId: readString(request.arguments.sameSkuGroupId)! } : {}),
-        metric: readPublicTrafficMetric(request.arguments.metric),
-        operator: readMetricThresholdOperator(request.arguments.operator),
-        value: readRequiredNumber(request.arguments.value, 'value'),
-        date: endDate,
-        windowDays: readOptionalWindowDays(request.arguments.windowDays) ?? REFRESH_ACTIVITY_DEFAULT_WINDOW_DAYS,
-        ...(request.arguments.requireActive !== undefined ? { requireActive: request.arguments.requireActive === true } : {}),
-        ...(request.arguments.requireOnlineDays !== undefined ? { requireOnlineDays: readOptionalLimit(request.arguments.requireOnlineDays) ?? REFRESH_ACTIVITY_DEFAULT_WINDOW_DAYS } : {}),
-      };
+      const input = metricThresholdInputFromExplainArgs(request.arguments, endDate);
       return formatMetricThresholdExplainResponse(await evaluateMetricThresholdStrategy(outputDir, registryContext.registry, input), input, 'strategy.metricThresholdExplain');
     }
     case 'strategy.refreshCandidateExplain': {
