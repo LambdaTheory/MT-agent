@@ -2837,9 +2837,7 @@ describe('handleBotIntent', () => {
           goal: '生成活跃度刷新计划',
           selectedTool: 'operations.refreshActivityPlan',
           arguments: {
-            metric: 'createdOrders',
-            operator: 'eq',
-            value: 0,
+            conditions: [{ metric: 'createdOrders', operator: 'eq', value: 0 }],
             windowDays: 30,
           },
           confidence: 0.9,
@@ -2888,7 +2886,7 @@ describe('handleBotIntent', () => {
     const response = await executeAgentToolRequest(
       {
         toolName: 'operations.refreshActivityPlan',
-        arguments: { metric: 'createdOrders', operator: 'eq', value: 0, windowDays: 30 },
+        arguments: { conditions: [{ metric: 'createdOrders', operator: 'eq', value: 0 }], windowDays: 30 },
         reason: '测试 firstSeenDate 满 30 天后才允许进入候选',
       },
       outputDir,
@@ -3004,7 +3002,7 @@ describe('handleBotIntent', () => {
             {
               id: 'refresh',
               toolName: 'operations.refreshActivityPlan',
-              arguments: { metric: 'createdOrders', operator: 'eq', value: 0, windowDays: 30 },
+              arguments: { conditions: [{ metric: 'createdOrders', operator: 'eq', value: 0 }], windowDays: 30 },
               reason: '先生成活跃度刷新计划和确认卡',
             },
             { toolName: 'product.query', arguments: { keyword: '900' }, reason: '确认执行后再查询健康源表现' },
