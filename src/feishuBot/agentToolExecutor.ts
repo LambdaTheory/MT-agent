@@ -13,7 +13,7 @@ import type { AgentIntent, AgentProblemType } from '../agentData/types.js';
 import { rankProductsByCategory, rankProductsByCategoryWindowed, type CategoryRankingMetric } from '../agentData/categoryRanking.js';
 import { buildDataHealthReport } from '../agentData/dataHealth.js';
 import { adaptLegacyRefreshCandidateExplainInput, explainRefreshCandidates } from '../agentData/refreshCandidateExplain.js';
-import { evaluateMetricThresholdStrategy, formatMetricThresholdCondition, metricSourceLabel, type MetricThresholdStrategyInput, type MetricThresholdStrategyResult } from '../agentData/metricThresholdStrategy.js';
+import { evaluateMetricThresholdStrategy, formatMetricThresholdCondition, metricSourceLabel, type MetricThresholdCondition, type MetricThresholdStrategyInput, type MetricThresholdStrategyResult } from '../agentData/metricThresholdStrategy.js';
 import { resolveSafeSourceForSameSkuGroup } from '../agentData/safeSource.js';
 import { findWindowedProducts, type WindowedPredicate } from '../agentData/windowedFindings.js';
 import { aggregateWindowProducts, readWindowMetric, type WindowProductAggregate } from '../agentData/windowAggregate.js';
@@ -1362,11 +1362,25 @@ function refreshActivityWindowSourceScore(metric: PublicTrafficPeriodMetrics): n
   );
 }
 
-function adaptRefreshActivityLegacyZeroMetric(value: unknown): Pick<MetricThresholdStrategyInput, 'metric' | 'operator' | 'value'> | null {
+function adaptRefreshActivityLegacyZeroMetric(value: unknown): MetricThresholdCondition | null {
   if (value === undefined) return null;
   if (value === 'created_orders') return { metric: 'createdOrders', operator: 'eq', value: 0 };
   if (value === 'amount') return { metric: 'amount', operator: 'eq', value: 0 };
   throw new Error('zeroMetric must be created_orders or amount');
+}
+
+function readMetricThresholdCondition(value: unknown, fieldName: string): MetricThresholdCondition {
+  if (!isRecord(value)) throw new Error(`${fieldName} item must be an object`);
+  return {
+    metric: readPublicTrafficMetric(value.metric),
+    operator: readMetricThresholdOperator(value.operator),
+    value: readRequiredNumber(value.value, `${fieldName}.value`),
+  };
+}
+
+function readMetricThresholdConditions(value: unknown): MetricThresholdCondition[] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 6) throw new Error('conditions must contain 1 to 6 conditions');
+  return value.map((item) => readMetricThresholdCondition(item, 'conditions'));
 }
 
 function refreshActivityMetricFromWindowAggregate(aggregate: WindowProductAggregate, windowDays: number): PublicTrafficPeriodMetrics {
@@ -1431,20 +1445,47 @@ function formatRefreshActivitySkipLine(skipped: MetricThresholdStrategyResult['s
 }
 
 function metricThresholdInputFromRefreshActivityArgs(args: Record<string, unknown>, date: string, windowDays: number): MetricThresholdStrategyInput {
-  const legacy = adaptRefreshActivityLegacyZeroMetric(args.zeroMetric);
-  const explicitMetric = args.metric === undefined ? undefined : readPublicTrafficMetric(args.metric);
-  if (!explicitMetric && !legacy) throw new Error('metric is required');
+  const conditions = args.conditions === undefined
+    ? (() => {
+      const legacy = adaptRefreshActivityLegacyZeroMetric(args.zeroMetric);
+      if (!legacy) throw new Error('conditions are required');
+      return [legacy];
+    })()
+    : readMetricThresholdConditions(args.conditions);
+  const firstCondition = conditions[0]!;
   return {
     ...(readString(args.query) ? { query: readString(args.query)! } : {}),
     ...(readString(args.sameSkuGroupId) ? { sameSkuGroupId: readString(args.sameSkuGroupId)! } : {}),
-    metric: explicitMetric ?? legacy!.metric,
-    operator: explicitMetric ? readMetricThresholdOperator(args.operator) : legacy!.operator,
-    value: explicitMetric ? readRequiredNumber(args.value, 'value') : legacy!.value,
+    metric: firstCondition.metric,
+    operator: firstCondition.operator,
+    value: firstCondition.value,
+    conditions,
     date,
     windowDays,
     requireActive: true,
     requireOnlineDays: windowDays,
   };
+}
+
+function buildRefreshActivityGroupPlans(
+  groups: ReturnType<typeof groupRefreshActivityCandidates>,
+  refillExecution: ReturnType<typeof buildRefreshActivityExecuteRequest>,
+): NonNullable<RefreshActivityPlan['groupPlans']> {
+  return groups.map((group) => {
+    const newLinkItem = refillExecution.request?.newLinkItems.find((item) => item.sameSkuGroupId === group.sameSkuGroupId);
+    const skippedGroup = `${group.label}｜${group.sameSkuGroupId}`;
+    const blockers = refillExecution.skippedBlockers.filter((blocker, index) =>
+      refillExecution.skippedGroups[index] === skippedGroup || refillExecution.skippedGroups[index] === group.label);
+    return {
+      sameSkuGroupId: group.sameSkuGroupId,
+      label: group.label,
+      delistProductIds: group.items.map((item) => item.entry.internalProductId),
+      delistCount: group.items.length,
+      refillCount: newLinkItem?.count ?? 0,
+      ...(newLinkItem ? { sourceProductId: newLinkItem.sourceProductId, sourceProductName: newLinkItem.sourceProductName } : {}),
+      blockers,
+    };
+  });
 }
 
 function findRefreshActivityWindowAggregate(index: RefreshActivityWindowAggregateIndex, entry: LinkRegistryEntry): WindowProductAggregate | undefined {
@@ -1736,7 +1777,6 @@ async function refreshActivityPlanResponse(
   const windowDays = readRefreshActivityWindowDays(args.windowDays);
   const input = metricThresholdInputFromRefreshActivityArgs(args, report.context.date, windowDays);
   const definition = getPublicTrafficMetric(input.metric)!;
-  const condition = formatMetricThresholdCondition(input);
   const sourceLabel = metricSourceLabel(definition.source);
   const scoped = scopedRefreshActivityEntries(args, registryContext.registry);
   if ('text' in scoped) return { text: scoped.text, metadata: { toolName: 'operations.refreshActivityPlan', ok: false } };
@@ -1756,13 +1796,14 @@ async function refreshActivityPlanResponse(
       return { entry, row: rowWithRefreshActivityWindowMetric(row, aggregate, windowDays) };
     })
     .filter((item): item is { entry: LinkRegistryEntry; row: PublicTrafficProductDataRow } => Boolean(item));
+  const conditionSummary = strategyResult.conditionSummary ?? formatMetricThresholdCondition(input);
 
   if (!definition.executableDelistAllowed) {
     return {
       text: [
         `活跃度刷新计划：${report.context.date}`,
         scoped.scopeLine,
-        `筛选口径：active 链接，${condition}，${sourceLabel}完整，上线满 ${windowDays} 天（上线满${windowDays}天）。`,
+        `筛选口径：active 链接，${conditionSummary}，${sourceLabel}完整，上线满 ${windowDays} 天（上线满${windowDays}天）。`,
         `${definition.label}可以查询和分析，但暂未授权作为自动下架条件。请改为人工复核，或选择已授权的下架指标。`,
         ...strategyResult.reasonSummary,
         formatRefreshActivitySkipLine(strategyResult.skipped, sourceLabel, windowDays),
@@ -1775,6 +1816,8 @@ async function refreshActivityPlanResponse(
         metricLabel: definition.label,
         operator: input.operator,
         value: input.value,
+        conditions: strategyResult.conditions,
+        conditionSummary,
         windowDays,
         candidateCount: strategyResult.candidateProductIds.length,
         skipped: {
@@ -1808,6 +1851,7 @@ async function refreshActivityPlanResponse(
   const shownGroups = groupRefreshActivityCandidates(shownCandidates);
   const delistOnlyExecution = buildRefreshActivityExecuteRequest(report.context.date, shownGroups, report.context, registryContext.registry, 'delist_only', windowMetrics, windowDays);
   const refillExecution = buildRefreshActivityExecuteRequest(report.context.date, shownGroups, report.context, registryContext.registry, 'delist_and_refill', windowMetrics, windowDays);
+  const groupPlans = buildRefreshActivityGroupPlans(shownGroups, refillExecution);
   const groupLines = shownGroups.slice(0, 12).map((group, index) => {
     const ids = group.items.map((item) => item.entry.internalProductId).join('、');
     const newLinkItem = refillExecution.request?.newLinkItems.find((item) => item.sameSkuGroupId === group.sameSkuGroupId);
@@ -1822,6 +1866,9 @@ async function refreshActivityPlanResponse(
     newLinkItemsForRefill: refillExecution.request?.newLinkItems ?? [],
     skippedGroups: refillExecution.skippedGroups,
     canRefill: Boolean(refillExecution.request),
+    conditions: strategyResult.conditions ?? input.conditions,
+    conditionSummary,
+    groupPlans,
     ...(continuation ? { continuation } : {}),
   } : null;
   const planRef = refreshPlan ? await saveRefreshActivityPlan(outputDir, refreshPlan) : null;
@@ -1839,11 +1886,11 @@ async function refreshActivityPlanResponse(
     text: [
       `活跃度刷新计划：${report.context.date}`,
       scoped.scopeLine,
-      `筛选口径：active 链接，${condition}，${sourceLabel}完整，上线满 ${windowDays} 天（上线满${windowDays}天）。`,
+      `筛选口径：active 链接，${conditionSummary}，${sourceLabel}完整，上线满 ${windowDays} 天（上线满${windowDays}天）。`,
       `待下架候选：${candidates.length} 条；涉及种类/同款组 ${groups.length} 个。`,
       `本次展示：${shownCandidates.length}/${candidates.length} 条。`,
       '',
-      ...(groupLines.length ? groupLines : [`没有找到符合条件的${condition} active 链接。`]),
+      ...(groupLines.length ? groupLines : [`没有找到符合条件的${conditionSummary} active 链接。`]),
       ...(zeroCandidateExplanation.length ? ['', ...zeroCandidateExplanation] : []),
       '',
       formatRefreshActivitySkipLine(strategyResult.skipped, sourceLabel, windowDays),
@@ -1860,7 +1907,7 @@ async function refreshActivityPlanResponse(
       candidateCount: candidates.length,
       shownCandidateCount: shownCandidates.length,
       productIds: candidates.map((candidate) => candidate.entry.internalProductId),
-      availability: { unavailableMetricProductIds: strategyResult.unavailableMetricProductIds, unavailableMetricCount: strategyResult.skipped.unavailableMetric },
+      availability: strategyResult.availability ?? { unavailableMetricProductIds: strategyResult.unavailableMetricProductIds, unavailableMetricCount: strategyResult.skipped.unavailableMetric },
       skipped: {
         inactive: strategyResult.skipped.inactive,
         missingRow: strategyResult.skipped.missingRow,
@@ -1873,11 +1920,14 @@ async function refreshActivityPlanResponse(
       metricLabel: definition.label,
       operator: input.operator,
       value: input.value,
+      conditions: strategyResult.conditions,
+      conditionSummary,
       windowDays,
       executeRequest: null,
       strategyRequests: { delistOnly: delistOnlyExecution.request ?? null, delistAndRefill: refillExecution.request ?? null },
       blockers: [...delistOnlyExecution.blockers, ...refillExecution.blockers],
       skippedGroups: refillExecution.skippedGroups,
+      groupPlans,
       zeroCandidateExplanation,
       ...(args.zeroMetric !== undefined ? { legacyArgumentAdapted: true } : {}),
     },
