@@ -28,7 +28,7 @@ interface DayRow {
   publicVisits?: number;
   dashboardVisits?: number | string;
   createdOrders?: number;
-  amount?: number;
+  amount?: number | string;
   signedOrderAmount?: number;
   custodyDays?: number | null;
 }
@@ -38,6 +38,12 @@ const registry: LinkRegistryEntry[] = [
   { internalProductId: '218', platformProductId: 'p218', shortName: 'Zero Visit B', aliases: ['zero-b'], sameSkuGroupId: 'zero-visits', status: 'active', source: ['link_registry_override'] },
   { internalProductId: '242', platformProductId: 'p242', shortName: 'Has Visits', aliases: ['has-visits'], sameSkuGroupId: 'zero-visits', status: 'active', source: ['link_registry_override'] },
   { internalProductId: '301', platformProductId: 'p301', shortName: 'Removed Zero', aliases: ['removed-zero'], sameSkuGroupId: 'zero-visits', status: 'removed', source: ['link_registry_override'] },
+];
+
+const compoundRegistry: LinkRegistryEntry[] = [
+  ...registry,
+  { internalProductId: '243', platformProductId: 'p243', shortName: 'Zero Visits With Amount', aliases: [], sameSkuGroupId: 'zero-visits', status: 'active', source: ['link_registry_override'] },
+  { internalProductId: '244', platformProductId: 'p244', shortName: 'Unavailable Amount', aliases: [], sameSkuGroupId: 'zero-visits', status: 'active', source: ['link_registry_override'] },
 ];
 
 async function writeDay(root: string, date: string, rows: DayRow[]) {
@@ -82,6 +88,8 @@ describe('evaluateMetricThresholdStrategy', () => {
         { id: '215', name: 'Zero Visit A', exposure: 10, publicVisits: 0, dashboardVisits: day === 15 ? '异常' : 1, createdOrders: 0, amount: 0 },
         { id: '218', name: 'Zero Visit B', exposure: 30, publicVisits: 0, dashboardVisits: day === 15 ? '异常' : 1, createdOrders: 0, amount: 0 },
         { id: '242', name: 'Has Visits', exposure: 50, publicVisits: day, dashboardVisits: day === 15 ? '异常' : 1, createdOrders: 0, amount: day },
+        { id: '243', name: 'Zero Visits With Amount', exposure: 20, publicVisits: 0, dashboardVisits: 1, createdOrders: 0, amount: day },
+        { id: '244', name: 'Unavailable Amount', exposure: 20, publicVisits: 0, dashboardVisits: 1, createdOrders: 0, amount: day === 15 ? '异常' : 0 },
         { id: '301', name: 'Removed Zero', exposure: 20, publicVisits: 0, dashboardVisits: day === 15 ? '异常' : 1, createdOrders: 0, amount: 0 },
         ...(day === 15 ? [{ id: '300', name: 'Partial Zero', exposure: 100, publicVisits: 0, dashboardVisits: '异常', createdOrders: 0, amount: 0 }] : []),
       ]);
@@ -113,6 +121,26 @@ describe('evaluateMetricThresholdStrategy', () => {
     expect(result.reasonSummary.join('\n')).toContain('创建订单');
     expect(result.reasonSummary.join('\n')).toContain('访问页数据缺失');
     expect(result.reasonSummary.join('\n')).toContain('未将缺失值按0筛选');
+  });
+
+  it('requires every compound condition to be available and matched', async () => {
+    const conditions = [
+      { metric: 'publicVisits' as const, operator: 'eq' as const, value: 0 },
+      { metric: 'amount' as const, operator: 'eq' as const, value: 0 },
+    ];
+    const result = await evaluateMetricThresholdStrategy(outputDir, compoundRegistry, {
+      metric: conditions[0].metric, operator: conditions[0].operator, value: conditions[0].value,
+      conditions,
+      date: '2026-07-15', windowDays: 15, requireActive: true, requireOnlineDays: 15,
+    });
+
+    expect(result.candidateProductIds).toEqual(['215', '218']);
+    expect(result.conditions).toEqual(conditions);
+    expect(result.unavailableMetricProductIds).toEqual(['244']);
+    expect(result.availability?.conditions).toEqual([
+      { metric: 'publicVisits', unavailableMetricCount: 1, unavailableMetricProductIds: ['244'] },
+      { metric: 'amount', unavailableMetricCount: 1, unavailableMetricProductIds: ['244'] },
+    ]);
   });
 
   it('keeps public amount distinct from signed order amount', async () => {

@@ -3,12 +3,18 @@ import { getPublicTrafficMetric, type PublicTrafficMetricKey, type PublicTraffic
 import { createLinkRegistry } from '../linkRegistry/store.js';
 import type { LinkRegistryEntry } from '../linkRegistry/types.js';
 
-export interface MetricThresholdStrategyInput {
+export type MetricThresholdOperator = 'eq' | 'neq' | 'gt' | 'gte' | 'lt' | 'lte';
+
+export interface MetricThresholdCondition {
+  metric: PublicTrafficMetricKey;
+  operator: MetricThresholdOperator;
+  value: number;
+}
+
+export interface MetricThresholdStrategyInput extends MetricThresholdCondition {
   query?: string;
   sameSkuGroupId?: string;
-  metric: PublicTrafficMetricKey;
-  operator: 'eq' | 'neq' | 'gt' | 'gte' | 'lt' | 'lte';
-  value: number;
+  conditions?: MetricThresholdCondition[];
   date: string;
   windowDays: number;
   requireActive?: boolean;
@@ -18,6 +24,8 @@ export interface MetricThresholdStrategyInput {
 export interface MetricThresholdStrategyResult {
   metric: PublicTrafficMetricKey;
   windowDays: number;
+  conditions?: MetricThresholdCondition[];
+  conditionSummary?: string;
   candidateProductIds: string[];
   skipped: {
     inactive: number;
@@ -27,6 +35,15 @@ export interface MetricThresholdStrategyResult {
     onlineDaysUnknown: number;
   };
   unavailableMetricProductIds: string[];
+  availability?: {
+    unavailableMetricCount: number;
+    unavailableMetricProductIds: string[];
+    conditions: Array<{
+      metric: PublicTrafficMetricKey;
+      unavailableMetricCount: number;
+      unavailableMetricProductIds: string[];
+    }>;
+  };
   reasonSummary: string[];
 }
 
@@ -40,7 +57,7 @@ export function metricSourceLabel(source: PublicTrafficMetricSource): string {
   return '链接状态数据';
 }
 
-function compareMetric(value: number, expected: number, operator: MetricThresholdStrategyInput['operator']): boolean {
+function compareMetric(value: number, expected: number, operator: MetricThresholdOperator): boolean {
   if (operator === 'eq') return value === expected;
   if (operator === 'neq') return value !== expected;
   if (operator === 'gt') return value > expected;
@@ -49,7 +66,7 @@ function compareMetric(value: number, expected: number, operator: MetricThreshol
   return value <= expected;
 }
 
-function operatorLabel(operator: MetricThresholdStrategyInput['operator']): string {
+function operatorLabel(operator: MetricThresholdOperator): string {
   if (operator === 'eq') return '=';
   if (operator === 'neq') return '!=';
   if (operator === 'gt') return '>';
@@ -58,9 +75,15 @@ function operatorLabel(operator: MetricThresholdStrategyInput['operator']): stri
   return '<=';
 }
 
-export function formatMetricThresholdCondition(input: Pick<MetricThresholdStrategyInput, 'metric' | 'operator' | 'value' | 'windowDays'>): string {
+export function formatMetricThresholdCondition(input: MetricThresholdCondition & { windowDays: number }): string {
   const definition = getPublicTrafficMetric(input.metric);
   return `近${input.windowDays}天${definition?.label ?? input.metric} ${operatorLabel(input.operator)} ${input.value}`;
+}
+
+function strategyConditions(input: MetricThresholdStrategyInput): MetricThresholdCondition[] {
+  if (input.conditions === undefined) return [{ metric: input.metric, operator: input.operator, value: input.value }];
+  if (input.conditions.length === 0) throw new Error('conditions must contain at least one condition');
+  return input.conditions;
 }
 
 function parseDateToUtcDay(value: string | undefined): number | null {
@@ -140,9 +163,15 @@ export async function evaluateMetricThresholdStrategy(
 ): Promise<MetricThresholdStrategyResult> {
   const aggregates = await aggregateWindowProducts({ outputDir, endDate: input.date, windowDays: input.windowDays });
   const index = aggregateIndex(aggregates);
+  const conditions = strategyConditions(input);
   const skipped = { inactive: 0, missingRow: 0, unavailableMetric: 0, onlineLessThanRequired: 0, onlineDaysUnknown: 0 };
   const candidateProductIds: string[] = [];
   const unavailableMetricProductIds: string[] = [];
+  const conditionAvailability = conditions.map((condition) => ({
+    metric: condition.metric,
+    unavailableMetricCount: 0,
+    unavailableMetricProductIds: [] as string[],
+  }));
 
   for (const entry of scopedEntries(registryEntries, input)) {
     if (input.requireActive && entry.status !== 'active') {
@@ -153,14 +182,6 @@ export async function evaluateMetricThresholdStrategy(
     const aggregate = findAggregate(index, entry);
     if (!aggregate) {
       skipped.missingRow += 1;
-      continue;
-    }
-
-    const availability = aggregate.availability[input.metric];
-    const metricValue = readWindowMetric(aggregate, input.metric);
-    if (!availability?.available || metricValue === undefined) {
-      skipped.unavailableMetric += 1;
-      unavailableMetricProductIds.push(entry.internalProductId);
       continue;
     }
 
@@ -176,20 +197,49 @@ export async function evaluateMetricThresholdStrategy(
       }
     }
 
-    if (compareMetric(metricValue, input.value, input.operator)) candidateProductIds.push(entry.internalProductId);
+    let hasUnavailableCondition = false;
+    let matchesEveryCondition = true;
+    for (const [conditionIndex, condition] of conditions.entries()) {
+      const availability = aggregate.availability[condition.metric];
+      const metricValue = readWindowMetric(aggregate, condition.metric);
+      if (!availability?.available || metricValue === undefined) {
+        hasUnavailableCondition = true;
+        conditionAvailability[conditionIndex].unavailableMetricCount += 1;
+        conditionAvailability[conditionIndex].unavailableMetricProductIds.push(entry.internalProductId);
+        continue;
+      }
+      if (!compareMetric(metricValue, condition.value, condition.operator)) matchesEveryCondition = false;
+    }
+    if (hasUnavailableCondition) {
+      skipped.unavailableMetric += 1;
+      unavailableMetricProductIds.push(entry.internalProductId);
+      continue;
+    }
+    if (matchesEveryCondition) candidateProductIds.push(entry.internalProductId);
   }
 
-  const condition = formatMetricThresholdCondition(input);
-  const unavailable = availabilityReasonText(input.metric, skipped.unavailableMetric);
+  const conditionSummary = conditions
+    .map((condition) => formatMetricThresholdCondition({ ...condition, windowDays: input.windowDays }))
+    .join(' 且 ');
+  const unavailableReasons = conditionAvailability
+    .map((item) => availabilityReasonText(item.metric, item.unavailableMetricCount))
+    .filter((item): item is string => Boolean(item));
   return {
-    metric: input.metric,
+    metric: conditions[0].metric,
     windowDays: input.windowDays,
+    conditions,
+    conditionSummary,
     candidateProductIds,
     skipped,
     unavailableMetricProductIds,
+    availability: {
+      unavailableMetricCount: skipped.unavailableMetric,
+      unavailableMetricProductIds,
+      conditions: conditionAvailability,
+    },
     reasonSummary: [
-      candidateProductIds.length > 0 ? `找到 ${candidateProductIds.length} 条符合 ${condition} 的链接。` : `没有找到符合 ${condition} 的链接。`,
-      ...(unavailable ? [unavailable] : []),
+      candidateProductIds.length > 0 ? `找到 ${candidateProductIds.length} 条符合 ${conditionSummary} 的链接。` : `没有找到符合 ${conditionSummary} 的链接。`,
+      ...unavailableReasons,
     ],
   };
 }
