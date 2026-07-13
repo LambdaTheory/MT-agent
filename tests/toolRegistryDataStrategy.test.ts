@@ -150,7 +150,10 @@ describe('data and strategy capability tools', () => {
     expect(validateAgentToolArguments('publicTraffic.windowAggregate', { windowDays: '91' })).toBe(false);
     expect(validateAgentToolArguments('strategy.metricThresholdExplain', { metric: 'publicVisits', operator: 'eq', value: 0, windowDays: '91' })).toBe(false);
     expect(validateAgentToolArguments('strategy.refreshCandidateExplain', { zeroMetric: 'amount', windowDays: '91' })).toBe(false);
-    expect(validateAgentToolArguments('operations.refreshActivityPlan', { metric: 'publicVisits', operator: 'eq', value: 0, windowDays: '91' })).toBe(false);
+    expect(validateAgentToolArguments('operations.refreshActivityPlan', {
+      conditions: [{ metric: 'publicVisits', operator: 'eq', value: 0 }],
+      windowDays: '91',
+    })).toBe(false);
     expect(validateAgentToolArguments('product.rankBestSameSku', { query: 'r50', periodDays: '91' })).toBe(false);
     expect(validateAgentToolArguments('product.rankByCategory', { metric: 'publicVisits', periodDays: '91' })).toBe(false);
   });
@@ -199,13 +202,27 @@ describe('data and strategy capability tools', () => {
         skippedReasons: expect.any(Object),
       },
     });
-    expect(findAgentTool('operations.refreshActivityPlan')?.inputSchema).toMatchObject({
+    const refreshActivityPlanInputSchema = findAgentTool('operations.refreshActivityPlan')?.inputSchema;
+    expect(refreshActivityPlanInputSchema).toMatchObject({
       properties: {
+        conditions: {
+          type: 'array',
+          minItems: 1,
+          maxItems: 6,
+        },
         windowDays: expect.any(Object),
       },
+      required: ['conditions', 'windowDays'],
     });
+    expect(refreshActivityPlanInputSchema).not.toHaveProperty('properties.metric');
+    expect(refreshActivityPlanInputSchema).not.toHaveProperty('properties.operator');
+    expect(refreshActivityPlanInputSchema).not.toHaveProperty('properties.value');
     expect(findAgentTool('operations.refreshActivityPlan')?.resultMetadataSchema).toMatchObject({
       properties: {
+        conditions: expect.any(Object),
+        conditionSummary: expect.any(Object),
+        availability: expect.any(Object),
+        groupPlans: expect.any(Object),
         windowDays: expect.any(Object),
       },
     });

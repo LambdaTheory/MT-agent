@@ -59,6 +59,16 @@ const reportMetricSchema = {
   type: 'string',
   enum: [...publicTrafficMetricKeys],
 };
+const metricThresholdConditionSchema = {
+  type: 'object',
+  properties: {
+    metric: reportMetricSchema,
+    operator: metricThresholdOperatorSchema,
+    value: { type: 'number' },
+  },
+  required: ['metric', 'operator', 'value'],
+  additionalProperties: false,
+};
 const stableMetricMetadataProperties = {
   metric: { type: 'string', enum: [...publicTrafficMetricKeys] },
   windowDays: { type: 'integer' },
@@ -380,6 +390,9 @@ const refreshActivityPlanResultMetadataSchema = {
   description: 'Metadata available after operations.refreshActivityPlan planning.',
   properties: {
     ...stableMetricMetadataProperties,
+    conditions: { type: 'array' },
+    conditionSummary: { type: 'string' },
+    groupPlans: { type: 'array' },
     date: { type: 'string' },
     candidateCount: { type: 'integer' },
     shownCandidateCount: { type: 'integer' },
@@ -591,12 +604,10 @@ const refreshActivityPlanArgumentsSchema = {
     maxCandidates: { type: 'number' },
     query: { type: 'string' },
     sameSkuGroupId: { type: 'string' },
-    metric: reportMetricSchema,
-    operator: metricThresholdOperatorSchema,
-    value: { type: 'number' },
+    conditions: { type: 'array', minItems: 1, maxItems: 6, items: metricThresholdConditionSchema },
     windowDays: arbitraryWindowDaysSchema,
   },
-  required: ['metric', 'operator', 'value', 'windowDays'],
+  required: ['conditions', 'windowDays'],
   additionalProperties: false,
 };
 const refreshActivityExecuteArgumentsSchema = {
