@@ -1068,7 +1068,7 @@ const agentTools: AgentToolDefinition[] = [
   },
   {
     name: 'operations.refreshActivityPlan',
-    description: '按最新或指定日期公域日报筛选满足显式 metric/operator/value/windowDays 阈值的 active 链接，按链接档案汇总待下架链接和补链建议；可传 query 或 sameSkuGroupId 将范围收窄到指定商品/同款组。metric 必须保持用户指定指标，不能改写为创单、金额或其它指标；未授权为自动下架条件的指标只返回解释，不生成执行策略卡。确认前不下架、不补链。',
+    description: '按最新或指定日期公域日报筛选满足显式 conditions[]/windowDays 阈值的 active 链接；conditions 使用 AND 语义并保留每个用户指定指标，按链接档案汇总待下架链接和补链建议。可传 query 或 sameSkuGroupId 将范围收窄到指定商品/同款组；任一未授权为自动下架条件的指标只返回解释，不生成执行策略卡。确认前不下架、不补链。',
     risk: 'read',
     requiresConfirmation: false,
     inputSchema: refreshActivityPlanArgumentsSchema,

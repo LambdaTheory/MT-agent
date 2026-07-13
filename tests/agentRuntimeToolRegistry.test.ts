@@ -452,12 +452,10 @@ describe('agent runtime tool registry', () => {
         maxCandidates: { type: 'number' },
         query: { type: 'string' },
         sameSkuGroupId: { type: 'string' },
-        metric: { type: 'string' },
-        operator: { type: 'string' },
-        value: { type: 'number' },
+        conditions: { type: 'array', minItems: 1, maxItems: 6 },
         windowDays: { type: ['integer', 'string'] },
       },
-      required: ['metric', 'operator', 'value', 'windowDays'],
+      required: ['conditions', 'windowDays'],
       additionalProperties: false,
     });
     expect(findAgentTool('publicTraffic.windowAggregate')?.description).toContain('不筛选、不排序');
@@ -481,7 +479,7 @@ describe('agent runtime tool registry', () => {
     expect(findAgentTool('product.rankByCategory')?.description).toContain('1..90');
     expect(findAgentTool('product.rankByCategory')?.description).not.toContain('1/7/30');
     expect(findAgentTool('operations.refreshActivityPlan')?.description).toContain('query');
-    expect(findAgentTool('operations.refreshActivityPlan')?.description).toContain('metric/operator/value/windowDays');
+    expect(findAgentTool('operations.refreshActivityPlan')?.description).toContain('conditions[]/windowDays');
     expect(findAgentTool('operations.refreshActivityPlan')?.resultMetadataSchema).toMatchObject({
       properties: {
         scope: { type: ['string', 'null'] },
