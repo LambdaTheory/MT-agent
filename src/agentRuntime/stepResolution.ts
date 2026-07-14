@@ -1,3 +1,5 @@
+import { schemaAllowsArguments } from './planner.js';
+
 export type AgentStepMetadataStore = Record<string, unknown>;
 
 export interface AgentStepResponseLike {
@@ -7,6 +9,10 @@ export interface AgentStepResponseLike {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function omitUndefinedProperties(value: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined));
 }
 
 function readSegmentValue(current: unknown, part: string): unknown {
@@ -97,8 +103,12 @@ export function resolvePlannerArguments(
   return resolved.ok && isRecord(resolved.value) ? { ok: true, value: resolved.value } : resolved.ok ? { ok: false, reference: '<arguments>' } : resolved;
 }
 
-export function rememberStepMetadata(store: AgentStepMetadataStore, stepId: string, response: AgentStepResponseLike): void {
-  const metadata = response.metadata ?? { text: response.text };
+export function rememberStepMetadata(store: AgentStepMetadataStore, stepId: string, response: AgentStepResponseLike, resultMetadataSchema?: unknown): void {
+  const candidate = response.metadata ?? { text: response.text };
+  const validationCandidate = response.metadata === undefined ? undefined : omitUndefinedProperties(response.metadata);
+  const metadata = resultMetadataSchema !== undefined && validationCandidate !== undefined && !schemaAllowsArguments(resultMetadataSchema, validationCandidate)
+    ? { text: response.text, metadataValidationError: stepId }
+    : candidate;
   store[stepId] = metadata;
   store.last = metadata;
 }

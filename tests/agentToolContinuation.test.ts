@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolvePlannerArguments } from '../src/agentRuntime/stepResolution.js';
+import { rememberStepMetadata, resolvePlannerArguments } from '../src/agentRuntime/stepResolution.js';
 
 describe('agent tool continuation metadata references', () => {
   it('resolves common data and strategy metadata shapes for later steps', () => {
@@ -22,5 +22,23 @@ describe('agent tool continuation metadata references', () => {
     expect(resolvePlannerArguments({ sourceProductId: '${safe.sourceProductId}' }, {
       safe: { sourceProductId: '680' },
     })).toEqual({ ok: true, value: { sourceProductId: '680' } });
+  });
+
+  it('stores fallback text metadata when declared result metadata schema is violated', () => {
+    const store: Record<string, unknown> = {};
+    rememberStepMetadata(store, 'rank', {
+      text: 'ranked product',
+      metadata: { productIds: '648' },
+    }, {
+      type: 'object',
+      properties: {
+        productIds: { type: 'array', items: { type: 'string' } },
+      },
+      additionalProperties: false,
+    });
+
+    expect(store.rank).toEqual({ text: 'ranked product', metadataValidationError: 'rank' });
+    expect(store.last).toEqual({ text: 'ranked product', metadataValidationError: 'rank' });
+    expect(resolvePlannerArguments({ productIds: '${rank.productIds}' }, store)).toEqual({ ok: false, reference: 'rank.productIds' });
   });
 });

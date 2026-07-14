@@ -19,7 +19,7 @@ const safeSourceResolveArgumentsSchema = {
   type: 'object',
   properties: {
     date: reportDateSchema,
-    sameSkuGroupId: { type: 'string' },
+    sameSkuGroupId: { type: ['string', 'null'] },
     excludedProductIds: { type: 'array', items: { type: 'string' } },
   },
   required: ['sameSkuGroupId'],
@@ -30,7 +30,7 @@ const refreshCandidateExplainArgumentsSchema = {
   properties: {
     date: reportDateSchema,
     query: { type: 'string' },
-    sameSkuGroupId: { type: 'string' },
+    sameSkuGroupId: { type: ['string', 'null'] },
     zeroMetric: { type: 'string', enum: ['created_orders', 'amount'] },
     windowDays: arbitraryWindowDaysSchema,
   },
@@ -243,7 +243,7 @@ const linkRegistryResolveProductsResultMetadataSchema = {
     status: { type: 'string' },
     query: { type: 'string' },
     resolutionMode: { type: 'string' },
-    sameSkuGroupId: { type: 'string' },
+    sameSkuGroupId: { type: ['string', 'null'] },
     productIds: { type: 'array', items: { type: 'string' }, description: 'Internal product ids resolved for follow-up tools such as rental.pricePreview.productIds.' },
     count: { type: 'integer' },
     matchText: { type: 'string' },

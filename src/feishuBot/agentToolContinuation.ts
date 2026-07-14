@@ -520,7 +520,7 @@ export async function continueAgentPlannerSteps(input: ContinuePlannerStepsInput
     input.textParts.push('');
     input.textParts.push(`步骤 ${absoluteIndex + 1}/${input.totalSteps}：${step.toolName}`);
     input.textParts.push(response.text);
-    rememberStepMetadata(input.metadataStore, stepId, response);
+    rememberStepMetadata(input.metadataStore, stepId, response, tool.resultMetadataSchema);
     if (shouldStopAfterConfirmedResponse(response)) {
       input.textParts.push('');
       input.textParts.push('当前步骤执行未成功，已停止后续步骤。');
@@ -559,7 +559,8 @@ export async function continueAgentPlannerStepsAfterResponse(
     `步骤 ${continuation.currentStepIndex + 1}/${continuation.totalSteps}：${request.toolName}`,
     response.text,
   ];
-  rememberStepMetadata(metadataStore, continuation.currentStepId, response);
+  const currentTool = findAgentTool(request.toolName);
+  rememberStepMetadata(metadataStore, continuation.currentStepId, response, currentTool?.resultMetadataSchema);
 
   if (shouldStopAfterConfirmedResponse(response)) {
     textParts.push('');
