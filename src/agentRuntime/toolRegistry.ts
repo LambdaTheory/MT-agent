@@ -480,11 +480,12 @@ const productIdArgumentsSchema = {
   required: ['productId'],
   additionalProperties: false,
 };
+const internalProductIdSchema = { type: 'string', pattern: '^\\d+$' };
 const rentalDelistArgumentsSchema = {
   type: 'object',
   properties: {
-    productId: { type: 'string', description: 'Single internal product id, or a comma/newline separated list for batch delist compatibility.' },
-    productIds: { type: 'array', minItems: 1, maxItems: 80, items: { type: 'string' }, description: 'Internal product ids to delist in one confirmed batch.' },
+    productId: { type: 'string', pattern: '^\\d+(?:[\\s,，;；]+\\d+)*$', description: 'Single internal product id, or a comma/newline separated list for batch delist compatibility.' },
+    productIds: { type: 'array', minItems: 1, maxItems: 80, items: internalProductIdSchema, description: 'Internal product ids to delist in one confirmed batch.' },
   },
   minProperties: 1,
   additionalProperties: false,
@@ -492,7 +493,7 @@ const rentalDelistArgumentsSchema = {
 const rentalDelistBatchArgumentsSchema = {
   type: 'object',
   properties: {
-    productIds: { type: 'array', minItems: 1, maxItems: 80, items: { type: 'string' } },
+    productIds: { type: 'array', minItems: 1, maxItems: 80, items: internalProductIdSchema },
   },
   required: ['productIds'],
   additionalProperties: false,
@@ -644,10 +645,11 @@ const refreshActivityExecuteArgumentsSchema = {
 };
 const rentalPriceChangeArgumentsSchema = {
   type: 'object',
+  not: { required: ['discount', 'adjustmentAmount'] },
   properties: {
-    productId: { type: 'string' },
+    productId: internalProductIdSchema,
     fields: { type: 'object' },
-    discount: { type: 'number', description: 'Explicit multiplier only. Use 0.8 for 8-fold, 1.8 for 180%; never use bare fold numbers such as 8.' },
+    discount: { type: ['number', 'string'], description: 'Explicit multiplier only. Use 0.8 for 8-fold, 1.8 for 180%; never use bare fold numbers such as 8.' },
     adjustmentAmount: { type: ['number', 'string'], description: 'Absolute amount to add to every rental price field. Use negative values such as -1 to subtract 1 yuan.' },
     scope: { type: 'string', enum: ['rent_fields', 'all_price_fields'], description: '兼容旧参数；倍数/折扣类改价会被强制限制为 rent_fields。非租金字段必须用 fields 精准点名。' },
   },
@@ -656,8 +658,9 @@ const rentalPriceChangeArgumentsSchema = {
 };
 const rentalPricePreviewArgumentsSchema = {
   type: 'object',
+  not: { required: ['discount', 'adjustmentAmount'] },
   properties: {
-    productIds: { type: 'array', minItems: 1, maxItems: 24, items: { type: 'string' } },
+    productIds: { type: 'array', minItems: 1, maxItems: 24, items: internalProductIdSchema },
     fields: { type: 'object' },
     discount: { type: ['number', 'string'], description: 'Explicit multiplier only. Use 0.8 for 8-fold, 1.8 for 180%; never use bare fold numbers such as 8.' },
     adjustmentAmount: { type: ['number', 'string'], description: 'Absolute amount to add to every rental price field. Use negative values such as -1 to subtract 1 yuan.' },
@@ -740,12 +743,21 @@ const rentalSpecDimArgumentsSchema = {
 };
 const rentalPriceRollbackArgumentsSchema = {
   type: 'object',
+  oneOf: [
+    { required: ['taskId'] },
+    { required: ['rollbackFile'] },
+  ],
   properties: {
-    productId: { type: 'string' },
-    taskId: { type: 'string' },
+    productId: internalProductIdSchema,
+    taskId: { type: 'string', pattern: '^task_\\d+_[a-fA-F0-9]+$' },
     rollbackFile: { type: 'string' },
   },
-  minProperties: 1,
+  additionalProperties: false,
+};
+const rentalPriceSnapshotArgumentsSchema = {
+  type: 'object',
+  properties: { query: { type: 'string' } },
+  required: ['query'],
   additionalProperties: false,
 };
 const newLinkBatchPlanArgumentsSchema = {
@@ -1300,7 +1312,7 @@ const agentTools: AgentToolDefinition[] = [
     description: '按端内ID、商品别名或同款组读取租赁后台当前规格价格，并按 SKU 聚合平均租金。适用于“x200u 的定价情况怎么样”。这是只读查询，不用于改价。',
     risk: 'read',
     requiresConfirmation: false,
-    inputSchema: productRankingArgumentsSchema,
+    inputSchema: rentalPriceSnapshotArgumentsSchema,
   },
   {
     name: 'rental.newLinkBatchPlan',

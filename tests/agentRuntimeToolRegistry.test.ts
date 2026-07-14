@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { listAgentPlannerTools } from '../src/agentRuntime/planner.js';
+import { listAgentPlannerTools, validateAgentToolArguments } from '../src/agentRuntime/planner.js';
 import { findAgentTool, listAgentTools } from '../src/agentRuntime/toolRegistry.js';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -413,6 +413,26 @@ describe('agent runtime tool registry', () => {
     expect(plannerTools.find((tool) => tool.name === 'operations.refreshActivityExecute')).toBeUndefined();
   });
 
+  it('locks high-risk rental schemas to current runtime guardrails', () => {
+    expect(validateAgentToolArguments('rental.priceRollback', { productId: '648' })).toBe(false);
+    expect(validateAgentToolArguments('rental.priceRollback', { taskId: 'task_123_abcd' })).toBe(true);
+    expect(validateAgentToolArguments('rental.priceRollback', { rollbackFile: 'output/rental/rollback.json' })).toBe(true);
+    expect(validateAgentToolArguments('rental.priceRollback', { taskId: 'task_123_abcd', rollbackFile: 'output/rental/rollback.json' })).toBe(false);
+
+    expect(validateAgentToolArguments('rental.pricePreview', { productIds: ['648'], discount: 0.8, adjustmentAmount: -1 })).toBe(false);
+    expect(validateAgentToolArguments('rental.priceChange', { productId: '648', discount: 0.8, adjustmentAmount: -1 })).toBe(false);
+
+    expect(validateAgentToolArguments('rental.pricePreview', { productIds: ['abc'], discount: 0.8 })).toBe(false);
+    expect(validateAgentToolArguments('rental.delistBatch', { productIds: ['abc'] })).toBe(false);
+
+    expect(findAgentTool('rental.priceSnapshot')?.inputSchema).toMatchObject({
+      properties: { query: { type: 'string' } },
+      required: ['query'],
+      additionalProperties: false,
+    });
+    expect(validateAgentToolArguments('rental.priceSnapshot', { query: 'x200u', periodDays: 7 })).toBe(false);
+  });
+
   it('describes rental operation metadata per executable action', () => {
     expect(findAgentTool('rental.copy')?.inputSchema).toMatchObject({
       properties: {
@@ -555,20 +575,22 @@ describe('agent runtime tool registry', () => {
       additionalProperties: false,
     });
     expect(findAgentTool('rental.priceChange')?.inputSchema).toMatchObject({
+      not: { required: ['discount', 'adjustmentAmount'] },
       properties: {
-        productId: { type: 'string' },
+        productId: { type: 'string', pattern: '^\\d+$' },
         fields: { type: 'object' },
-        discount: { type: 'number' },
-        scope: { type: 'string' },
+        discount: { type: ['number', 'string'] },
+        scope: { type: 'string', enum: ['rent_fields', 'all_price_fields'] },
       },
       required: ['productId'],
       additionalProperties: false,
     });
     expect(findAgentTool('rental.pricePreview')?.inputSchema).toMatchObject({
+      not: { required: ['discount', 'adjustmentAmount'] },
       properties: {
         productIds: { type: 'array' },
         discount: { type: ['number', 'string'] },
-        scope: { type: 'string' },
+        scope: { type: 'string', enum: ['rent_fields', 'all_price_fields'] },
       },
       required: ['productIds'],
       additionalProperties: false,
@@ -597,12 +619,15 @@ describe('agent runtime tool registry', () => {
       additionalProperties: false,
     });
     expect(findAgentTool('rental.priceRollback')?.inputSchema).toMatchObject({
+      oneOf: [
+        { required: ['taskId'] },
+        { required: ['rollbackFile'] },
+      ],
       properties: {
-        productId: { type: 'string' },
-        taskId: { type: 'string' },
+        productId: { type: 'string', pattern: '^\\d+$' },
+        taskId: { type: 'string', pattern: '^task_\\d+_[a-fA-F0-9]+$' },
         rollbackFile: { type: 'string' },
       },
-      minProperties: 1,
       additionalProperties: false,
     });
     expect(findAgentTool('rental.operationConfirmRequest')?.inputSchema).toMatchObject({
