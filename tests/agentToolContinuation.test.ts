@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { rememberStepMetadata, resolvePlannerArguments } from '../src/agentRuntime/stepResolution.js';
+import { continueAgentPlannerSteps } from '../src/feishuBot/agentToolContinuation.js';
 
 describe('agent tool continuation metadata references', () => {
   it('resolves common data and strategy metadata shapes for later steps', () => {
@@ -40,5 +41,28 @@ describe('agent tool continuation metadata references', () => {
     expect(store.rank).toEqual({ text: 'ranked product', metadataValidationError: 'rank' });
     expect(store.last).toEqual({ text: 'ranked product', metadataValidationError: 'rank' });
     expect(resolvePlannerArguments({ productIds: '${rank.productIds}' }, store)).toEqual({ ok: false, reference: 'rank.productIds' });
+  });
+});
+
+describe('agent tool continuation execution contracts', () => {
+  it('stops before execution when a resolved placeholder violates the target tool schema', async () => {
+    const textParts = ['Agent 多步骤计划：bad product ids'];
+    const response = await continueAgentPlannerSteps({
+      goal: 'bad product ids',
+      reason: 'metadata shape mismatch must not execute',
+      steps: [
+        { toolName: 'rental.pricePreview', arguments: { productIds: '${rank.productIds}', discount: 0.8 }, reason: 'preview price' },
+      ],
+      baseIndex: 0,
+      totalSteps: 1,
+      metadataStore: { rank: { productIds: ['abc'] } },
+      textParts,
+      outputDir: 'output',
+      options: {},
+      sourceText: 'preview abc',
+    });
+
+    expect(response?.text).toContain('参数未通过安全校验');
+    expect(response?.metadata).toMatchObject({ ok: false, needsClarification: true });
   });
 });
