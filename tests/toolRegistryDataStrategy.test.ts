@@ -192,6 +192,9 @@ describe('data and strategy capability tools', () => {
       ],
     })).toBe(true);
     expect(validateAgentToolArguments('strategy.metricThresholdExplain', { conditions: [] })).toBe(false);
+    expect(validateAgentToolArguments('strategy.metricThresholdExplain', {})).toBe(false);
+    expect(validateAgentToolArguments('strategy.metricThresholdExplain', { metric: 'publicVisits' })).toBe(false);
+    expect(validateAgentToolArguments('strategy.metricThresholdExplain', { metric: 'publicVisits', operator: 'eq' })).toBe(false);
     expect(validateAgentToolArguments('strategy.metricThresholdExplain', {
       conditions: [
         { metric: 'publicVisits', operator: 'eq', value: 0 },

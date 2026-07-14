@@ -54,6 +54,10 @@ const metricThresholdConditionSchema = {
 };
 const metricThresholdExplainArgumentsSchema = {
   type: 'object',
+  anyOf: [
+    { required: ['conditions'] },
+    { required: ['metric', 'operator', 'value'] },
+  ],
   properties: {
     date: reportDateSchema,
     query: { type: 'string' },
