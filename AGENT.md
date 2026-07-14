@@ -247,8 +247,10 @@ MT-agent/
 - 配置优先级：`MT_AGENT_LLM_*`，其次 `LLM_*`；`MT_AGENT_LLM_PROVIDER=disabled` 可关闭规划器。
 - `plannerVisible: true` 才能由 LLM 直接选择。
 - `plannerVisible: false` 是内部/隐藏运行时工具，绝不能通过普通 planner 输出或 continuation 直接调用。
-- 工具 schema、prompt 和执行端必须是同一份可兑现契约；schema 不能声明执行端做不到的字段或枚举。
+- 工具 schema、prompt 和执行端必须是同一份可兑现契约；schema 不能声明执行端做不到的字段或枚举。本地 planner 校验已覆盖 `anyOf`、`oneOf`、`not`、`enum`、`pattern`、数组/对象必填项和 `additionalProperties`，新增 schema 约束时必须补对应回归测试。
+- 高风险租赁工具的 schema 必须贴合当前 runtime 护栏：端内 ID 使用数字字符串；批量 ID 数组逐项校验；`discount` 与 `adjustmentAmount` 不得同时出现；rollback 必须提供且只能提供 `taskId` 或 `rollbackFile` 之一。
 - 多步骤计划可以使用前一步的 `resultMetadataSchema` 输出；商品写步骤会暂停，确认后只执行当前步骤，再恢复余下步骤。
+- continuation 在解析 `${step.metadata}` 占位符后必须重新跑目标工具参数校验；工具返回 metadata 也要按 `resultMetadataSchema` 校验，失败时只能存 fallback 文本，不能让坏 metadata 继续驱动后续步骤。
 
 #### 确认卡边界
 
