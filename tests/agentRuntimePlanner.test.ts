@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { validateAgentMultiStepPlannerProposal, validateAgentPlannerClarificationProposal, validateAgentPlannerProposal, validateAgentToolArguments } from '../src/agentRuntime/planner.js';
+import { schemaAllowsArguments, validateAgentMultiStepPlannerProposal, validateAgentPlannerClarificationProposal, validateAgentPlannerProposal, validateAgentToolArguments } from '../src/agentRuntime/planner.js';
 import { listAgentTools } from '../src/agentRuntime/toolRegistry.js';
 
 describe('agent runtime planner proposal validation', () => {
@@ -222,6 +222,29 @@ describe('agent runtime planner proposal validation', () => {
   it('rejects arguments that do not satisfy tool metadata schema', () => {
     expect(validateAgentPlannerProposal('{"goal":"查询商品表现","selectedTool":"product.query","arguments":{},"confidence":0.88,"reason":"缺少 keyword"}')).toEqual({ ok: false, reason: 'invalid_arguments' });
     expect(validateAgentPlannerProposal('{"goal":"查询商品表现","selectedTool":"product.query","arguments":{"keyword":"565","extra":true},"confidence":0.88,"reason":"多余字段"}')).toEqual({ ok: false, reason: 'invalid_arguments' });
+  });
+
+  it('enforces oneOf and not keywords in local tool schema validation', () => {
+    const schema = {
+      type: 'object',
+      oneOf: [
+        { required: ['taskId'] },
+        { required: ['rollbackFile'] },
+      ],
+      not: { required: ['discount', 'adjustmentAmount'] },
+      properties: {
+        taskId: { type: 'string' },
+        rollbackFile: { type: 'string' },
+        discount: { type: 'number' },
+        adjustmentAmount: { type: 'number' },
+      },
+      additionalProperties: false,
+    };
+
+    expect(schemaAllowsArguments(schema, { taskId: 'task_1_abcd' })).toBe(true);
+    expect(schemaAllowsArguments(schema, { rollbackFile: 'output/rental/rollback.json' })).toBe(true);
+    expect(schemaAllowsArguments(schema, { taskId: 'task_1_abcd', rollbackFile: 'output/rental/rollback.json' })).toBe(false);
+    expect(schemaAllowsArguments(schema, { taskId: 'task_1_abcd', discount: 0.8, adjustmentAmount: -1 })).toBe(false);
   });
 
   it('recursively validates planner array item schemas for multi-product tools', () => {
