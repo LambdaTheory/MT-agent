@@ -19,7 +19,7 @@ const safeSourceResolveArgumentsSchema = {
   type: 'object',
   properties: {
     date: reportDateSchema,
-    sameSkuGroupId: { type: ['string', 'null'] },
+    sameSkuGroupId: { type: 'string' },
     excludedProductIds: { type: 'array', items: { type: 'string' } },
   },
   required: ['sameSkuGroupId'],
@@ -30,7 +30,7 @@ const refreshCandidateExplainArgumentsSchema = {
   properties: {
     date: reportDateSchema,
     query: { type: 'string' },
-    sameSkuGroupId: { type: ['string', 'null'] },
+    sameSkuGroupId: { type: 'string' },
     zeroMetric: { type: 'string', enum: ['created_orders', 'amount'] },
     windowDays: arbitraryWindowDaysSchema,
   },
