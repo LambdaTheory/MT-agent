@@ -1,0 +1,534 @@
+# MT-agent 开发与维护指南
+
+> 本文面向接手 MT-agent 的开发 Agent 与维护人员，说明模块现状、文件边界、主链路、开发方向、安全约束和验证方式。
+>
+> **最后核对基线：2026-07-14；当前稳定集成分支：`master`。** 文档描述应优先以当前代码和测试为准，阶段性审计文档仅用于理解未完成事项。
+
+---
+
+## 1. 项目定位
+
+MT-agent 是一个服务于支付宝商品运营场景的 `Node.js + TypeScript` 自动化项目。已建立如下运营闭环：
+
+```text
+业务后台 / 外部业务接口
+  → Playwright 抓取或 API 同步
+  → 数据规范化、聚合、分析
+  → Markdown / Excel / JSON / 状态文件
+  → 飞书日报、Bot 查询、审批卡、运营提醒
+```
+
+项目当前的正确定位是：**以数据分析、报表、提醒、只读查询和人工确认后的半自动执行为主的运营 Agent 基座。**
+
+项目**不是**无人值守的全自动改价、下架、复制商品或上链执行器：
+
+- LLM 的职责是理解自然语言、选择受控工具、抽取结构化参数、形成计划。
+- 本地 TypeScript 代码负责数据读取、参数校验、业务计算、确认卡、执行和审计。
+- 对商品/链接有副作用的操作必须经过明确的飞书确认卡。
+- 依赖业务后台页面的操作必须保留登录态、页面变动和账号权限失败的人工兜底。
+
+## 2. 技术与运行环境
+
+| 项目 | 现状 |
+|---|---|
+| 语言/运行时 | TypeScript 5.8、Node.js 20+（建议当前 LTS） |
+| 模块模式 | ESM，`package.json` 中 `type: module` |
+| TypeScript | `strict: true`、`target: ES2022`、`module/moduleResolution: NodeNext` |
+| 浏览器自动化 | Playwright 1.52 |
+| 测试 | Vitest 3.2，Node 环境 |
+| 表格产物 | `xlsx-js-style` |
+| 飞书 | `@larksuiteoapi/node-sdk` |
+| TypeScript 运行 | `tsx`，CLI 无需先 build |
+| 常驻进程 | PM2：`mt-feishu-bot`、`mt-rental-price-agent` |
+| 推荐系统 | Windows PowerShell；需要业务网络和可复用登录态 |
+
+根配置文件：
+
+- `package.json`：55 个脚本、依赖与 PM2 相关操作入口。
+- `tsconfig.json`：包含 `src/**/*.ts` 与 `tests/**/*.ts`，构建输出到 `dist/`。
+- `vitest.config.ts`：Vitest Node 测试环境。
+- `ecosystem.config.cjs`：PM2 配置。
+- `.env.example`：飞书、LLM、输出目录、外挂技能与外部 API 的配置样例；**不得读取、打印或提交真实 `.env`。**
+- `config/agent.config.json`：日报抓取页面、周期、分页、输出目录、浏览器 profile、映射文件等主配置。
+
+---
+
+## 3. 仓库结构
+
+```text
+MT-agent/
+├─ config/                     # 主配置、商品 ID 映射、链接档案覆盖项
+├─ docs/                       # 设计、交接、审计、交付、spec/plan 文档
+├─ src/
+│  ├─ cli/                     # 命令行入口
+│  ├─ crawler/                 # Playwright 抓取与登录态
+│  ├─ publicTraffic/           # 公域流量分析、产物和日报展示
+│  ├─ feishuBot/               # 飞书收发、工具执行、卡片和路由
+│  ├─ agentRuntime/            # Agent 规划、工具注册、审批、Daily Mission
+│  ├─ agentData/               # 面向 Agent 的确定性数据查询层
+│  ├─ activityAutomation/      # 差异化定价活动页半自动化
+│  ├─ closedOrderFeedback/     # 关单备注同步、分析、观察
+│  ├─ linkRegistry/            # 链接档案、审计、治理、维护流程
+│  ├─ inventoryStatus/         # 同款库存快照
+│  ├─ mapping/                 # 平台商品 ID / 内部 ID 映射
+│  ├─ notify/                  # 飞书推送
+│  ├─ operationsLearningLoop/  # 运营学习问答/会话
+│  ├─ newLinkWorkflow/         # 新链批量工作流
+│  ├─ llm/                     # OpenAI-compatible LLM provider 抽象
+│  ├─ config/ domain/          # 配置加载、领域类型
+│  ├─ extractor/ report/       # 表格提取、通用报表生成
+│  ├─ storage/ observability/  # 输出路径、运行日志、运行时日志
+│  └─ agentLearning/ analyzer/ # 学习存储、商品分析
+├─ tests/                      # 200+ Vitest 测试文件和 golden fixtures
+├─ vendor/rental-price-agent/  # 外挂租赁价 Playwright 技能
+├─ output/                     # 每日产物、状态、日志、审计数据（运行生成）
+├─ .worktrees/                 # 隔离开发 worktree
+├─ README.md                   # 用户侧项目概览和运行说明
+└─ AGENT.md                    # 本文
+```
+
+---
+
+## 4. 模块说明
+
+### 4.1 `src/cli/`：命令行入口
+
+每个主要工作流由一个 `tsx src/cli/*.ts` 入口启动。不要在 CLI 内重复业务实现；CLI 负责读取配置/环境、组织依赖、调用领域模块、输出结果与退出码。
+
+| 入口 | npm 脚本 | 用途 |
+|---|---|---|
+| `publicTrafficReport.ts` | `public-traffic-report` | **主公域流量日报**：抓取、映射、分析、产物、飞书通知 |
+| `dailyReport.ts` | `daily-report` | 基础版日报链路 |
+| `feishuBotSdk.ts` | `feishu-bot:sdk` | 飞书 SDK 长连接服务，生产主入口 |
+| `feishuBot.ts` | `feishu-bot` | 飞书 HTTP 回调服务，保留兼容入口 |
+| `agentDryRun.ts` | `agent:dry-run` | 自然语言 Agent 意图/计划干跑；默认 planner-first |
+| `activityAutomation.ts` | `activity-automation:scout` | 差异化定价活动页侦察与辅助配置 |
+| `dailyMissionRun.ts` | `daily-mission-run` | Daily Mission collect → plan → approval 起点 |
+| `dailyMissionAudit.ts` | `daily-mission-audit` | Daily Mission 审计查询 |
+| `dailyMissionDaemon.ts` | `daily-mission-daemon` | Daily Mission 守护入口 |
+| `closedOrderFeedbackSync.ts` | `closed-order-feedback:sync` | 关单备注同步 |
+| `closedOrderFeedbackPreview.ts` | `closed-order-feedback:preview` | 关单反馈预览 |
+| `closedOrderObservationReport.ts` | `closed-order-observation:report` | 关单观察报告 |
+| `linkRegistryAudit.ts` | `link-registry:audit` | 链接档案审计 |
+| `linkRegistryRefreshDaemon.ts` | `link-registry:refresh-daemon` | 链接档案刷新守护 |
+| `linkRegistryGroupReview.ts` | `link-registry:group-review` | 同款组复核 |
+| `linkRegistryMergeReview.ts` | `link-registry:merge-review` | 档案合并复核 |
+| `syncProductIdMap.ts` | `sync-product-id-map` | 商品 ID 映射同步 |
+| `refreshProductIdMap.ts` | `refresh-product-id-map` | 商品 ID 映射刷新 |
+| `rebuildLatestReport.ts` | `rebuild-latest` | 重建最新日报 |
+| `captureDashboard.ts` | `capture-dashboard` | 仪表盘诊断截图 |
+| `probePageSize.ts` | `probe-page-size` | 分页大小探测 |
+| `probeExposurePage.ts` | `probe-exposure-page` | 曝光页结构探测 |
+| `operationsLearningLoopPreview.ts` | `operations-learning-loop:preview` | 运营学习闭环预览 |
+
+### 4.2 `src/crawler/`：页面抓取与登录态
+
+负责从业务后台读取源数据，是报表、链接生命周期与活动自动化的底层依赖。
+
+关键文件：
+
+- `exposureCrawler.ts`：公域曝光数据抓取；处理表格、spinner、iframe/frame 等页面差异。
+- `dashboardCrawler.ts`：仪表盘访问数据抓取。
+- `goodsExportCrawler.ts`：商品总表导出。
+- `orderAnalysisCrawler.ts`：订单分析抓取。
+- `publicTrafficCrawler.ts`：公域流量组合抓取。
+- `browserProfile.ts`：Playwright profile 路径与浏览器会话管理。
+- `loginState.ts`、`loginNotification.ts`：登录失效检测和飞书提醒。
+- `merchantSession.ts`、`subAccount.ts`：商户会话和子账号处理。
+- `pagination.ts`、`pageSizeProbe.ts`、`exposurePageProbe.ts`：分页与页面结构探测。
+- `failureHandling.ts`：抓取异常处理。
+
+开发注意：
+
+1. 页面抓取强依赖平台 DOM/选择器；页面改版后先写或更新 source-level 测试，再改选择器。
+2. 不要把空数据直接视为成功：需要区分「页面没有数据」「登录失效」「选择器失效」「抓取中断」。
+3. 超时/解析失败要保留足够诊断上下文（URL、标题、页面/Frame 信息），但不得在日志泄露 token 或隐私数据。
+4. 真实抓取会触发业务后台访问；未经明确要求，不在开发中随意运行有外部副作用的 CLI。
+
+### 4.3 `src/publicTraffic/`：公域流量分析与日报
+
+这是最成熟的主业务链路。主入口为 `src/cli/publicTrafficReport.ts`。
+
+数据流程：
+
+```text
+商品总表 + 曝光累计 + 1/7/30 日访问 + 订单分析
+  → 规范化/合并/增量与窗口聚合
+  → 低曝光、弱点击、弱转化、高潜、新品、链接生命周期等发现
+  → Markdown、XLSX、JSON、飞书卡片/文本、运行日志
+```
+
+关键文件：
+
+- `analyzePublicTraffic.ts`、`analyzePublicTrafficData.ts`：主分析。
+- `buildPublicTrafficCard.ts`：飞书日报卡片。
+- `buildPublicTrafficMarkdown.ts`、`buildPublicTrafficWorkbook.ts`：Markdown / Excel 产物。
+- `buildPublicTrafficFeishu.ts`：飞书消息格式。
+- `mergePublicTrafficData.ts`：多周期数据合并。
+- `exposureAggregate.ts`、`exposureDelta.ts`、`exposureNormalize.ts`、`exposureStatus.ts`：曝光数据处理管线。
+- `dashboardQuality.ts`、`dashboardRefresh.ts`：数据质量与仪表盘刷新。
+- `goodsSnapshot.ts`、`goodsLinkLifecycle.ts`、`goodsStatePersistence.ts`：商品首次出现、生命周期、持久化状态。
+- `goodsManagerNewProducts.ts`：goods-manager 新品池集成。
+- `orderAnalysis.ts`：订单分析。
+- `productDisplayName.ts`：商品展示名解析。
+- `rulesConfig.ts`：分析规则。
+- `artifacts.ts`、`paths.ts`、`observationState.ts`、`publicTrafficRunState.ts`：运行产物和状态辅助。
+
+输出默认写在 `output/`，典型包含按日期分目录的日报 Markdown/XLSX、源数据/中间 JSON、运行日志，以及 `output/state/` 下的生命周期状态。
+
+### 4.4 `src/agentData/`：Agent 数据理解层
+
+该层把日报/状态数据转换为可被 Agent 确定性查询的能力。**不要把计算逻辑复制进 LLM prompt 或飞书 handler；新数据查询应优先落在该层。**
+
+关键文件：
+
+- `productRanking.ts`、`categoryRanking.ts`：商品和品类排名。
+- `windowAggregate.ts`、`windowQuery.ts`、`windowedFindings.ts`：任意窗口聚合和窗口化发现。
+- `publicTrafficMetricCatalog.ts`：公域日报**全指标能力目录**。
+- `publicTrafficQueries.ts`：公域流量查询。
+- `metricThresholdStrategy.ts`：来源感知的指标阈值策略。
+- `refreshCandidateExplain.ts`：活动刷新候选解释，使用窗口语义。
+- `dataHealth.ts`、`safeSource.ts`：数据健康与安全读取。
+- `taskPool.ts`：任务池查询。
+
+近期已完成/正在延续的方向：全指标能力矩阵、任意窗口聚合、参数天数校验、复合条件与来源感知阈值。新增指标时须同时维护：**能力目录、查询/聚合逻辑、阈值解释、工具 metadata/schema、回归 fixture 与测试。**
+
+### 4.5 `src/feishuBot/`：飞书 Bot、工具执行与卡片
+
+飞书交互中枢，既有 SDK 长连接，也保留 HTTP callback。生产优先使用 `feishuBotSdk.ts` 对应的 SDK 长连接。
+
+关键文件：
+
+- `sdkClient.ts`：SDK 长连接、事件处理和卡片回调。
+- `server.ts`：HTTP 回调服务器。
+- `agentToolExecutor.ts`：中央工具执行引擎；处理工具结果、审批、continuation，是当前最大的实现文件。
+- `tools.ts`、`readOnlyToolRegistry.ts`：工具定义、只读工具注册。
+- `reportQuery.ts`：报告查询、过滤、排序、汇总。
+- `rentalPrice.ts`：租赁价相关读写操作协调。
+- `dispatcher.ts`、`intent.ts`：消息分发与旧式命令意图识别。
+- `agentToolContinuation.ts`、`agentSpecializedContinuation.ts`：多步骤与专用卡片 continuation。
+- `rental*Handlers.ts`：批量、镜像、规格、只读、写操作等租赁子处理器。
+- `idLookup.ts`、`idLookupCard.ts`、`inventoryStatusCard.ts`、`linkRegistryOverviewCard.ts`：查询卡片。
+- `refreshActivityCard.ts`、`refreshActivityPlanStore.ts`、`refreshActivityStrategySelect.ts`：活动刷新 UI/状态。
+- `closedOrderObservationCard.ts`、`closedOrderPriceAlertCard.ts`：关单相关卡片。
+- `llmProvider.ts`、`llmReadOnlyToolAdapter.ts`、`llmToolSelector.ts`：LLM 接入适配。
+- `priceAdjustment.ts`、`priceChangeContract.ts`、`priceMultiplier.ts`：价格调整参数与契约。
+
+维护要点：
+
+- SDK 与 HTTP 两条入口的行为必须保持一致；涉及卡片回调时应同时核对 `sdkClient.ts` 和 `server.ts`。
+- `reason` 只能用于展示，不能反解析为结构化价格/范围参数。
+- `reportQuery` 不支持的 filter、sort 或 metric 必须显式报错，不能静默返回空结果或「声称排序却未排序」。
+- 交互卡片会暂停后续步骤；LLM 计划要把打开交互卡的工具放在最后，或先进行澄清。
+
+### 4.6 `src/agentRuntime/`：Agent 运行时、审批与 Daily Mission
+
+负责 LLM 规划、工具注册、schema 校验、通用确认卡、多步计划与 Daily Mission。
+
+关键文件：
+
+- `toolRegistry.ts`：中央工具注册表，定义工具 schema、可见性、结果 metadata、执行入口。
+- `planner.ts`、`llmPlanner.ts`：规划器。
+- `approvalCard.ts`、`clarificationCard.ts`：通用确认/澄清卡。
+- `stepResolution.ts`：解析 `${step.metadata}` 占位符。
+- `runtime.ts`、`policy.ts`、`tool.ts`、`types.ts`：运行时基础类型与策略。
+- `dailyMissionOrchestrator.ts`、`dailyMissionExecution.ts`、`dailyMissionRun.ts`、`dailyMissionContext.ts`：Daily Mission 主链路。
+- `dailyMissionApproval.ts`、`dailyMissionApprovalCallback.ts`、`dailyMissionApprovalStore.ts`：Mission 审批。
+- `dailyMissionArtifacts.ts`、`dailyMissionCollectors.ts`、`dailyMissionRejection.ts`：产物、数据收集与拒绝处理。
+- `decisionBuilder.ts`、`decisionBuilderFactory.ts`、`decisionPolicy.ts`、`decisionGolden.ts`、`decisionRecord.ts`：决策构建、策略与 golden。
+- `operationLedger.ts`、`operationPlan.ts`、`outcomeAttribution.ts`：操作账本与归因。
+- `dailyJournalWriter.ts`：Daily Mission journal。
+- `agentExploreLoop.ts`、`exploreToolset.ts`：探索循环。
+- `dataFreshnessGate.ts`、`hotspotEvents.ts`、`marketPriceCollector.ts`、`publicTrafficCrawlTool.ts`：数据门控与采集工具。
+
+#### LLM 与工具约定
+
+- 通过 OpenAI-compatible `/chat/completions` 供应商接入。
+- 配置优先级：`MT_AGENT_LLM_*`，其次 `LLM_*`；`MT_AGENT_LLM_PROVIDER=disabled` 可关闭规划器。
+- `plannerVisible: true` 才能由 LLM 直接选择。
+- `plannerVisible: false` 是内部/隐藏运行时工具，绝不能通过普通 planner 输出或 continuation 直接调用。
+- 工具 schema、prompt 和执行端必须是同一份可兑现契约；schema 不能声明执行端做不到的字段或枚举。
+- 多步骤计划可以使用前一步的 `resultMetadataSchema` 输出；商品写步骤会暂停，确认后只执行当前步骤，再恢复余下步骤。
+
+#### 确认卡边界
+
+- 商品复制、下架、改价、规格/租期变更等写操作必须确认。
+- 日报生成与仪表盘刷新属于重抓取操作，也必须确认。
+- 报表重发/推送、关单同步/报告等非商品变更操作可直接执行。
+- 确认卡使用从完整请求派生的 `confirmationKey`，解析时必须复算并验证，防止卡片 payload 篡改。
+
+#### Daily Mission 当前状态
+
+Daily Mission 的 collect → plan → approval 骨架已经存在，但审计文档指出其真实审批执行闭环仍有高优先级问题。在这些问题修复、补充回归测试并验证前，**不建议将 Daily Mission 接入真实运营写操作。**
+
+优先修复方向：
+
+1. 审批回调必须验证 run 状态、持久化待审 decision 与请求一致性。
+2. `runId + decisionId` 必须有持久化幂等保护，避免重复确认导致二次副作用。
+3. DecisionPolicy 应拒绝 hidden/runtime 工具，只允许明确白名单的 plan/preview 工具。
+4. 遇到工具返回二次确认卡时，结果应为 pending，而不是误记执行成功。
+5. 执行后必须更新 Mission run 状态、journal、ledger 归因和 audit 视图。
+6. 同日多 run 的 artifacts 需要按 `runId` 隔离，避免覆盖。
+7. JSONL ledger 要能容错坏行并保持读取可用。
+
+### 4.7 `src/linkRegistry/`：现有链接档案与治理
+
+该模块维护长期链接档案，不是日报里的一次性临时字段。它为审计、治理提醒、维护提示、同款组上下文和后续 Agent 决策提供事实源。
+
+关键文件：
+
+- `buildRegistry.ts`：从商品/状态数据建立链接档案。
+- `audit.ts`、`auditReview.ts`、`auditReviewApproval.ts`：审计与复核。
+- `groupReview.ts`、`groupReviewApproval.ts`：同款组复核。
+- `mergeReview.ts`、`mergeReviewApproval.ts`：合并复核。
+- `maintenance.ts`、`maintenanceSession.ts`：维护流程。
+- `governanceSession.ts`：治理会话。
+- `overrides.ts`：人工覆盖项与别名/规则。
+- `daemonCatalog.ts`、`promptRefresh.ts`、`refreshHealth.ts`、`reminderState.ts`：刷新与提醒。
+- `store.ts`、`persistence.ts`、`queryRegistry.ts`：存储查询。
+- `listingState.ts`、`alias.ts`、`types.ts`：状态模型与类型。
+
+状态语义：
+
+| 字段 | 值 | 含义 |
+|---|---|---|
+| `status` | `active / removed / unknown` | 既有消费方使用的粗粒度状态 |
+| `listingState` | `on_sale / delisted / gone / unknown` | 上架语义的细粒度状态 |
+| `delisted` | — | 来源明确显示已下架/停售，仍可能未来恢复 |
+| `gone` | — | 商品已经从总表生命周期消失 |
+
+`delisted` 和 `gone` 都派生为 `status=removed`，不得进入改价、补链、规格删除和活动刷新等可操作候选。前端/飞书展示要区分「已下架」和「链接不存在」，不能混淆。
+
+### 4.8 `src/activityAutomation/`：差异化定价活动自动化
+
+它不是通用活动脚本，而是针对差异化定价活动表单的半自动执行器。
+
+关键文件：
+
+- `workflow.ts`：主流程。
+- `scout.ts`、`scoutAnalysis.ts`：页面侦察、截图、控件分析。
+- `productPicker.ts`、`productPickSession.ts`：自动/人工选品。
+- `dateFilling.ts`、`discountFilling.ts`：日期和折扣填写。
+- `submit.ts`、`submitSession.ts`：提交前后记录。
+- `cancelAssistance.ts`、`cancelModel.ts`：活动取消辅助。
+- `pageModel.ts`：页面抽象。
+- `differentialPricing.ts`、`config.ts`、`recording.ts`、`workarounds.ts`：工作流辅助。
+
+标准流程：进入页面 → 检查登录/账号 → 侦察页面 → 选商品 → 填日期/折扣 → 记录结果 → 仅在显式确认时提交。
+
+页面结构、账号权限和登录态均可能使自动化失效。因此它适合「人工已经确定策略、希望减少机械填写」的场景，而非无人值守批量提交。
+
+### 4.9 `src/closedOrderFeedback/`：关单信息模块
+
+从外部接口拉取近期开单/关单备注，避免重复摄入，将自由文本转化为可分析、可观察的运营信息。
+
+关键文件：
+
+- `runtime.ts`：主运行时。
+- `sync.ts`、`ingest.ts`：同步与去重摄入。
+- `feedback.ts`、`observation.ts`：反馈原因分析、观察报告。
+- `apiProvider.ts`、`fakeProvider.ts`：真实/测试 provider。
+- `priceAlertMonitor.ts`：价格告警观察。
+- `types.ts`：类型契约。
+
+需注意真实 API、token 与商户备注的敏感性；测试优先使用 `fakeProvider` 和 fixtures。
+
+### 4.10 其他模块
+
+| 路径 | 职责 |
+|---|---|
+| `src/inventoryStatus/` | 同款库存快照、查询与持久化 |
+| `src/mapping/` | 商品总表中的平台/内部商品 ID 映射、Excel 补注、分析结果 enrich |
+| `src/notify/` | 飞书 App、Webhook、文本/卡片投递 |
+| `src/operationsLearningLoop/` | 运营学习 quiz 与 session |
+| `src/newLinkWorkflow/batch.ts` | 新链批量计划与流程 |
+| `src/llm/` | provider 接口、OpenAI-compatible 实现、fake provider、JSON 校验 |
+| `src/extractor/` | Ant Table 提取、行/文本标准化 |
+| `src/report/` | 通用 Markdown、XLSX 构建 |
+| `src/storage/` | output 路径和 run log |
+| `src/observability/` | 运行日志 |
+| `src/agentLearning/` | Agent 学习记录存储 |
+
+### 4.11 `vendor/rental-price-agent/`：租赁价外挂技能
+
+外部但随仓库提供的 Playwright 技能，通过独立 daemon（默认端口 9223）向 MT-agent 暴露租赁 SaaS 操作。
+
+主要能力：商品实时读取、改价、改库存、规格增删、租期设置、复制、下架、平台搜索、批量预览/执行/验证/回滚。
+
+核心原则：**Mirror 用于定位，SaaS 商品详情页才是当前值的可信来源。**
+
+安全流程：
+
+```text
+实时 read → 生成 diff / 规则校验 → 向用户展示 → 等待确认
+  → apply + submit → readback verify → 记录任务/审计
+```
+
+规格和租期为未保存页面的表单级变更，必须使用原子操作（如 `spec-add-and-refresh`、`tenancy-set`）；表单改变后不可随意重新导航/重新 read，否则可能丢失未保存变更。
+
+---
+
+## 5. 开发规范
+
+### 5.1 Worktree 治理：强制要求
+
+`C:\works\MT-agent` 的 `master` 是稳定集成和 PM2 运行目录，**不承载日常功能开发**。
+
+在任何非纯读取任务前：
+
+1. 阅读 `docs/worktree-governance.md`。
+2. 检查 `git worktree list --porcelain` 与当前工作树状态。
+3. 从 master 创建隔离 worktree：
+
+```powershell
+git worktree add .worktrees/<topic> -b codex/<topic> master
+```
+
+4. 在新 worktree 中实现、测试、提交。
+5. 只有用户明确要求时才合入 master。
+
+禁止：
+
+- 在 master 直接改功能代码。
+- 跨 worktree 混入其他开发现场。
+- 未经要求清理分支、worktree、`.omo` 草稿或未跟踪文件。
+- 未经要求 push、重启 PM2、发送真实飞书消息、跑真实抓取或执行写操作。
+- 读取、打印、提交 `.env`、真实账号凭据、浏览器 profile、token 或 secret。
+
+### 5.2 实现原则
+
+1. **职责下沉**：CLI/飞书 handler 不复制计算；数据计算进 `agentData` / 领域模块，卡片展示进 card builder。
+2. **契约单一事实源**：新增可被 LLM 调用的字段，必须同步 schema、工具元数据、执行端、错误处理、测试；不要留「schema 支持但执行端忽略」的假能力。
+3. **失败要明确**：不支持的 metric/filter/sort、缺失选择器、部分读数、无法判定的状态，必须显式返回错误/告警/unknown，不得静默降级为成功。
+4. **范围显式化**：单商品与同款组范围必须由统一解析器确定；若单 ID 被扩展为 N 条，确认卡必须说明原因与数量，并进行必要的二次确认。
+5. **结构化优先**：数字、价格、折扣、范围、商品 ID 只从结构化字段读取；`reason` 是展示文本，不能作为业务取值来源。
+6. **写操作预览优先**：先读、再算 diff、展示确认、执行、回读验证、审计；不要跳过其中任一环节。
+
+### 5.3 LLM 语义开发方向
+
+总体方针：**保留并强化安全骨架；将模糊理解交给 LLM 的结构化输出与 grounding；让代码只做严格校验和一次性计算；用 golden set 保证可演进。**
+
+推荐优先级：
+
+1. 建立自然语言 → 期望工具参数的 golden set（建议 `tests/nl-param-golden/`）；历史修复案例、折扣歧义、同款组范围、reportQuery 错误应纳入。
+2. 统一单 ID/同款组解析范围，并在确认卡回显范围推导原因。
+3. 收紧价格倍数契约：LLM 只输出 `0–1 factor` 或带符号 amount；二者互斥；代码只计算一次。
+4. 将平台真实支持的价格字段/档位作为单一事实源，并注入 LLM grounding。
+5. 收敛 `reportQuery` 的 filter、sort、metric 契约，显式拒绝不支持项。
+6. 再考虑 planner 侧的先读后规划、critic 自检和批量闭环；不要优先扩大执行端自治。
+
+明确不要做：
+
+- 不要为了「智能化」移除确认卡。
+- 不要在没有 golden 回归保护时批量删除兼容/兜底逻辑。
+- 不要让 planner 可见 hidden runtime 工具。
+- 不要通过自由文本 reason 推导执行参数。
+- 不要把同一句写操作因 planner 选了不同工具而解析成不同影响范围。
+
+---
+
+## 6. 构建、测试和验证
+
+### 基础命令
+
+```powershell
+npm run build
+npm test -- --exclude ".worktrees/**"
+```
+
+- `npm run build`：`tsc -p tsconfig.json`。
+- `npm test`：`vitest run`。
+- 未配置 ESLint/Prettier；保持相邻文件既有 TypeScript 风格、命名和注释密度。
+
+按模块聚焦测试示例：
+
+```powershell
+npm test -- tests/feishuBot*.test.ts
+npm test -- tests/linkRegistry*.test.ts
+npm test -- tests/publicTraffic*.test.ts
+npm test -- tests/dailyMission*.test.ts
+```
+
+测试库覆盖 crawler、日报、报表、映射、飞书卡片/Bot、Agent runtime、链接治理、库存、活动自动化、关单信息和 LLM provider。自然语言决策相关 fixtures 位于 `tests/nl-decision-golden/`；新增语义能力应同步增加可读、稳定的 regression cases。
+
+### 验证要求
+
+- 只改纯函数/数据层：至少执行对应测试 + build。
+- 改工具 schema/运行时/飞书路由：测试工具 contract、执行器、SDK 与 HTTP 路径（若两者共享能力）。
+- 改 crawler：优先 source/fixture 测试；真实后台抓取需先获授权。
+- 改写操作：必须补齐 preview、确认、拒绝、重复确认、失败、readback/审计测试。
+- 改 Daily Mission：至少测试审批与 run 一致性、持久化幂等、二次确认卡、run artifact 隔离、journal/audit 更新。
+
+---
+
+## 7. 运行与 PM2
+
+常见入口：
+
+```powershell
+npm run public-traffic-report
+npm run feishu-bot:sdk
+npm run agent:dry-run -- "查询 565"
+npm run activity-automation:scout
+```
+
+PM2 定义见 `ecosystem.config.cjs`：
+
+| 应用 | 实际入口 | 用途 |
+|---|---|---|
+| `mt-feishu-bot` | `src/cli/feishuBotSdk.ts` | 飞书 SDK 长连接服务 |
+| `mt-rental-price-agent` | `vendor/rental-price-agent/scripts/playwright-runner.js` | 租赁价浏览器 daemon |
+
+PM2 重启、真实消息发送、daemon 启停均可能产生外部影响；仅在用户明确授权后执行。不要把测试成功等同于生产可用：生产还依赖 `.env`、飞书应用配置、浏览器登录态、业务后台可达性和账号权限。
+
+---
+
+## 8. 环境变量与数据安全
+
+变量示例见 `.env.example`。主要分组：
+
+| 分组 | 典型变量 |
+|---|---|
+| 飞书应用/投递 | `FEISHU_APP_ID`、`FEISHU_APP_SECRET`、`FEISHU_SEND_TO` |
+| 飞书 Bot | `FEISHU_BOT_USE_SDK`、`FEISHU_BOT_OPEN_ID`、`FEISHU_BOT_PORT`、验证/加密配置 |
+| LLM | `MT_AGENT_LLM_PROVIDER`、`MT_AGENT_LLM_BASE_URL`、`MT_AGENT_LLM_MODEL`、`MT_AGENT_LLM_API_KEY` |
+| 输出与技能 | `MT_AGENT_OUTPUT_DIR`、`RENTAL_PRICE_AGENT_DIR`、daemon URL/token |
+| 外部业务接口 | `GOODS_MANAGER_BASE_URL`、`CLOSED_ORDER_REMARKS_BASE_URL`、API token |
+
+规则：
+
+- `.env`、浏览器 profile、输出中可能含敏感数据的文件不能提交。
+- 日志、异常、卡片和测试断言不得输出 API key、认证 token、完整私密业务数据。
+- 真实用户/商品数据的 fixture 需要脱敏；优先构造最小测试数据。
+
+---
+
+## 9. 必读文档索引
+
+| 文件 | 用途 |
+|---|---|
+| `README.md` | 对外项目总览、安装、环境配置、常用命令 |
+| `docs/worktree-governance.md` | **开发前必读**：master/worktree 规则与历史现场说明 |
+| `docs/llm-agent-runtime.md` | LLM planner、confirmation、continuation 的运行时规则 |
+| `docs/llm-semantic-development-guidance.md` | LLM 语义理解开发方针和优先级 |
+| `docs/llm-semantic-understanding-audit-2026-07-01.md` | 语义理解审计背景 |
+| `docs/agent-runtime-refactor-development-audit-2026-07-02.md` | Daily Mission 已知缺口与推荐修复顺序 |
+| `docs/feishu-bot-readonly-command-agent-merge-handoff.md` | 飞书只读命令 Agent 交接资料 |
+| `docs/delivery/` | 具体功能交付记录 |
+| `docs/superpowers/specs/` | 设计规格 |
+| `docs/superpowers/plans/` | 分阶段实现计划 |
+| `vendor/rental-price-agent/SKILL.md` | 租赁价技能完整协议、动作和安全流程 |
+
+---
+
+## 10. 新 Agent 接手清单
+
+1. 阅读本文件、`README.md`、`docs/worktree-governance.md`。
+2. 确认当前目录是否为 master；非纯读取任务先创建独立 worktree。
+3. 查看 `git status --short --branch`，不得覆盖未知变更。
+4. 阅读目标模块及相邻测试；先理解既有数据/卡片/工具 contract，再修改。
+5. 如涉及 LLM、读取 `docs/llm-agent-runtime.md` 和语义开发指导；确认工具是 planner-visible 还是 hidden。
+6. 如涉及写操作，检查完整的 preview → confirmation → execute → verify → audit 路径。
+7. 先写/更新失败测试，再实现最小改动；运行目标测试与 `npm run build`。
+8. 汇报时准确说明：改动范围、验证命令、通过/失败情况、未运行的真实环境验证及原因。
+9. 不要主动 merge、push、重启 PM2 或执行真实业务写入；等待明确指令。
