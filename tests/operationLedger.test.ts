@@ -12,6 +12,7 @@ import {
   loadOperationLedgerStore,
   operationLedgerJsonlPath,
   operationLedgerPath,
+  recordOperationEvent,
   recordOperationPlan,
 } from '../src/agentRuntime/operationLedger.js';
 
@@ -149,6 +150,34 @@ describe('operation ledger persistence', () => {
     await appendOperationLedgerJsonlEntry(outputDir, approved);
 
     await expect(loadOperationLedgerJsonlEntries(outputDir, '2026-07-01')).resolves.toEqual([created, approved]);
+  });
+
+  it('writes an explicitly partitioned event under its business date while preserving the real execution timestamp', async () => {
+    const outputDir = await tempOutputDir();
+    const partitioned = sampleEntry({
+      at: '2026-07-03T08:00:00.000Z',
+      event: 'execution_succeeded',
+      partitionDate: '2026-07-02',
+    });
+    const wallClock = sampleEntry({ at: '2026-07-03T08:01:00.000Z', event: 'created' });
+
+    await recordOperationEvent(outputDir, partitioned);
+    await recordOperationEvent(outputDir, wallClock);
+
+    await expect(loadOperationLedgerJsonlEntries(outputDir, '2026-07-02')).resolves.toEqual([partitioned]);
+    await expect(loadOperationLedgerJsonlEntries(outputDir, '2026-07-03')).resolves.toEqual([wallClock]);
+    await expect(loadDailyOperationJournalStore(outputDir, '2026-07-02')).resolves.toMatchObject({ entries: [partitioned] });
+    await expect(loadOperationLedgerStore(outputDir)).resolves.toMatchObject({ journal: [partitioned, wallClock] });
+  });
+
+  it('falls back to the execution date for an invalid partition date', async () => {
+    const outputDir = await tempOutputDir();
+    const entry = sampleEntry({ at: '2026-07-03T08:00:00.000Z', partitionDate: '2026-02-30' });
+
+    await recordOperationEvent(outputDir, entry);
+
+    await expect(loadOperationLedgerJsonlEntries(outputDir, '2026-07-03')).resolves.toEqual([entry]);
+    await expect(loadOperationLedgerJsonlEntries(outputDir, '2026-02-30')).resolves.toEqual([]);
   });
 
   it('returns an empty JSONL entry list when the dated ledger file is missing', async () => {

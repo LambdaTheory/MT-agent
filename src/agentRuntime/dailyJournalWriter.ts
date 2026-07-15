@@ -81,6 +81,7 @@ export async function writeDailyJournal(input: WriteDailyJournalInput): Promise<
   await recordOperationEvent(input.outputDir, {
     planId: input.runId,
     at: `${input.date}T00:00:00.000Z`,
+    partitionDate: input.date,
     event: 'journal_written',
     runId: input.runId,
     decisionId: `${input.runId}:journal_written`,

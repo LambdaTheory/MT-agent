@@ -92,27 +92,77 @@ async function recordWriteEvent(
   event: RentalWriteEvent,
   toolName: string,
   productId: string,
+  rentalAction: RentalOperationConfirmRequest['action'],
 ): Promise<void> {
   if (!context) return;
   await recordOperationEvent(context.outputDir, {
     planId: context.decisionId ?? context.runId ?? 'ad-hoc',
-    at: context.missionDate ? `${context.missionDate}T00:00:00.000Z` : new Date().toISOString(),
+    at: new Date().toISOString(),
+    ...(context.missionDate ? { partitionDate: context.missionDate } : {}),
     event,
     toolName,
     ...(context.runId ? { runId: context.runId } : {}),
     ...(context.decisionId ? { decisionId: context.decisionId } : {}),
     subject: { kind: 'product', id: productId },
-    ...(context.missionDate ? { metadata: { missionDate: context.missionDate } } : {}),
+    metadata: {
+      ...(context.missionDate ? { missionDate: context.missionDate } : {}),
+      rentalAction,
+      executionTimestampRecorded: true,
+    },
   });
+}
+
+export const RENTAL_DELIST_MAX_AUDIT_WARNINGS = 20;
+
+function auditWarning(productId: string, error: unknown): string {
+  return `商品 ${productId}：下架审计记录失败（${error instanceof Error ? error.message : String(error)}）`;
+}
+
+export async function recordSuccessfulRentalDelistEvent(
+  context: RentalWriteLedgerContext | undefined,
+  toolName: string,
+  productId: string,
+): Promise<void> {
+  await recordWriteEvent(context, 'execution_succeeded', toolName, productId, 'delist');
+}
+
+export async function recordSuccessfulRentalDelistEventBestEffort(
+  context: RentalWriteLedgerContext | undefined,
+  toolName: string,
+  productId: string,
+): Promise<string | undefined> {
+  try {
+    await recordSuccessfulRentalDelistEvent(context, toolName, productId);
+  } catch (error) {
+    return auditWarning(productId, error);
+  }
+  return undefined;
+}
+
+export function appendRentalDelistAuditWarnings(
+  response: BotResponse,
+  warnings: string[],
+): BotResponse {
+  const auditWarnings = [
+    ...(Array.isArray(response.metadata?.auditWarnings) ? response.metadata.auditWarnings.filter((value): value is string => typeof value === 'string') : []),
+    ...warnings,
+  ].slice(0, RENTAL_DELIST_MAX_AUDIT_WARNINGS);
+  if (auditWarnings.length === 0) return response;
+  return {
+    ...response,
+    text: `${response.text}\n审计警告：${auditWarnings.join('；')}`,
+    metadata: { ...(response.metadata ?? {}), auditWarnings },
+  };
 }
 
 async function recordFailedWriteEvent(
   context: RentalWriteLedgerContext | undefined,
   toolName: string,
   productId: string,
+  rentalAction: RentalOperationConfirmRequest['action'],
 ): Promise<void> {
   try {
-    await recordWriteEvent(context, 'execution_failed', toolName, productId);
+    await recordWriteEvent(context, 'execution_failed', toolName, productId, rentalAction);
   } catch (ledgerError) {
     console.warn('Failed to record rental write failure event.', ledgerError);
   }
@@ -126,11 +176,16 @@ export async function executeRentalWriteOperationHandler(
   if (request.toolName === 'rental.operationConfirmRequest') {
     const rentalRequest = rentalOperationConfirmRequestFromToolArguments(request.arguments);
     if (!rentalRequest) throw new Error('租赁商品操作参数无效，请重新发起。');
-    await recordWriteEvent(ledgerContext, 'execution_started', request.toolName, rentalRequest.productId);
+    await recordWriteEvent(ledgerContext, 'execution_started', request.toolName, rentalRequest.productId, rentalRequest.action);
     try {
       const result = await executeRentalOperationConfirmRequest(client, rentalRequest);
-      await recordWriteEvent(ledgerContext, result.ok ? 'execution_succeeded' : 'execution_failed', request.toolName, rentalRequest.productId);
-      return {
+      const warning = rentalRequest.action === 'delist' && result.ok
+        ? await recordSuccessfulRentalDelistEventBestEffort(ledgerContext, request.toolName, rentalRequest.productId)
+        : undefined;
+      if (!(rentalRequest.action === 'delist' && result.ok)) {
+        await recordWriteEvent(ledgerContext, result.ok ? 'execution_succeeded' : 'execution_failed', request.toolName, rentalRequest.productId, rentalRequest.action);
+      }
+      return appendRentalDelistAuditWarnings({
         text: result.text,
         metadata: {
           ...(result.metadata ?? {}),
@@ -138,20 +193,25 @@ export async function executeRentalWriteOperationHandler(
           ok: result.ok,
           productId: rentalRequest.productId,
         },
-      };
+      }, warning ? [warning] : []);
     } catch (error) {
-      await recordFailedWriteEvent(ledgerContext, request.toolName, rentalRequest.productId);
+      await recordFailedWriteEvent(ledgerContext, request.toolName, rentalRequest.productId, rentalRequest.action);
       throw error;
     }
   }
 
   const rentalRequest = rentalAgentToolRequest(request.toolName, request.arguments);
   if (!rentalRequest) throw new Error('租赁商品操作参数无效，请重新发起。');
-  await recordWriteEvent(ledgerContext, 'execution_started', request.toolName, rentalRequest.productId);
+  await recordWriteEvent(ledgerContext, 'execution_started', request.toolName, rentalRequest.productId, rentalRequest.action);
   try {
     const result = await executeRentalOperationConfirmRequest(client, rentalRequest);
-    await recordWriteEvent(ledgerContext, result.ok ? 'execution_succeeded' : 'execution_failed', request.toolName, rentalRequest.productId);
-    return {
+    const warning = rentalRequest.action === 'delist' && result.ok
+      ? await recordSuccessfulRentalDelistEventBestEffort(ledgerContext, request.toolName, rentalRequest.productId)
+      : undefined;
+    if (!(rentalRequest.action === 'delist' && result.ok)) {
+      await recordWriteEvent(ledgerContext, result.ok ? 'execution_succeeded' : 'execution_failed', request.toolName, rentalRequest.productId, rentalRequest.action);
+    }
+    return appendRentalDelistAuditWarnings({
       text: result.text,
       metadata: {
         ...(result.metadata ?? {}),
@@ -159,9 +219,9 @@ export async function executeRentalWriteOperationHandler(
         ok: result.ok,
         productId: rentalRequest.productId,
       },
-    };
+    }, warning ? [warning] : []);
   } catch (error) {
-    await recordFailedWriteEvent(ledgerContext, request.toolName, rentalRequest.productId);
+    await recordFailedWriteEvent(ledgerContext, request.toolName, rentalRequest.productId, rentalRequest.action);
     throw error;
   }
 }

@@ -79,6 +79,7 @@ export async function attributeOutcomes(outputDir: string, missionDate: string, 
     await recordOperationEvent(outputDir, {
       planId: record.decisionId,
       at: `${missionDate}T00:00:00.000Z`,
+      partitionDate: missionDate,
       event: 'outcome_attributed',
       runId: record.runId,
       decisionId: record.decisionId,

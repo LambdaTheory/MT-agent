@@ -98,4 +98,48 @@ describe('mergeGoodsSnapshotWithDaemon', () => {
       },
     ]);
   });
+
+  it('preserves platform restrictions while applying daemon names', () => {
+    expect(mergeGoodsSnapshotWithDaemon([
+      {
+        platformProductId: 'platform-701',
+        internalProductId: '701',
+        productName: '旧名称',
+        listingState: 'delisted',
+        listingStatusText: '已下架',
+        platformRestriction: { kind: 'review_rejected', reasonText: '资质审核不通过', observedAt: '2026-07-14' },
+      },
+      {
+        platformProductId: 'platform-702',
+        internalProductId: '702',
+        productName: '仅商品总表名称',
+        listingState: 'delisted',
+        listingStatusText: '已下架',
+        platformRestriction: { kind: 'frozen', reasonText: '涉嫌违规冻结' },
+      },
+    ], [
+      {
+        internalProductId: '701',
+        productName: 'daemon 名称',
+        discoveredAt: '2026-07-04T00:00:00.000Z',
+      },
+    ])).toEqual([
+      {
+        platformProductId: 'platform-701',
+        internalProductId: '701',
+        productName: 'daemon 名称',
+        listingState: 'delisted',
+        listingStatusText: '已下架',
+        platformRestriction: { kind: 'review_rejected', reasonText: '资质审核不通过', observedAt: '2026-07-14' },
+      },
+      {
+        platformProductId: 'platform-702',
+        internalProductId: '702',
+        productName: '仅商品总表名称',
+        listingState: 'delisted',
+        listingStatusText: '已下架',
+        platformRestriction: { kind: 'frozen', reasonText: '涉嫌违规冻结' },
+      },
+    ]);
+  });
 });

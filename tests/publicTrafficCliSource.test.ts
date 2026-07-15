@@ -68,6 +68,20 @@ describe('public traffic CLI wiring', () => {
     expect(text).toContain('昨日漏抓=');
   });
 
+  it('passes lifecycle suppression into link registry delist attribution', async () => {
+    const text = await source('../src/cli/publicTrafficReport.ts');
+    expect(text).toContain('suppressDelistAttribution: refreshHealth.suppressLifecycleDrop');
+    expect(text).toContain('suppressDelistAttribution: boolean;');
+    expect(text).toContain('suppressDelistAttribution: input.suppressDelistAttribution');
+    expect(text).toContain('loadClosedOrderRegistryContext({ artifactsDir: input.outputDir, suppressDelistAttribution: input.suppressDelistAttribution, referenceDate: input.runDate }, process.cwd())');
+  });
+
+  it('stamps nested platform restriction observation time in current goods snapshot', async () => {
+    const text = await source('../src/cli/publicTrafficReport.ts');
+    expect(text).toContain('const goodsSnapshotCollectedAt = new Date().toISOString();');
+    expect(text).toContain('platformRestriction: { ...item.platformRestriction, observedAt: item.platformRestriction.observedAt ?? (goodsSnapshotFromExport ? goodsSnapshotCollectedAt : runDate) }');
+  });
+
   it('crawler 接入订单分析抓取', async () => {
     const text = await source('../src/crawler/publicTrafficCrawler.ts');
     expect(text).toContain('collectOrderAnalysisPages');

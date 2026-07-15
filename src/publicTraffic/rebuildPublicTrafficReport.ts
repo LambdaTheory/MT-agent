@@ -74,6 +74,7 @@ async function writeInventorySameSkuSnapshotSafely(input: {
       ...input.closedOrderRegistryPaths,
       ...(input.productIdMappingPath ? { productIdMapPath: input.productIdMappingPath } : {}),
       artifactsDir: input.closedOrderRegistryPaths?.artifactsDir ?? input.outputDir,
+      referenceDate: input.date,
     }, process.cwd());
     const sameSkuSnapshot = buildInventorySameSkuSnapshot({
       date: input.date,

@@ -61,6 +61,7 @@ export async function executeApprovedDecision(input: ExecuteApprovedDecisionInpu
   await recordOperationEvent(outputDir, {
     planId: decision.decisionId,
     at: input.date ? `${input.date}T00:00:00.000Z` : new Date().toISOString(),
+    ...(input.date ? { partitionDate: input.date } : {}),
     event: 'approval_accepted',
     runId: decision.runId,
     decisionId: decision.decisionId,

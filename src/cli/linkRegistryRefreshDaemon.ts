@@ -4,6 +4,7 @@ import { loadEnv } from '../config/loadEnv.js';
 import { resolveClosedOrderRegistryPaths } from '../closedOrderFeedback/runtime.js';
 import { fetchDaemonCatalogSnapshot, mergeGoodsSnapshotWithDaemon, saveDaemonCatalogSnapshot } from '../linkRegistry/daemonCatalog.js';
 import { decideRefreshHealth } from '../linkRegistry/refreshHealth.js';
+import { writeRefreshSuppressionState } from '../linkRegistry/refreshSuppressionState.js';
 import { writeJsonAtomic } from '../linkRegistry/persistence.js';
 import { loadProductIdMapping, type ProductIdMapping } from '../mapping/productIdMapping.js';
 import { buildPublicTrafficPaths } from '../publicTraffic/paths.js';
@@ -61,6 +62,12 @@ export async function runLinkRegistryRefreshDaemonCli(argv = process.argv.slice(
     daemonExcludedCount: daemonSnapshot.excludedCount,
     daemonPagesScraped: daemonSnapshot.pagesScraped,
     daemonFetchMode: 'live',
+  });
+
+  await writeRefreshSuppressionState(resolvedPaths.artifactsDir, {
+    version: 1,
+    referenceDate,
+    suppressDelistAttribution: refreshHealth.suppressLifecycleDrop,
   });
 
   const firstSeen = await updateGoodsFirstSeenStateSerialized({

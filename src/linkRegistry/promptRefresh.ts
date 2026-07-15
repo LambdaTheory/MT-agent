@@ -8,6 +8,7 @@ import {
 } from '../closedOrderFeedback/runtime.js';
 import { downloadGoodsExport } from '../crawler/goodsExportCrawler.js';
 import { decideRefreshHealth } from './refreshHealth.js';
+import { writeRefreshSuppressionState } from './refreshSuppressionState.js';
 import { writeJsonAtomic } from './persistence.js';
 import { buildLinkRegistryMaintenanceReport, isLinkRegistryMaintenanceIgnoredEntry } from './maintenance.js';
 import { fetchDaemonCatalogSnapshot, loadOptionalDaemonCatalogSnapshot, mergeGoodsSnapshotWithDaemon, saveDaemonCatalogSnapshot } from './daemonCatalog.js';
@@ -149,8 +150,15 @@ export async function refreshLinkRegistryForPrompt(
   if (refreshMode === 'default') {
     try {
       const goodsExportPath = await downloadGoodsExport(config, paths.goodsExportWorkbook);
+      const collectedAt = new Date().toISOString();
       await writeProductIdMappingFromExport(goodsExportPath, resolvedPaths.productIdMapPath, paths.productIdMappingSyncLog);
-      goodsSnapshotFromExport = parseGoodsExportSnapshot(goodsExportPath);
+      goodsSnapshotFromExport = parseGoodsExportSnapshot(goodsExportPath).map((item) => ({
+        ...item,
+        ...(item.listingState ? { observedAt: collectedAt } : {}),
+        ...(item.platformRestriction
+          ? { platformRestriction: { ...item.platformRestriction, observedAt: collectedAt } }
+          : {}),
+      }));
       goodsExportRefreshed = true;
     } catch (error) {
       warnings.push(`商品总表刷新失败：${errorMessage(error)}`);
@@ -185,6 +193,11 @@ export async function refreshLinkRegistryForPrompt(
     daemonFetchMode: daemonRefreshed ? 'live' : (daemonSnapshot ? 'fallback' : 'missing'),
   });
   warnings.push(...refreshHealth.warnings);
+  await writeRefreshSuppressionState(outputDir, {
+    version: 1,
+    referenceDate,
+    suppressDelistAttribution: refreshHealth.suppressLifecycleDrop,
+  });
   await writeJsonAtomic(paths.goodsListSnapshot, mergedSnapshot);
 
   const firstSeen = await updateGoodsFirstSeenStateSerialized({
@@ -200,7 +213,11 @@ export async function refreshLinkRegistryForPrompt(
     suppressNewRemovals: refreshHealth.suppressLifecycleDrop,
   });
 
-  const registryContext = await loadClosedOrderRegistryContext(registryInput);
+  const registryContext = await loadClosedOrderRegistryContext({
+    ...registryInput,
+    suppressDelistAttribution: refreshHealth.suppressLifecycleDrop,
+    referenceDate,
+  });
   const summaryBase = summarizeNewEntries(beforeContext?.registry ?? [], registryContext.registry, referenceDate);
   return {
     registryContext,

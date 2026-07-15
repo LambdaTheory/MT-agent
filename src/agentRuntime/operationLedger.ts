@@ -72,6 +72,15 @@ async function readJson(path: string): Promise<unknown | null> {
   }
 }
 
+function partitionDateFor(entry: OperationPlanJournalEntry): string {
+  const partitionDate = entry.partitionDate;
+  if (typeof partitionDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(partitionDate)) return entry.at.slice(0, 10);
+  const parsed = new Date(`${partitionDate}T00:00:00.000Z`);
+  return Number.isNaN(parsed.valueOf()) || parsed.toISOString().slice(0, 10) !== partitionDate
+    ? entry.at.slice(0, 10)
+    : partitionDate;
+}
+
 async function writeJson(path: string, value: unknown): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
@@ -125,7 +134,7 @@ export async function appendOperationPlanJournalEntry(
   entry: OperationPlanJournalEntry,
 ): Promise<OperationPlanJournalEntry> {
   return withLedgerLock(outputDir, async () => {
-    const date = entry.at.slice(0, 10);
+    const date = partitionDateFor(entry);
     const ledger = await loadOperationLedgerStore(outputDir);
     const daily = await loadDailyOperationJournalStore(outputDir, date);
     const now = new Date().toISOString();
@@ -140,7 +149,7 @@ export async function appendOperationLedgerJsonlEntry(
   entry: OperationPlanJournalEntry,
 ): Promise<OperationPlanJournalEntry> {
   return withLedgerLock(outputDir, async () => {
-    const path = operationLedgerJsonlPath(outputDir, entry.at.slice(0, 10));
+    const path = operationLedgerJsonlPath(outputDir, partitionDateFor(entry));
     await mkdir(dirname(path), { recursive: true });
     await appendFile(path, `${JSON.stringify(entry)}\n`, 'utf8');
     return entry;
@@ -152,23 +161,48 @@ export async function recordOperationEvent(
   entry: OperationPlanJournalEntry,
 ): Promise<OperationPlanJournalEntry> {
   return withLedgerLock(outputDir, async () => {
-    const date = entry.at.slice(0, 10);
-    const key = operationEventKey(entry);
+    const date = partitionDateFor(entry);
     const jsonlPath = operationLedgerJsonlPath(outputDir, date);
     const jsonlEntries = await loadOperationLedgerJsonlEntries(outputDir, date);
     const ledger = await loadOperationLedgerStore(outputDir);
     const daily = await loadDailyOperationJournalStore(outputDir, date);
-    if (jsonlEntries.some((item) => operationEventKey(item) === key) || daily.entries.some((item) => operationEventKey(item) === key)) return entry;
+    const entries = unionOperationEvents([
+      ...jsonlEntries.filter((item) => partitionDateFor(item) === date),
+      ...ledger.journal.filter((item) => partitionDateFor(item) === date),
+      ...daily.entries.filter((item) => partitionDateFor(item) === date),
+    ], entry);
     const now = new Date().toISOString();
-    await writeJsonl(jsonlPath, [...jsonlEntries, entry]);
-    await writeJson(operationLedgerPath(outputDir), { ...ledger, updatedAt: now, journal: [...ledger.journal, entry] });
-    await writeJson(dailyOperationJournalPath(outputDir, date), { ...daily, date, updatedAt: now, entries: [...daily.entries, entry] });
+    await writeJsonl(jsonlPath, entries);
+    const otherJournalEntries = ledger.journal.filter((item) => partitionDateFor(item) !== date);
+    await writeJson(operationLedgerPath(outputDir), { ...ledger, updatedAt: now, journal: [...otherJournalEntries, ...entries] });
+    await writeJson(dailyOperationJournalPath(outputDir, date), { ...daily, date, updatedAt: now, entries });
     return entry;
   });
 }
 
+function unionOperationEvents(
+  entries: OperationPlanJournalEntry[],
+  incoming: OperationPlanJournalEntry,
+): OperationPlanJournalEntry[] {
+  const seen = new Set<string>();
+  return [...entries, incoming].filter((item) => {
+    const key = operationEventKey(item);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function operationEventKey(entry: OperationPlanJournalEntry): string {
-  return [entry.runId ?? '', entry.decisionId ?? '', entry.event, entry.at, entry.toolName ?? ''].join('|');
+  return [
+    entry.runId ?? '',
+    entry.decisionId ?? '',
+    entry.event,
+    entry.at,
+    entry.toolName ?? '',
+    entry.subject?.kind ?? '',
+    entry.subject?.id ?? '',
+  ].join('|');
 }
 
 export async function loadOperationLedgerJsonlEntries(

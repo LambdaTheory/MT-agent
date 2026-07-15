@@ -89,6 +89,7 @@ export async function runDailyMissionPlan(input: RunDailyMissionPlanInput): Prom
     await recordOperationEvent(input.outputDir, {
       planId: input.runId,
       at: eventAt(),
+      partitionDate: input.date,
       event: 'data_collected',
       runId: input.runId,
       decisionId: `${input.runId}:data_collected`,
@@ -100,6 +101,7 @@ export async function runDailyMissionPlan(input: RunDailyMissionPlanInput): Prom
       await recordOperationEvent(input.outputDir, {
         planId: input.runId,
         at: eventAt(),
+        partitionDate: input.date,
         event: 'data_not_ready',
         runId: input.runId,
         decisionId: `${input.runId}:data_not_ready`,
@@ -133,6 +135,7 @@ export async function runDailyMissionPlan(input: RunDailyMissionPlanInput): Prom
       await recordOperationEvent(input.outputDir, {
         planId: decision.decisionId,
         at: eventAt(),
+        partitionDate: input.date,
         event: 'decision_created',
         runId: input.runId,
         decisionId: decision.decisionId,
@@ -153,6 +156,7 @@ export async function runDailyMissionPlan(input: RunDailyMissionPlanInput): Prom
       await recordOperationEvent(input.outputDir, {
         planId: decision.decisionId,
         at: eventAt(),
+        partitionDate: input.date,
         event: 'approval_requested',
         runId: input.runId,
         decisionId: decision.decisionId,

@@ -20,6 +20,7 @@ import {
   type DaemonCatalogSnapshot,
 } from '../linkRegistry/daemonCatalog.js';
 import { decideRefreshHealth } from '../linkRegistry/refreshHealth.js';
+import { writeRefreshSuppressionState } from '../linkRegistry/refreshSuppressionState.js';
 import { annotateGoodsExportWorkbookWithInternalId } from '../mapping/annotateGoodsExportWorkbook.js';
 import { parseGoodsExportSnapshot } from '../mapping/goodsExportMapping.js';
 import { loadProductIdMapping, type ProductIdMapping } from '../mapping/productIdMapping.js';
@@ -522,6 +523,7 @@ export async function runPublicTrafficReportCli(): Promise<PublicTrafficReportCl
     const mappingPath = resolveProductIdMappingPath(config);
     log.addEvent('开始下载商品总表、抓取曝光与后链路数据');
     const { goodsExportPath, exposure: crawlResult, dashboard: rawTables, orderAnalysis: orderAnalysisCapture } = await crawlPublicTrafficSources(config, paths.goodsExportWorkbook);
+    const goodsSnapshotCollectedAt = new Date().toISOString();
     await refreshProductIdMappingForReport(goodsExportPath, mappingPath, paths.productIdMappingSyncLog, log);
     const mapping = await loadMappingSafely(mappingPath, log);
     const goodsSnapshotFromExport = await loadGoodsSnapshotFromExport(goodsExportPath, log);
@@ -529,7 +531,11 @@ export async function runPublicTrafficReportCli(): Promise<PublicTrafficReportCl
     const { previous: previousGoodsSnapshot, current: currentGoodsSnapshot } = await mutateGoodsSnapshotStateSerialized(paths.goodsCurrentSnapshotState, (latestPrevious) => mergeGoodsSnapshotWithDaemon(
       goodsSnapshotFromExport ?? (latestPrevious.length > 0 ? latestPrevious : goodsSnapshotFromMapping(mapping)),
       daemonCatalog?.entries ?? [],
-    ).map((item) => (item.listingState ? { ...item, observedAt: item.observedAt ?? runDate } : item)));
+    ).map((item) => ({
+      ...item,
+      ...(item.listingState ? { observedAt: item.observedAt ?? (goodsSnapshotFromExport ? goodsSnapshotCollectedAt : runDate) } : {}),
+      ...(item.platformRestriction ? { platformRestriction: { ...item.platformRestriction, observedAt: item.platformRestriction.observedAt ?? (goodsSnapshotFromExport ? goodsSnapshotCollectedAt : runDate) } } : {}),
+    })));
     const refreshHealth = decideRefreshHealth({
       previousSnapshotCount: previousGoodsSnapshot.length,
       currentMergedSnapshotCount: currentGoodsSnapshot.length,
@@ -539,6 +545,11 @@ export async function runPublicTrafficReportCli(): Promise<PublicTrafficReportCl
       daemonFetchMode: daemonCatalog ? 'live' : 'missing',
     });
     for (const warning of refreshHealth.warnings) log.addEvent(warning);
+    await writeRefreshSuppressionState(config.outputDir, {
+      version: 1,
+      referenceDate: runDate,
+      suppressDelistAttribution: refreshHealth.suppressLifecycleDrop,
+    });
     await writeJsonAtomic(paths.goodsListSnapshot, currentGoodsSnapshot);
     log.addEvent(`商品当前快照已保存: ${currentGoodsSnapshot.length} 条, daemon=${daemonCatalog?.entries.length ?? 0}`);
     const firstSeenState = await updateGoodsFirstSeenStateSerialized({
@@ -712,6 +723,7 @@ export async function runPublicTrafficReportCli(): Promise<PublicTrafficReportCl
       runDate,
       context,
       snapshotPath: paths.sameSkuSnapshot,
+      suppressDelistAttribution: refreshHealth.suppressLifecycleDrop,
     }, log);
 
     await writeFile(paths.reportContext, JSON.stringify(context, null, 2), 'utf8');
@@ -804,11 +816,12 @@ async function writeInventorySameSkuSnapshotSafely(
     runDate: string;
     context: PublicTrafficDataReportContext;
     snapshotPath: string;
+    suppressDelistAttribution: boolean;
   },
   log: ReturnType<typeof createRunLog>,
 ): Promise<ClosedOrderRegistryContext | null> {
   try {
-    const registryContext = await loadClosedOrderRegistryContext({ artifactsDir: input.outputDir }, process.cwd());
+    const registryContext = await loadClosedOrderRegistryContext({ artifactsDir: input.outputDir, suppressDelistAttribution: input.suppressDelistAttribution, referenceDate: input.runDate }, process.cwd());
     const sameSkuSnapshot = buildInventorySameSkuSnapshot({
       date: input.runDate,
       reportDate: input.context.date,

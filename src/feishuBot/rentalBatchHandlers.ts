@@ -185,7 +185,8 @@ async function recordBatchEvent(context: RentalWriteLedgerContext | undefined, e
   if (!context || !isLedgeredBatchWrite(request)) return;
   await recordOperationEvent(context.outputDir, {
     planId: context.decisionId ?? context.runId ?? 'ad-hoc',
-    at: context.missionDate ? `${context.missionDate}T00:00:00.000Z` : new Date().toISOString(),
+    at: new Date().toISOString(),
+    ...(context.missionDate ? { partitionDate: context.missionDate } : {}),
     event,
     toolName,
     ...(context.runId ? { runId: context.runId } : {}),

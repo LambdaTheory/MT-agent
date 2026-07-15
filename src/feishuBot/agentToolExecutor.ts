@@ -85,7 +85,12 @@ import {
   type RentalPriceSkillClient,
 } from './rentalPrice.js';
 import { executeRentalReadOnlyOperationHandler } from './rentalReadOnlyOperationHandlers.js';
-import { executeRentalWriteOperationHandler } from './rentalWriteOperationHandlers.js';
+import {
+  appendRentalDelistAuditWarnings,
+  executeRentalWriteOperationHandler,
+  recordSuccessfulRentalDelistEventBestEffort,
+  RENTAL_DELIST_MAX_AUDIT_WARNINGS,
+} from './rentalWriteOperationHandlers.js';
 import { executeRentalBatchTool } from './rentalBatchHandlers.js';
 import { executeRentalMirrorTool } from './rentalMirrorHandlers.js';
 import { findReadOnlyTool } from './readOnlyToolRegistry.js';
@@ -1077,7 +1082,8 @@ async function recordAgentToolWriteEvent(
   if (!context) return;
   await recordOperationEvent(context.outputDir, {
     planId: context.decisionId ?? context.runId ?? 'ad-hoc',
-    at: context.missionDate ? `${context.missionDate}T00:00:00.000Z` : new Date().toISOString(),
+    at: new Date().toISOString(),
+    ...(context.missionDate ? { partitionDate: context.missionDate } : {}),
     event,
     toolName,
     ...(context.runId ? { runId: context.runId } : {}),
@@ -1760,6 +1766,7 @@ async function rentalDelistBatchResponse(
   args: Record<string, unknown>,
   client: RentalPriceSkillClient,
   toolName: 'rental.delist' | 'rental.delistBatch' = 'rental.delistBatch',
+  ledgerContext?: RentalWriteLedgerContext,
 ): Promise<BotResponse> {
   const productIds = readDelistProductIds(args);
   if (!productIds) {
@@ -1770,10 +1777,15 @@ async function rentalDelistBatchResponse(
   }
 
   const results: Awaited<ReturnType<RentalPriceSkillClient['delist']>>[] = [];
+  const auditWarnings: string[] = [];
   for (const productId of productIds) {
     try {
       const result = await client.delist(productId);
       results.push(result);
+      if (result.ok) {
+        const warning = await recordSuccessfulRentalDelistEventBestEffort(ledgerContext, toolName, result.productId);
+        if (warning && auditWarnings.length < RENTAL_DELIST_MAX_AUDIT_WARNINGS) auditWarnings.push(warning);
+      }
     } catch (error) {
       results.push({ productId, ok: false, lines: [error instanceof Error ? error.message : String(error)] });
       break;
@@ -1799,6 +1811,7 @@ async function rentalDelistBatchResponse(
       skippedMissing.length ? `跳过：${skippedMissing.length} 个商品不存在（${skippedMissing.map((result) => result.productId).join('、')}）` : undefined,
       failed.length ? `失败：${failed.length} 个（${failed.map((result) => result.productId).join('、')}）` : undefined,
       pending.length ? `未执行：${pending.length} 个（${pending.join('、')}）` : undefined,
+      auditWarnings.length ? `审计警告：${auditWarnings.join('；')}` : undefined,
       '',
       '下架明细：',
       ...detailLines,
@@ -1812,6 +1825,7 @@ async function rentalDelistBatchResponse(
       failedProductIds: failed.map((result) => result.productId),
       pendingProductIds: pending,
       completedCount: success.length,
+      ...(auditWarnings.length ? { auditWarnings } : {}),
     },
   };
 }
@@ -2001,16 +2015,30 @@ async function refreshActivityExecuteResponse(
 ): Promise<BotResponse> {
   const request = readRefreshActivityExecuteRequest(args);
   const delistResults = [];
+  const auditWarnings: string[] = [];
   for (const productId of request.delistProductIds) {
     await recordAgentToolWriteEvent(ledgerContext, 'execution_started', 'operations.refreshActivityExecute', productId);
     let result;
     try {
       result = await client.delist(productId);
     } catch (error) {
-      await recordAgentToolWriteEvent(ledgerContext, 'execution_failed', 'operations.refreshActivityExecute', productId);
+      try {
+        await recordAgentToolWriteEvent(ledgerContext, 'execution_failed', 'operations.refreshActivityExecute', productId);
+      } catch (ledgerError) {
+        console.warn('Failed to record refresh activity delist failure event.', ledgerError);
+      }
       throw error;
     }
-    await recordAgentToolWriteEvent(ledgerContext, result.ok ? 'execution_succeeded' : 'execution_failed', 'operations.refreshActivityExecute', productId);
+    if (result.ok) {
+      const warning = await recordSuccessfulRentalDelistEventBestEffort(ledgerContext, 'operations.refreshActivityExecute', result.productId);
+      if (warning && auditWarnings.length < RENTAL_DELIST_MAX_AUDIT_WARNINGS) auditWarnings.push(warning);
+    } else {
+      try {
+        await recordAgentToolWriteEvent(ledgerContext, 'execution_failed', 'operations.refreshActivityExecute', result.productId);
+      } catch (ledgerError) {
+        console.warn('Failed to record refresh activity delist failure event.', ledgerError);
+      }
+    }
     delistResults.push(result);
     if (!result.ok && !isSafeMissingDelistResult(result)) break;
   }
@@ -2052,20 +2080,27 @@ async function refreshActivityExecuteResponse(
   }
   const overallOk = request.strategy === 'delist_only' ? allDelisted : allDelisted && Boolean(newLinkResult?.ok);
 
-  const auditPath = await writeRefreshActivityAudit(outputDir, {
-    request,
-    delistResults,
-    skippedMissingDelistProductIds: skippedMissingDelist.map((result) => result.productId),
-    blockingDelistFailureProductIds: blockingDelistFailures.map((result) => result.productId),
-    newLinkResult,
-    ok: overallOk,
-    createdAt: new Date().toISOString(),
-  });
+  let auditPath: string | null = null;
+  try {
+    auditPath = await writeRefreshActivityAudit(outputDir, {
+      request,
+      delistResults,
+      skippedMissingDelistProductIds: skippedMissingDelist.map((result) => result.productId),
+      blockingDelistFailureProductIds: blockingDelistFailures.map((result) => result.productId),
+      newLinkResult,
+      ok: overallOk,
+      createdAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    if (auditWarnings.length < RENTAL_DELIST_MAX_AUDIT_WARNINGS) {
+      auditWarnings.push(`活跃度刷新审计文件写入失败（${error instanceof Error ? error.message : String(error)}）`);
+    }
+  }
 
   const typeLines = request.newLinkItems.map((item, index) =>
     `${index + 1}. ${item.keyword}${item.sameSkuGroupId ? `｜${item.sameSkuGroupId}` : ''}：下架/补链 ${item.count} 条，补链源 ${item.sourceProductId} ${item.sourceProductName}`);
   const delistLines = delistResults.map((result) => `- ${result.ok ? '成功' : '失败'}：商品 ${result.productId}${result.lines.length ? `｜${result.lines.join('；')}` : ''}`);
-  return {
+  return appendRentalDelistAuditWarnings({
     text: [
       `${overallOk ? '活跃度刷新执行完成' : delistFinished && skippedMissingDelist.length ? '活跃度刷新部分完成' : '活跃度刷新执行中断'}：${request.date}`,
       `下架：成功 ${delistSuccess.length}/${request.delistProductIds.length}`,
@@ -2079,7 +2114,7 @@ async function refreshActivityExecuteResponse(
       ...delistLines,
       ...(newLinkResult ? ['', '补链明细：', newLinkResult.text] : []),
       '',
-      `审计文件：${auditPath}`,
+      ...(auditPath ? [`审计文件：${auditPath}`] : []),
     ].join('\n'),
     metadata: {
       toolName: 'operations.refreshActivityExecute',
@@ -2090,7 +2125,7 @@ async function refreshActivityExecuteResponse(
       newProductIds: newLinkResult?.newProductIds ?? [],
       ok: overallOk,
     },
-  };
+  }, auditWarnings);
 }
 
 async function runReadOnlyAgentIntent(
@@ -2565,12 +2600,12 @@ export async function executeAgentToolRequest(
     case 'rental.delist': {
       const productIds = readDelistProductIds(request.arguments);
       if (request.arguments.productIds !== undefined || (productIds && productIds.length > 1)) {
-        return rentalDelistBatchResponse(request.arguments, options.rentalPriceClient ?? createRentalPriceSkillClient(), request.toolName);
+        return rentalDelistBatchResponse(request.arguments, options.rentalPriceClient ?? createRentalPriceSkillClient(), request.toolName, options.ledgerContext);
       }
       return executeRentalWriteOperationHandler(request, options.rentalPriceClient ?? createRentalPriceSkillClient(), options.ledgerContext);
     }
     case 'rental.delistBatch':
-      return rentalDelistBatchResponse(request.arguments, options.rentalPriceClient ?? createRentalPriceSkillClient(), request.toolName);
+      return rentalDelistBatchResponse(request.arguments, options.rentalPriceClient ?? createRentalPriceSkillClient(), request.toolName, options.ledgerContext);
     case 'rental.specRemovePlan': {
       const query = requireString(request.arguments.query, 'query');
       const keyword = requireString(request.arguments.keyword, 'keyword');

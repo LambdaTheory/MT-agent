@@ -30,6 +30,8 @@ export interface OperationSubject {
 export interface OperationPlanJournalEntry {
   planId: string;
   at: string;
+  /** Business date used only for JSONL and daily-journal partitioning. */
+  partitionDate?: string;
   event: string;
   stepId?: string;
   status?: OperationPlanStepStatus;
