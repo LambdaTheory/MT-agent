@@ -19,10 +19,7 @@ function isEnoent(error: unknown): boolean {
 export async function findPublicTrafficReportByDataDate(outputDir: string, dataDate: string): Promise<LocatedPublicTrafficReport | null> {
   if (!reportDatePattern.test(dataDate)) throw new Error('dataDate must be YYYY-MM-DD');
 
-  const entries = await readdir(outputDir, { withFileTypes: true }).catch((error: unknown) => {
-    if (isEnoent(error)) return [];
-    throw error;
-  });
+  const entries = await readdir(outputDir, { withFileTypes: true });
   const runDates = entries
     .filter((entry) => entry.isDirectory() && reportDatePattern.test(entry.name))
     .map((entry) => entry.name)

@@ -86,3 +86,61 @@ A first accidental run without `--prefix` executed in this subagent's own isolat
 
 - The locator intentionally checks both canonical `公域数据上下文_<runDate>.json` and legacy `report-context.json` for compatibility. If future requirements want the new public locator to be canonical-only, the legacy fallback should be removed together with report-store regression updates.
 - `saveHistoricalDashboardCapture` writes files sequentially and directly to final paths as requested; it is "atomic-enough" for ordered writes but does not use temp-file rename semantics.
+
+## Reviewer findings fix
+
+### Exact changes
+
+- `src/publicTraffic/reportContextLocator.ts`
+  - Removed the `readdir(outputDir)` ENOENT-to-empty-list fallback.
+  - `findPublicTrafficReportByDataDate(outputDir, dataDate)` now propagates ENOENT when the output root is missing.
+  - Per-report context file ENOENT remains ignored inside the per-directory context file read loop.
+
+- `src/publicTraffic/historicalDashboardCapture.ts`
+  - Added a preflight validation pass for all required `1d`, `7d`, and `30d` raw tables before `mkdir(dir, { recursive: true })`.
+  - Reused the validated table map for writes so missing required periods cannot create a partial final archive directory.
+  - Kept the archive file basename equivalent to `公域访问数据` using JavaScript Unicode escapes to avoid shell encoding corruption during this fix.
+
+- `tests/reportContextLocator.test.ts`
+  - Added regression coverage that creates no output root and expects `findPublicTrafficReportByDataDate(...)` to reject with `code: 'ENOENT'`.
+
+- `tests/historicalDashboardCapture.test.ts`
+  - Added regression coverage calling `saveHistoricalDashboardCapture(...)` with only `1d` and `7d`, expecting rejection and `stat(targetArchiveDir)` to reject with `code: 'ENOENT'`.
+
+### RED results
+
+1. `npm --prefix "C:\works\MT-agent\.claude\worktrees\dated-dashboard-recapture-design" test -- tests/reportContextLocator.test.ts tests/historicalDashboardCapture.test.ts`
+   - Result: FAIL as expected.
+   - Failure reason: missing output root regression resolved `null` instead of rejecting with ENOENT.
+
+2. `npm --prefix "C:\works\MT-agent\.claude\worktrees\dated-dashboard-recapture-design" test -- tests/historicalDashboardCapture.test.ts`
+   - Result: FAIL as expected after correcting the test insertion.
+   - Failure reason: `stat(targetArchiveDir)` resolved with `Stats`, proving the final archive directory was created before detecting the missing `30d` table.
+
+### GREEN results
+
+1. `npm --prefix "C:\works\MT-agent\.claude\worktrees\dated-dashboard-recapture-design" test -- tests/reportContextLocator.test.ts tests/historicalDashboardCapture.test.ts tests/feishuBotReportStore.test.ts`
+   - Result: PASS.
+   - Test files: 3 passed.
+   - Tests: 16 passed.
+
+2. `npm --prefix "C:\works\MT-agent\.claude\worktrees\dated-dashboard-recapture-design" run build`
+   - Result: PASS.
+   - TypeScript compile completed with no diagnostics.
+
+3. `git -C "C:\works\MT-agent\.claude\worktrees\dated-dashboard-recapture-design" diff --check`
+   - Result: PASS.
+   - Output only warned that two test files will be normalized from LF to CRLF when Git touches them; no whitespace errors were reported.
+
+### Self-review
+
+- Confirmed the locator no longer swallows ENOENT from the output root scan.
+- Confirmed only per-context-file ENOENT is ignored while scanning candidate run directories.
+- Confirmed malformed JSON propagation remains covered and passing.
+- Confirmed historical archive validation happens before final archive directory creation or file writes.
+- Confirmed no Task 4 refresh orchestration or external actions were added.
+- Confirmed unrelated untracked SDD files in the worktree were not staged for this fix.
+
+### Concerns / notes
+
+- `git diff --check` reported line-ending normalization warnings for the edited test files, but no whitespace errors.

@@ -28,13 +28,17 @@ export async function saveHistoricalDashboardCapture(input: {
   refreshQuality: DashboardQualitySummary;
   capturedAt: string;
 }): Promise<{ dir: string; manifestPath: string }> {
+  const tablesByPeriod = new Map(input.rawTables.map((table) => [table.period, table]));
+  for (const period of PERIODS) {
+    if (!tablesByPeriod.has(period)) throw new Error(`Historical dashboard archive is missing ${period} raw table`);
+  }
+
   const dir = `${input.outputDir}/historical-dashboard-captures/${input.dataDate}`;
   await mkdir(dir, { recursive: true });
 
   for (const period of PERIODS) {
-    const table = input.rawTables.find((item) => item.period === period);
-    if (!table) throw new Error(`Historical dashboard archive is missing ${period} raw table`);
-    await writeFile(`${dir}/公域访问数据_${PERIOD_LABELS[period]}.json`, `${JSON.stringify(table, null, 2)}\n`, 'utf8');
+    const table = tablesByPeriod.get(period)!;
+    await writeFile(`${dir}/\u516c\u57df\u8bbf\u95ee\u6570\u636e_${PERIOD_LABELS[period]}.json`, `${JSON.stringify(table, null, 2)}\n`, 'utf8');
   }
 
   const manifest: HistoricalDashboardCaptureManifest = {

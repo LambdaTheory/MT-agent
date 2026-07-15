@@ -26,6 +26,13 @@ it('does not treat a same-named run directory with a different context date as a
   await expect(findPublicTrafficReportByDataDate(outputDir, '2026-07-13')).resolves.toBeNull();
 });
 
+it('propagates ENOENT when the output root does not exist', async () => {
+  const tempDir = await mkdtemp(join(tmpdir(), 'mt-agent-context-locator-'));
+  const missingOutputDir = join(tempDir, 'missing-output-root');
+
+  await expect(findPublicTrafficReportByDataDate(missingOutputDir, '2026-07-13')).rejects.toMatchObject({ code: 'ENOENT' });
+});
+
 it('propagates malformed context JSON instead of treating it as absent', async () => {
   const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-context-locator-'));
   const runDir = join(outputDir, '2026-07-14');
