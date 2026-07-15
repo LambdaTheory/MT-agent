@@ -622,10 +622,17 @@ const rentalBatchRollbackArgumentsSchema = {
   required: ['stateFile'],
   additionalProperties: false,
 };
+const rentalBatchDelayedVerifyArgumentsSchema = rentalBatchStateFileArgumentsSchema;
 const rentalMirrorKeywordArgumentsSchema = {
   type: 'object',
   properties: { keyword: { type: 'string' } },
   required: ['keyword'],
+  additionalProperties: false,
+};
+const rentalMirrorWritebackStateArgumentsSchema = {
+  type: 'object',
+  properties: { stateFile: { type: 'string' }, confirm: { type: 'boolean' } },
+  required: ['stateFile', 'confirm'],
   additionalProperties: false,
 };
 const rentalReadRawArgumentsSchema = {
@@ -1219,11 +1226,26 @@ const agentTools: AgentToolDefinition[] = [
     inputSchema: rentalBatchRollbackArgumentsSchema,
   },
   {
+    name: 'rental.batchDelayedVerify',
+    description: '租赁 batch runner delayed-verify 控制面；stateFile 必须位于 rental tasks/batches。',
+    risk: 'high',
+    requiresConfirmation: true,
+    inputSchema: rentalBatchDelayedVerifyArgumentsSchema,
+  },
+  {
     name: 'rental.mirrorSearch',
     description: '只读调用 rental mirror search，按关键词返回镜像候选商品；不执行 writeback。',
     risk: 'read',
     requiresConfirmation: false,
     inputSchema: rentalMirrorKeywordArgumentsSchema,
+  },
+  {
+    name: 'rental.mirrorWritebackState',
+    description: '隐藏高风险工具：确认后调用 rental mirror writeback-state 写回批处理 stateFile；stateFile 必须位于 rental tasks/batches。',
+    risk: 'high',
+    requiresConfirmation: true,
+    plannerVisible: false,
+    inputSchema: rentalMirrorWritebackStateArgumentsSchema,
   },
   {
     name: 'rental.mirrorBatchSpec',

@@ -2729,9 +2729,11 @@ export async function executeAgentToolRequest(
     case 'rental.batchResume':
     case 'rental.batchReport':
     case 'rental.batchRollback':
+    case 'rental.batchDelayedVerify':
       return executeRentalBatchTool(request.toolName, request.arguments, options.ledgerContext);
     case 'rental.mirrorSearch':
     case 'rental.mirrorBatchSpec':
+    case 'rental.mirrorWritebackState':
       return executeRentalMirrorTool(request.toolName, request.arguments);
     case 'closedOrder.syncFeedback': {
       const result = await syncClosedOrderFeedbackFromApi(

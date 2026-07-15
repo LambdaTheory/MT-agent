@@ -62,7 +62,9 @@ describe('agent runtime tool registry', () => {
       'rental.batchResume',
       'rental.batchReport',
       'rental.batchRollback',
+      'rental.batchDelayedVerify',
       'rental.mirrorSearch',
+      'rental.mirrorWritebackState',
       'rental.mirrorBatchSpec',
       'rental.specDiscoverFull',
       'rental.readRaw',
@@ -102,7 +104,7 @@ describe('agent runtime tool registry', () => {
 
     const tools = listAgentTools();
     tools.pop();
-    expect(listAgentTools()).toHaveLength(81);
+    expect(listAgentTools()).toHaveLength(83);
   });
 
   it('returns defensive copies of tool metadata', () => {
@@ -340,6 +342,7 @@ describe('agent runtime tool registry', () => {
       'rental.batchResume',
       'rental.batchReport',
       'rental.batchRollback',
+      'rental.batchDelayedVerify',
       'rental.mirrorSearch',
       'rental.mirrorBatchSpec',
       'rental.specDiscoverFull',
@@ -367,6 +370,8 @@ describe('agent runtime tool registry', () => {
     expect(plannerToolNames).not.toContain('rental.operationConfirmRequest');
     expect(plannerToolNames).not.toContain('rental.priceApply');
     expect(plannerToolNames).not.toContain('rental.bulkPriceApply');
+    expect(plannerToolNames).not.toContain('rental.mirrorWritebackState');
+    expect(plannerToolNames.some((name) => /image/i.test(name))).toBe(false);
     expect(plannerToolNames).not.toContain('rental.perSpecPriceApply');
     expect(plannerToolNames).not.toContain('rental.specDimApply');
     expect(plannerToolNames).not.toContain('operations.refreshActivityExecute');
@@ -614,6 +619,21 @@ describe('agent runtime tool registry', () => {
       },
       required: ['productIds'],
       additionalProperties: false,
+    });
+    expect(findAgentTool('rental.batchDelayedVerify')?.inputSchema).toMatchObject({
+      properties: { stateFile: { type: 'string' } },
+      required: ['stateFile'],
+      additionalProperties: false,
+    });
+    expect(findAgentTool('rental.mirrorWritebackState')).toMatchObject({
+      risk: 'high',
+      requiresConfirmation: true,
+      plannerVisible: false,
+      inputSchema: {
+        properties: { stateFile: { type: 'string' }, confirm: { type: 'boolean' } },
+        required: ['stateFile', 'confirm'],
+        additionalProperties: false,
+      },
     });
     expect(findAgentTool('rental.newLinkBatchPlan')?.inputSchema).toMatchObject({
       properties: {
