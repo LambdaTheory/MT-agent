@@ -24,16 +24,16 @@ describe('agent dry-run CLI', () => {
     expect(text).not.toContain('createRentalPriceSkillClient');
   });
 
-  it('defaults to planner-first intent resolving without executing real tools', async () => {
+  it('keeps product queries local-direct by default without executing real tools', async () => {
     await expect(runAgentDryRun('查询 565')).resolves.toEqual({
       source: 'cli',
       text: '查询 565',
       mode: 'planner-first',
-      intentType: 'unknown',
-      intent: { type: 'unknown', text: '查询 565' },
+      intentType: 'query_product',
+      intent: { type: 'query_product', keyword: '565' },
       legacyIntent: { type: 'query_product', keyword: '565' },
       dryRun: true,
-      response: { text: 'DRY RUN: would handle intent unknown' },
+      response: { text: 'DRY RUN: would handle intent query_product' },
     });
   });
 
