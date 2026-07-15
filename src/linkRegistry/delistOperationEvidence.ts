@@ -19,9 +19,14 @@ function isSuccessfulDelist(entry: OperationPlanJournalEntry): boolean {
     && entry.metadata?.rentalAction === 'delist';
 }
 
+function hasRecordedExecutionTimestamp(entry: OperationPlanJournalEntry): boolean {
+  return entry.metadata?.executionTimestampRecorded === true;
+}
+
 export function collectAgentDelistEvents(entries: OperationPlanJournalEntry[]): AgentDelistEvent[] {
   return entries
     .filter((entry) => isSuccessfulDelist(entry)
+      && hasRecordedExecutionTimestamp(entry)
       && entry.subject?.kind === 'product'
       && /^\d+$/.test(entry.subject.id)
       && isValidTimestamp(entry.at))

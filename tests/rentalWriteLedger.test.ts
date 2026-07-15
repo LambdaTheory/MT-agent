@@ -46,6 +46,7 @@ describe('rental write ledger', () => {
     expect(entries.every((entry) => entry.toolName === 'rental.delist')).toBe(true);
     expect(entries.every((entry) => entry.subject?.id === '648')).toBe(true);
     expect(entries.every((entry) => entry.metadata?.rentalAction === 'delist')).toBe(true);
+    expect(entries.every((entry) => entry.metadata?.executionTimestampRecorded === true)).toBe(true);
   });
 
   it('records execution_failed when a rental write operation throws', async () => {

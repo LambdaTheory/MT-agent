@@ -60,6 +60,44 @@ describe('attributeDelist', () => {
     })).toMatchObject({ cause: 'external_manual_off_shelf_pending_confirmation', confidence: 'suspected' });
   });
 
+
+  it('rejects stale outer platform snapshots even when nested restriction time is fresh', () => {
+    expect(attributeDelist({
+      ...delisted,
+      platformRestrictions: [{
+        restriction: { kind: 'frozen', reasonText: 'nested fresh restriction', observedAt: '2026-07-14T09:00:00.000Z' },
+        listingState: 'delisted',
+        observedAt: '2026-07-12T09:00:00.000Z',
+      }],
+    })).toMatchObject({ cause: 'external_manual_off_shelf_pending_confirmation', confidence: 'suspected' });
+  });
+
+  it('rejects future outer platform snapshots even when nested restriction time is before final status', () => {
+    expect(attributeDelist({
+      ...delisted,
+      platformRestrictions: [{
+        restriction: { kind: 'frozen', reasonText: 'future outer restriction', observedAt: '2026-07-14T09:00:00.000Z' },
+        listingState: 'delisted',
+        observedAt: '2026-07-14T10:30:00.000Z',
+      }],
+    })).toMatchObject({ cause: 'external_manual_off_shelf_pending_confirmation', confidence: 'suspected' });
+  });
+
+  it('accepts current platform restrictions only when outer and nested observation times match', () => {
+    expect(attributeDelist({
+      ...delisted,
+      platformRestrictions: [{
+        restriction: { kind: 'frozen', reasonText: 'current restriction', observedAt: '2026-07-14T09:00:00.000Z' },
+        listingState: 'delisted',
+        observedAt: '2026-07-14T09:00:00.000Z',
+      }],
+    })).toMatchObject({
+      cause: 'platform_frozen',
+      confidence: 'confirmed',
+      evidence: [{ observedAt: '2026-07-14T09:00:00.000Z', reasonText: 'current restriction' }],
+    });
+  });
+
   it('suppresses all attribution when the source health gate requires it', () => {
     expect(attributeDelist({
       ...delisted,

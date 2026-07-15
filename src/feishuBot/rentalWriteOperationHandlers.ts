@@ -106,6 +106,7 @@ async function recordWriteEvent(
     metadata: {
       ...(context.missionDate ? { missionDate: context.missionDate } : {}),
       rentalAction,
+      executionTimestampRecorded: true,
     },
   });
 }

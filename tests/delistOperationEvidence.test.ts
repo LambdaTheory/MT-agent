@@ -7,6 +7,7 @@ const succeededDelist = {
   event: 'execution_succeeded',
   toolName: 'rental.delist',
   subject: { kind: 'product' as const, id: '648' },
+  metadata: { rentalAction: 'delist', executionTimestampRecorded: true },
 };
 
 describe('collectAgentDelistEvents', () => {
@@ -29,7 +30,7 @@ describe('collectAgentDelistEvents', () => {
       {
         ...succeededDelist,
         toolName: 'rental.operationConfirmRequest',
-        metadata: { rentalAction: 'delist' },
+        metadata: { rentalAction: 'delist', executionTimestampRecorded: true },
         runId: 'run-1',
         decisionId: 'decision-1',
       },
@@ -45,5 +46,15 @@ describe('collectAgentDelistEvents', () => {
       runId: 'run-1',
       decisionId: 'decision-1',
     }]);
+  });
+
+  it('rejects legacy delist ledger events without the execution timestamp marker', () => {
+    expect(collectAgentDelistEvents([
+      {
+        ...succeededDelist,
+        at: '2026-07-14T00:00:00.000Z',
+        metadata: { missionDate: '2026-07-14', rentalAction: 'delist' },
+      },
+    ])).toEqual([]);
   });
 });

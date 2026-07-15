@@ -56,8 +56,9 @@ function selectRestriction(
       && item.restriction.reasonText.trim()
       && observedAt !== null
       && restrictionObservedAt !== null
-      && restrictionObservedAt <= statusTime
-      && statusTime - restrictionObservedAt <= MAX_RESTRICTION_FRESHNESS_MS;
+      && observedAt === restrictionObservedAt
+      && observedAt <= statusTime
+      && statusTime - observedAt <= MAX_RESTRICTION_FRESHNESS_MS;
   });
   if (candidates.length === 0) return null;
   return [...candidates].sort((left, right) => {
