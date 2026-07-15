@@ -100,13 +100,13 @@ describe('public traffic crawler orchestration', () => {
 
   it('adapts dashboard collection result objects back to raw table arrays', async () => {
     const refreshSource = await readFile(new URL('../src/publicTraffic/dashboardRefresh.ts', import.meta.url), 'utf8');
-    const refreshCall = 'collectDashboardPage(config, page)';
+    const refreshCall = 'collectDashboardPage(config, page, { dataDate })';
     const refreshCallIndex = refreshSource.indexOf(refreshCall);
-    const refreshTablesAccess = refreshSource.indexOf('.tables', refreshCallIndex);
+    const refreshTablesAccess = refreshSource.indexOf('capture.tables', refreshCallIndex);
 
     expect(refreshCallIndex).toBeGreaterThan(-1);
     expect(refreshTablesAccess).toBeGreaterThan(refreshCallIndex);
-    expect(refreshSource).toContain('Promise<RawTableData[]>');
+    expect(refreshSource).toContain('Promise<{ tables: RawTableData[]; actualPageDate: string }>');
   });
 
   it('downloads goods export in the same persistent browser context before traffic pages', async () => {
