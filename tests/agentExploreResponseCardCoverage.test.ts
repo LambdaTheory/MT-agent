@@ -1,15 +1,19 @@
-import { describe, expect, it } from 'vitest';
-import { parseAgentToolConfirmRequest } from '../src/agentRuntime/approvalCard.js';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { agentExploreResponse } from '../src/feishuBot/agentExploreResponse.js';
+import { loadAgentToolConfirmRequestFromValue } from '../src/feishuBot/agentToolConfirmStore.js';
 import { FakeLlmProvider } from '../src/llm/fakeProvider.js';
 
-function readConfirmRequests(card: unknown) {
+async function readConfirmRequests(outputDir: string, card: unknown) {
   const body = (card as { body?: { elements?: Array<{ elements?: Array<{ name?: string; behaviors?: Array<{ value?: unknown }> }> }> } }).body;
-  return (body?.elements ?? [])
+  const values = (body?.elements ?? [])
     .flatMap((element) => element.elements ?? [])
     .filter((element) => element.name === 'agent_tool_confirm_submit')
-    .map((element) => parseAgentToolConfirmRequest(element.behaviors?.[0]?.value))
-    .filter((request): request is NonNullable<ReturnType<typeof parseAgentToolConfirmRequest>> => request !== null);
+    .map((element) => element.behaviors?.[0]?.value);
+  const requests = await Promise.all(values.map((value) => loadAgentToolConfirmRequestFromValue(outputDir, value)));
+  return requests.filter((request): request is NonNullable<typeof request> => request !== null);
 }
 
 function decision(decisionId: string, toolName: string, args: Record<string, unknown>) {
@@ -29,6 +33,16 @@ function decision(decisionId: string, toolName: string, args: Record<string, unk
 }
 
 describe('Agent Explore confirmation card coverage', () => {
+  let outputDir: string;
+
+  beforeEach(async () => {
+    outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-explore-card-'));
+  });
+
+  afterEach(async () => {
+    await rm(outputDir, { recursive: true, force: true });
+  });
+
   it('creates confirmation buttons for ledger-covered rental write tools', async () => {
     const provider = new FakeLlmProvider(JSON.stringify({
       action: 'finish',
@@ -42,8 +56,8 @@ describe('Agent Explore confirmation card coverage', () => {
       ],
     }));
 
-    const response = await agentExploreResponse('分析原子写操作', 'output', { provider });
-    const requests = readConfirmRequests(response.card);
+    const response = await agentExploreResponse('分析原子写操作', outputDir, { provider });
+    const requests = await readConfirmRequests(outputDir, response.card);
 
     expect(response.text).toContain('待确认执行：5 项');
     expect(requests.map((request) => request.toolName)).toEqual([
@@ -65,7 +79,7 @@ describe('Agent Explore confirmation card coverage', () => {
       ],
     }));
 
-    const response = await agentExploreResponse('分析高级表单态操作', 'output', { provider });
+    const response = await agentExploreResponse('分析高级表单态操作', outputDir, { provider });
 
     expect(response.card).toBeUndefined();
     expect(response.text).not.toContain('待确认执行');

@@ -8,6 +8,7 @@ import { findAgentTool } from '../agentRuntime/toolRegistry.js';
 import type { FeishuCardPayload } from '../notify/feishuApp.js';
 import type { AgentToolExecutionOptions } from './agentToolExecutor.js';
 import { agentExploreReason } from './agentExploreAttribution.js';
+import { saveAgentToolConfirmRequest } from './agentToolConfirmStore.js';
 import type { BotResponse } from './types.js';
 import type { LlmProvider } from '../llm/provider.js';
 
@@ -49,9 +50,17 @@ function isConfirmableExploreWrite(decision: DecisionRecord): boolean {
     && isLedgerCoveredExploreWrite(decision);
 }
 
-function buildExploreConfirmCard(approvals: DecisionRecord[]): FeishuCardPayload | undefined {
+async function buildExploreConfirmCard(approvals: DecisionRecord[], outputDir: string): Promise<FeishuCardPayload | undefined> {
   if (!approvals.length) return undefined;
-  const cards = approvals.map((approval) => buildAgentToolConfirmCard(exploreDecisionToConfirmRequest(approval)));
+  const cards = await Promise.all(approvals.map(async (approval) => {
+    const request = exploreDecisionToConfirmRequest(approval);
+    const tool = findAgentTool(request.toolName);
+    if (tool?.plannerVisible === false) {
+      const requestRef = await saveAgentToolConfirmRequest(outputDir, request);
+      return buildAgentToolConfirmCard(request, { requestRef });
+    }
+    return buildAgentToolConfirmCard(request);
+  }));
   const elements = cards.flatMap((card, index) => {
     const body = card.body as { elements?: unknown[] } | undefined;
     return [
@@ -106,7 +115,7 @@ export async function agentExploreResponse(
   }
 
   const approvals = (result.decisions ?? []).filter(isConfirmableExploreWrite);
-  const card = buildExploreConfirmCard(approvals);
+  const card = await buildExploreConfirmCard(approvals, outputDir);
   const text = [
     result.answer || (result.stopReason === 'max_steps' ? '探索达到最大步数，已停止。' : invalidExploreText(result.invalidReason)),
     formatSteps(result.steps),
