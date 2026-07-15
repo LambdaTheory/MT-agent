@@ -128,6 +128,7 @@ const NON_RENT_PRICE_FIELD_LABELS: Record<string, string[]> = {
 };
 const REFRESH_ACTIVITY_EXECUTION_MAX_PRODUCTS = 20;
 const RENTAL_DELIST_BATCH_MAX_PRODUCTS = 80;
+const RENTAL_DELIST_BATCH_MAX_AUDIT_WARNINGS = 20;
 const RENT_FIELD_ORDER: Array<{ field: string; label: string }> = [
   { field: 'rent1day', label: '1天' },
   { field: 'rent2day', label: '2天' },
@@ -1395,11 +1396,20 @@ async function rentalDelistBatchResponse(
   }
 
   const results: Awaited<ReturnType<RentalPriceSkillClient['delist']>>[] = [];
+  const auditWarnings: string[] = [];
   for (const productId of productIds) {
     try {
       const result = await client.delist(productId);
       results.push(result);
-      if (result.ok) await recordSuccessfulRentalDelistEvent(ledgerContext, toolName, result.productId);
+      if (result.ok) {
+        try {
+          await recordSuccessfulRentalDelistEvent(ledgerContext, toolName, result.productId);
+        } catch (error) {
+          if (auditWarnings.length < RENTAL_DELIST_BATCH_MAX_AUDIT_WARNINGS) {
+            auditWarnings.push(`商品 ${result.productId}：下架审计记录失败（${error instanceof Error ? error.message : String(error)}）`);
+          }
+        }
+      }
     } catch (error) {
       results.push({ productId, ok: false, lines: [error instanceof Error ? error.message : String(error)] });
       break;
@@ -1425,6 +1435,7 @@ async function rentalDelistBatchResponse(
       skippedMissing.length ? `跳过：${skippedMissing.length} 个商品不存在（${skippedMissing.map((result) => result.productId).join('、')}）` : undefined,
       failed.length ? `失败：${failed.length} 个（${failed.map((result) => result.productId).join('、')}）` : undefined,
       pending.length ? `未执行：${pending.length} 个（${pending.join('、')}）` : undefined,
+      auditWarnings.length ? `审计警告：${auditWarnings.join('；')}` : undefined,
       '',
       '下架明细：',
       ...detailLines,
@@ -1438,6 +1449,7 @@ async function rentalDelistBatchResponse(
       failedProductIds: failed.map((result) => result.productId),
       pendingProductIds: pending,
       completedCount: success.length,
+      ...(auditWarnings.length ? { auditWarnings } : {}),
     },
   };
 }

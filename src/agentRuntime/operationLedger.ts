@@ -168,7 +168,15 @@ export async function recordOperationEvent(
 }
 
 function operationEventKey(entry: OperationPlanJournalEntry): string {
-  return [entry.runId ?? '', entry.decisionId ?? '', entry.event, entry.at, entry.toolName ?? ''].join('|');
+  return [
+    entry.runId ?? '',
+    entry.decisionId ?? '',
+    entry.event,
+    entry.at,
+    entry.toolName ?? '',
+    entry.subject?.kind ?? '',
+    entry.subject?.id ?? '',
+  ].join('|');
 }
 
 export async function loadOperationLedgerJsonlEntries(

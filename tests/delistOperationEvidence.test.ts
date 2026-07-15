@@ -48,6 +48,20 @@ describe('collectAgentDelistEvents', () => {
     }]);
   });
 
+  it('recognizes successful batch delists only with the existing execution-evidence guards', () => {
+    expect(collectAgentDelistEvents([
+      { ...succeededDelist, toolName: 'rental.delistBatch', subject: { kind: 'product', id: '649' } },
+      { ...succeededDelist, toolName: 'rental.delistBatch', event: 'execution_failed', subject: { kind: 'product', id: '650' } },
+      { ...succeededDelist, toolName: 'rental.delistBatch', metadata: { rentalAction: 'delist' }, subject: { kind: 'product', id: '651' } },
+      { ...succeededDelist, toolName: 'rental.delistBatch', subject: { kind: 'product', id: 'not-numeric' } },
+      { ...succeededDelist, toolName: 'rental.delistBatch', at: 'not-a-date', subject: { kind: 'product', id: '652' } },
+    ])).toEqual([{
+      internalProductId: '649',
+      at: '2026-07-14T09:00:00.000Z',
+      toolName: 'rental.delistBatch',
+    }]);
+  });
+
   it('rejects legacy delist ledger events without the execution timestamp marker', () => {
     expect(collectAgentDelistEvents([
       {

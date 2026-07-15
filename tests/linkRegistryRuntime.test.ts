@@ -49,7 +49,7 @@ describe('link registry runtime', () => {
       planId: 'plan-1',
       at: '2026-07-14T09:00:00.000Z',
       event: 'execution_succeeded',
-      toolName: 'rental.delist',
+      toolName: 'rental.delistBatch',
       subject: { kind: 'product', id: '1702' },
       metadata: { rentalAction: 'delist', executionTimestampRecorded: true },
     });

@@ -1,8 +1,9 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { loadOperationLedgerJsonlEntries } from '../src/agentRuntime/operationLedger.js';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { loadDailyOperationJournalStore, loadOperationLedgerJsonlEntries, loadOperationLedgerStore } from '../src/agentRuntime/operationLedger.js';
+import { collectAgentDelistEvents } from '../src/linkRegistry/delistOperationEvidence.js';
 import { executeAgentToolRequest } from '../src/feishuBot/agentToolExecutor.js';
 import type { RentalPriceSkillClient } from '../src/feishuBot/rentalPrice.js';
 
@@ -50,6 +51,56 @@ describe('executeAgentToolRequest ledgerContext', () => {
       runId: 'run-batch', decisionId: 'dec-batch', subject: { kind: 'product', id: '648' },
       metadata: { rentalAction: 'delist', executionTimestampRecorded: true, missionDate: '2026-07-01' },
     })]);
+  });
+
+  it('preserves two successful batch delists at an identical timestamp for attribution', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-14T09:00:00.000Z'));
+    try {
+      const response = await executeAgentToolRequest(
+        { toolName: 'rental.delistBatch', arguments: { productIds: ['648', '649'] }, reason: 'batch' },
+        dir,
+        { rentalPriceClient: { ...fakeClient(), delist: async (productId: string) => ({ productId, ok: true, lines: ['delisted'] }) }, ledgerContext: { outputDir: dir, runId: 'run-batch', decisionId: 'dec-batch' } },
+      );
+      const [jsonl, daily, ledger] = await Promise.all([
+        loadOperationLedgerJsonlEntries(dir, '2026-07-14'),
+        loadDailyOperationJournalStore(dir, '2026-07-14'),
+        loadOperationLedgerStore(dir),
+      ]);
+      expect(response.metadata).toMatchObject({ ok: true, delistedProductIds: ['648', '649'], pendingProductIds: [] });
+      expect(daily.entries).toEqual(jsonl);
+      expect(ledger.journal).toEqual(jsonl);
+      expect(collectAgentDelistEvents(jsonl).map((event) => event.internalProductId)).toEqual(['648', '649']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('retains client successes and continues after ledger audit failure', async () => {
+    const calls: string[] = [];
+    const malformedOutputDir = join(dir, 'ledger-is-a-file');
+    await writeFile(malformedOutputDir, 'not a directory', 'utf8');
+    const response = await executeAgentToolRequest(
+      { toolName: 'rental.delistBatch', arguments: { productIds: ['648', '649'] }, reason: 'batch' },
+      dir,
+      {
+        rentalPriceClient: { ...fakeClient(), delist: async (productId: string) => {
+          calls.push(productId);
+          return { productId, ok: true, lines: ['delisted'] };
+        } },
+        ledgerContext: { outputDir: malformedOutputDir },
+      },
+    );
+
+    expect(calls).toEqual(['648', '649']);
+    expect(response.metadata).toMatchObject({
+      ok: true,
+      delistedProductIds: ['648', '649'],
+      failedProductIds: [],
+      pendingProductIds: [],
+      auditWarnings: [expect.stringContaining('商品 648'), expect.stringContaining('商品 649')],
+    });
+    expect(response.text).toContain('审计警告：');
   });
 
   it('threads ledgerContext into rental write handler', async () => {
