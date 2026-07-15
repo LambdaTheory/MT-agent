@@ -2,7 +2,6 @@ import { pathToFileURL } from 'node:url';
 import { loadConfig } from '../config/loadConfig.js';
 import { loadEnv } from '../config/loadEnv.js';
 import { runDashboardRefresh } from '../publicTraffic/dashboardRefresh.js';
-import { formatDashboardQuality } from '../publicTraffic/dashboardQuality.js';
 
 type FeishuSendTo = 'personal' | 'group' | 'both';
 
@@ -25,10 +24,9 @@ function parseSendTo(argv: string[]): FeishuSendTo | undefined {
 export async function runCaptureDashboardCli(argv = process.argv.slice(2)): Promise<void> {
   await loadEnv();
   const config = await loadConfig();
-  const dataDate = parseArgValue(argv, '--date') ?? today();
-  const result = await runDashboardRefresh({ config, dataDate, sendTo: parseSendTo(argv) });
-  console.log(`访问页补抓完成: ${formatDashboardQuality(result.refreshQuality)}`);
-  if (result.firstQuality) console.log(`首版日报访问页状态: ${formatDashboardQuality(result.firstQuality)}`);
+  const result = await runDashboardRefresh({ config, date: parseArgValue(argv, '--date') ?? today(), sendTo: parseSendTo(argv) });
+  console.log(`访问页补抓完成: ${result.refreshQualityText}`);
+  console.log(`首版日报访问页状态: ${result.firstQualityText}`);
   console.log(`决策: ${result.message}`);
 }
 

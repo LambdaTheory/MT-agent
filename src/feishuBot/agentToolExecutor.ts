@@ -44,7 +44,6 @@ import { summarizeOperationsLearningHistory, summarizeOperationsLearningSession 
 import { buildPublicTrafficCard } from '../publicTraffic/buildPublicTrafficCard.js';
 import { buildPublicTrafficFeishuText } from '../publicTraffic/buildPublicTrafficFeishu.js';
 import { runDashboardRefresh } from '../publicTraffic/dashboardRefresh.js';
-import { formatDashboardQuality } from '../publicTraffic/dashboardQuality.js';
 import { buildPublicTrafficPaths } from '../publicTraffic/paths.js';
 import type { PublicTrafficDataReportContext, PublicTrafficProductDataRow } from '../publicTraffic/types.js';
 import { startOperationsLearningSession } from '../operationsLearningLoop/session.js';
@@ -2037,16 +2036,16 @@ export async function executeAgentToolRequest(
       await loadEnv();
       const config = await loadConfig();
       const sendTo = readSendTo(request.arguments.sendTo);
-      const dataDate = readOptionalDate(request.arguments.date) ?? today();
-      const result = await runDashboardRefresh({ config, dataDate, sendTo });
+      const date = readOptionalDate(request.arguments.date) ?? today();
+      const result = await runDashboardRefresh({ config, date, sendTo });
       return {
         text: [
           `访问页补抓完成：${result.message}`,
-          `日期：${dataDate}`,
-          `状态：${result.status}`,
+          `日期：${date}`,
           '',
-          `补抓结果：${formatDashboardQuality(result.refreshQuality)}`,
-          ...(result.firstQuality ? ['', `首版状态：${formatDashboardQuality(result.firstQuality)}`] : []),
+          `补抓结果：${result.refreshQualityText}`,
+          '',
+          `首版状态：${result.firstQualityText}`,
         ].join('\n'),
       };
     }
