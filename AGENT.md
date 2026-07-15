@@ -188,6 +188,7 @@ MT-agent/
 - 批量 CLI 的 `sendReport` 固定为 `false`：可重建本地日报，但不重发飞书日报；`--send-to` 只发送每个日期的补抓结果卡，不代表日报重发。
 - 未找到既有日报上下文时，只归档到 `output/historical-dashboard-captures/<dataDate>/`，不重建、不重发。
 - 结构化状态包括 `repaired`、`still_missing`、`saved_existing_complete`、`saved_already_resent`、`saved_historical_without_report`；绿色只用于真实修复并重发，橙色用于执行后仍缺失，蓝色用于安全保存但无需修复或仅归档。
+- 飞书结果卡由 `src/feishuBot/dashboardRefreshCard.ts` 构建，必须保持“结论摘要 → 日期分栏 → 三周期质量标签 → 处理动作/raw 去向”的分层信息架构；不要退回单个 Markdown 表格或调试日志式长文本。fallback text 可保留表格，但 interactive card 首屏必须先讲结论和日期。
 - 日期选择器回读可能显示 `MM-DD ~ MM-DD` 范围；只要范围结束日期等于请求业务日即可确认。页面推荐浮层可能遮挡日期选择器或周期 tab，`dashboardCrawler.ts` 已有受遮挡点击后备。
 - 从 worktree 对主仓库 `output` 做人工回灌/补抓时，`outputDir`、`productIdMappingPath`、`browserProfileDir` 等相对配置必须显式指向主仓库绝对路径，否则会写到 worktree 或读取不到映射文件。
 
