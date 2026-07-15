@@ -84,7 +84,7 @@ describe('rental write ledger', () => {
     warn.mockRestore();
   });
 
-  it('records execution time in at while retaining missionDate only as metadata', async () => {
+  it('records execution time in at while partitioning by missionDate', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-07-15T13:45:00.000Z'));
     try {
@@ -94,9 +94,10 @@ describe('rental write ledger', () => {
         { outputDir: dir, missionDate: '2026-07-01' },
       );
 
-      const entries = await loadOperationLedgerJsonlEntries(dir, '2026-07-15');
+      const entries = await loadOperationLedgerJsonlEntries(dir, '2026-07-01');
       expect(entries).toHaveLength(2);
       expect(entries.every((entry) => entry.at === '2026-07-15T13:45:00.000Z')).toBe(true);
+      expect(entries.every((entry) => entry.partitionDate === '2026-07-01')).toBe(true);
       expect(entries.every((entry) => entry.metadata?.missionDate === '2026-07-01')).toBe(true);
     } finally {
       vi.useRealTimers();

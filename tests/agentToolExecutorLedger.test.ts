@@ -46,9 +46,9 @@ describe('executeAgentToolRequest ledgerContext', () => {
       dir,
       { rentalPriceClient: client, ledgerContext: { outputDir: dir, runId: 'run-batch', decisionId: 'dec-batch', missionDate: '2026-07-01' } },
     );
-    const entries = await loadOperationLedgerJsonlEntries(dir, new Date().toISOString().slice(0, 10));
+    const entries = await loadOperationLedgerJsonlEntries(dir, '2026-07-01');
     expect(entries).toEqual([expect.objectContaining({
-      at: expect.any(String), event: 'execution_succeeded', toolName: 'rental.delistBatch',
+      at: expect.any(String), partitionDate: '2026-07-01', event: 'execution_succeeded', toolName: 'rental.delistBatch',
       runId: 'run-batch', decisionId: 'dec-batch', subject: { kind: 'product', id: '648' },
       metadata: { rentalAction: 'delist', executionTimestampRecorded: true, missionDate: '2026-07-01' },
     })]);
