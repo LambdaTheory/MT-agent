@@ -36,12 +36,12 @@ describe('rental batch runner tools', () => {
   });
 
   it('registers batch runner control tools', () => {
-    for (const name of ['batchPreview', 'batchExecute', 'batchStatus', 'batchResume', 'batchReport', 'batchRollback']) {
+    for (const name of ['batchPreview', 'batchExecute', 'batchStatus', 'batchResume', 'batchReport', 'batchRollback', 'batchDelayedVerify']) {
       expect(findAgentTool(`rental.${name}`)).toMatchObject({ risk: 'high', requiresConfirmation: true });
     }
   });
 
-  it('dispatches preview, execute, status, resume, report, and rollback to batch-runner', async () => {
+  it('dispatches preview, execute, status, resume, report, rollback, and delayed-verify to batch-runner', async () => {
     const specFile = join(rentalRoot, 'tasks', 'batches', 'spec.json');
     const stateFile = join(rentalRoot, 'tasks', 'batches', 'state.json');
     await writeFile(specFile, JSON.stringify({ items: [{ productId: '648', fields: { rent1day: '88.00' } }] }), 'utf8');
@@ -61,6 +61,7 @@ describe('rental batch runner tools', () => {
     const resume = await executeAgentToolRequest({ toolName: 'rental.batchResume', arguments: { stateFile }, reason: 'resume batch' }, outputDir, { ledgerContext: { outputDir, runId: 'run-batch', decisionId: 'dec-batch' } });
     const report = await executeAgentToolRequest({ toolName: 'rental.batchReport', arguments: { stateFile }, reason: 'report batch' }, outputDir);
     const rollback = await executeAgentToolRequest({ toolName: 'rental.batchRollback', arguments: { stateFile, confirm: true }, reason: 'rollback batch' }, outputDir, { ledgerContext: { outputDir, runId: 'run-batch', decisionId: 'dec-batch' } });
+    const delayedVerify = await executeAgentToolRequest({ toolName: 'rental.batchDelayedVerify', arguments: { stateFile }, reason: 'delayed verify batch' }, outputDir);
 
     expect(preview.metadata).toMatchObject({ toolName: 'rental.batchPreview', command: 'preview', ok: true });
     expect(preview.text).toContain('preview');
@@ -74,6 +75,8 @@ describe('rental batch runner tools', () => {
     expect(typeof resumedState.resumedAt).toBe('string');
     expect(report.text).toContain('report');
     expect(rollback.text).toContain('rollback --confirm');
+    expect(delayedVerify.metadata).toMatchObject({ toolName: 'rental.batchDelayedVerify', command: 'delayed-verify', ok: true });
+    expect(delayedVerify.text).toContain('delayed-verify');
     const date = new Date().toISOString().slice(0, 10);
     const entries = await loadOperationLedgerJsonlEntries(outputDir, date);
     expect(entries.filter((entry) => entry.event === 'execution_succeeded' && entry.runId === 'run-batch' && entry.decisionId === 'dec-batch')).toEqual(expect.arrayContaining([

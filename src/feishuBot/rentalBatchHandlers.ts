@@ -8,7 +8,7 @@ import type { BotResponse } from './types.js';
 
 const execFileAsync = promisify(execFile);
 
-type BatchCommand = 'preview' | 'execute' | 'status' | 'resume' | 'report' | 'rollback';
+type BatchCommand = 'preview' | 'execute' | 'status' | 'resume' | 'report' | 'rollback' | 'delayed-verify';
 
 interface BatchToolRequest {
   command: BatchCommand;
@@ -69,6 +69,8 @@ function requestFromTool(toolName: string, args: Record<string, unknown>, rootDi
       return { command: 'report', fileArg: safeBatchPath(rootDir, args.stateFile, 'stateFile') };
     case 'rental.batchRollback':
       return { command: 'rollback', fileArg: safeBatchPath(rootDir, args.stateFile, 'stateFile'), confirm: args.confirm === true };
+    case 'rental.batchDelayedVerify':
+      return { command: 'delayed-verify', fileArg: safeBatchPath(rootDir, args.stateFile, 'stateFile') };
     default:
       return null;
   }
