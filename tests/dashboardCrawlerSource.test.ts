@@ -55,4 +55,21 @@ describe('dashboard crawler source', () => {
     expect(source).toContain('dashboardTarget = await waitForTableOrEmptyState(page, 180000);');
     expect(source).toContain('collectPeriodWithAdaptivePageSize(dashboardTarget');
   });
+
+  it('selects and verifies the requested page date before collecting periods', async () => {
+    const source = await readFile(new URL('../src/crawler/dashboardCrawler.ts', import.meta.url), 'utf8');
+    const collectStart = source.indexOf('export async function collectDashboardPage');
+    const dateSelection = source.indexOf('selectDashboardDataDate', collectStart);
+    const periodLoop = source.indexOf('for (const period of periods)', collectStart);
+
+    expect(source).toContain('input[placeholder="请选择日期"]');
+    expect(source).toContain('assessDashboardDateReadback');
+    expect(dateSelection).toBeGreaterThan(collectStart);
+    expect(dateSelection).toBeLessThan(periodLoop);
+  });
+
+  it('keeps automatic merchant sub-account selection in the dashboard flow', async () => {
+    const source = await readFile(new URL('../src/crawler/dashboardCrawler.ts', import.meta.url), 'utf8');
+    expect(source).toContain('await selectSubAccountIfNeeded(page);');
+  });
 });

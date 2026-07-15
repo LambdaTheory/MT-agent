@@ -1,11 +1,12 @@
 import { mkdir, writeFile } from 'node:fs/promises';
-import type { Frame, Page } from 'playwright';
+import type { Frame, Locator, Page } from 'playwright';
 import type { AgentConfig, RawTableData } from '../domain/types.js';
 import { ensureAuthenticatedMerchantSession } from './merchantSession.js';
 import { shouldKeepBrowserOpenOnFailure } from './failureHandling.js';
 import { normalizePageSizeCandidates, readCurrentPageSize, setDashboardPageSize } from './pageSizeProbe.js';
 import { dedupeRowsByProductId, isCollectionComplete } from './pagination.js';
 import { selectSubAccountIfNeeded } from './subAccount.js';
+import { assessDashboardDateReadback, assertDashboardDataDate } from '../publicTraffic/dashboardCaptureDate.js';
 
 const PERIOD_LABELS = {
   '1d': '1日',
@@ -14,6 +15,15 @@ const PERIOD_LABELS = {
 } as const;
 
 type DashboardTarget = Frame | Page;
+
+export interface DashboardCollectOptions {
+  dataDate?: string;
+}
+
+export interface DashboardCollectionResult {
+  tables: RawTableData[];
+  actualPageDate?: string;
+}
 
 function normalize(value: string | null | undefined): string {
   return (value ?? '').replace(/\s+/g, ' ').trim();
@@ -269,6 +279,144 @@ async function waitForDashboardTargetTableOrEmptyState(target: DashboardTarget, 
   throw new Error('Dashboard target table or empty-state did not appear within timeout');
 }
 
+function dashboardDateFailure(message: string, dataDate: string, displayedValue?: string): Error {
+  return new Error(`${message}; dataDate=${dataDate}${displayedValue === undefined ? '' : `; displayedValue=${displayedValue || 'empty'}`}`);
+}
+
+function parseDashboardDateParts(dataDate: string): { year: number; month: number; day: number; dayText: string } {
+  const [year, month, day] = dataDate.split('-').map(Number);
+  return { year, month, day, dayText: String(day) };
+}
+
+async function visibleLocator(locator: Locator): Promise<Locator | null> {
+  if ((await locator.count().catch(() => 0)) > 0 && (await locator.first().isVisible().catch(() => false))) return locator.first();
+  return null;
+}
+
+async function readVisibleAntPickerPanelDate(target: DashboardTarget): Promise<{ year: number; month: number } | null> {
+  const panelText = await target
+    .locator('.ant-picker-panel:visible, .ant-picker-dropdown:not(.ant-picker-dropdown-hidden)')
+    .first()
+    .innerText({ timeout: 1000 })
+    .catch(() => '');
+  const normalizedPanel = normalize(panelText);
+  const yearMatch = normalizedPanel.match(/(20\d{2}|19\d{2})\s*年?/);
+  const monthMatch = normalizedPanel.match(/(?:年\s*)?(1[0-2]|0?[1-9])\s*月/);
+  if (!yearMatch || !monthMatch) return null;
+  return { year: Number(yearMatch[1]), month: Number(monthMatch[1]) };
+}
+
+async function clickVisibleDashboardPickerControl(target: DashboardTarget, selectors: string[], names: RegExp[]): Promise<boolean> {
+  for (const selector of selectors) {
+    const control = await visibleLocator(target.locator(selector));
+    if (control) {
+      await control.click();
+      return true;
+    }
+  }
+
+  for (const name of names) {
+    const control = await visibleLocator(target.getByRole('button', { name }));
+    if (control) {
+      await control.click();
+      return true;
+    }
+  }
+
+  return false;
+}
+
+async function alignDashboardDatePickerMonth(target: DashboardTarget, dataDate: string): Promise<void> {
+  const { year, month } = parseDashboardDateParts(dataDate);
+  const deadline = Date.now() + 30000;
+
+  while (Date.now() < deadline) {
+    const visiblePanel = await visibleLocator(target.locator('.ant-picker-panel, .ant-picker-dropdown'));
+    if (!visiblePanel) throw dashboardDateFailure('Dashboard date picker panel was not visible', dataDate);
+
+    const panelDate = await readVisibleAntPickerPanelDate(target);
+    if (!panelDate) throw dashboardDateFailure('Dashboard date picker month could not be read', dataDate);
+    if (panelDate.year === year && panelDate.month === month) return;
+
+    const panelIndex = panelDate.year * 12 + panelDate.month;
+    const requestedIndex = year * 12 + month;
+    const useYearJump = Math.abs(requestedIndex - panelIndex) >= 12;
+    const clicked = panelIndex > requestedIndex
+      ? await clickVisibleDashboardPickerControl(
+          target,
+          useYearJump ? ['.ant-picker-header-super-prev-btn', '.ant-picker-header-prev-btn'] : ['.ant-picker-header-prev-btn'],
+          useYearJump ? [/previous year|上一年/i, /previous month|上个月|prev/i] : [/previous month|上个月|prev/i],
+        )
+      : await clickVisibleDashboardPickerControl(
+          target,
+          useYearJump ? ['.ant-picker-header-super-next-btn', '.ant-picker-header-next-btn'] : ['.ant-picker-header-next-btn'],
+          useYearJump ? [/next year|下一年/i, /next month|下个月|next/i] : [/next month|下个月|next/i],
+        );
+
+    if (!clicked) throw dashboardDateFailure('Dashboard date picker navigation control was not found', dataDate);
+    await waitForDashboardTargetTimeout(target, 300);
+  }
+
+  throw dashboardDateFailure('Dashboard date picker did not navigate to requested month', dataDate);
+}
+
+async function clickDashboardDateCell(target: DashboardTarget, dataDate: string): Promise<void> {
+  const { dayText } = parseDashboardDateParts(dataDate);
+  const preferredCell = target
+    .locator(`td:not(.ant-picker-cell-disabled)[title*="${dataDate}"], td:not(.ant-picker-cell-disabled)[data-value*="${dataDate}"], td:not(.ant-picker-cell-disabled)[aria-label*="${dataDate}"]`)
+    .first();
+  if ((await preferredCell.count().catch(() => 0)) > 0 && (await preferredCell.isVisible().catch(() => false))) {
+    await preferredCell.click();
+    return;
+  }
+
+  const visibleCells = target.locator('td.ant-picker-cell-in-view:not(.ant-picker-cell-disabled) .ant-picker-cell-inner').filter({ hasText: new RegExp(`^${dayText}$`) });
+  const dateCell = await visibleLocator(visibleCells);
+  if (!dateCell) throw dashboardDateFailure('Dashboard date picker requested day was not found', dataDate);
+  await dateCell.click();
+}
+
+async function confirmDashboardDatePickerIfNeeded(target: DashboardTarget): Promise<void> {
+  const confirmButton =
+    (await visibleLocator(target.getByRole('button', { name: /^(确定|OK)$/i }))) ??
+    (await visibleLocator(target.getByText(/^(确定|OK)$/i, { exact: true })));
+  if (confirmButton) await confirmButton.click();
+}
+
+async function waitForDashboardDateReadback(input: Locator, target: DashboardTarget, dataDate: string): Promise<string> {
+  const deadline = Date.now() + 30000;
+  let lastValue = '';
+
+  while (Date.now() < deadline) {
+    lastValue = await input.inputValue({ timeout: 1000 }).catch(() => '');
+    const readback = assessDashboardDateReadback(dataDate, lastValue);
+    if (readback.confirmed) return dataDate;
+    await waitForDashboardTargetTimeout(target, 1000);
+  }
+
+  throw dashboardDateFailure('Dashboard date picker did not confirm requested dataDate', dataDate, lastValue);
+}
+
+export async function selectDashboardDataDate(page: Page, target: DashboardTarget, dataDate: string): Promise<string> {
+  void page;
+  const requestedDate = assertDashboardDataDate(dataDate);
+  const input = target.locator('input[placeholder="请选择日期"]').first();
+
+  if ((await input.count().catch(() => 0)) === 0 || !(await input.isVisible().catch(() => false))) {
+    throw new Error('Dashboard date picker was not found');
+  }
+
+  const pickerShell = input.locator('xpath=ancestor::*[contains(concat(" ", normalize-space(@class), " "), " ant-picker ")][1]');
+  if ((await pickerShell.count().catch(() => 0)) > 0 && (await pickerShell.first().isVisible().catch(() => false))) await pickerShell.first().click();
+  else await input.click();
+
+  await alignDashboardDatePickerMonth(target, requestedDate);
+  await clickDashboardDateCell(target, requestedDate);
+  await confirmDashboardDatePickerIfNeeded(target);
+  const confirmedDate = await waitForDashboardDateReadback(input, target, requestedDate);
+  await waitForDashboardTargetTableOrEmptyState(target, 30000);
+  return confirmedDate;
+}
 async function collectPeriodWithAdaptivePageSize(page: DashboardTarget, period: keyof typeof PERIOD_LABELS, preferredPageSize: number): Promise<RawTableData> {
   const candidates = normalizePageSizeCandidates(preferredPageSize);
   let lastError: Error | null = null;
@@ -289,7 +437,11 @@ async function collectPeriodWithAdaptivePageSize(page: DashboardTarget, period: 
 
 export { selectSubAccountIfNeeded } from './subAccount.js';
 
-export async function collectDashboardPage(config: AgentConfig, page: Page): Promise<RawTableData[]> {
+export async function collectDashboardPage(
+  config: AgentConfig,
+  page: Page,
+  options: DashboardCollectOptions = {},
+): Promise<DashboardCollectionResult> {
   await page.goto(config.targetUrl, { waitUntil: 'domcontentloaded' });
   await selectSubAccountIfNeeded(page);
 
@@ -306,6 +458,8 @@ export async function collectDashboardPage(config: AgentConfig, page: Page): Pro
     throw new Error(await dashboardTimeoutMessage(page));
   }
 
+  const actualPageDate = options.dataDate ? await selectDashboardDataDate(page, dashboardTarget, options.dataDate) : undefined;
+
   const rawDir = `${config.outputDir}/latest`;
   await mkdir(rawDir, { recursive: true });
 
@@ -317,7 +471,7 @@ export async function collectDashboardPage(config: AgentConfig, page: Page): Pro
       await writeFile(path, JSON.stringify(table, null, 2), 'utf8');
       console.log(`[${table.period}] saved ${table.rows.length} rows to ${path}`);
     }
-    return emptyResults;
+    return { tables: emptyResults, ...(actualPageDate ? { actualPageDate } : {}) };
   }
 
   const results: RawTableData[] = [];
@@ -330,7 +484,7 @@ export async function collectDashboardPage(config: AgentConfig, page: Page): Pro
     console.log(`[${period}] saved ${table.rows.length} rows to ${path}`);
   }
 
-  return results;
+  return { tables: results, ...(actualPageDate ? { actualPageDate } : {}) };
 }
 
 export async function crawlDashboard(config: AgentConfig): Promise<RawTableData[]> {
@@ -338,9 +492,9 @@ export async function crawlDashboard(config: AgentConfig): Promise<RawTableData[
   let completed = false;
 
   try {
-    const results = await collectDashboardPage(config, page);
+    const result = await collectDashboardPage(config, page);
     completed = true;
-    return results;
+    return result.tables;
   } finally {
     if (completed || !shouldKeepBrowserOpenOnFailure(process.env.MT_AGENT_KEEP_BROWSER_ON_FAILURE)) {
       await browser.close();
