@@ -529,7 +529,11 @@ export async function runPublicTrafficReportCli(): Promise<PublicTrafficReportCl
     const { previous: previousGoodsSnapshot, current: currentGoodsSnapshot } = await mutateGoodsSnapshotStateSerialized(paths.goodsCurrentSnapshotState, (latestPrevious) => mergeGoodsSnapshotWithDaemon(
       goodsSnapshotFromExport ?? (latestPrevious.length > 0 ? latestPrevious : goodsSnapshotFromMapping(mapping)),
       daemonCatalog?.entries ?? [],
-    ).map((item) => (item.listingState ? { ...item, observedAt: item.observedAt ?? runDate } : item)));
+    ).map((item) => ({
+      ...item,
+      ...(item.listingState ? { observedAt: item.observedAt ?? runDate } : {}),
+      ...(item.platformRestriction ? { platformRestriction: { ...item.platformRestriction, observedAt: item.platformRestriction.observedAt ?? runDate } } : {}),
+    })));
     const refreshHealth = decideRefreshHealth({
       previousSnapshotCount: previousGoodsSnapshot.length,
       currentMergedSnapshotCount: currentGoodsSnapshot.length,
@@ -712,6 +716,7 @@ export async function runPublicTrafficReportCli(): Promise<PublicTrafficReportCl
       runDate,
       context,
       snapshotPath: paths.sameSkuSnapshot,
+      suppressDelistAttribution: refreshHealth.suppressLifecycleDrop,
     }, log);
 
     await writeFile(paths.reportContext, JSON.stringify(context, null, 2), 'utf8');
@@ -804,11 +809,12 @@ async function writeInventorySameSkuSnapshotSafely(
     runDate: string;
     context: PublicTrafficDataReportContext;
     snapshotPath: string;
+    suppressDelistAttribution: boolean;
   },
   log: ReturnType<typeof createRunLog>,
 ): Promise<ClosedOrderRegistryContext | null> {
   try {
-    const registryContext = await loadClosedOrderRegistryContext({ artifactsDir: input.outputDir }, process.cwd());
+    const registryContext = await loadClosedOrderRegistryContext({ artifactsDir: input.outputDir, suppressDelistAttribution: input.suppressDelistAttribution }, process.cwd());
     const sameSkuSnapshot = buildInventorySameSkuSnapshot({
       date: input.runDate,
       reportDate: input.context.date,
