@@ -163,6 +163,14 @@ async function writeContext(): Promise<string> {
     highPotential: [{ identifier: '端内ID 566', action: '继续放量', reason: '高潜力' }],
     newProductObservation: [],
     lifecycleGovernance: [{ identifier: '端内ID 706', action: '下架、替换或重做素材', reason: '已托管 45 天，30日曝光 60，访问 1，金额 0.00', priority: 'medium' }],
+    custodyAbnormal: [
+      { identifier: '端内ID 565', action: '检查托管', reason: '托管异常', priority: 'high' },
+      { identifier: '端内ID 701', action: '检查托管', reason: '托管异常', priority: 'high' },
+      { identifier: '端内ID 702', action: '检查托管', reason: '托管异常', priority: 'medium' },
+      { identifier: '端内ID 649', action: '检查托管', reason: '托管异常', priority: 'medium' },
+      { identifier: '端内ID 841', action: '检查托管', reason: '托管异常', priority: 'medium' },
+      { identifier: '端内ID 733', action: '检查托管', reason: '托管异常', priority: 'medium' },
+    ],
     recommendedActions: [
       { identifier: '端内ID 565', action: '补曝光', reason: '曝光不足', priority: 'high' },
       { identifier: '端内ID 701', action: '新品维护', reason: '新链接池维护', priority: 'medium' },
@@ -1248,17 +1256,23 @@ describe('handleBotIntent', () => {
     expect(response.text).not.toContain('公域日报 2026-06-11');
   });
 
-  it('answers product query from report context', async () => {
+  it('answers product query from report context with dual ids and 30-day metrics', async () => {
     const outputDir = await writeContext();
     const response = await handleBotIntent({ type: 'query_product', keyword: '565' }, outputDir);
-    expect(response.text).toContain('端内ID 565 iPhone 15');
-    expect(response.text).toContain('1日：曝光 10');
+    expect(response.text).toContain('端内ID 565｜商品ID 2000000000000000000001');
+    expect(response.text).toContain('iPhone 15');
+    expect(response.text).toContain('1日：曝光 10，访问 2，发货 0');
+    expect(response.text).toContain('30日：曝光 10，访问 2，发货 0');
+    expect(response.card).toBeDefined();
+    expect(JSON.stringify(response.card)).toContain('商品查询结果');
+    expect(JSON.stringify(response.card)).toContain('端内ID 565｜商品ID 2000000000000000000001');
   });
 
   it('answers dated product query from the requested report context', async () => {
     const outputDir = await writeDatedContexts();
     const response = await handleBotIntent({ type: 'query_product', keyword: '733', date: '2026-06-10' }, outputDir);
-    expect(response.text).toContain('端内ID 733 旧日期 Pocket3');
+    expect(response.text).toContain('端内ID 733｜商品ID platform-2026-06-10-733');
+    expect(response.text).toContain('旧日期 Pocket3');
     expect(response.text).toContain('1日：曝光 321');
     expect(response.text).not.toContain('最新日期 Pocket3');
   });
@@ -1273,18 +1287,42 @@ describe('handleBotIntent', () => {
   it('answers numeric product query with only the exact product id', async () => {
     const outputDir = await writeContext();
     const response = await handleBotIntent({ type: 'query_product', keyword: '733' }, outputDir);
-    expect(response.text).toContain('端内ID 733 大疆DJI Pocket3云台相机128G');
+    expect(response.text).toContain('端内ID 733｜商品ID p-733-target');
+    expect(response.text).toContain('大疆DJI Pocket3云台相机128G');
     expect(response.text).not.toContain('端内ID 649');
     expect(response.text).not.toContain('端内ID 841');
+  });
+
+  it('answers ordinary product queries by platform product id', async () => {
+    const outputDir = await writeContext();
+    const response = await handleBotIntent({ type: 'query_product', keyword: '2000000000000000000001' }, outputDir);
+
+    expect(response.text).toContain('端内ID 565｜商品ID 2000000000000000000001');
+    expect(response.text).toContain('iPhone 15');
+    expect(response.text).toContain('30日：曝光 10，访问 2，发货 0');
   });
 
   it('answers comma separated product id queries from report context', async () => {
     const outputDir = await writeContext();
     const response = await handleBotIntent({ type: 'query_product', keyword: '565, 701, 733' }, outputDir);
-    expect(response.text).toContain('端内ID 565 iPhone 15');
-    expect(response.text).toContain('端内ID 701 大疆 Pocket 3');
-    expect(response.text).toContain('端内ID 733 大疆DJI Pocket3云台相机128G');
+    expect(response.text).toContain('端内ID 565｜商品ID 2000000000000000000001');
+    expect(response.text).toContain('iPhone 15');
+    expect(response.text).toContain('端内ID 701｜商品ID p701');
+    expect(response.text).toContain('大疆 Pocket 3');
+    expect(response.text).toContain('端内ID 733｜商品ID p-733-target');
+    expect(response.text).toContain('大疆DJI Pocket3云台相机128G');
     expect(response.text).not.toContain('没有找到匹配商品');
+    expect(response.card).toBeUndefined();
+  });
+
+  it('keeps matched rows when a batch product query has missing ids', async () => {
+    const outputDir = await writeContext();
+    const response = await handleBotIntent({ type: 'query_product', keyword: '565, 999999' }, outputDir);
+
+    expect(response.text).toContain('端内ID 565｜商品ID 2000000000000000000001');
+    expect(response.text).toContain('iPhone 15');
+    expect(response.text).toContain('未找到：999999');
+    expect(response.text).toContain('未在最新日报与 ID 映射快照中找到');
   });
 
   it('falls back to link registry for comma separated product ids missing from report rows', async () => {
@@ -1303,6 +1341,23 @@ describe('handleBotIntent', () => {
     expect(response.text).toContain('端内ID 561 DJI Pocket 3 标准版');
     expect(response.text).toContain('平台商品ID platform-561');
     expect(response.text).not.toContain('没有找到匹配商品');
+  });
+
+  it('returns a bounded issue-pool card for report section queries', async () => {
+    const outputDir = await writeContext();
+    const response = await executeAgentToolRequest(
+      { toolName: 'publicTraffic.reportQuery', arguments: { target: 'section', section: 'custodyAbnormal' }, reason: '查询托管异常问题池' },
+      outputDir,
+    );
+
+    expect(response.text).toContain('公域日报托管异常 2026-06-11');
+    expect(response.card).toBeDefined();
+    const cardText = JSON.stringify(response.card);
+    expect(cardText).toContain('托管异常 · 6 条');
+    expect(cardText).toContain('端内ID 565｜商品ID 2000000000000000000001');
+    expect(cardText).toContain('查看完整清单');
+    expect(cardText).toContain('query_full_list');
+    expect(cardText).not.toContain('端内ID 733｜商品ID p-733-target');
   });
 
   it('keeps gone links out of resolved operation candidates', async () => {
@@ -1431,7 +1486,8 @@ describe('handleBotIntent', () => {
 
     const response = await handleBotIntent({ type: 'unknown', text: '帮我看看苹果手机' }, outputDir, { llmToolSelector: selector });
 
-    expect(response.text).toContain('端内ID 565 iPhone 15');
+    expect(response.text).toContain('端内ID 565｜商品ID 2000000000000000000001');
+    expect(response.text).toContain('iPhone 15');
   });
 
   it('declines low-confidence LLM read-only selections instead of guessing', async () => {
@@ -1580,7 +1636,8 @@ describe('handleBotIntent', () => {
 
     const response = await handleBotIntent({ type: 'unknown', text: '帮我看看苹果手机' }, outputDir, { agentPlannerProvider: planner });
 
-    expect(response.text).toContain('端内ID 565 iPhone 15');
+    expect(response.text).toContain('端内ID 565｜商品ID 2000000000000000000001');
+    expect(response.text).toContain('iPhone 15');
   });
 
   it('lets the Agent planner answer natural report data questions through publicTraffic.reportQuery', async () => {
@@ -1927,7 +1984,8 @@ describe('handleBotIntent', () => {
     expect(response.text).toContain('步骤 1/2：publicTraffic.latestSummary');
     expect(response.text).toContain('步骤 2/2：product.query');
     expect(response.text).toContain('565');
-    expect(response.card).toBeUndefined();
+    expect(response.card).toBeDefined();
+    expect(JSON.stringify(response.card)).toContain('商品查询结果');
   });
 
   it('pauses remaining multi-step planner steps when a read tool returns an interactive card', async () => {
@@ -2031,7 +2089,8 @@ describe('handleBotIntent', () => {
     expect(executed.text).toContain('复制成功：商品 761 → 新商品 901');
     expect(executed.text).toContain('步骤 3/3：product.query');
     expect(executed.text).toContain('端内ID 565');
-    expect(executed.card).toBeUndefined();
+    expect(executed.card).toBeDefined();
+    expect(JSON.stringify(executed.card)).toContain('商品查询结果');
   });
 
   it('asks for a second confirmation when a confirmed product step is followed by another product step', async () => {
@@ -2122,7 +2181,8 @@ describe('handleBotIntent', () => {
     expect(executed.text).toContain('复制成功：商品 761 → 新商品 565');
     expect(executed.text).toContain('步骤 2/2：product.query');
     expect(executed.text).toContain('端内ID 565');
-    expect(executed.card).toBeUndefined();
+    expect(executed.card).toBeDefined();
+    expect(JSON.stringify(executed.card)).toContain('商品查询结果');
   });
 
   it('continues into a dedicated new-link planning card without copying new links before its own confirmation', async () => {
@@ -4101,6 +4161,11 @@ describe('handleBotIntent', () => {
     const registryRoot = await mkdtemp(join(tmpdir(), 'mt-agent-closed-order-registry-'));
     const registryPaths = await writeClosedOrderRegistryFixtures(registryRoot);
     await mkdir(join(outputDir, 'state'), { recursive: true });
+    const closedAtBase = new Date();
+    const pricingClosedAt = new Date(closedAtBase.getTime() - 24 * 60 * 60 * 1000).toISOString();
+    const pricingIngestedAt = new Date(new Date(pricingClosedAt).getTime() + 5 * 60 * 1000).toISOString();
+    const inventoryClosedAt = new Date(closedAtBase.getTime() - 2 * 24 * 60 * 60 * 1000).toISOString();
+    const inventoryIngestedAt = new Date(new Date(inventoryClosedAt).getTime() + 5 * 60 * 1000).toISOString();
     await writeFile(join(outputDir, 'state', 'closed-order-feedback-ingest.json'), JSON.stringify({
       version: 1,
       items: [
@@ -4109,9 +4174,9 @@ describe('handleBotIntent', () => {
           closeId: 'close-1',
           internalProductId: '560',
           rawRemark: '价格太低，不接单',
-          closedAt: '2026-07-06T01:00:00.000Z',
-          firstIngestedAt: '2026-07-06T01:05:00.000Z',
-          lastIngestedAt: '2026-07-06T01:05:00.000Z',
+          closedAt: pricingClosedAt,
+          firstIngestedAt: pricingIngestedAt,
+          lastIngestedAt: pricingIngestedAt,
           seenCount: 1,
         },
         {
@@ -4119,9 +4184,9 @@ describe('handleBotIntent', () => {
           closeId: 'close-2',
           internalProductId: '561',
           rawRemark: '库存不足',
-          closedAt: '2026-07-05T08:00:00.000Z',
-          firstIngestedAt: '2026-07-05T08:05:00.000Z',
-          lastIngestedAt: '2026-07-05T08:05:00.000Z',
+          closedAt: inventoryClosedAt,
+          firstIngestedAt: inventoryIngestedAt,
+          lastIngestedAt: inventoryIngestedAt,
           seenCount: 1,
         },
       ],

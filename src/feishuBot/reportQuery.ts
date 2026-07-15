@@ -1,3 +1,4 @@
+import { findProductBySectionIdentifier } from '../agentData/productQuery.js';
 import type { PeriodKey } from '../domain/types.js';
 import { getPublicTrafficMetric, metricAvailabilityForFixedPeriod, publicTrafficMetricKeys, type MetricAvailability, type PublicTrafficMetricDefinition, type PublicTrafficMetricKey } from '../agentData/publicTrafficMetricCatalog.js';
 import { derivedOrderBusinessMetrics, fulfillmentRateLines, ORDER_ANALYSIS_PAGE_LABELS, type OrderAnalysisPageKey } from '../publicTraffic/orderAnalysis.js';
@@ -707,8 +708,10 @@ function formatSectionExtraValue(value: unknown): string {
   return String(value).replace(/\s+/g, ' ').trim();
 }
 
-function formatSectionItem(item: Record<string, unknown>, index: number): string {
-  const id = item.identifier ?? item.productId ?? '-';
+function formatSectionItem(context: PublicTrafficDataReportContext, item: Record<string, unknown>, index: number): string {
+  const product = findProductBySectionIdentifier(context, item.identifier ?? item.productId);
+  const id = product ? `端内ID ${product.internalProductId}｜商品ID ${product.platformProductId ?? '未映射'}` : String(item.identifier ?? item.productId ?? '-');
+  const productName = product?.row.productName ? ` ${product.row.productName}` : '';
   const action = item.action ?? item.maintenanceStatus ?? item.reason ?? '-';
   const reason = item.reason ?? item.note ?? '';
   const priority = item.priority ? `，优先级 ${item.priority}` : '';
@@ -717,7 +720,33 @@ function formatSectionItem(item: Record<string, unknown>, index: number): string
     .filter(([key, value]) => !hiddenFields.has(key) && formatSectionExtraValue(value))
     .slice(0, 8)
     .map(([key, value]) => `${sectionFieldLabels[key] ?? key} ${formatSectionExtraValue(value)}`);
-  return `${index + 1}. ${id}：${action}${priority}${reason ? `。${reason}` : ''}${extra.length ? `；${extra.join('，')}` : ''}`;
+  return `${index + 1}. ${id}${productName}：${action}${priority}${reason ? `。${reason}` : ''}${extra.length ? `；${extra.join('，')}` : ''}`;
+}
+
+export interface PublicTrafficReportSectionCardData {
+  label: string;
+  total: number;
+  rows: Array<{ id: string; action: string; reason: string; priority?: string }>;
+}
+
+export function buildReportSectionCardData(context: PublicTrafficDataReportContext, args: PublicTrafficReportQueryArguments): PublicTrafficReportSectionCardData | null {
+  if (args.target !== 'section') return null;
+  const section = args.section ?? 'recommendedActions';
+  const sortDirection = args.sortDirection ?? 'asc';
+  const rows = sectionItems(context, section)
+    .filter((item) => itemMatchesSectionFilters(item, args.filters))
+    .sort((left, right) => {
+      if (!args.sortBy) return 0;
+      const compared = compareSortableValues(sectionFieldValue(left, args.sortBy as ReportQueryFilter['field']), sectionFieldValue(right, args.sortBy as ReportQueryFilter['field']));
+      return sortDirection === 'asc' ? compared : -compared;
+    })
+    .map((item) => ({
+      id: String(item.identifier ?? item.productId ?? ''),
+      action: String(item.action ?? item.maintenanceStatus ?? item.reason ?? '-'),
+      reason: String(item.reason ?? item.note ?? ''),
+      ...(typeof item.priority === 'string' ? { priority: item.priority } : {}),
+    }));
+  return { label: sectionLabels[section], total: sectionItems(context, section).length, rows };
 }
 
 function formatSection(context: PublicTrafficDataReportContext, args: PublicTrafficReportQueryArguments): string {
@@ -735,7 +764,7 @@ function formatSection(context: PublicTrafficDataReportContext, args: PublicTraf
   return [
     `公域日报${sectionLabels[section]} ${context.date}`,
     `共 ${sectionItems(context, section).length} 条，展示 ${items.length} 条`,
-    ...(items.length ? items.map(formatSectionItem) : ['暂无数据。']),
+    ...(items.length ? items.map((item, index) => formatSectionItem(context, item, index)) : ['暂无数据。']),
   ].join('\n');
 }
 

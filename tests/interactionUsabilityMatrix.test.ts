@@ -312,7 +312,7 @@ describe('interaction usability matrix cases', () => {
 
     expect(report.details).toHaveLength(interactionUsabilityCases.length * 2);
     expect(report.capabilityPassed).toHaveLength(interactionUsabilityCases.length);
-    expect(report.routingPassed).toEqual(['query-status-956', 'daily-summary']);
+    expect(report.routingPassed).toEqual(['daily-summary']);
     expect(report.blockedByCapability).toEqual([]);
     expect([...report.blockedByRouting, ...report.blockedByMetadata, ...report.blockedByWorkflow].length).toBeGreaterThan(0);
   });

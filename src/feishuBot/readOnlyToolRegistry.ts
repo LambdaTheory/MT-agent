@@ -1,7 +1,7 @@
 import { explainRefreshCandidates } from '../agentData/refreshCandidateExplain.js';
 import { resolveSafeSourceForSameSkuGroup } from '../agentData/safeSource.js';
 import { aggregateWindowProducts, readWindowMetric, type WindowProductAggregate } from '../agentData/windowAggregate.js';
-import { getInactiveLinks, getNewProductPool, getProblemProducts, getProductPerformance, getRemovedLinks } from '../agentData/publicTrafficQueries.js';
+import { getInactiveLinks, getNewProductPool, getProblemProducts, getRemovedLinks } from '../agentData/publicTrafficQueries.js';
 import { rankBestProductByRegistryQuery, rankBestProductByRegistryQueryWindowed, type ProductRankingResult, type ProductWindowRankingResult } from '../agentData/productRanking.js';
 import { getPublicTrafficMetric, publicTrafficMetricKeys, type PublicTrafficMetricKey } from '../agentData/publicTrafficMetricCatalog.js';
 import { buildAgentTaskPool } from '../agentData/taskPool.js';
@@ -11,7 +11,7 @@ import type { LinkRegistryStore } from '../linkRegistry/store.js';
 import type { LinkRegistryEntry } from '../linkRegistry/types.js';
 import type { PublicTrafficDataReportContext } from '../publicTraffic/types.js';
 import type { LlmReadOnlyToolName } from './llmProvider.js';
-import { formatLatestSummary } from './reportStore.js';
+import { formatLatestSummary, formatProductQueryResult, queryProductResult } from './reportStore.js';
 import type { BotResponse } from './types.js';
 
 type ReadOnlyAgentIntent = Exclude<AgentIntent, { type: 'unknown' }>;
@@ -109,17 +109,6 @@ function formatInactiveLinkLines(items: Array<{ productId: string; identifier: s
 
 function formatNewProductPoolLines(items: Array<{ productId: string; productName: string; maintenanceStatus: string }>): string {
   return items.length > 0 ? items.map((item, index) => `${index + 1}. ${item.productId}：${item.productName || '未命名'}。状态：${item.maintenanceStatus}`).join('\n') : '暂无新链接池商品。';
-}
-
-function formatProductAnswer(answer: ReturnType<typeof getProductPerformance>): string {
-  if (!answer) return '暂无匹配商品。';
-  const one = answer.periods.find((metric) => metric.period === '1d');
-  const seven = answer.periods.find((metric) => metric.period === '7d');
-  return [
-    `${answer.productId} ${answer.productName}`,
-    one ? `1日：曝光 ${one.exposure}，访问 ${one.publicVisits}，发货 ${one.shippedOrders}` : '',
-    seven ? `7日：曝光 ${seven.exposure}，访问 ${seven.publicVisits}，发货 ${seven.shippedOrders}` : '',
-  ].filter(Boolean).join('\n');
 }
 
 function formatMoney(value: number): string {
@@ -252,10 +241,6 @@ function formatSafeSourceGroups(context: PublicTrafficDataReportContext, registr
     : '所有已知同款组都有可用安全源商品。';
 }
 
-function getProductPerformanceForBot(context: PublicTrafficDataReportContext, keyword: string): ReturnType<typeof getProductPerformance> {
-  return getProductPerformance(context, keyword) ?? (/^\d+$/.test(keyword) ? getProductPerformance(context, `端内ID ${keyword}`) : null);
-}
-
 function formatOrderSummary(context: { orderAnalysis?: { pages?: Record<string, { label: string; indicators?: Array<{ label: string; value: string }> }> } }): string {
   const overview = context.orderAnalysis?.pages?.overview;
   const indicators = overview?.indicators ?? [];
@@ -292,7 +277,7 @@ export const readOnlyTools: ReadOnlyTool[] = [
       },
     },
     async run(context, intent) {
-      return { text: formatProductAnswer(getProductPerformanceForBot(context, intent.type === 'product' ? intent.keyword : '')) };
+      return { text: formatProductQueryResult(queryProductResult(context, intent.type === 'product' ? intent.keyword : '')) };
     },
   },
   {

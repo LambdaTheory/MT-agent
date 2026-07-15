@@ -13,6 +13,7 @@ import type { ClosedOrderRegistryPathsInput } from '../closedOrderFeedback/runti
 import { replyFeishuMessageCard, replyFeishuMessageText, type FeishuAppSendResult, type FeishuCardPayload, type FeishuReplyConfig } from '../notify/feishuApp.js';
 import { handleOperationsLearningFeedback, handleOperationsLearningStop } from '../operationsLearningLoop/session.js';
 import { findLatestReportContext } from './reportStore.js';
+import { resolveQueryFullListText } from './queryFullListAction.js';
 import { buildIdLookupCard } from './idLookupCard.js';
 import { lookupProductId } from './idLookup.js';
 import { createFeishuMessageDispatcher } from './dispatcher.js';
@@ -160,6 +161,7 @@ function expectedActionForButtonName(name: string | undefined): string | undefin
     activity_price_callback_confirm_submit: 'activity_price_callback_confirm',
     activity_price_callback_cancel_submit: 'activity_price_callback_cancel',
     id_lookup_submit: 'id_lookup',
+    query_full_list_submit: 'query_full_list',
     link_registry_maintenance_start_submit: 'link_registry_maintenance_start',
     link_registry_maintenance_start_form: 'link_registry_maintenance_start',
     link_registry_maintenance_snooze_submit: 'link_registry_maintenance_snooze',
@@ -917,6 +919,11 @@ async function handleCardActionTrigger(
     }
     setServerCardActionStatus(claim.key, 'cancelled');
     return statusCard('租赁商品操作已取消', `商品 ${productId} 操作已取消。`, 'grey');
+  }
+
+  if (actionName === 'query_full_list') {
+    const text = await resolveQueryFullListText(config.outputDir ?? 'output', value?.queryRef);
+    return statusCard('完整清单', text, 'blue');
   }
 
   if (actionName === 'id_lookup') {

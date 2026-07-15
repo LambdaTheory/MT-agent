@@ -1174,13 +1174,13 @@ describe('createFeishuSdkBot card.action.trigger', () => {
       },
     });
 
-    for (let attempt = 0; attempt < 100 && !sent.some((item) => JSON.stringify(item).includes('步骤 2/2：product.query')); attempt += 1) {
+    for (let attempt = 0; attempt < 100 && !sent.some((item) => JSON.stringify(item).includes('端内ID 565')); attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
 
     expect(calls).toEqual(['388', '388']);
-    const finalPatch = sent.map(patchedCard).find((card) => JSON.stringify(card).includes('步骤 2/2：product.query'));
-    expect(JSON.stringify(finalPatch)).toContain('新链批量复制完成');
+    const finalPatch = sent.map(patchedCard).find((card) => JSON.stringify(card).includes('端内ID 565'));
+    expect(JSON.stringify(finalPatch)).toContain('商品查询结果');
     expect(JSON.stringify(finalPatch)).toContain('端内ID 565');
   });
 
@@ -1244,13 +1244,13 @@ describe('createFeishuSdkBot card.action.trigger', () => {
       },
     });
 
-    for (let attempt = 0; attempt < 100 && !sent.some((item) => JSON.stringify(item).includes('步骤 2/2：product.query')); attempt += 1) {
+    for (let attempt = 0; attempt < 100 && !sent.some((item) => JSON.stringify(item).includes('端内ID 565')); attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
 
     expect(executions).toHaveLength(1);
-    const finalPatch = sent.map(patchedCard).find((card) => JSON.stringify(card).includes('步骤 2/2：product.query'));
-    expect(JSON.stringify(finalPatch)).toContain('改价执行成功');
+    const finalPatch = sent.map(patchedCard).find((card) => JSON.stringify(card).includes('端内ID 565'));
+    expect(JSON.stringify(finalPatch)).toContain('商品查询结果');
     expect(JSON.stringify(finalPatch)).toContain('端内ID 565');
   });
 
@@ -1293,13 +1293,13 @@ describe('createFeishuSdkBot card.action.trigger', () => {
       },
     });
 
-    for (let attempt = 0; attempt < 100 && !sent.some((item) => JSON.stringify(item).includes('步骤 2/2：product.query')); attempt += 1) {
+    for (let attempt = 0; attempt < 100 && !sent.some((item) => JSON.stringify(item).includes('端内ID 565')); attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
 
     expect(calls).toEqual(['761']);
-    const finalPatch = sent.map(patchedCard).find((card) => JSON.stringify(card).includes('步骤 2/2：product.query'));
-    expect(JSON.stringify(finalPatch)).toContain('下架成功');
+    const finalPatch = sent.map(patchedCard).find((card) => JSON.stringify(card).includes('端内ID 565'));
+    expect(JSON.stringify(finalPatch)).toContain('商品查询结果');
     expect(JSON.stringify(finalPatch)).toContain('端内ID 565');
   });
 
@@ -1684,6 +1684,28 @@ describe('createFeishuSdkBot card.action.trigger', () => {
     expect(JSON.stringify(sent[0])).toContain('取消差异化定价');
     expect(JSON.stringify(sent[0])).toContain('cancel_differential_pricing_open');
     await expect(readFile(submitSessionPath, 'utf8')).resolves.toContain('"status": "price_callback_pending"');
+  });
+
+  it('handles query full-list card action by returning a read-only text card', async () => {
+    const outputDir = await writeContext();
+    const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
+    const sent: unknown[] = [];
+    const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', outputDir, sdk: fakeSdk(sent, registered) });
+
+    bot.start();
+    const result = await registered['card.action.trigger']({
+      event: {
+        context: { open_message_id: 'om-query-full-list' },
+        action: { tag: 'button', name: 'query_full_list_submit', behaviors: [{ type: 'callback', value: { action: 'query_full_list', queryRef: '2026-06-11:custodyAbnormal' } }] },
+      },
+    });
+
+    expect(sent).toEqual([]);
+    expect(result).toMatchObject({ card: { type: 'raw', data: { schema: '2.0' } } });
+    const cardText = JSON.stringify((result as any).card.data);
+    expect(cardText).toContain('完整清单');
+    expect(cardText).toContain('托管异常 2026-06-11');
+    expect(cardText).toContain('暂无数据。');
   });
 
   it('handles id_lookup form submit by returning the updated card', async () => {
