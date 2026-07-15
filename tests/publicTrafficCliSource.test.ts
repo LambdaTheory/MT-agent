@@ -78,7 +78,8 @@ describe('public traffic CLI wiring', () => {
 
   it('stamps nested platform restriction observation time in current goods snapshot', async () => {
     const text = await source('../src/cli/publicTrafficReport.ts');
-    expect(text).toContain('platformRestriction: { ...item.platformRestriction, observedAt: item.platformRestriction.observedAt ?? runDate }');
+    expect(text).toContain('const goodsSnapshotCollectedAt = new Date().toISOString();');
+    expect(text).toContain('platformRestriction: { ...item.platformRestriction, observedAt: item.platformRestriction.observedAt ?? (goodsSnapshotFromExport ? goodsSnapshotCollectedAt : runDate) }');
   });
 
   it('crawler 接入订单分析抓取', async () => {
