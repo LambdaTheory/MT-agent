@@ -303,6 +303,39 @@ describe('public traffic report freeform query', () => {
     expect(text).not.toContain('端内ID 202');
   });
 
+  it('queries a named section with dual product ids', () => {
+    const context: PublicTrafficDataReportContext = {
+      ...reportContext,
+      rows: [
+        ...reportContext.rows,
+        { ...row('201', '托管异常商品 A', { exposure: 100, publicVisits: 10 }), platformProductId: 'platform-201', custodyDays: 37 },
+        { ...row('202', '托管异常商品 B', { exposure: 200, publicVisits: 20 }), platformProductId: '', custodyDays: 12 },
+        { ...row('203', '托管异常商品 C', { exposure: 300, publicVisits: 30 }), platformProductId: 'platform-203', custodyDays: 13 },
+        { ...row('204', '托管异常商品 D', { exposure: 400, publicVisits: 40 }), platformProductId: 'platform-204', custodyDays: 14 },
+        { ...row('205', '托管异常商品 E', { exposure: 500, publicVisits: 50 }), platformProductId: 'platform-205', custodyDays: 15 },
+        { ...row('206', '托管异常商品 F', { exposure: 600, publicVisits: 60 }), platformProductId: 'platform-206', custodyDays: 16 },
+      ],
+      custodyAbnormal: [
+        { identifier: '端内ID 201', action: '检查托管', reason: '托管异常', priority: 'high' },
+        { identifier: '端内ID 202', action: '检查托管', reason: '托管异常', priority: 'medium' },
+        { identifier: '端内ID 203', action: '检查托管', reason: '托管异常', priority: 'medium' },
+        { identifier: '端内ID 204', action: '检查托管', reason: '托管异常', priority: 'medium' },
+        { identifier: '端内ID 205', action: '检查托管', reason: '托管异常', priority: 'medium' },
+        { identifier: '端内ID 206', action: '检查托管', reason: '托管异常', priority: 'medium' },
+      ],
+    };
+
+    const text = runPublicTrafficReportQuery(context, {
+      target: 'section',
+      section: 'custodyAbnormal',
+    });
+
+    expect(text).toContain('端内ID 201｜商品ID platform-201');
+    expect(text).toContain('托管异常商品 A');
+    expect(text).toContain('端内ID 202｜商品ID 未映射');
+    expect(text).toContain('托管异常商品 B');
+  });
+
   it('keeps extended new-product-pool fields in section details', () => {
     const text = runPublicTrafficReportQuery(reportContext, {
       target: 'section',

@@ -1621,6 +1621,28 @@ describe('createFeishuSdkBot card.action.trigger', () => {
     await expect(readFile(submitSessionPath, 'utf8')).resolves.toContain('"status": "price_callback_pending"');
   });
 
+  it('handles query full-list card action by returning a read-only text card', async () => {
+    const outputDir = await writeContext();
+    const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
+    const sent: unknown[] = [];
+    const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', outputDir, sdk: fakeSdk(sent, registered) });
+
+    bot.start();
+    const result = await registered['card.action.trigger']({
+      event: {
+        context: { open_message_id: 'om-query-full-list' },
+        action: { tag: 'button', name: 'query_full_list_submit', behaviors: [{ type: 'callback', value: { action: 'query_full_list', queryRef: '2026-06-11:custodyAbnormal' } }] },
+      },
+    });
+
+    expect(sent).toEqual([]);
+    expect(result).toMatchObject({ card: { type: 'raw', data: { schema: '2.0' } } });
+    const cardText = JSON.stringify((result as any).card.data);
+    expect(cardText).toContain('完整清单');
+    expect(cardText).toContain('托管异常 2026-06-11');
+    expect(cardText).toContain('暂无数据。');
+  });
+
   it('handles id_lookup form submit by returning the updated card', async () => {
     const outputDir = await writeContext();
     const registered: Record<string, (data: unknown) => Promise<unknown>> = {};

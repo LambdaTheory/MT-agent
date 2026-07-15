@@ -54,7 +54,8 @@ import {
   type RentalPriceSkillClient,
 } from './rentalPrice.js';
 import type { ReadOnlyToolRunOptions } from './readOnlyToolRegistry.js';
-import { findLatestReportContext, findReportContextByDate, formatConversionSummary, formatLatestSummary, formatProductRows, parseNumericProductIdList, queryProductRows } from './reportStore.js';
+import { buildProductDetailCard } from './queryCards.js';
+import { findLatestReportContext, findReportContextByDate, formatConversionSummary, formatLatestSummary, formatProductQueryResult, formatProductRows, parseNumericProductIdList, queryProductResult } from './reportStore.js';
 import type { BotIntent, BotResponse } from './types.js';
 import type { ResolutionCandidate } from '../agentRuntime/intentResolution.js';
 
@@ -729,8 +730,13 @@ export async function handleBotIntent(intent: BotIntent, outputDir = 'output', o
     const productIds = parseNumericProductIdList(intent.keyword);
     const latest = await findReportContextForIntent(outputDir, intent.date);
     if (latest) {
-      const rows = queryProductRows(latest.context, intent.keyword);
-      if (rows.length > 0) return { text: formatProductRows(rows) };
+      const result = queryProductResult(latest.context, intent.keyword);
+      if (result.matches.length > 0 || result.ambiguous.length > 0) {
+        return {
+          text: formatProductQueryResult(result),
+          ...(result.matches.length === 1 ? { card: buildProductDetailCard(latest.context, result) } : {}),
+        };
+      }
     }
     if (!latest && intent.date) return { text: missingReportContextText(intent.date) };
     if (productIds.length > 0) {

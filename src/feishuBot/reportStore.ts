@@ -1,5 +1,6 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { queryProducts, parseNumericProductQueryList, productQueryMatch, type ProductQueryMatch, type ProductQueryResult } from '../agentData/productQuery.js';
 import { findOrderAnalysisIndicator } from '../publicTraffic/orderAnalysis.js';
 import type { PublicTrafficDataReportContext, PublicTrafficProductDataRow } from '../publicTraffic/types.js';
 
@@ -68,30 +69,8 @@ function formatLatestSummarySourceStatus(context: PublicTrafficDataReportContext
   return `数据源：${exposureText}；${dashboardText}；${orderText}`;
 }
 
-function normalizeProductIdentifier(value: string): string {
-  return value.trim().toLowerCase();
-}
-
-function extractInternalProductId(displayProductId: string): string | null {
-  return /^端内id\s*(\d+)$/i.exec(displayProductId.trim())?.[1] ?? null;
-}
-
-function matchesExactNumericProductId(row: PublicTrafficProductDataRow, normalizedKeyword: string): boolean {
-  return (
-    extractInternalProductId(row.displayProductId) === normalizedKeyword ||
-    normalizeProductIdentifier(row.displayProductId) === normalizedKeyword ||
-    normalizeProductIdentifier(row.platformProductId) === normalizedKeyword
-  );
-}
-
 export function parseNumericProductIdList(keyword: string): string[] {
-  const tokens = keyword
-    .trim()
-    .replace(/[;；。]+$/g, '')
-    .split(/[,\uFF0C\u3001\s;；]+/)
-    .filter(Boolean);
-  if (tokens.length < 1 || tokens.some((token) => !/^\d+$/.test(token))) return [];
-  return tokens;
+  return parseNumericProductQueryList(keyword);
 }
 
 export function formatLatestSummary(context: PublicTrafficDataReportContext): string {
@@ -141,33 +120,54 @@ export function formatConversionSummary(context: PublicTrafficDataReportContext)
 }
 
 export function queryProductRows(context: PublicTrafficDataReportContext, keyword: string): PublicTrafficProductDataRow[] {
-  const normalized = normalizeProductIdentifier(keyword);
-  if (!normalized) return [];
-  const productIds = parseNumericProductIdList(normalized);
-  if (productIds.length > 0) {
-    return productIds.flatMap((productId) => context.rows.find((row) => matchesExactNumericProductId(row, productId)) ?? []);
-  }
-  if (/^\d+$/.test(normalized)) {
-    return context.rows.filter((row) => matchesExactNumericProductId(row, normalized)).slice(0, 5);
-  }
+  return queryProducts(context, keyword).matches.map((match) => match.row);
+}
 
-  return context.rows
-    .filter(
-      (row) =>
-        row.productName.toLowerCase().includes(normalized) ||
-        row.platformProductId.toLowerCase().includes(normalized) ||
-        row.displayProductId.toLowerCase().includes(normalized),
-    )
-    .slice(0, 5);
+export function queryProductResult(context: PublicTrafficDataReportContext, keyword: string): ProductQueryResult {
+  return queryProducts(context, keyword);
+}
+
+function formatMetricValue(value: number | null): string {
+  return value === null ? '暂无数据' : String(value);
+}
+
+function formatProductIdentity(match: ProductQueryMatch): string {
+  return `端内ID ${match.internalProductId}｜商品ID ${match.platformProductId ?? '未映射'}`;
+}
+
+function formatProductMatch(match: ProductQueryMatch): string {
+  return [
+    formatProductIdentity(match),
+    match.row.productName,
+    ...match.periods.map((period) => `${period.period.replace('d', '日')}：曝光 ${formatMetricValue(period.exposure)}，访问 ${formatMetricValue(period.visits)}，发货 ${formatMetricValue(period.shippedOrders)}`),
+  ].join('\n');
+}
+
+function formatAmbiguous(result: ProductQueryResult): string[] {
+  return result.ambiguous.map((item) => [
+    `ID ${item.input} 同时命中多个商品，请明确选择端内ID或商品ID：`,
+    ...item.candidates.map((candidate, index) => `${index + 1}. ${formatProductIdentity(candidate)} ${candidate.row.productName}`),
+  ].join('\n'));
+}
+
+function formatMissing(result: ProductQueryResult): string[] {
+  if (!result.missing.length) return [];
+  return [
+    `未找到：${result.missing.map((item) => item.input).join('、')}`,
+    '未在最新日报与 ID 映射快照中找到。',
+  ];
+}
+
+export function formatProductQueryResult(result: ProductQueryResult): string {
+  const parts = [
+    ...result.matches.map(formatProductMatch),
+    ...formatAmbiguous(result),
+    ...formatMissing(result),
+  ];
+  return parts.length ? parts.join('\n\n') : '没有找到匹配商品。';
 }
 
 export function formatProductRows(rows: PublicTrafficProductDataRow[]): string {
   if (rows.length === 0) return '没有找到匹配商品。';
-  return rows
-    .map((row) => {
-      const one = row.periods['1d'];
-      const seven = row.periods['7d'];
-      return `${row.displayProductId} ${row.productName}\n1日：曝光 ${one.exposure}，访问 ${one.publicVisits || one.dashboardVisits}，发货 ${one.shippedOrders}\n7日：曝光 ${seven.exposure}，访问 ${seven.publicVisits || seven.dashboardVisits}，发货 ${seven.shippedOrders}`;
-    })
-    .join('\n\n');
+  return rows.map((row) => formatProductMatch(productQueryMatch('', row))).join('\n\n');
 }
