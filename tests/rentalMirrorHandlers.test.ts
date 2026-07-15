@@ -16,9 +16,10 @@ describe('rental mirror read-side tools', () => {
     previousRoot = process.env.RENTAL_PRICE_AGENT_DIR;
     process.env.RENTAL_PRICE_AGENT_DIR = rentalRoot;
     await mkdir(join(rentalRoot, 'scripts'), { recursive: true });
+    await mkdir(join(rentalRoot, 'tasks', 'batches'), { recursive: true });
     await writeFile(join(rentalRoot, 'scripts', 'mirror-search.js'), [
       'const args = process.argv.slice(2);',
-      'console.log(JSON.stringify({ status: "ok", args, keyword: args[1], rows: [{ id: "648", name: args[1] }] }));',
+      'console.log(JSON.stringify({ status: "ok", args, keyword: args[1], stateFile: args[1], rows: [{ id: "648", name: args[1] }] }));',
     ].join('\n'), 'utf8');
   });
 
@@ -32,7 +33,7 @@ describe('rental mirror read-side tools', () => {
   it('registers only mirror search and batch-spec read-side tools', () => {
     expect(findAgentTool('rental.mirrorSearch')).toMatchObject({ risk: 'read', requiresConfirmation: false });
     expect(findAgentTool('rental.mirrorBatchSpec')).toMatchObject({ risk: 'read', requiresConfirmation: false });
-    expect(findAgentTool('rental.mirrorWritebackState')).toBeUndefined();
+    expect(findAgentTool('rental.mirrorWritebackState')).toMatchObject({ risk: 'high', requiresConfirmation: true, plannerVisible: false });
   });
 
   it('dispatches search and batch-spec to mirror-search without writeback', async () => {
@@ -45,5 +46,17 @@ describe('rental mirror read-side tools', () => {
     expect(batchSpec.metadata).toMatchObject({ toolName: 'rental.mirrorBatchSpec', command: 'batch-spec', ok: true });
     expect(batchSpec.text).toContain('batch-spec');
     expect(batchSpec.text).not.toContain('writeback');
+  });
+
+  it('dispatches hidden confirmed writeback-state only for safe batch state paths', async () => {
+    const stateFile = join(rentalRoot, 'tasks', 'batches', 'state.json');
+    await writeFile(stateFile, JSON.stringify({ batchId: 'batch-1' }), 'utf8');
+
+    const writeback = await executeAgentToolRequest({ toolName: 'rental.mirrorWritebackState', arguments: { stateFile, confirm: true }, reason: 'confirmed mirror writeback' }, outputDir);
+
+    expect(writeback.metadata).toMatchObject({ toolName: 'rental.mirrorWritebackState', command: 'writeback-state', ok: true, stateFile });
+    expect(writeback.text).toContain('writeback-state');
+    await expect(executeAgentToolRequest({ toolName: 'rental.mirrorWritebackState', arguments: { stateFile: join(rentalRoot, 'state.json'), confirm: true }, reason: 'bad writeback' }, outputDir)).rejects.toThrow(/tasks\/batches/);
+    await expect(executeAgentToolRequest({ toolName: 'rental.mirrorWritebackState', arguments: { stateFile, confirm: false }, reason: 'unconfirmed writeback' }, outputDir)).rejects.toThrow(/confirm=true/);
   });
 });
