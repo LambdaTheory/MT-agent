@@ -56,12 +56,14 @@ describe('executeApprovedDecision', () => {
     expect(entries.every((entry) => entry.subject?.id === '648')).toBe(true);
   });
 
-  it('records dated execution events under the mission date partition', async () => {
+  it('records dated execution events under the mission date partition with real execution timestamps', async () => {
     await executeApprovedDecision({ decision, outputDir: dir, date: '2026-07-02', options: { rentalPriceClient: fakeClient() } });
 
     const entries = (await loadOperationLedgerJsonlEntries(dir, '2026-07-02')).filter((entry) => entry.decisionId === 'dec-1');
     expect(entries.map((entry) => entry.event)).toEqual(['approval_accepted', 'execution_started', 'execution_succeeded']);
     expect(entries.every((entry) => entry.metadata?.missionDate === '2026-07-02')).toBe(true);
+    expect(entries.every((entry) => entry.partitionDate === '2026-07-02')).toBe(true);
+    expect(entries.filter((entry) => entry.event.startsWith('execution_')).every((entry) => entry.at !== '2026-07-02T00:00:00.000Z')).toBe(true);
   });
 
   it('snapshots subject metrics before dated execution', async () => {

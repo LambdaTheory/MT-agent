@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -215,6 +215,34 @@ describe('operation ledger attribution', () => {
     expect(dailyAfterRetry.entries).toEqual([entry]);
     expect(ledgerAfterRetry.journal).toEqual([entry]);
   });
+
+  it('recovers a business partition from its daily journal when its JSONL sink is missing', async () => {
+    const entry = {
+      planId: 'plan-1',
+      at: '2026-07-03T09:00:00.000Z',
+      partitionDate: '2026-07-02',
+      event: 'execution_succeeded',
+      runId: 'run-1',
+      decisionId: 'dec-1',
+      toolName: 'rental.priceApply',
+      subject: { kind: 'product' as const, id: '648' },
+    };
+
+    await recordOperationEvent(dir, entry);
+    await unlink(join(dir, 'operation-ledger', '2026-07-02.jsonl'));
+    const followUp = { ...entry, at: '2026-07-03T09:01:00.000Z', event: 'execution_failed' };
+    await recordOperationEvent(dir, followUp);
+
+    const [jsonl, daily, ledger] = await Promise.all([
+      loadOperationLedgerJsonlEntries(dir, '2026-07-02'),
+      loadDailyOperationJournalStore(dir, '2026-07-02'),
+      loadOperationLedgerStore(dir),
+    ]);
+    expect(jsonl).toEqual([entry, followUp]);
+    expect(daily.entries).toEqual(jsonl);
+    expect(ledger.journal).toEqual(jsonl);
+  });
+
   it('dedupes identical operation events across jsonl and daily journal stores', async () => {
     const entry = {
       planId: 'plan-1',

@@ -98,6 +98,7 @@ async function recordWriteEvent(
   await recordOperationEvent(context.outputDir, {
     planId: context.decisionId ?? context.runId ?? 'ad-hoc',
     at: new Date().toISOString(),
+    ...(context.missionDate ? { partitionDate: context.missionDate } : {}),
     event,
     toolName,
     ...(context.runId ? { runId: context.runId } : {}),
