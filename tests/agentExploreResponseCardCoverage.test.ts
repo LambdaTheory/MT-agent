@@ -43,7 +43,7 @@ describe('Agent Explore confirmation card coverage', () => {
     await rm(outputDir, { recursive: true, force: true });
   });
 
-  it('creates confirmation buttons for ledger-covered rental write tools', async () => {
+  it('does not create Agent Explore confirmations for low-level rental price writes', async () => {
     const provider = new FakeLlmProvider(JSON.stringify({
       action: 'finish',
       answer: '建议执行原子写操作',
@@ -59,14 +59,14 @@ describe('Agent Explore confirmation card coverage', () => {
     const response = await agentExploreResponse('分析原子写操作', outputDir, { provider });
     const requests = await readConfirmRequests(outputDir, response.card);
 
-    expect(response.text).toContain('待确认执行：5 项');
+    expect(response.text).toContain('待确认执行：2 项');
     expect(requests.map((request) => request.toolName)).toEqual([
-      'rental.priceApply',
-      'rental.perSpecPriceApply',
-      'rental.specDimApply',
       'rental.delistBatch',
       'rental.priceRollback',
     ]);
+    expect(JSON.stringify(response.card)).not.toContain('rental.priceApply');
+    expect(JSON.stringify(response.card)).not.toContain('rental.perSpecPriceApply');
+    expect(JSON.stringify(response.card)).not.toContain('rental.specDimApply');
   });
 
   it('does not create generic Explore cards for advanced form-state tools', async () => {

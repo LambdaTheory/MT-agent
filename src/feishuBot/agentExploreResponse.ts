@@ -18,6 +18,12 @@ export interface AgentExploreResponseOptions {
   executionOptions?: AgentToolExecutionOptions;
 }
 
+const AGENT_EXPLORE_CONFIRMABLE_RENTAL_TOOLS = new Set([
+  'rental.delist',
+  'rental.delistBatch',
+  'rental.priceRollback',
+]);
+
 function formatSteps(steps: Array<{ tool: string }>): string {
   return steps.length ? `探索步骤：${steps.map((step) => step.tool).join(' -> ')}` : '探索步骤：无';
 }
@@ -40,7 +46,7 @@ function isLedgerCoveredExploreWrite(decision: DecisionRecord): boolean {
   if (!schemaAllowsArguments(tool.inputSchema, args)) return false;
   if (toolName === 'rental.delist') return args.productIds === undefined;
   if (toolName === 'rental.applyCurrent' || toolName === 'rental.submitCurrent') return false;
-  return toolName === 'operations.refreshActivityExecute' || toolName.startsWith('rental.');
+  return toolName === 'operations.refreshActivityExecute' || AGENT_EXPLORE_CONFIRMABLE_RENTAL_TOOLS.has(toolName);
 }
 
 function isConfirmableExploreWrite(decision: DecisionRecord): boolean {
