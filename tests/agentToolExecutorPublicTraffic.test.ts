@@ -58,10 +58,31 @@ describe('executeAgentToolRequest public traffic report', () => {
     };
     mocks.loadConfig.mockResolvedValueOnce(config);
     mocks.runDashboardRefresh.mockResolvedValueOnce({
-      decision: 'rebuilt_and_resent',
-      firstQualityText: '访问页抓取情况\n1日：缺失',
-      refreshQualityText: '访问页抓取情况\n1日：完整',
-      message: '已重建日报并重发飞书',
+      status: 'repaired',
+      dataDate: '2026-06-24',
+      actualPageDate: '2026-06-24',
+      firstQuality: {
+        hasMissing: true,
+        notes: [],
+        periods: {
+          '1d': { complete: false, rowCount: 0 },
+          '7d': { complete: true, rowCount: 1 },
+          '30d': { complete: true, rowCount: 1 },
+        },
+      },
+      refreshQuality: {
+        hasMissing: false,
+        notes: [],
+        periods: {
+          '1d': { complete: true, rowCount: 1 },
+          '7d': { complete: true, rowCount: 1 },
+          '30d': { complete: true, rowCount: 1 },
+        },
+      },
+      rebuild: 'performed',
+      resend: 'performed',
+      rawLocation: 'output/2026-06-24',
+      message: '已补抓完整访问页 raw，重建并重发对应公域日报',
     });
 
     const response = await executeAgentToolRequest(
@@ -71,10 +92,10 @@ describe('executeAgentToolRequest public traffic report', () => {
 
     expect(mocks.loadEnv).toHaveBeenCalled();
     expect(mocks.loadConfig).toHaveBeenCalled();
-    expect(mocks.runDashboardRefresh).toHaveBeenCalledWith({ config, date: '2026-06-24', sendTo: 'group' });
+    expect(mocks.runDashboardRefresh).toHaveBeenCalledWith({ config, dataDate: '2026-06-24', sendTo: 'group' });
     expect(response.text).toContain('访问页补抓完成');
-    expect(response.text).toContain('已重建日报并重发飞书');
-    expect(response.text).toContain('1日：完整');
+    expect(response.text).toContain('已补抓完整访问页 raw，重建并重发对应公域日报');
+    expect(response.text).toContain('1d=complete');
   });
 
   it('runs generic report queries against an explicit report data date', async () => {
