@@ -243,7 +243,7 @@ describe('executeAgentToolRequest public traffic report', () => {
     );
 
     expect(response.text).toContain('公域日报汇总 2026-06-22');
-    expect(response.text).toContain('访问 18');
+    expect(response.text).toContain('公域访问量 18');
   });
 
   it('returns inactive-link id collection from lifecycle governance', async () => {
