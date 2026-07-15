@@ -80,7 +80,12 @@ import {
   type RentalPriceSkillClient,
 } from './rentalPrice.js';
 import { executeRentalReadOnlyOperationHandler } from './rentalReadOnlyOperationHandlers.js';
-import { executeRentalWriteOperationHandler, recordSuccessfulRentalDelistEvent } from './rentalWriteOperationHandlers.js';
+import {
+  appendRentalDelistAuditWarnings,
+  executeRentalWriteOperationHandler,
+  recordSuccessfulRentalDelistEventBestEffort,
+  RENTAL_DELIST_MAX_AUDIT_WARNINGS,
+} from './rentalWriteOperationHandlers.js';
 import { executeRentalBatchTool } from './rentalBatchHandlers.js';
 import { executeRentalMirrorTool } from './rentalMirrorHandlers.js';
 import { findReadOnlyTool } from './readOnlyToolRegistry.js';
@@ -128,7 +133,6 @@ const NON_RENT_PRICE_FIELD_LABELS: Record<string, string[]> = {
 };
 const REFRESH_ACTIVITY_EXECUTION_MAX_PRODUCTS = 20;
 const RENTAL_DELIST_BATCH_MAX_PRODUCTS = 80;
-const RENTAL_DELIST_BATCH_MAX_AUDIT_WARNINGS = 20;
 const RENT_FIELD_ORDER: Array<{ field: string; label: string }> = [
   { field: 'rent1day', label: '1天' },
   { field: 'rent2day', label: '2天' },
@@ -1402,13 +1406,8 @@ async function rentalDelistBatchResponse(
       const result = await client.delist(productId);
       results.push(result);
       if (result.ok) {
-        try {
-          await recordSuccessfulRentalDelistEvent(ledgerContext, toolName, result.productId);
-        } catch (error) {
-          if (auditWarnings.length < RENTAL_DELIST_BATCH_MAX_AUDIT_WARNINGS) {
-            auditWarnings.push(`商品 ${result.productId}：下架审计记录失败（${error instanceof Error ? error.message : String(error)}）`);
-          }
-        }
+        const warning = await recordSuccessfulRentalDelistEventBestEffort(ledgerContext, toolName, result.productId);
+        if (warning && auditWarnings.length < RENTAL_DELIST_MAX_AUDIT_WARNINGS) auditWarnings.push(warning);
       }
     } catch (error) {
       results.push({ productId, ok: false, lines: [error instanceof Error ? error.message : String(error)] });
@@ -1577,16 +1576,30 @@ async function refreshActivityExecuteResponse(
 ): Promise<BotResponse> {
   const request = readRefreshActivityExecuteRequest(args);
   const delistResults = [];
+  const auditWarnings: string[] = [];
   for (const productId of request.delistProductIds) {
     await recordAgentToolWriteEvent(ledgerContext, 'execution_started', 'operations.refreshActivityExecute', productId);
     let result;
     try {
       result = await client.delist(productId);
     } catch (error) {
-      await recordAgentToolWriteEvent(ledgerContext, 'execution_failed', 'operations.refreshActivityExecute', productId);
+      try {
+        await recordAgentToolWriteEvent(ledgerContext, 'execution_failed', 'operations.refreshActivityExecute', productId);
+      } catch (ledgerError) {
+        console.warn('Failed to record refresh activity delist failure event.', ledgerError);
+      }
       throw error;
     }
-    await recordAgentToolWriteEvent(ledgerContext, result.ok ? 'execution_succeeded' : 'execution_failed', 'operations.refreshActivityExecute', productId);
+    if (result.ok) {
+      const warning = await recordSuccessfulRentalDelistEventBestEffort(ledgerContext, 'operations.refreshActivityExecute', result.productId);
+      if (warning && auditWarnings.length < RENTAL_DELIST_MAX_AUDIT_WARNINGS) auditWarnings.push(warning);
+    } else {
+      try {
+        await recordAgentToolWriteEvent(ledgerContext, 'execution_failed', 'operations.refreshActivityExecute', result.productId);
+      } catch (ledgerError) {
+        console.warn('Failed to record refresh activity delist failure event.', ledgerError);
+      }
+    }
     delistResults.push(result);
     if (!result.ok && !isSafeMissingDelistResult(result)) break;
   }
@@ -1641,7 +1654,7 @@ async function refreshActivityExecuteResponse(
   const typeLines = request.newLinkItems.map((item, index) =>
     `${index + 1}. ${item.keyword}${item.sameSkuGroupId ? `｜${item.sameSkuGroupId}` : ''}：下架/补链 ${item.count} 条，补链源 ${item.sourceProductId} ${item.sourceProductName}`);
   const delistLines = delistResults.map((result) => `- ${result.ok ? '成功' : '失败'}：商品 ${result.productId}${result.lines.length ? `｜${result.lines.join('；')}` : ''}`);
-  return {
+  return appendRentalDelistAuditWarnings({
     text: [
       `${overallOk ? '活跃度刷新执行完成' : delistFinished && skippedMissingDelist.length ? '活跃度刷新部分完成' : '活跃度刷新执行中断'}：${request.date}`,
       `下架：成功 ${delistSuccess.length}/${request.delistProductIds.length}`,
@@ -1666,7 +1679,7 @@ async function refreshActivityExecuteResponse(
       newProductIds: newLinkResult?.newProductIds ?? [],
       ok: overallOk,
     },
-  };
+  }, auditWarnings);
 }
 
 async function runReadOnlyAgentIntent(

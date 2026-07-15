@@ -15,7 +15,7 @@ function isValidTimestamp(value: string): boolean {
 function isSuccessfulDelist(entry: OperationPlanJournalEntry): boolean {
   if (entry.event !== 'execution_succeeded') return false;
   if (entry.toolName === 'rental.delist' || entry.toolName === 'rental.delistBatch') return true;
-  return entry.toolName === 'rental.operationConfirmRequest'
+  return (entry.toolName === 'rental.operationConfirmRequest' || entry.toolName === 'operations.refreshActivityExecute')
     && entry.metadata?.rentalAction === 'delist';
 }
 

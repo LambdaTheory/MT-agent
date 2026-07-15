@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { loadDailyOperationJournalStore, loadOperationLedgerJsonlEntries, loadOperationLedgerStore } from '../src/agentRuntime/operationLedger.js';
+import * as operationLedger from '../src/agentRuntime/operationLedger.js';
 import { collectAgentDelistEvents } from '../src/linkRegistry/delistOperationEvidence.js';
 import { executeAgentToolRequest } from '../src/feishuBot/agentToolExecutor.js';
 import type { RentalPriceSkillClient } from '../src/feishuBot/rentalPrice.js';
@@ -113,5 +114,60 @@ describe('executeAgentToolRequest ledgerContext', () => {
     const date = new Date().toISOString().slice(0, 10);
     const entries = await loadOperationLedgerJsonlEntries(dir, date);
     expect(entries.some((entry) => entry.event === 'execution_succeeded' && entry.runId === 'run-1' && entry.decisionId === 'dec-1')).toBe(true);
+  });
+  it('continues refresh activity delists when success audit persistence fails', async () => {
+    const calls: string[] = [];
+    const recordSpy = vi.spyOn(operationLedger, 'recordOperationEvent');
+    recordSpy.mockResolvedValueOnce({} as never);
+    recordSpy.mockRejectedValueOnce(new Error('ledger unavailable'));
+    recordSpy.mockResolvedValue({} as never);
+
+    const response = await executeAgentToolRequest(
+      {
+        toolName: 'operations.refreshActivityExecute',
+        arguments: { date: '2026-07-14', strategy: 'delist_only', delistProductIds: ['648', '649'] },
+        reason: 'refresh',
+      },
+      dir,
+      {
+        rentalPriceClient: {
+          ...fakeClient(),
+          delist: async (productId: string) => {
+            calls.push(productId);
+            return { productId, ok: true, lines: ['delisted'] };
+          },
+        },
+        ledgerContext: { outputDir: dir, runId: 'run-refresh', decisionId: 'dec-refresh' },
+      },
+    );
+
+    expect(calls).toEqual(['648', '649']);
+    expect(response).toMatchObject({
+      text: expect.stringContaining('审计警告：'),
+      metadata: { ok: true, delistedProductIds: ['648', '649'], auditWarnings: expect.arrayContaining([expect.stringContaining('商品 648')]) },
+    });
+    expect(recordSpy.mock.calls.filter(([, entry]) => entry.event === 'execution_failed')).toHaveLength(0);
+    expect(recordSpy.mock.calls.filter(([, entry]) => entry.event === 'execution_succeeded')).toHaveLength(2);
+    expect(recordSpy.mock.calls.filter(([, entry]) => entry.event === 'execution_succeeded' && entry.subject?.id === '648')).toHaveLength(1);
+    recordSpy.mockRestore();
+  });
+
+  it('records refresh activity delists as attributable delist success evidence', async () => {
+    const response = await executeAgentToolRequest(
+      {
+        toolName: 'operations.refreshActivityExecute',
+        arguments: { date: '2026-07-14', strategy: 'delist_only', delistProductIds: ['648'] },
+        reason: 'refresh',
+      },
+      dir,
+      { rentalPriceClient: fakeClient(), ledgerContext: { outputDir: dir, runId: 'run-refresh', decisionId: 'dec-refresh' } },
+    );
+
+    const date = new Date().toISOString().slice(0, 10);
+    const entries = await loadOperationLedgerJsonlEntries(dir, date);
+    expect(response.metadata).toMatchObject({ ok: true, delistedProductIds: ['648'] });
+    expect(collectAgentDelistEvents(entries)).toEqual([expect.objectContaining({
+      internalProductId: '648', toolName: 'operations.refreshActivityExecute', runId: 'run-refresh', decisionId: 'dec-refresh',
+    })]);
   });
 });

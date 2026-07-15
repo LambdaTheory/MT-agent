@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { loadOperationLedgerJsonlEntries, operationLedgerJsonlPath } from '../src/agentRuntime/operationLedger.js';
+import { loadOperationLedgerJsonlEntries, loadOperationLedgerStore, operationLedgerJsonlPath } from '../src/agentRuntime/operationLedger.js';
 import { executeRentalWriteOperationHandler } from '../src/feishuBot/rentalWriteOperationHandlers.js';
 import type { RentalPriceSkillClient } from '../src/feishuBot/rentalPrice.js';
 
@@ -102,4 +102,31 @@ describe('rental write ledger', () => {
       vi.useRealTimers();
     }
   });
+  it.each([
+    { toolName: 'rental.delist', arguments: { productId: '648' } },
+    { toolName: 'rental.operationConfirmRequest', arguments: { action: 'delist', productId: '648' } },
+  ])('keeps a successful delist successful when its success audit persistence fails ($toolName)', async ({ toolName, arguments: args }) => {
+    const response = await executeRentalWriteOperationHandler(
+      { toolName, arguments: args, reason: 'test' },
+      fakeClient({
+        delist: async () => {
+          const date = new Date().toISOString().slice(0, 10);
+          const path = operationLedgerJsonlPath(dir, date);
+          await rm(path, { force: true });
+          await mkdir(path, { recursive: true });
+          return { productId: '648', ok: true, lines: ['delisted'] };
+        },
+      }),
+      { outputDir: dir, runId: 'run-1', decisionId: 'dec-1' },
+    );
+
+    expect(response).toMatchObject({
+      text: expect.stringContaining('下架成功：商品 648'),
+      metadata: { toolName, ok: true, productId: '648', auditWarnings: [expect.stringContaining('商品 648')] },
+    });
+    expect(response.text).toContain('审计警告：');
+    const ledger = await loadOperationLedgerStore(dir);
+    expect(ledger.journal.map((entry) => entry.event)).toEqual(['execution_started']);
+  });
+
 });
