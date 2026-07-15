@@ -650,6 +650,7 @@ describe('rental price card action', () => {
         itemTitle: '含手柄',
       });
       expect(commands[2]).toMatchObject({ action: 'spec-refresh', allowCurrentPage: true, expectedProductId: '761' });
+      expect(commands[3]).toMatchObject({ action: 'submit', expectedProductId: '761' });
       expect(result.lines).toContain('item: removed');
       expect(result.audit?.resultFile).toContain('spec-remove-761-');
       expect(await readFile(result.audit!.resultFile!, 'utf8')).toContain('"itemTitle": "含手柄"');
