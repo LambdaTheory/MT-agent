@@ -4,6 +4,7 @@ import { loadOperationLedgerStore } from '../agentRuntime/operationLedger.js';
 import { buildLinkRegistry } from '../linkRegistry/buildRegistry.js';
 import { collectAgentDelistEvents } from '../linkRegistry/delistOperationEvidence.js';
 import { loadOptionalDaemonCatalogSnapshot } from '../linkRegistry/daemonCatalog.js';
+import { loadRefreshSuppressionState, shouldSuppressDelistAttribution } from '../linkRegistry/refreshSuppressionState.js';
 import { applyLinkRegistryOverrides, parseLinkRegistryOverrides, type LinkRegistryOverrideRisk } from '../linkRegistry/overrides.js';
 import { createLinkRegistryQuery, type LinkRegistryQuery } from '../linkRegistry/queryRegistry.js';
 import type { LinkRegistryEntry } from '../linkRegistry/types.js';
@@ -24,6 +25,7 @@ export interface ClosedOrderRegistryPathsInput {
   overridesPath?: string;
   artifactsDir?: string;
   suppressDelistAttribution?: boolean;
+  referenceDate?: string;
 }
 
 export interface ResolvedClosedOrderRegistryPaths {
@@ -244,6 +246,9 @@ export async function loadClosedOrderRegistryContext(
     loadOptionalDaemonCatalogSnapshot(resolvedPaths.daemonCatalogPath),
     loadOptionalJson<unknown | null>(resolvedPaths.overridesPath, null),
   ]);
+  const referenceDate = input.referenceDate ?? new Date().toISOString().slice(0, 10);
+  const suppressDelistAttribution = input.suppressDelistAttribution === true
+    || shouldSuppressDelistAttribution(await loadRefreshSuppressionState(resolvedPaths.artifactsDir), referenceDate);
   const baseRegistry = buildLinkRegistry({
     productIdMapping,
     productNameMap,
@@ -254,7 +259,7 @@ export async function loadClosedOrderRegistryContext(
     lifecycle,
     daemonCatalog,
     agentDelistEvents: collectAgentDelistEvents(operationLedger.journal),
-    suppressDelistAttribution: input.suppressDelistAttribution,
+    suppressDelistAttribution,
   });
   const overrideResult = rawOverrides === null
     ? { entries: baseRegistry, risks: [] }
