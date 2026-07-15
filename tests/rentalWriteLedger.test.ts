@@ -82,4 +82,23 @@ describe('rental write ledger', () => {
     expect(warn).toHaveBeenCalledWith('Failed to record rental write failure event.', expect.any(Error));
     warn.mockRestore();
   });
+
+  it('records execution time in at while retaining missionDate only as metadata', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-15T13:45:00.000Z'));
+    try {
+      await executeRentalWriteOperationHandler(
+        { toolName: 'rental.delist', arguments: { productId: '648' }, reason: 'test' },
+        fakeClient(),
+        { outputDir: dir, missionDate: '2026-07-01' },
+      );
+
+      const entries = await loadOperationLedgerJsonlEntries(dir, '2026-07-15');
+      expect(entries).toHaveLength(2);
+      expect(entries.every((entry) => entry.at === '2026-07-15T13:45:00.000Z')).toBe(true);
+      expect(entries.every((entry) => entry.metadata?.missionDate === '2026-07-01')).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

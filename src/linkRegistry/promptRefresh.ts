@@ -206,7 +206,10 @@ export async function refreshLinkRegistryForPrompt(
     suppressNewRemovals: refreshHealth.suppressLifecycleDrop,
   });
 
-  const registryContext = await loadClosedOrderRegistryContext(registryInput);
+  const registryContext = await loadClosedOrderRegistryContext({
+    ...registryInput,
+    suppressDelistAttribution: refreshHealth.suppressLifecycleDrop,
+  });
   const summaryBase = summarizeNewEntries(beforeContext?.registry ?? [], registryContext.registry, referenceDate);
   return {
     registryContext,

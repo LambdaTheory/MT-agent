@@ -7,7 +7,7 @@ import { canonicalProductShortName, type ProductNameMap } from '../publicTraffic
 import type { LinkListingState, LinkRegistryEntry, LinkRegistrySource, LinkRegistryStatus } from './types.js';
 import { arbitrateListingState, listingStateToStatus, parseListingStateFromText, type ListingStateObservation } from './listingState.js';
 import { sameSkuGroupRules } from './overrides.js';
-import { attributeDelist } from './delistAttribution.js';
+import { attributeDelist, type PlatformRestrictionAttributionObservation } from './delistAttribution.js';
 import type { AgentDelistEvent } from './delistOperationEvidence.js';
 
 const LISTING_STATE_FRESHNESS_OVERRIDE_MS = 24 * 60 * 60 * 1000;
@@ -22,6 +22,7 @@ export interface BuildLinkRegistryInput {
   lifecycle?: GoodsLinkLifecycleState | null;
   daemonCatalog?: DaemonCatalogSnapshot | null;
   agentDelistEvents?: AgentDelistEvent[];
+  suppressDelistAttribution?: boolean;
 }
 
 interface DraftEntry {
@@ -46,7 +47,7 @@ interface DraftEntry {
   daemonRowText?: string;
   daemonSnapshotAt?: string;
   listingObservations: ListingStateObservation[];
-  platformRestrictions: PlatformRestrictionObservation[];
+  platformRestrictions: PlatformRestrictionAttributionObservation[];
   nameHints: Set<string>;
   aliases: Set<string>;
   sources: Set<LinkRegistrySource>;
@@ -199,7 +200,11 @@ function addGoodsSnapshot(drafts: Map<string, DraftEntry>, goodsSnapshot: GoodsS
       });
     }
     if (item.platformRestriction?.reasonText.trim()) {
-      draft.platformRestrictions.push(item.platformRestriction);
+      draft.platformRestrictions.push({
+        restriction: item.platformRestriction,
+        ...(item.listingState ? { listingState: item.listingState } : {}),
+        ...(item.observedAt ? { observedAt: item.observedAt } : {}),
+      });
     }
     addNameHint(draft, item.productName);
     draft.sources.add('goods_snapshot');
@@ -633,7 +638,11 @@ function updatedAtFor(draft: DraftEntry): string | undefined {
   return [draft.lastSeenDate, draft.firstSeenDate].find((value) => !!value);
 }
 
-function finalizeEntry(draft: DraftEntry, agentDelistEvents: AgentDelistEvent[]): LinkRegistryEntry {
+function finalizeEntry(
+  draft: DraftEntry,
+  agentDelistEvents: AgentDelistEvent[],
+  suppressDelistAttribution: boolean | undefined,
+): LinkRegistryEntry {
   const listingDecision = arbitrateListingState(draft.listingObservations, { freshnessOverrideMs: LISTING_STATE_FRESHNESS_OVERRIDE_MS });
   const status = listingDecision.state === 'unknown' && draft.status ? draft.status : listingStateToStatus(listingDecision.state);
   const attribution = attributeDelist({
@@ -641,6 +650,7 @@ function finalizeEntry(draft: DraftEntry, agentDelistEvents: AgentDelistEvent[])
     statusObservedAt: listingDecision.observedAt,
     platformRestrictions: draft.platformRestrictions,
     agentDelistEvents: agentDelistEvents.filter((event) => event.internalProductId === draft.internalProductId),
+    suppressDelistAttribution,
   });
   const aliases = [...draft.aliases]
     .map((value) => value.trim())
@@ -698,6 +708,6 @@ export function buildLinkRegistry(input: BuildLinkRegistryInput): LinkRegistryEn
   inferDraftMetadata(drafts);
 
   return [...drafts.values()]
-    .map((draft) => finalizeEntry(draft, input.agentDelistEvents ?? []))
+    .map((draft) => finalizeEntry(draft, input.agentDelistEvents ?? [], input.suppressDelistAttribution))
     .sort(compareInternalProductId);
 }

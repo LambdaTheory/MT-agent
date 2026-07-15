@@ -2,11 +2,20 @@ import type { PlatformRestrictionObservation } from '../publicTraffic/types.js';
 import type { AgentDelistEvent } from './delistOperationEvidence.js';
 import type { LinkDelistCause, LinkDelistCauseConfidence, LinkDelistCauseEvidence, LinkListingState } from './types.js';
 
+const MAX_RESTRICTION_FRESHNESS_MS = 24 * 60 * 60 * 1000;
+
+export interface PlatformRestrictionAttributionObservation {
+  restriction: PlatformRestrictionObservation;
+  listingState?: LinkListingState;
+  observedAt?: string;
+}
+
 export interface DelistAttributionInput {
   listingState: LinkListingState;
   statusObservedAt?: string;
-  platformRestrictions?: PlatformRestrictionObservation[];
+  platformRestrictions?: PlatformRestrictionAttributionObservation[];
   agentDelistEvents?: AgentDelistEvent[];
+  suppressDelistAttribution?: boolean;
 }
 
 export interface DelistAttributionResult {
@@ -33,12 +42,28 @@ function restrictionRank(kind: PlatformRestrictionObservation['kind']): number {
   return 1;
 }
 
-function selectRestriction(items: PlatformRestrictionObservation[]): PlatformRestrictionObservation | null {
-  const candidates = items.filter((item) => item.reasonText.trim());
+function selectRestriction(
+  items: PlatformRestrictionAttributionObservation[],
+  statusObservedAt: string | undefined,
+): PlatformRestrictionAttributionObservation | null {
+  const statusTime = validTimestamp(statusObservedAt);
+  if (statusTime === null) return null;
+
+  const candidates = items.filter((item) => {
+    const observedAt = validTimestamp(item.observedAt);
+    const restrictionObservedAt = validTimestamp(item.restriction.observedAt);
+    return item.listingState === 'delisted'
+      && item.restriction.reasonText.trim()
+      && observedAt !== null
+      && restrictionObservedAt !== null
+      && restrictionObservedAt <= statusTime
+      && statusTime - restrictionObservedAt <= MAX_RESTRICTION_FRESHNESS_MS;
+  });
   if (candidates.length === 0) return null;
   return [...candidates].sort((left, right) => {
     const timeOrder = (validTimestamp(right.observedAt) ?? -Infinity) - (validTimestamp(left.observedAt) ?? -Infinity);
-    return timeOrder || restrictionRank(right.kind) - restrictionRank(left.kind) || left.reasonText.localeCompare(right.reasonText);
+    return timeOrder || restrictionRank(right.restriction.kind) - restrictionRank(left.restriction.kind)
+      || left.restriction.reasonText.localeCompare(right.restriction.reasonText);
   })[0] ?? null;
 }
 
@@ -48,24 +73,24 @@ function matchingAgentEvent(events: AgentDelistEvent[], statusObservedAt: string
   return [...events]
     .filter((event) => {
       const at = validTimestamp(event.at);
-      return at !== null && at <= observed;
+      return at !== null && at < observed;
     })
     .sort((left, right) => right.at.localeCompare(left.at))[0] ?? null;
 }
 
 export function attributeDelist(input: DelistAttributionInput): DelistAttributionResult | null {
-  if (input.listingState !== 'delisted') return null;
+  if (input.suppressDelistAttribution || input.listingState !== 'delisted') return null;
 
-  const restriction = selectRestriction(input.platformRestrictions ?? []);
+  const restriction = selectRestriction(input.platformRestrictions ?? [], input.statusObservedAt);
   if (restriction) {
     return {
-      cause: causeForRestriction(restriction.kind),
+      cause: causeForRestriction(restriction.restriction.kind),
       confidence: 'confirmed',
       evidence: [{
         source: 'goods_snapshot',
         kind: 'platform_restriction',
-        ...(restriction.observedAt ? { observedAt: restriction.observedAt } : {}),
-        reasonText: restriction.reasonText,
+        observedAt: restriction.observedAt,
+        reasonText: restriction.restriction.reasonText,
       }],
     };
   }

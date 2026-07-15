@@ -23,6 +23,7 @@ export interface ClosedOrderRegistryPathsInput {
   daemonCatalogPath?: string;
   overridesPath?: string;
   artifactsDir?: string;
+  suppressDelistAttribution?: boolean;
 }
 
 export interface ResolvedClosedOrderRegistryPaths {
@@ -253,6 +254,7 @@ export async function loadClosedOrderRegistryContext(
     lifecycle,
     daemonCatalog,
     agentDelistEvents: collectAgentDelistEvents(operationLedger.journal),
+    suppressDelistAttribution: input.suppressDelistAttribution,
   });
   const overrideResult = rawOverrides === null
     ? { entries: baseRegistry, risks: [] }

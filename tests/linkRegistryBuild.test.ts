@@ -622,6 +622,70 @@ describe('link registry build', () => {
     });
   });
 
+  it('rejects an on-sale restriction from a snapshot when daemon later reports delisted', () => {
+    expect(buildLinkRegistry({
+      goodsSnapshot: [{
+        platformProductId: 'platform-1705', internalProductId: '1705', productName: '旧限制商品',
+        listingState: 'on_sale', listingStatusText: '出售中', observedAt: '2026-07-14T09:00:00.000Z',
+        platformRestriction: { kind: 'review_rejected', reasonText: '历史审核原因', observedAt: '2026-07-14T09:00:00.000Z' },
+      }],
+      daemonCatalog: {
+        generatedAt: '2026-07-14T10:00:00.000Z', count: 1, excludedCount: 0,
+        entries: [{ internalProductId: '1705', productName: '旧限制商品', syncStatus: '已下架', discoveredAt: '2026-07-14T10:00:00.000Z' }],
+      },
+    })[0]).toMatchObject({
+      listingState: 'delisted',
+      delistCause: 'external_manual_off_shelf_pending_confirmation',
+    });
+  });
+
+  it('rejects a stale restriction when daemon later reports delisted', () => {
+    expect(buildLinkRegistry({
+      goodsSnapshot: [{
+        platformProductId: 'platform-1706', internalProductId: '1706', productName: '过期限制商品',
+        listingState: 'delisted', listingStatusText: '已下架', observedAt: '2026-07-14T10:00:00.000Z',
+        platformRestriction: { kind: 'frozen', reasonText: '过期冻结', observedAt: '2026-07-12T09:00:00.000Z' },
+      }],
+      daemonCatalog: {
+        generatedAt: '2026-07-14T10:00:00.000Z', count: 1, excludedCount: 0,
+        entries: [{ internalProductId: '1706', productName: '过期限制商品', syncStatus: '已下架', discoveredAt: '2026-07-14T10:00:00.000Z' }],
+      },
+    })[0]).toMatchObject({
+      listingState: 'delisted',
+      delistCause: 'external_manual_off_shelf_pending_confirmation',
+    });
+  });
+
+  it('retains a current delisted restriction over a matching daemon observation', () => {
+    expect(buildLinkRegistry({
+      goodsSnapshot: [{
+        platformProductId: 'platform-1707', internalProductId: '1707', productName: '当前冻结商品',
+        listingState: 'delisted', listingStatusText: '已下架', observedAt: '2026-07-14T09:00:00.000Z',
+        platformRestriction: { kind: 'frozen', reasonText: '当前冻结', observedAt: '2026-07-14T09:00:00.000Z' },
+      }],
+      daemonCatalog: {
+        generatedAt: '2026-07-14T10:00:00.000Z', count: 1, excludedCount: 0,
+        entries: [{ internalProductId: '1707', productName: '当前冻结商品', syncStatus: '已下架', discoveredAt: '2026-07-14T10:00:00.000Z' }],
+      },
+    })[0]).toMatchObject({
+      delistCause: 'platform_frozen',
+      delistCauseConfidence: 'confirmed',
+    });
+  });
+
+  it('suppresses platform and external attribution when requested', () => {
+    const entry = buildLinkRegistry({
+      suppressDelistAttribution: true,
+      goodsSnapshot: [{
+        platformProductId: 'platform-1708', internalProductId: '1708', productName: '受抑制商品',
+        listingState: 'delisted', listingStatusText: '已下架', observedAt: '2026-07-14T10:00:00.000Z',
+        platformRestriction: { kind: 'frozen', reasonText: '冻结', observedAt: '2026-07-14T10:00:00.000Z' },
+      }],
+    })[0];
+    expect(entry).toMatchObject({ listingState: 'delisted' });
+    expect(entry).not.toHaveProperty('delistCause');
+  });
+
   it('uses verified agent delist only after a later delisted observation', () => {
     expect(buildLinkRegistry({
       daemonCatalog: {
