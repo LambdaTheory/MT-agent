@@ -1,0 +1,53 @@
+import { describe, expect, it } from 'vitest';
+import { attributeDelist } from '../src/linkRegistry/delistAttribution.js';
+
+const delisted = { listingState: 'delisted' as const, statusObservedAt: '2026-07-14T10:00:00.000Z' };
+
+describe('attributeDelist', () => {
+  it('maps review, frozen, and other platform restrictions as confirmed causes', () => {
+    expect(attributeDelist({ ...delisted, platformRestrictions: [{ kind: 'review_rejected', reasonText: '资质不足', observedAt: '2026-07-14T09:00:00.000Z' }] }))
+      .toMatchObject({ cause: 'platform_review_rejected', confidence: 'confirmed' });
+    expect(attributeDelist({ ...delisted, platformRestrictions: [{ kind: 'frozen', reasonText: '涉嫌违规', observedAt: '2026-07-14T09:00:00.000Z' }] }))
+      .toMatchObject({ cause: 'platform_frozen', confidence: 'confirmed' });
+    expect(attributeDelist({ ...delisted, platformRestrictions: [{ kind: 'other', reasonText: '平台限制', observedAt: '2026-07-14T09:00:00.000Z' }] }))
+      .toMatchObject({ cause: 'platform_restricted', confidence: 'confirmed' });
+  });
+
+  it('makes platform restriction win over a matching agent event', () => {
+    expect(attributeDelist({
+      ...delisted,
+      platformRestrictions: [{ kind: 'frozen', reasonText: '冻结', observedAt: '2026-07-14T09:00:00.000Z' }],
+      agentDelistEvents: [{ internalProductId: '648', at: '2026-07-14T09:30:00.000Z', toolName: 'rental.delist' }],
+    })).toMatchObject({ cause: 'platform_frozen', confidence: 'confirmed' });
+  });
+
+  it('confirms agent delist only when a successful event is no later than delisted readback', () => {
+    expect(attributeDelist({
+      ...delisted,
+      agentDelistEvents: [{ internalProductId: '648', at: '2026-07-14T09:30:00.000Z', toolName: 'rental.delist', runId: 'run-1' }],
+    })).toMatchObject({ cause: 'agent_confirmed_manual_off_shelf', confidence: 'confirmed' });
+
+    expect(attributeDelist({
+      ...delisted,
+      agentDelistEvents: [{ internalProductId: '648', at: '2026-07-14T10:30:00.000Z', toolName: 'rental.delist' }],
+    })).toMatchObject({ cause: 'external_manual_off_shelf_pending_confirmation', confidence: 'suspected' });
+  });
+
+  it('uses external pending confirmation only for a delisted current state with no accepted evidence', () => {
+    expect(attributeDelist(delisted)).toEqual({
+      cause: 'external_manual_off_shelf_pending_confirmation',
+      confidence: 'suspected',
+      evidence: [],
+    });
+    expect(attributeDelist({ ...delisted, listingState: 'on_sale' })).toBeNull();
+    expect(attributeDelist({ listingState: 'unknown' })).toBeNull();
+    expect(attributeDelist({ listingState: 'gone' })).toBeNull();
+  });
+
+  it('does not confirm an agent event when final delisted observation has no valid time', () => {
+    expect(attributeDelist({
+      listingState: 'delisted',
+      agentDelistEvents: [{ internalProductId: '648', at: '2026-07-14T09:30:00.000Z', toolName: 'rental.delist' }],
+    })).toMatchObject({ cause: 'external_manual_off_shelf_pending_confirmation', confidence: 'suspected' });
+  });
+});
