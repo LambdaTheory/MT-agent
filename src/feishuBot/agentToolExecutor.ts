@@ -43,6 +43,7 @@ import { sendFeishuCard } from '../notify/feishu.js';
 import { summarizeOperationsLearningHistory, summarizeOperationsLearningSession } from '../operationsLearningLoop/session.js';
 import { buildPublicTrafficCard } from '../publicTraffic/buildPublicTrafficCard.js';
 import { buildPublicTrafficFeishuText } from '../publicTraffic/buildPublicTrafficFeishu.js';
+import { assertDashboardDataDate, previousShanghaiDate } from '../publicTraffic/dashboardCaptureDate.js';
 import { runDashboardRefresh } from '../publicTraffic/dashboardRefresh.js';
 import { buildPublicTrafficPaths } from '../publicTraffic/paths.js';
 import type { PublicTrafficDataReportContext, PublicTrafficProductDataRow } from '../publicTraffic/types.js';
@@ -2036,16 +2037,18 @@ export async function executeAgentToolRequest(
       await loadEnv();
       const config = await loadConfig();
       const sendTo = readSendTo(request.arguments.sendTo);
-      const date = readOptionalDate(request.arguments.date) ?? today();
-      const result = await runDashboardRefresh({ config, date, sendTo });
+      const parsedDate = readOptionalDate(request.arguments.date);
+      const dataDate = parsedDate ? assertDashboardDataDate(parsedDate) : previousShanghaiDate();
+      const result = await runDashboardRefresh({ config, dataDate, sendTo });
       return {
         text: [
           `访问页补抓完成：${result.message}`,
-          `日期：${date}`,
+          `业务数据日：${result.dataDate}`,
+          `页面回读：${result.actualPageDate}`,
           '',
           `补抓结果：${result.refreshQualityText}`,
           '',
-          `首版状态：${result.firstQualityText}`,
+          `首版状态：${result.firstQualityText ?? '无既有日报上下文'}`,
         ].join('\n'),
       };
     }

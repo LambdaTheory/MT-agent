@@ -58,9 +58,15 @@ describe('executeAgentToolRequest public traffic report', () => {
     };
     mocks.loadConfig.mockResolvedValueOnce(config);
     mocks.runDashboardRefresh.mockResolvedValueOnce({
-      decision: 'rebuilt_and_resent',
-      firstQualityText: '访问页抓取情况\n1日：缺失',
+      status: 'repaired',
+      dataDate: '2026-06-24',
+      actualPageDate: '2026-06-24',
+      refreshQuality: { hasMissing: false, notes: [], periods: { '1d': { complete: true, rowCount: 1 }, '7d': { complete: true, rowCount: 1 }, '30d': { complete: true, rowCount: 1 } } },
       refreshQualityText: '访问页抓取情况\n1日：完整',
+      firstQualityText: '访问页抓取情况\n1日：缺失',
+      rebuild: 'performed',
+      resend: 'performed',
+      rawLocation: 'output/2026-06-25',
       message: '已重建日报并重发飞书',
     });
 
@@ -71,10 +77,46 @@ describe('executeAgentToolRequest public traffic report', () => {
 
     expect(mocks.loadEnv).toHaveBeenCalled();
     expect(mocks.loadConfig).toHaveBeenCalled();
-    expect(mocks.runDashboardRefresh).toHaveBeenCalledWith({ config, date: '2026-06-24', sendTo: 'group' });
+    expect(mocks.runDashboardRefresh).toHaveBeenCalledWith({ config, dataDate: '2026-06-24', sendTo: 'group' });
     expect(response.text).toContain('访问页补抓完成');
     expect(response.text).toContain('已重建日报并重发飞书');
     expect(response.text).toContain('1日：完整');
+  });
+
+  it('defaults dashboard refresh to the previous Shanghai data date when no date is provided', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-14T00:30:00.000Z'));
+    const config = {
+      targetUrl: 'https://example.test/dashboard',
+      periods: ['1d', '7d', '30d'],
+      preferredPageSize: 100,
+      outputDir: 'output',
+      browserProfileDir: 'profile',
+    };
+    mocks.loadConfig.mockResolvedValueOnce(config);
+    mocks.runDashboardRefresh.mockResolvedValueOnce({
+      status: 'saved_existing_complete',
+      dataDate: '2026-07-13',
+      actualPageDate: '2026-07-13',
+      refreshQuality: { hasMissing: false, notes: [], periods: { '1d': { complete: true, rowCount: 1 }, '7d': { complete: true, rowCount: 1 }, '30d': { complete: true, rowCount: 1 } } },
+      refreshQualityText: '访问页抓取情况\n1日：完整',
+      firstQualityText: '访问页抓取情况\n1日：完整',
+      rebuild: 'skipped',
+      resend: 'skipped',
+      rawLocation: 'output/2026-07-14',
+      message: '已保存访问页 raw；既有日报无需自动重发',
+    });
+
+    try {
+      await executeAgentToolRequest(
+        { toolName: 'publicTraffic.refreshDashboard', arguments: {}, reason: '测试默认补抓访问页' },
+        'output',
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(mocks.runDashboardRefresh).toHaveBeenLastCalledWith({ config, dataDate: '2026-07-13', sendTo: undefined });
   });
 
   it('runs generic report queries against an explicit report data date', async () => {

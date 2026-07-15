@@ -117,8 +117,9 @@ function canonicalizeIntent(intent: BotIntent): BotIntent {
     case 'push_latest_report_to_group':
       return { type: intent.type, ...(intent.date ? { date: intent.date } : {}) };
     case 'run_public_traffic_report':
-    case 'refresh_public_traffic_dashboard':
       return { type: intent.type, sendTo: intent.sendTo };
+    case 'refresh_public_traffic_dashboard':
+      return { type: intent.type, ...(intent.date ? { date: intent.date } : {}), sendTo: intent.sendTo };
     case 'resend_latest_report':
       return { type: intent.type, sendTo: intent.sendTo, ...(intent.date ? { date: intent.date } : {}) };
     case 'query_product':

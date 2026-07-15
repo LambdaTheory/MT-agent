@@ -17,8 +17,16 @@ describe('parseBotIntent', () => {
   });
 
   it('parses dashboard refresh intent separately from full report generation', () => {
-    expect(parseBotIntent('抓取访问页数据')).toEqual({ type: 'refresh_public_traffic_dashboard', sendTo: undefined });
-    expect(parseBotIntent('补抓后链路数据 发群')).toEqual({ type: 'refresh_public_traffic_dashboard', sendTo: 'group' });
+    expect(parseBotIntent('抓取访问页数据')).toEqual({ type: 'refresh_public_traffic_dashboard', date: undefined, sendTo: undefined });
+    expect(parseBotIntent('补抓后链路数据 发群')).toEqual({ type: 'refresh_public_traffic_dashboard', date: undefined, sendTo: 'group' });
+  });
+
+  it('preserves a dashboard refresh data date from exact commands', () => {
+    expect(parseBotIntent('补抓 2026-07-12 访问页')).toEqual({
+      type: 'refresh_public_traffic_dashboard',
+      date: '2026-07-12',
+      sendTo: undefined,
+    });
   });
 
   it('parses resend report intent', () => {

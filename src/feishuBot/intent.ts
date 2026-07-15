@@ -184,7 +184,10 @@ export function parseExactBotIntent(input: string): BotIntent {
   if (!canonicalText) return { type: 'help' };
   if (/^(帮助|help|\/help)$/i.test(canonicalText)) return { type: 'help' };
   if (/^(跑|生成|执行).*(公域)?日报/.test(canonicalText)) return { type: 'run_public_traffic_report', sendTo: sendTo(canonicalText) };
-  if (/^(抓取|补抓|刷新|更新).*(访问页|后链路|访问数据)/.test(canonicalText)) return { type: 'refresh_public_traffic_dashboard', sendTo: sendTo(canonicalText) };
+  if (/^(抓取|补抓|刷新|更新).*(访问页|后链路|访问数据)/.test(canonicalText)) {
+    const date = parseDateHint(canonicalText)?.date;
+    return { type: 'refresh_public_traffic_dashboard', ...(date ? { date } : {}), sendTo: sendTo(canonicalText) };
+  }
   if (/^(推送)?(公域)?日报到群$/.test(canonicalText) || /^(推送|发送).*(公域)?日报.*(到群|群里)$/.test(canonicalText)) return pushLatestReportIntentWithDate(canonicalText);
   if (/^重发.*(公域)?日报/.test(canonicalText)) return resendLatestReportIntentWithDate(canonicalText);
   if (/^(同步|拉取|更新).*(关单|关单反馈)/.test(canonicalText)) return { type: 'sync_closed_order_feedback' };

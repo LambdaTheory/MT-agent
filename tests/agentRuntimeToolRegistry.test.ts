@@ -265,11 +265,13 @@ describe('agent runtime tool registry', () => {
     });
   });
 
-  it('describes dashboard refresh as a parameter-light write tool', () => {
-    expect(findAgentTool('publicTraffic.refreshDashboard')?.inputSchema).toMatchObject({
+  it('describes dashboard refresh as a confirmed business-date write tool', () => {
+    const tool = findAgentTool('publicTraffic.refreshDashboard');
+    expect(tool?.description).toBe('补抓指定业务数据日的访问页 1日、7日、30日数据；页面日期经回读确认后保存 raw，必要时修复并最多重发一次对应日报。未传 date 时默认昨天。');
+    expect(tool?.inputSchema).toMatchObject({
       type: 'object',
       properties: {
-        date: { type: 'string' },
+        date: { type: 'string', description: '业务数据截止日；默认昨天，不是日报目录日期' },
         sendTo: { type: 'string' },
       },
       additionalProperties: false,
