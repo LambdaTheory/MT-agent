@@ -58,9 +58,9 @@ export function decideDashboardRefreshOutcome(input: {
   alreadyResent: boolean;
 }): DashboardRefreshStatus {
   if (!input.reportFound) return 'saved_historical_without_report';
+  if (input.refreshQuality.hasMissing) return 'still_missing';
   if (input.alreadyResent) return 'saved_already_resent';
   if (!input.firstQuality || !input.firstQuality.hasMissing) return 'saved_existing_complete';
-  if (input.refreshQuality.hasMissing) return 'still_missing';
   return 'repaired';
 }
 
@@ -93,6 +93,10 @@ function messageForDashboardRefreshStatus(status: DashboardRefreshStatus): strin
   if (status === 'saved_existing_complete') return '已保存访问页 raw；既有日报无需自动重发';
   if (status === 'saved_already_resent') return '已保存访问页 raw；该业务数据日已补抓重发过，跳过重复重发';
   return '未找到该业务数据日的既有日报上下文，已归档历史访问页 raw，未重建或重发';
+}
+
+function messageForDashboardResendFailure(reason: string | undefined): string {
+  return `已补抓完整访问页 raw 并重建日报，但飞书重发失败：${reason ?? 'unknown'}`;
 }
 
 function conservativeMissingQuality(): DashboardQualitySummary {
@@ -163,7 +167,7 @@ export async function runDashboardRefresh(input: DashboardRefreshRequest): Promi
 
   const existingState = await loadPublicTrafficRunState(paths.publicTrafficRunState);
   const state = existingState ?? conservativeState(dataDate);
-  const status = existingState
+  let status = existingState
     ? decideDashboardRefreshOutcome({
         reportFound: true,
         firstQuality: state.firstDashboardQuality,
@@ -174,8 +178,9 @@ export async function runDashboardRefresh(input: DashboardRefreshRequest): Promi
 
   let rebuild: DashboardRefreshResult['rebuild'] = 'skipped';
   let resend: DashboardRefreshResult['resend'] = 'skipped';
+  let message = messageForDashboardRefreshStatus(status);
   if (status === 'repaired') {
-    await rebuildPublicTrafficReport({
+    const rebuildResult = await rebuildPublicTrafficReport({
       outputDir: input.config.outputDir,
       date: located.runDate,
       productIdMappingPath: input.config.productIdMappingPath,
@@ -183,13 +188,18 @@ export async function runDashboardRefresh(input: DashboardRefreshRequest): Promi
       send: true,
     });
     rebuild = 'performed';
-    resend = 'performed';
+    if (rebuildResult.sent) {
+      resend = 'performed';
+    } else {
+      status = 'saved_existing_complete';
+      message = messageForDashboardResendFailure(rebuildResult.sendReason);
+    }
   }
 
   const nextState: PublicTrafficRunState = {
     ...state,
-    dashboardRefreshResent: state.dashboardRefreshResent || status === 'repaired',
-    ...(status === 'repaired' ? { dashboardRefreshResentAt: capturedAt } : {}),
+    dashboardRefreshResent: state.dashboardRefreshResent || resend === 'performed',
+    ...(resend === 'performed' ? { dashboardRefreshResentAt: capturedAt } : {}),
     dashboardRefreshDecision: status,
   };
   await savePublicTrafficRunState(paths.publicTrafficRunState, nextState);
@@ -206,7 +216,7 @@ export async function runDashboardRefresh(input: DashboardRefreshRequest): Promi
     rebuild,
     resend,
     rawLocation: paths.dir,
-    message: messageForDashboardRefreshStatus(status),
+    message,
   };
 }
 

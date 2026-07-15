@@ -57,12 +57,23 @@ describe('dashboard refresh result cards', () => {
     const refresh = result('still_missing');
     const rendered = JSON.stringify(buildDashboardRefreshResultCard(refresh));
     const text = formatDashboardRefreshResultText(refresh);
-    for (const value of ['2026-06-24', '1\u65e5', '7\u65e5', '30\u65e5', '12', '0', '300', 'output/2026-06-25']) {
+    for (const value of ['2026-06-24', '1日', '7日', '30日', '12', '0', '300', 'output/2026-06-25']) {
       expect(rendered).toContain(value);
       expect(text).toContain(value);
     }
     expect(text).toContain(NOT_REBUILT_OR_RESENT);
     expect(text).toContain('rowCount=0');
-    expect(text).not.toContain('Agent \u64cd\u4f5c\u5df2\u5b8c\u6210');
+    expect(text).not.toContain('Agent 操作已完成');
+  });
+
+  it('shows rebuild without resend as a blue saved-data card', () => {
+    const refresh = { ...result('saved_existing_complete'), rebuild: 'performed' as const, resend: 'skipped' as const, message: '\u5df2\u8865\u6293\u5b8c\u6574\u8bbf\u95ee\u9875 raw \u5e76\u91cd\u5efa\u65e5\u62a5\uff0c\u4f46\u98de\u4e66\u91cd\u53d1\u5931\u8d25\uff1amissing config' };
+    const card = buildDashboardRefreshResultCard(refresh);
+    const rendered = JSON.stringify(card);
+
+    expect(card.header).toMatchObject({ title: { content: SAVED_TITLE }, template: 'blue' });
+    expect(rendered).toContain('\u65e5\u62a5\u5904\u7406\uff1a\u5df2\u91cd\u5efa\uff0c\u672a\u91cd\u53d1');
+    expect(rendered).toContain('\u91cd\u53d1\u5931\u8d25');
+    expect(rendered).not.toContain('\u65e5\u62a5\u5904\u7406\uff1a\u5df2\u91cd\u5efa\uff0c\u5df2\u91cd\u53d1 1 \u6b21');
   });
 });

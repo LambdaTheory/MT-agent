@@ -19,7 +19,8 @@ const STATUS_META: Record<DashboardRefreshStatus, { title: string; template: 'gr
 };
 
 function reportAction(result: DashboardRefreshResult): string {
-  if (result.status === 'repaired') return '日报处理：已重建，已重发 1 次';
+  if (result.rebuild === 'performed' && result.resend === 'performed') return '日报处理：已重建，已重发 1 次';
+  if (result.rebuild === 'performed') return '日报处理：已重建，未重发';
   if (result.status === 'saved_already_resent') return '日报处理：已跳过重复重发';
   return '日报处理：未重建、未重发';
 }
