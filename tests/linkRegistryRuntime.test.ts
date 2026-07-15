@@ -70,6 +70,40 @@ describe('link registry runtime', () => {
       delistCauseConfidence: 'confirmed',
     });
   });
+  it('confirms a 09:00 Agent delist when a fresh same-day goods observation arrives after it', async () => {
+    const goodsSnapshotPath = join(outputDir, 'goods-current-snapshot.json');
+    const productIdMapPath = join(outputDir, 'product-id-map.json');
+    const productNameMapPath = join(outputDir, 'product-name-map.json');
+    const firstSeenPath = join(outputDir, 'goods-first-seen.json');
+    const lifecyclePath = join(outputDir, 'goods-link-lifecycle.json');
+    const daemonCatalogPath = join(outputDir, 'link-registry-daemon-catalog.json');
+    const overridesPath = join(outputDir, 'link-registry-overrides.json');
+
+    await Promise.all([
+      writeFile(goodsSnapshotPath, JSON.stringify([{
+        platformProductId: 'platform-1702', internalProductId: '1702', productName: 'freshly observed delist',
+        listingState: 'delisted', listingStatusText: '已下架', observedAt: '2026-07-14T10:30:00.000Z',
+      }]), 'utf8'),
+      writeFile(productIdMapPath, '{}', 'utf8'),
+      writeFile(productNameMapPath, '{}', 'utf8'),
+      writeFile(firstSeenPath, '{}', 'utf8'),
+      writeFile(lifecyclePath, 'null', 'utf8'),
+      writeFile(daemonCatalogPath, JSON.stringify({ generatedAt: '2026-07-14T10:30:00.000Z', count: 0, excludedCount: 0, entries: [] }), 'utf8'),
+      writeFile(overridesPath, 'null', 'utf8'),
+    ]);
+    await recordOperationEvent(outputDir, {
+      planId: 'plan-1', at: '2026-07-14T09:00:00.000Z', event: 'execution_succeeded', toolName: 'rental.delist',
+      subject: { kind: 'product', id: '1702' }, metadata: { rentalAction: 'delist', executionTimestampRecorded: true },
+    });
+
+    const context = await loadClosedOrderRegistryContext({
+      artifactsDir: outputDir, goodsSnapshotPath, productIdMapPath, productNameMapPath, firstSeenPath, lifecyclePath, daemonCatalogPath, overridesPath,
+    }, outputDir);
+
+    expect(context.registry.find((entry) => entry.internalProductId === '1702')).toMatchObject({
+      delistCause: 'agent_confirmed_manual_off_shelf', delistCauseConfidence: 'confirmed',
+    });
+  });
   it('suppresses daemon delist attribution only for an unhealthy refresh on the same reference date', async () => {
     const goodsSnapshotPath = join(outputDir, 'goods-current-snapshot.json');
     const productIdMapPath = join(outputDir, 'product-id-map.json');

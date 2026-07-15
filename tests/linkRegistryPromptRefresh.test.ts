@@ -51,6 +51,7 @@ describe('link registry prompt refresh', () => {
     mergedSnapshot: unknown[];
     daemonSnapshot: { count: number; excludedCount: number; pagesScraped: number; entries: unknown[] };
   }): void {
+    vi.setSystemTime(new Date('2026-07-15T10:30:00.000Z'));
     mocks.loadConfig.mockResolvedValue({ productIdMappingPath: 'config/product-id-map.json' });
     mocks.resolveClosedOrderRegistryPaths.mockResolvedValue({
       productIdMapPath: 'map.json', goodsSnapshotPath: 'snapshot.json', firstSeenPath: 'first.json', lifecyclePath: 'lifecycle.json', daemonCatalogPath: 'daemon.json', artifactsDir: 'output',
@@ -68,6 +69,32 @@ describe('link registry prompt refresh', () => {
     mocks.writeRefreshSuppressionState.mockResolvedValue(undefined);
   }
 
+  it('stamps freshly parsed goods-export observations with collection time rather than the reference date', async () => {
+    configureRefresh({
+      previousSnapshot: [],
+      mergedSnapshot: [],
+      daemonSnapshot: { count: 1, excludedCount: 0, pagesScraped: 1, entries: [] },
+    });
+    mocks.downloadGoodsExport.mockResolvedValue('goods.xlsx');
+    mocks.writeProductIdMappingFromExport.mockResolvedValue(1);
+    mocks.parseGoodsExportSnapshot.mockReturnValue([{
+      platformProductId: 'platform-1702',
+      internalProductId: '1702',
+      productName: 'fresh delisted product',
+      listingState: 'delisted',
+      listingStatusText: '已下架',
+      platformRestriction: { kind: 'frozen', reasonText: '冻结' },
+    }]);
+    mocks.mergeGoodsSnapshotWithDaemon.mockImplementation((items) => items);
+    const { refreshLinkRegistryForPrompt } = await import('../src/linkRegistry/promptRefresh.js');
+
+    await refreshLinkRegistryForPrompt('output', '2026-07-15');
+
+    expect(mocks.mergeGoodsSnapshotWithDaemon).toHaveBeenCalledWith([expect.objectContaining({
+      observedAt: '2026-07-15T10:30:00.000Z',
+      platformRestriction: expect.objectContaining({ observedAt: '2026-07-15T10:30:00.000Z' }),
+    })], []);
+  });
   it('persists unhealthy same-date suppression and passes referenceDate to the immediate registry build', async () => {
     configureRefresh({ previousSnapshot: [], mergedSnapshot: [], daemonSnapshot: { count: 0, excludedCount: 0, pagesScraped: 0, entries: [] } });
     const { refreshLinkRegistryForPrompt } = await import('../src/linkRegistry/promptRefresh.js');

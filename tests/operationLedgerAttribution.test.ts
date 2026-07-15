@@ -106,6 +106,80 @@ describe('operation ledger attribution', () => {
     expect(ledgerAfterRetry.journal).toEqual([entry]);
   });
 
+  it('repairs a JSONL-only event when a later distinct event arrives after canonical recovery', async () => {
+    const eventA = {
+      planId: 'plan-1',
+      at: '2026-07-01T09:00:00.000Z',
+      event: 'execution_succeeded',
+      runId: 'run-1',
+      decisionId: 'dec-1',
+      toolName: 'rental.delistBatch',
+      subject: { kind: 'product' as const, id: '648' },
+      metadata: { rentalAction: 'delist', executionTimestampRecorded: true },
+    };
+    const eventB = {
+      planId: 'plan-2',
+      at: '2026-07-01T09:01:00.000Z',
+      event: 'execution_succeeded',
+      runId: 'run-2',
+      decisionId: 'dec-2',
+      toolName: 'rental.priceApply',
+      subject: { kind: 'product' as const, id: '649' },
+    };
+    const ledgerPath = operationLedgerPath(dir);
+
+    await mkdir(ledgerPath, { recursive: true });
+    await expect(recordOperationEvent(dir, eventA)).rejects.toThrow();
+    await rm(ledgerPath, { recursive: true, force: true });
+
+    await recordOperationEvent(dir, eventB);
+
+    const [jsonl, daily, ledger] = await Promise.all([
+      loadOperationLedgerJsonlEntries(dir, '2026-07-01'),
+      loadDailyOperationJournalStore(dir, '2026-07-01'),
+      loadOperationLedgerStore(dir),
+    ]);
+    expect(jsonl).toEqual([eventA, eventB]);
+    expect(daily.entries).toEqual([eventA, eventB]);
+    expect(ledger.journal).toEqual([eventA, eventB]);
+
+  });
+  it('repairs a missing daily event when a later distinct event arrives after daily recovery', async () => {
+    const eventA = {
+      planId: 'plan-1',
+      at: '2026-07-01T09:00:00.000Z',
+      event: 'execution_succeeded',
+      runId: 'run-1',
+      decisionId: 'dec-1',
+      toolName: 'rental.delistBatch',
+      subject: { kind: 'product' as const, id: '648' },
+    };
+    const eventB = {
+      planId: 'plan-2',
+      at: '2026-07-01T09:01:00.000Z',
+      event: 'execution_succeeded',
+      runId: 'run-2',
+      decisionId: 'dec-2',
+      toolName: 'rental.priceApply',
+      subject: { kind: 'product' as const, id: '649' },
+    };
+    const dailyPath = dailyOperationJournalPath(dir, '2026-07-01');
+
+    await mkdir(dailyPath, { recursive: true });
+    await expect(recordOperationEvent(dir, eventA)).rejects.toThrow();
+    await rm(dailyPath, { recursive: true, force: true });
+
+    await recordOperationEvent(dir, eventB);
+
+    const [jsonl, daily, ledger] = await Promise.all([
+      loadOperationLedgerJsonlEntries(dir, '2026-07-01'),
+      loadDailyOperationJournalStore(dir, '2026-07-01'),
+      loadOperationLedgerStore(dir),
+    ]);
+    expect(jsonl).toEqual([eventA, eventB]);
+    expect(daily.entries).toEqual([eventA, eventB]);
+    expect(ledger.journal).toEqual([eventA, eventB]);
+  });
   it('repairs only the daily journal on retry after daily journal write fails', async () => {
     const entry = {
       planId: 'plan-1',

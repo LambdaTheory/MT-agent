@@ -251,6 +251,31 @@ describe('runPublicTrafficReportCli public traffic sequencing', () => {
     await expect(readFile(todayPaths.log, 'utf8')).resolves.toContain('goods-manager 新品池: 2 个商品');
   });
 
+  it('stamps fresh parsed goods-export observations with their collection timestamp', async () => {
+    const mapping = await import('../src/mapping/goodsExportMapping.js');
+    vi.spyOn(mapping, 'parseGoodsExportSnapshot').mockReturnValueOnce([{
+      platformProductId: 'p1702',
+      internalProductId: '1702',
+      productName: 'fresh delisted product',
+      listingState: 'delisted',
+      listingStatusText: '已下架',
+      platformRestriction: { kind: 'frozen', reasonText: '冻结' },
+    }]);
+    const { runPublicTrafficReportCli } = await import('../src/cli/publicTrafficReport.js');
+
+    await runPublicTrafficReportCli();
+
+    const paths = buildPublicTrafficPaths(mocks.outputDir, '2026-06-10');
+    const snapshot = JSON.parse(await readFile(paths.goodsCurrentSnapshotState, 'utf8')) as Array<{
+      internalProductId: string;
+      observedAt?: string;
+      platformRestriction?: { observedAt?: string };
+    }>;
+    expect(snapshot.find((item) => item.internalProductId === '1702')).toMatchObject({
+      observedAt: '2026-06-10T12:00:00.000Z',
+      platformRestriction: { observedAt: '2026-06-10T12:00:00.000Z' },
+    });
+  });
   it('writes merged current goods snapshot from mapping fallback and daemon live catalog', async () => {
     mocks.loadProductIdMapping.mockResolvedValueOnce({ p701: '701' });
     mocks.fetchDaemonCatalogSnapshot.mockResolvedValueOnce({

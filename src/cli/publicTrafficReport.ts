@@ -523,6 +523,7 @@ export async function runPublicTrafficReportCli(): Promise<PublicTrafficReportCl
     const mappingPath = resolveProductIdMappingPath(config);
     log.addEvent('开始下载商品总表、抓取曝光与后链路数据');
     const { goodsExportPath, exposure: crawlResult, dashboard: rawTables, orderAnalysis: orderAnalysisCapture } = await crawlPublicTrafficSources(config, paths.goodsExportWorkbook);
+    const goodsSnapshotCollectedAt = new Date().toISOString();
     await refreshProductIdMappingForReport(goodsExportPath, mappingPath, paths.productIdMappingSyncLog, log);
     const mapping = await loadMappingSafely(mappingPath, log);
     const goodsSnapshotFromExport = await loadGoodsSnapshotFromExport(goodsExportPath, log);
@@ -532,8 +533,8 @@ export async function runPublicTrafficReportCli(): Promise<PublicTrafficReportCl
       daemonCatalog?.entries ?? [],
     ).map((item) => ({
       ...item,
-      ...(item.listingState ? { observedAt: item.observedAt ?? runDate } : {}),
-      ...(item.platformRestriction ? { platformRestriction: { ...item.platformRestriction, observedAt: item.platformRestriction.observedAt ?? runDate } } : {}),
+      ...(item.listingState ? { observedAt: item.observedAt ?? (goodsSnapshotFromExport ? goodsSnapshotCollectedAt : runDate) } : {}),
+      ...(item.platformRestriction ? { platformRestriction: { ...item.platformRestriction, observedAt: item.platformRestriction.observedAt ?? (goodsSnapshotFromExport ? goodsSnapshotCollectedAt : runDate) } } : {}),
     })));
     const refreshHealth = decideRefreshHealth({
       previousSnapshotCount: previousGoodsSnapshot.length,

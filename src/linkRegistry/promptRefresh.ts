@@ -150,12 +150,13 @@ export async function refreshLinkRegistryForPrompt(
   if (refreshMode === 'default') {
     try {
       const goodsExportPath = await downloadGoodsExport(config, paths.goodsExportWorkbook);
+      const collectedAt = new Date().toISOString();
       await writeProductIdMappingFromExport(goodsExportPath, resolvedPaths.productIdMapPath, paths.productIdMappingSyncLog);
       goodsSnapshotFromExport = parseGoodsExportSnapshot(goodsExportPath).map((item) => ({
         ...item,
-        ...(item.listingState ? { observedAt: referenceDate } : {}),
+        ...(item.listingState ? { observedAt: collectedAt } : {}),
         ...(item.platformRestriction
-          ? { platformRestriction: { ...item.platformRestriction, observedAt: referenceDate } }
+          ? { platformRestriction: { ...item.platformRestriction, observedAt: collectedAt } }
           : {}),
       }));
       goodsExportRefreshed = true;

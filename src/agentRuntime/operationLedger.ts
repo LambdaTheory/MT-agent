@@ -153,23 +153,36 @@ export async function recordOperationEvent(
 ): Promise<OperationPlanJournalEntry> {
   return withLedgerLock(outputDir, async () => {
     const date = entry.at.slice(0, 10);
-    const key = operationEventKey(entry);
     const jsonlPath = operationLedgerJsonlPath(outputDir, date);
     const jsonlEntries = await loadOperationLedgerJsonlEntries(outputDir, date);
     const ledger = await loadOperationLedgerStore(outputDir);
     const daily = await loadDailyOperationJournalStore(outputDir, date);
-    const jsonlHasEntry = jsonlEntries.some((item) => operationEventKey(item) === key);
-    const ledgerHasEntry = ledger.journal.some((item) => operationEventKey(item) === key);
-    const dailyHasEntry = daily.entries.some((item) => operationEventKey(item) === key);
-    if (jsonlHasEntry && ledgerHasEntry && dailyHasEntry) return entry;
+    const entries = unionOperationEvents([
+      ...jsonlEntries.filter((item) => item.at.slice(0, 10) === date),
+      ...ledger.journal.filter((item) => item.at.slice(0, 10) === date),
+      ...daily.entries.filter((item) => item.at.slice(0, 10) === date),
+    ], entry);
     const now = new Date().toISOString();
-    if (!jsonlHasEntry) await writeJsonl(jsonlPath, [...jsonlEntries, entry]);
-    if (!ledgerHasEntry) await writeJson(operationLedgerPath(outputDir), { ...ledger, updatedAt: now, journal: [...ledger.journal, entry] });
-    if (!dailyHasEntry) await writeJson(dailyOperationJournalPath(outputDir, date), { ...daily, date, updatedAt: now, entries: [...daily.entries, entry] });
+    await writeJsonl(jsonlPath, entries);
+    const otherJournalEntries = ledger.journal.filter((item) => item.at.slice(0, 10) !== date);
+    await writeJson(operationLedgerPath(outputDir), { ...ledger, updatedAt: now, journal: [...otherJournalEntries, ...entries] });
+    await writeJson(dailyOperationJournalPath(outputDir, date), { ...daily, date, updatedAt: now, entries });
     return entry;
   });
 }
 
+function unionOperationEvents(
+  entries: OperationPlanJournalEntry[],
+  incoming: OperationPlanJournalEntry,
+): OperationPlanJournalEntry[] {
+  const seen = new Set<string>();
+  return [...entries, incoming].filter((item) => {
+    const key = operationEventKey(item);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
 function operationEventKey(entry: OperationPlanJournalEntry): string {
   return [
     entry.runId ?? '',
