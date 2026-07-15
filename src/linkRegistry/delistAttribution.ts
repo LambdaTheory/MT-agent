@@ -54,6 +54,7 @@ function selectRestriction(
     const observedAt = validTimestamp(item.observedAt);
     const restrictionObservedAt = validTimestamp(item.restriction.observedAt);
     return item.listingState === 'delisted'
+      && item.listingStatusText?.trim()
       && item.restriction.reasonText.trim()
       && observedAt !== null
       && restrictionObservedAt !== null

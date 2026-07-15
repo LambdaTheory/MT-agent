@@ -111,6 +111,14 @@ async function recordWriteEvent(
   });
 }
 
+export async function recordSuccessfulRentalDelistEvent(
+  context: RentalWriteLedgerContext | undefined,
+  toolName: string,
+  productId: string,
+): Promise<void> {
+  await recordWriteEvent(context, 'execution_succeeded', toolName, productId, 'delist');
+}
+
 async function recordFailedWriteEvent(
   context: RentalWriteLedgerContext | undefined,
   toolName: string,

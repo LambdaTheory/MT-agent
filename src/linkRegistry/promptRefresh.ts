@@ -8,6 +8,7 @@ import {
 } from '../closedOrderFeedback/runtime.js';
 import { downloadGoodsExport } from '../crawler/goodsExportCrawler.js';
 import { decideRefreshHealth } from './refreshHealth.js';
+import { writeRefreshSuppressionState } from './refreshSuppressionState.js';
 import { writeJsonAtomic } from './persistence.js';
 import { buildLinkRegistryMaintenanceReport, isLinkRegistryMaintenanceIgnoredEntry } from './maintenance.js';
 import { fetchDaemonCatalogSnapshot, loadOptionalDaemonCatalogSnapshot, mergeGoodsSnapshotWithDaemon, saveDaemonCatalogSnapshot } from './daemonCatalog.js';
@@ -191,6 +192,11 @@ export async function refreshLinkRegistryForPrompt(
     daemonFetchMode: daemonRefreshed ? 'live' : (daemonSnapshot ? 'fallback' : 'missing'),
   });
   warnings.push(...refreshHealth.warnings);
+  await writeRefreshSuppressionState(outputDir, {
+    version: 1,
+    referenceDate,
+    suppressDelistAttribution: refreshHealth.suppressLifecycleDrop,
+  });
   await writeJsonAtomic(paths.goodsListSnapshot, mergedSnapshot);
 
   const firstSeen = await updateGoodsFirstSeenStateSerialized({
@@ -209,6 +215,7 @@ export async function refreshLinkRegistryForPrompt(
   const registryContext = await loadClosedOrderRegistryContext({
     ...registryInput,
     suppressDelistAttribution: refreshHealth.suppressLifecycleDrop,
+    referenceDate,
   });
   const summaryBase = summarizeNewEntries(beforeContext?.registry ?? [], registryContext.registry, referenceDate);
   return {

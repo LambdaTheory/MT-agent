@@ -30,6 +30,28 @@ describe('executeAgentToolRequest ledgerContext', () => {
     await rm(dir, { recursive: true, force: true });
   });
 
+  it('records marked success evidence only for successful products in a batch delist', async () => {
+    const client = {
+      ...fakeClient(),
+      delist: async (productId: string) => productId === '648'
+        ? { productId, ok: true, lines: ['delisted'] }
+        : productId === '649'
+          ? { productId, ok: false, lines: ['Product not found'] }
+          : { productId, ok: false, lines: ['failed'] },
+    };
+    await executeAgentToolRequest(
+      { toolName: 'rental.delistBatch', arguments: { productIds: ['648', '649', '650', '651'] }, reason: 'batch' },
+      dir,
+      { rentalPriceClient: client, ledgerContext: { outputDir: dir, runId: 'run-batch', decisionId: 'dec-batch', missionDate: '2026-07-01' } },
+    );
+    const entries = await loadOperationLedgerJsonlEntries(dir, new Date().toISOString().slice(0, 10));
+    expect(entries).toEqual([expect.objectContaining({
+      at: expect.any(String), event: 'execution_succeeded', toolName: 'rental.delistBatch',
+      runId: 'run-batch', decisionId: 'dec-batch', subject: { kind: 'product', id: '648' },
+      metadata: { rentalAction: 'delist', executionTimestampRecorded: true, missionDate: '2026-07-01' },
+    })]);
+  });
+
   it('threads ledgerContext into rental write handler', async () => {
     await executeAgentToolRequest(
       { toolName: 'rental.delist', arguments: { productId: '648' }, reason: 'daily mission approval' },

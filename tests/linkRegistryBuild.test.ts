@@ -622,6 +622,20 @@ describe('link registry build', () => {
     });
   });
 
+  it('does not confirm platform attribution for a delisted goods snapshot without raw listing status text', () => {
+    expect(buildLinkRegistry({
+      goodsSnapshot: [{
+        platformProductId: 'platform-1709', internalProductId: '1709', productName: '缺状态文本商品',
+        listingState: 'delisted', observedAt: '2026-07-14T10:00:00.000Z',
+        platformRestriction: { kind: 'frozen', reasonText: '涉嫌违规冻结', observedAt: '2026-07-14T10:00:00.000Z' },
+      }],
+    })[0]).toMatchObject({
+      listingState: 'delisted',
+      delistCause: 'external_manual_off_shelf_pending_confirmation',
+      delistCauseConfidence: 'suspected',
+    });
+  });
+
   it('rejects an on-sale restriction from a snapshot when daemon later reports delisted', () => {
     expect(buildLinkRegistry({
       goodsSnapshot: [{

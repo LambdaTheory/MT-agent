@@ -20,6 +20,7 @@ import {
   type DaemonCatalogSnapshot,
 } from '../linkRegistry/daemonCatalog.js';
 import { decideRefreshHealth } from '../linkRegistry/refreshHealth.js';
+import { writeRefreshSuppressionState } from '../linkRegistry/refreshSuppressionState.js';
 import { annotateGoodsExportWorkbookWithInternalId } from '../mapping/annotateGoodsExportWorkbook.js';
 import { parseGoodsExportSnapshot } from '../mapping/goodsExportMapping.js';
 import { loadProductIdMapping, type ProductIdMapping } from '../mapping/productIdMapping.js';
@@ -543,6 +544,11 @@ export async function runPublicTrafficReportCli(): Promise<PublicTrafficReportCl
       daemonFetchMode: daemonCatalog ? 'live' : 'missing',
     });
     for (const warning of refreshHealth.warnings) log.addEvent(warning);
+    await writeRefreshSuppressionState(config.outputDir, {
+      version: 1,
+      referenceDate: runDate,
+      suppressDelistAttribution: refreshHealth.suppressLifecycleDrop,
+    });
     await writeJsonAtomic(paths.goodsListSnapshot, currentGoodsSnapshot);
     log.addEvent(`商品当前快照已保存: ${currentGoodsSnapshot.length} 条, daemon=${daemonCatalog?.entries.length ?? 0}`);
     const firstSeenState = await updateGoodsFirstSeenStateSerialized({
@@ -814,7 +820,7 @@ async function writeInventorySameSkuSnapshotSafely(
   log: ReturnType<typeof createRunLog>,
 ): Promise<ClosedOrderRegistryContext | null> {
   try {
-    const registryContext = await loadClosedOrderRegistryContext({ artifactsDir: input.outputDir, suppressDelistAttribution: input.suppressDelistAttribution }, process.cwd());
+    const registryContext = await loadClosedOrderRegistryContext({ artifactsDir: input.outputDir, suppressDelistAttribution: input.suppressDelistAttribution, referenceDate: input.runDate }, process.cwd());
     const sameSkuSnapshot = buildInventorySameSkuSnapshot({
       date: input.runDate,
       reportDate: input.context.date,

@@ -80,7 +80,7 @@ import {
   type RentalPriceSkillClient,
 } from './rentalPrice.js';
 import { executeRentalReadOnlyOperationHandler } from './rentalReadOnlyOperationHandlers.js';
-import { executeRentalWriteOperationHandler } from './rentalWriteOperationHandlers.js';
+import { executeRentalWriteOperationHandler, recordSuccessfulRentalDelistEvent } from './rentalWriteOperationHandlers.js';
 import { executeRentalBatchTool } from './rentalBatchHandlers.js';
 import { executeRentalMirrorTool } from './rentalMirrorHandlers.js';
 import { findReadOnlyTool } from './readOnlyToolRegistry.js';
@@ -1384,6 +1384,7 @@ async function rentalDelistBatchResponse(
   args: Record<string, unknown>,
   client: RentalPriceSkillClient,
   toolName: 'rental.delist' | 'rental.delistBatch' = 'rental.delistBatch',
+  ledgerContext?: RentalWriteLedgerContext,
 ): Promise<BotResponse> {
   const productIds = readDelistProductIds(args);
   if (!productIds) {
@@ -1398,6 +1399,7 @@ async function rentalDelistBatchResponse(
     try {
       const result = await client.delist(productId);
       results.push(result);
+      if (result.ok) await recordSuccessfulRentalDelistEvent(ledgerContext, toolName, result.productId);
     } catch (error) {
       results.push({ productId, ok: false, lines: [error instanceof Error ? error.message : String(error)] });
       break;
@@ -2072,12 +2074,12 @@ export async function executeAgentToolRequest(
     case 'rental.delist': {
       const productIds = readDelistProductIds(request.arguments);
       if (request.arguments.productIds !== undefined || (productIds && productIds.length > 1)) {
-        return rentalDelistBatchResponse(request.arguments, options.rentalPriceClient ?? createRentalPriceSkillClient(), request.toolName);
+        return rentalDelistBatchResponse(request.arguments, options.rentalPriceClient ?? createRentalPriceSkillClient(), request.toolName, options.ledgerContext);
       }
       return executeRentalWriteOperationHandler(request, options.rentalPriceClient ?? createRentalPriceSkillClient(), options.ledgerContext);
     }
     case 'rental.delistBatch':
-      return rentalDelistBatchResponse(request.arguments, options.rentalPriceClient ?? createRentalPriceSkillClient(), request.toolName);
+      return rentalDelistBatchResponse(request.arguments, options.rentalPriceClient ?? createRentalPriceSkillClient(), request.toolName, options.ledgerContext);
     case 'rental.specRemovePlan': {
       const query = requireString(request.arguments.query, 'query');
       const keyword = requireString(request.arguments.keyword, 'keyword');

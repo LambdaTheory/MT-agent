@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   updateGoodsFirstSeenStateSerialized: vi.fn(),
   updateGoodsLinkLifecycleStateSerialized: vi.fn(),
   writeJsonAtomic: vi.fn(),
+  writeRefreshSuppressionState: vi.fn(),
 }));
 
 vi.mock('../src/config/loadEnv.js', () => ({ loadEnv: vi.fn(async () => undefined) }));
@@ -42,6 +43,7 @@ vi.mock('../src/publicTraffic/goodsStatePersistence.js', () => ({
   updateGoodsLinkLifecycleStateSerialized: mocks.updateGoodsLinkLifecycleStateSerialized,
 }));
 vi.mock('../src/linkRegistry/persistence.js', () => ({ writeJsonAtomic: mocks.writeJsonAtomic }));
+vi.mock('../src/linkRegistry/refreshSuppressionState.js', () => ({ writeRefreshSuppressionState: mocks.writeRefreshSuppressionState }));
 
 describe('link registry prompt refresh', () => {
   function configureRefresh({ previousSnapshot, mergedSnapshot, daemonSnapshot }: {
@@ -63,7 +65,16 @@ describe('link registry prompt refresh', () => {
     mocks.updateGoodsFirstSeenStateSerialized.mockResolvedValue({});
     mocks.updateGoodsLinkLifecycleStateSerialized.mockResolvedValue({ active: {}, removedLinks: [] });
     mocks.writeJsonAtomic.mockResolvedValue(undefined);
+    mocks.writeRefreshSuppressionState.mockResolvedValue(undefined);
   }
+
+  it('persists unhealthy same-date suppression and passes referenceDate to the immediate registry build', async () => {
+    configureRefresh({ previousSnapshot: [], mergedSnapshot: [], daemonSnapshot: { count: 0, excludedCount: 0, pagesScraped: 0, entries: [] } });
+    const { refreshLinkRegistryForPrompt } = await import('../src/linkRegistry/promptRefresh.js');
+    await refreshLinkRegistryForPrompt('output', '2026-07-15', { mode: 'daemon_only' });
+    expect(mocks.writeRefreshSuppressionState).toHaveBeenCalledWith('output', { version: 1, referenceDate: '2026-07-15', suppressDelistAttribution: true });
+    expect(mocks.loadClosedOrderRegistryContext).toHaveBeenLastCalledWith(expect.objectContaining({ suppressDelistAttribution: true, referenceDate: '2026-07-15' }));
+  });
 
   it('suppresses registry delist attribution for an empty daemon snapshot', async () => {
     configureRefresh({

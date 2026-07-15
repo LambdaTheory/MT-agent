@@ -5,18 +5,18 @@ const delisted = { listingState: 'delisted' as const, statusObservedAt: '2026-07
 
 describe('attributeDelist', () => {
   it('maps review, frozen, and other platform restrictions as confirmed causes', () => {
-    expect(attributeDelist({ ...delisted, platformRestrictions: [{ restriction: { kind: 'review_rejected', reasonText: '资质不足', observedAt: '2026-07-14T09:00:00.000Z' }, listingState: 'delisted', observedAt: '2026-07-14T09:00:00.000Z' }] }))
+    expect(attributeDelist({ ...delisted, platformRestrictions: [{ restriction: { kind: 'review_rejected', reasonText: '资质不足', observedAt: '2026-07-14T09:00:00.000Z' }, listingState: 'delisted', listingStatusText: '已下架', observedAt: '2026-07-14T09:00:00.000Z' }] }))
       .toMatchObject({ cause: 'platform_review_rejected', confidence: 'confirmed' });
-    expect(attributeDelist({ ...delisted, platformRestrictions: [{ restriction: { kind: 'frozen', reasonText: '涉嫌违规', observedAt: '2026-07-14T09:00:00.000Z' }, listingState: 'delisted', observedAt: '2026-07-14T09:00:00.000Z' }] }))
+    expect(attributeDelist({ ...delisted, platformRestrictions: [{ restriction: { kind: 'frozen', reasonText: '涉嫌违规', observedAt: '2026-07-14T09:00:00.000Z' }, listingState: 'delisted', listingStatusText: '已下架', observedAt: '2026-07-14T09:00:00.000Z' }] }))
       .toMatchObject({ cause: 'platform_frozen', confidence: 'confirmed' });
-    expect(attributeDelist({ ...delisted, platformRestrictions: [{ restriction: { kind: 'other', reasonText: '平台限制', observedAt: '2026-07-14T09:00:00.000Z' }, listingState: 'delisted', observedAt: '2026-07-14T09:00:00.000Z' }] }))
+    expect(attributeDelist({ ...delisted, platformRestrictions: [{ restriction: { kind: 'other', reasonText: '平台限制', observedAt: '2026-07-14T09:00:00.000Z' }, listingState: 'delisted', listingStatusText: '已下架', observedAt: '2026-07-14T09:00:00.000Z' }] }))
       .toMatchObject({ cause: 'platform_restricted', confidence: 'confirmed' });
   });
 
   it('makes platform restriction win over a matching agent event', () => {
     expect(attributeDelist({
       ...delisted,
-      platformRestrictions: [{ restriction: { kind: 'frozen', reasonText: '冻结', observedAt: '2026-07-14T09:00:00.000Z' }, listingState: 'delisted', observedAt: '2026-07-14T09:00:00.000Z' }],
+      platformRestrictions: [{ restriction: { kind: 'frozen', reasonText: '冻结', observedAt: '2026-07-14T09:00:00.000Z' }, listingState: 'delisted', listingStatusText: '已下架', observedAt: '2026-07-14T09:00:00.000Z' }],
       agentDelistEvents: [{ internalProductId: '648', at: '2026-07-14T09:30:00.000Z', toolName: 'rental.delist' }],
     })).toMatchObject({ cause: 'platform_frozen', confidence: 'confirmed' });
   });
@@ -89,6 +89,7 @@ describe('attributeDelist', () => {
       platformRestrictions: [{
         restriction: { kind: 'frozen', reasonText: 'current restriction', observedAt: '2026-07-14T09:00:00.000Z' },
         listingState: 'delisted',
+        listingStatusText: '已下架',
         observedAt: '2026-07-14T09:00:00.000Z',
       }],
     })).toMatchObject({
@@ -96,6 +97,11 @@ describe('attributeDelist', () => {
       confidence: 'confirmed',
       evidence: [{ observedAt: '2026-07-14T09:00:00.000Z', reasonText: 'current restriction' }],
     });
+  });
+
+  it('rejects platform attribution without nonblank raw listing status text', () => {
+    expect(attributeDelist({ ...delisted, platformRestrictions: [{ restriction: { kind: 'frozen', reasonText: '冻结', observedAt: '2026-07-14T09:00:00.000Z' }, listingState: 'delisted', observedAt: '2026-07-14T09:00:00.000Z' }] }))
+      .toMatchObject({ cause: 'external_manual_off_shelf_pending_confirmation', confidence: 'suspected' });
   });
 
   it('includes listingStatusText in platform restriction evidence when nonblank', () => {
@@ -118,7 +124,7 @@ describe('attributeDelist', () => {
     expect(attributeDelist({
       ...delisted,
       suppressDelistAttribution: true,
-      platformRestrictions: [{ restriction: { kind: 'frozen', reasonText: '涉嫌违规', observedAt: '2026-07-14T09:00:00.000Z' }, listingState: 'delisted', observedAt: '2026-07-14T09:00:00.000Z' }],
+      platformRestrictions: [{ restriction: { kind: 'frozen', reasonText: '涉嫌违规', observedAt: '2026-07-14T09:00:00.000Z' }, listingState: 'delisted', listingStatusText: '已下架', observedAt: '2026-07-14T09:00:00.000Z' }],
       agentDelistEvents: [{ internalProductId: '648', at: '2026-07-14T09:30:00.000Z', toolName: 'rental.delist' }],
     })).toBeNull();
   });

@@ -73,7 +73,7 @@ describe('public traffic CLI wiring', () => {
     expect(text).toContain('suppressDelistAttribution: refreshHealth.suppressLifecycleDrop');
     expect(text).toContain('suppressDelistAttribution: boolean;');
     expect(text).toContain('suppressDelistAttribution: input.suppressDelistAttribution');
-    expect(text).toContain('loadClosedOrderRegistryContext({ artifactsDir: input.outputDir, suppressDelistAttribution: input.suppressDelistAttribution }, process.cwd())');
+    expect(text).toContain('loadClosedOrderRegistryContext({ artifactsDir: input.outputDir, suppressDelistAttribution: input.suppressDelistAttribution, referenceDate: input.runDate }, process.cwd())');
   });
 
   it('stamps nested platform restriction observation time in current goods snapshot', async () => {

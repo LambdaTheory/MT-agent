@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentConfig, PeriodProductMetrics, RawTableData } from '../src/domain/types.js';
 import { parsePublicTrafficArtifactManifest } from '../src/publicTraffic/artifacts.js';
 import { buildPublicTrafficPaths } from '../src/publicTraffic/paths.js';
+import { loadRefreshSuppressionState } from '../src/linkRegistry/refreshSuppressionState.js';
 import type { ExposureDailyDelta, PublicTrafficDataReportContext } from '../src/publicTraffic/types.js';
 
 const mocks = vi.hoisted(() => ({
