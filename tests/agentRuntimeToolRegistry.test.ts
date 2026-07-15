@@ -103,7 +103,7 @@ describe('agent runtime tool registry', () => {
 
     const tools = listAgentTools();
     tools.pop();
-    expect(listAgentTools()).toHaveLength(81);
+    expect(listAgentTools()).toHaveLength(82);
   });
 
   it('returns defensive copies of tool metadata', () => {
