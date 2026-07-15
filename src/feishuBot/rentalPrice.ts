@@ -192,6 +192,111 @@ export interface RentalRawReadResult extends RentalPriceReadResult {
   readCount?: number;
 }
 
+export interface RentalImageStateResult {
+  productId: string;
+  ok: boolean;
+  status: string;
+  thumbs: string[];
+  whiteImage?: string;
+  firstThumbnail?: string;
+  lines: string[];
+}
+
+export interface RentalImageMutationResult {
+  productId: string;
+  ok: boolean;
+  status: string;
+  lines: string[];
+  result: Record<string, unknown>;
+}
+
+export interface RentalImageVerifyResult extends RentalImageMutationResult {}
+
+export interface RentalImageUploadRequest {
+  productId: string;
+  sectionType: string;
+  categoryName: string;
+  uploadFile: string;
+  confirmSelection?: boolean;
+  allowDuplicateFileName?: boolean;
+}
+
+export interface RentalImagePickRequest {
+  productId: string;
+  categoryName: string;
+  fileNames: string[];
+  skipIfAlreadyPresent?: boolean;
+}
+
+export interface RentalImageOrderRequest {
+  productId: string;
+  orderedUrls: string[];
+}
+
+export interface RentalWhiteImageSetRequest {
+  productId: string;
+  categoryName: string;
+  fileName: string;
+  skipIfWhiteImageMatched?: boolean;
+}
+
+export interface RentalImageVerifyRequest {
+  productId: string;
+  expectedImages: Record<string, unknown>;
+}
+
+export interface RentalVasStateResult {
+  productId?: string;
+  ok: boolean;
+  status: string;
+  enabled?: boolean;
+  platforms: string[];
+  services: unknown[];
+  lines: string[];
+  result: Record<string, unknown>;
+}
+
+export interface RentalVasCatalogResult {
+  ok: boolean;
+  status: string;
+  count: number;
+  services: unknown[];
+  lines: string[];
+  result: Record<string, unknown>;
+}
+
+export interface RentalVasMutationResult {
+  ok: boolean;
+  status: string;
+  lines: string[];
+  result: Record<string, unknown>;
+}
+
+export interface RentalVasReadRequest {
+  productId?: string;
+  allowCurrentPage?: boolean;
+  expectedProductId?: string;
+}
+
+export interface RentalVasCatalogReadRequest {
+  productId?: string;
+  allowCurrentPage?: boolean;
+  expectedProductId?: string;
+  ids?: string[];
+  keyword?: string;
+}
+
+export interface RentalVasApplyRequest {
+  allowCurrentPage: boolean;
+  expectedProductId: string;
+  expectedVAS: Record<string, unknown>;
+}
+
+export interface RentalVasVerifyRequest {
+  productId: string;
+  expectedVAS: Record<string, unknown>;
+}
+
 export interface RentalSpecDiscoverFullResult extends RentalPriceSpecDiscoverResult {
   status: string;
 }
@@ -233,6 +338,16 @@ export interface RentalPriceSkillClient {
   specAddDim?(productId: string, title: string): Promise<RentalPriceSpecAddResult>;
   specRemoveDim?(request: { productId: string; specDimId: string }): Promise<RentalPriceSpecRemoveResult>;
   specRemoveItem?(request: { productId: string; specDimId: string; itemId?: string; itemTitle: string }): Promise<RentalPriceSpecRemoveResult>;
+  imageRead?(productId: string): Promise<RentalImageStateResult>;
+  imageUpload?(request: RentalImageUploadRequest): Promise<RentalImageMutationResult>;
+  imagePick?(request: RentalImagePickRequest): Promise<RentalImageMutationResult>;
+  imageOrder?(request: RentalImageOrderRequest): Promise<RentalImageMutationResult>;
+  whiteImageSet?(request: RentalWhiteImageSetRequest): Promise<RentalImageMutationResult>;
+  imageVerify?(request: RentalImageVerifyRequest): Promise<RentalImageVerifyResult>;
+  vasRead?(request: RentalVasReadRequest): Promise<RentalVasStateResult>;
+  vasCatalogRead?(request: RentalVasCatalogReadRequest): Promise<RentalVasCatalogResult>;
+  vasApply?(request: RentalVasApplyRequest): Promise<RentalVasMutationResult>;
+  vasVerify?(request: RentalVasVerifyRequest): Promise<RentalVasMutationResult>;
 }
 
 export interface RentalSpecRemoveItemConfirmRequest {
@@ -591,6 +706,92 @@ function summarizeBatchReadResults(results: Record<string, unknown>): string[] {
   });
 }
 
+function readStringArrayField(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+}
+
+function normalizeImageState(productId: string, result: Record<string, unknown>): RentalImageStateResult {
+  const status = commandStatus(result);
+  const thumbs = readStringArrayField(result.thumbs ?? result.images ?? result.orderedUrls);
+  const whiteImage = optionalString(result, 'whiteImage') ?? optionalString(result, 'whiteImageUrl') ?? optionalString(result, 'white_ground_image');
+  const firstThumbnail = optionalString(result, 'firstThumbnail') ?? optionalString(result, 'thumbnail') ?? thumbs[0];
+  return {
+    productId,
+    ok: status === 'ok' || status === 'partial',
+    status,
+    thumbs,
+    ...(whiteImage ? { whiteImage } : {}),
+    ...(firstThumbnail ? { firstThumbnail } : {}),
+    lines: [`image-read: ${status}`, `thumbs: ${thumbs.length}`, ...(whiteImage ? [`whiteImage: ${whiteImage}`] : []), ...(firstThumbnail ? [`firstThumbnail: ${firstThumbnail}`] : [])],
+  };
+}
+
+function normalizeImageMutation(productId: string, action: string, result: Record<string, unknown>): RentalImageMutationResult {
+  const status = commandStatus(result);
+  const message = optionalString(result, 'message');
+  return { productId, ok: status === 'ok', status, lines: [`${action}: ${status}`, ...(message ? [message] : [])], result };
+}
+
+function normalizeVasState(result: Record<string, unknown>, fallbackProductId?: string): RentalVasStateResult {
+  const status = commandStatus(result);
+  const productId = optionalString(result, 'productId') ?? fallbackProductId;
+  const services = Array.isArray(result.services) ? result.services : [];
+  const platforms = readStringArrayField(result.platforms);
+  const enabled = optionalBoolean(result, 'enabled');
+  return {
+    ...(productId ? { productId } : {}),
+    ok: status === 'ok' || status === 'partial',
+    status,
+    ...(enabled !== undefined ? { enabled } : {}),
+    platforms,
+    services,
+    lines: [`vas-read: ${status}`, `platforms: ${platforms.length}`, `services: ${services.length}`, ...(enabled !== undefined ? [`enabled: ${enabled}`] : [])],
+    result,
+  };
+}
+
+function normalizeVasCatalog(result: Record<string, unknown>): RentalVasCatalogResult {
+  const status = commandStatus(result);
+  const services = Array.isArray(result.services) ? result.services : Array.isArray(result.items) ? result.items : [];
+  const count = optionalNumber(result, 'count') ?? services.length;
+  return { ok: status === 'ok' || status === 'partial', status, count, services, lines: [`vas-catalog-read: ${status}`, `services: ${count}`], result };
+}
+
+function normalizeVasMutation(action: string, result: Record<string, unknown>): RentalVasMutationResult {
+  const status = commandStatus(result);
+  const message = optionalString(result, 'message');
+  return { ok: status === 'ok', status, lines: [`${action}: ${status}`, ...(message ? [message] : [])], result };
+}
+
+function assertStringArrayField(value: unknown, fieldName: string): void {
+  if (!Array.isArray(value) || value.some((item) => typeof item !== 'string' || !item.trim())) {
+    throw new Error(`${fieldName} must be an array of non-empty strings`);
+  }
+}
+
+function assertArrayField(value: unknown, fieldName: string): void {
+  if (!Array.isArray(value)) throw new Error(`${fieldName} must be an array`);
+}
+
+function assertSafeExpectedVas(expectedVAS: Record<string, unknown>): void {
+  for (const forbidden of ['incrementAdd', 'incrementDel', 'serviceCreate', 'serviceUpdate', 'serviceDelete', 'createServices', 'updateServices', 'deleteServices']) {
+    if (forbidden in expectedVAS) throw new Error(`expectedVAS cannot include service-library mutation field: ${forbidden}`);
+  }
+  if ('enabled' in expectedVAS && typeof expectedVAS.enabled !== 'boolean') throw new Error('expectedVAS.enabled must be a boolean');
+  if ('platforms' in expectedVAS) assertStringArrayField(expectedVAS.platforms, 'expectedVAS.platforms');
+  const services = isRecord(expectedVAS.services) ? expectedVAS.services : undefined;
+  if (services) {
+    for (const forbidden of ['incrementAdd', 'incrementDel', 'create', 'update', 'delete']) {
+      if (forbidden in services) throw new Error(`expectedVAS.services cannot include service-library mutation field: ${forbidden}`);
+    }
+    for (const key of ['set', 'upsert', 'remove']) {
+      if (key in services) assertArrayField(services[key], `expectedVAS.services.${key}`);
+    }
+  } else if ('services' in expectedVAS) {
+    throw new Error('expectedVAS.services must be an object');
+  }
+}
+
 function readableValues(response: Record<string, unknown>): Record<string, unknown> {
   const values = isRecord(response.values) ? response.values : {};
   const firstSpec = Object.values(values).find(isRecord) as Record<string, unknown> | undefined;
@@ -898,6 +1099,11 @@ function actionClassForDaemonCommand(action: string | undefined): RentalDaemonAc
     case 'batch-read':
     case 'read':
     case 'spec-discover':
+    case 'image-read':
+    case 'image-verify':
+    case 'vas-read':
+    case 'vas-catalog-read':
+    case 'vas-verify':
       return 'safe-read';
     case 'status':
       return 'lifecycle-control';
@@ -1171,6 +1377,103 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
         ...(warnings ? { warnings } : {}),
         ...(missingFields ? { missingFields } : {}),
       };
+    },
+    async imageRead(productId) {
+      const safeProductId = readProductId(productId);
+      if (!safeProductId) throw new Error('productId must be a numeric string');
+      return normalizeImageState(safeProductId, await send({ action: 'image-read', productId: safeProductId }));
+    },
+    async imageUpload(request) {
+      const safeProductId = readProductId(request.productId);
+      if (!safeProductId) throw new Error('productId must be a numeric string');
+      const result = await send({
+        action: 'image-upload',
+        productId: safeProductId,
+        sectionType: request.sectionType,
+        categoryName: request.categoryName,
+        uploadFile: request.uploadFile,
+        ...(request.confirmSelection !== undefined ? { confirmSelection: request.confirmSelection } : {}),
+        ...(request.allowDuplicateFileName !== undefined ? { allowDuplicateFileName: request.allowDuplicateFileName } : {}),
+      });
+      return normalizeImageMutation(safeProductId, 'image-upload', result);
+    },
+    async imagePick(request) {
+      const safeProductId = readProductId(request.productId);
+      if (!safeProductId) throw new Error('productId must be a numeric string');
+      const result = await send({
+        action: 'image-pick',
+        productId: safeProductId,
+        categoryName: request.categoryName,
+        fileNames: request.fileNames,
+        ...(request.skipIfAlreadyPresent !== undefined ? { skipIfAlreadyPresent: request.skipIfAlreadyPresent } : {}),
+      });
+      return normalizeImageMutation(safeProductId, 'image-pick', result);
+    },
+    async imageOrder(request) {
+      const safeProductId = readProductId(request.productId);
+      if (!safeProductId) throw new Error('productId must be a numeric string');
+      const result = await send({ action: 'image-order', productId: safeProductId, orderedUrls: request.orderedUrls });
+      return normalizeImageMutation(safeProductId, 'image-order', result);
+    },
+    async whiteImageSet(request) {
+      const safeProductId = readProductId(request.productId);
+      if (!safeProductId) throw new Error('productId must be a numeric string');
+      const result = await send({
+        action: 'white-image-set',
+        productId: safeProductId,
+        categoryName: request.categoryName,
+        fileName: request.fileName,
+        ...(request.skipIfWhiteImageMatched !== undefined ? { skipIfWhiteImageMatched: request.skipIfWhiteImageMatched } : {}),
+      });
+      return normalizeImageMutation(safeProductId, 'white-image-set', result);
+    },
+    async imageVerify(request) {
+      const safeProductId = readProductId(request.productId);
+      if (!safeProductId) throw new Error('productId must be a numeric string');
+      const result = await send({ action: 'image-verify', productId: safeProductId, expectedImages: request.expectedImages });
+      return normalizeImageMutation(safeProductId, 'image-verify', result);
+    },
+    async vasRead(request) {
+      const safeProductId = request.productId === undefined ? undefined : readProductId(request.productId);
+      const expectedProductId = request.expectedProductId === undefined ? undefined : readProductId(request.expectedProductId);
+      if (request.productId !== undefined && !safeProductId) throw new Error('productId must be a numeric string');
+      if (request.expectedProductId !== undefined && !expectedProductId) throw new Error('expectedProductId must be a numeric string');
+      const result = await send({
+        action: 'vas-read',
+        ...(safeProductId ? { productId: safeProductId } : {}),
+        ...(request.allowCurrentPage !== undefined ? { allowCurrentPage: request.allowCurrentPage } : {}),
+        ...(expectedProductId ? { expectedProductId } : {}),
+      });
+      return normalizeVasState(result, safeProductId ?? expectedProductId ?? undefined);
+    },
+    async vasCatalogRead(request) {
+      const safeProductId = request.productId === undefined ? undefined : readProductId(request.productId);
+      const expectedProductId = request.expectedProductId === undefined ? undefined : readProductId(request.expectedProductId);
+      if (request.productId !== undefined && !safeProductId) throw new Error('productId must be a numeric string');
+      if (request.expectedProductId !== undefined && !expectedProductId) throw new Error('expectedProductId must be a numeric string');
+      const result = await send({
+        action: 'vas-catalog-read',
+        ...(safeProductId ? { productId: safeProductId } : {}),
+        ...(request.allowCurrentPage !== undefined ? { allowCurrentPage: request.allowCurrentPage } : {}),
+        ...(expectedProductId ? { expectedProductId } : {}),
+        ...(request.ids && request.ids.length > 0 ? { ids: request.ids } : {}),
+        ...(request.keyword ? { keyword: request.keyword } : {}),
+      });
+      return normalizeVasCatalog(result);
+    },
+    async vasApply(request) {
+      const safeProductId = readProductId(request.expectedProductId);
+      if (!safeProductId) throw new Error('expectedProductId must be a numeric string');
+      assertSafeExpectedVas(request.expectedVAS);
+      const result = await send({ action: 'vas-apply', allowCurrentPage: request.allowCurrentPage, expectedProductId: safeProductId, expectedVAS: request.expectedVAS });
+      return normalizeVasMutation('vas-apply', result);
+    },
+    async vasVerify(request) {
+      const safeProductId = readProductId(request.productId);
+      if (!safeProductId) throw new Error('productId must be a numeric string');
+      assertSafeExpectedVas(request.expectedVAS);
+      const result = await send({ action: 'vas-verify', productId: safeProductId, expectedVAS: request.expectedVAS });
+      return normalizeVasMutation('vas-verify', result);
     },
     async preview(request) {
       const current = await send({ action: 'read', productId: request.productId });
