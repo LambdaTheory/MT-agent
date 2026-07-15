@@ -78,9 +78,30 @@ describe('executeAgentToolRequest public traffic report', () => {
     expect(mocks.loadEnv).toHaveBeenCalled();
     expect(mocks.loadConfig).toHaveBeenCalled();
     expect(mocks.runDashboardRefresh).toHaveBeenCalledWith({ config, dataDate: '2026-06-24', sendTo: 'group' });
-    expect(response.text).toContain('访问页补抓完成');
+    expect(response.text).toContain('访问页补抓并重建完成');
     expect(response.text).toContain('已重建日报并重发飞书');
-    expect(response.text).toContain('1日：完整');
+    expect(response.text).toContain('| 1日 | 完整 | 1 | - |');
+    expect(response.card).toMatchObject({ header: { title: { content: '访问页补抓并重建完成' }, template: 'green' } });
+    expect(response.metadata).toMatchObject({ toolName: 'publicTraffic.refreshDashboard', ok: true, status: 'repaired', dataDate: '2026-06-24', actualPageDate: '2026-06-24', rawLocation: 'output/2026-06-25', rebuild: 'performed', resend: 'performed' });
+  });
+
+  it('returns an orange specialized card while preserving operational success for still-missing data', async () => {
+    const config = { targetUrl: 'https://example.test/dashboard', periods: ['1d', '7d', '30d'], preferredPageSize: 100, outputDir: 'output', browserProfileDir: 'profile' };
+    mocks.loadConfig.mockResolvedValueOnce(config);
+    mocks.runDashboardRefresh.mockResolvedValueOnce({
+      status: 'still_missing', dataDate: '2026-06-24', actualPageDate: '2026-06-24',
+      refreshQuality: { hasMissing: true, notes: [], periods: { '1d': { complete: true, rowCount: 1 }, '7d': { complete: false, rowCount: 0, reason: 'rowCount=0' }, '30d': { complete: true, rowCount: 1 } } },
+      rebuild: 'skipped', resend: 'skipped', rawLocation: 'output/2026-06-25', message: 'saved safely',
+    });
+
+    const response = await executeAgentToolRequest(
+      { toolName: 'publicTraffic.refreshDashboard', arguments: { date: '2026-06-24' }, reason: '测试缺失访问页补抓' },
+      'output',
+    );
+
+    expect(response.card).toMatchObject({ header: { title: { content: '访问页补抓完成，但数据仍未完整' }, template: 'orange' } });
+    expect(JSON.stringify(response.card)).toContain('未重建、未重发');
+    expect(response.metadata).toMatchObject({ toolName: 'publicTraffic.refreshDashboard', ok: true, status: 'still_missing' });
   });
 
   it('defaults dashboard refresh to the previous Shanghai data date when no date is provided', async () => {
