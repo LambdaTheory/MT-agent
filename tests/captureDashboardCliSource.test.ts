@@ -18,4 +18,18 @@ describe('capture dashboard cli source', () => {
     const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
     expect(pkg.scripts['capture-dashboard']).toBe('tsx src/cli/captureDashboard.ts');
   });
+
+  it('package exposes capture-dashboard-batch script with guarded env-loading cli', () => {
+    const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
+    const source = readFileSync('src/cli/captureDashboardBatch.ts', 'utf8');
+    const loadEnvIndex = source.indexOf('await loadEnv()');
+    const loadConfigIndex = source.indexOf('await loadConfig()');
+
+    expect(pkg.scripts['capture-dashboard-batch']).toBe('tsx src/cli/captureDashboardBatch.ts');
+    expect(source).toContain('pathToFileURL');
+    expect(source).toContain('ensureAuthenticatedMerchantSession');
+    expect(source).toContain('runDashboardBatchRecapture');
+    expect(loadEnvIndex).toBeGreaterThan(-1);
+    expect(loadConfigIndex).toBeGreaterThan(loadEnvIndex);
+  });
 });

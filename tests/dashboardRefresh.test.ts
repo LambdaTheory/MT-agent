@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentConfig, PeriodKey, RawTableData } from '../src/domain/types.js';
 import type { DashboardQualitySummary } from '../src/publicTraffic/dashboardQuality.js';
 import { buildPublicTrafficPaths } from '../src/publicTraffic/paths.js';
-import { decideDashboardRefreshOutcome, runDashboardRefresh } from '../src/publicTraffic/dashboardRefresh.js';
+import { decideDashboardRefreshOutcome, runDashboardRefresh, saveDashboardRefreshCapture } from '../src/publicTraffic/dashboardRefresh.js';
 import { collectDashboardPage } from '../src/crawler/dashboardCrawler.js';
 import { rebuildPublicTrafficReport } from '../src/publicTraffic/rebuildPublicTrafficReport.js';
 
@@ -261,6 +261,38 @@ describe('runDashboardRefresh', () => {
     expect(rebuildPublicTrafficReport).toHaveBeenCalled();
     expect(result).toMatchObject({ status: 'saved_existing_complete', rebuild: 'performed', resend: 'skipped' });
     expect(result.message).toContain('重发失败');
+    await expect(readFile(paths.publicTrafficRunState, 'utf8')).resolves.toContain('"dashboardRefreshResent": false');
+  });
+
+  it('can save a shared-session capture without resending the rebuilt report', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-dashboard-refresh-'));
+    const runDate = '2026-07-14';
+    const dataDate = '2026-07-13';
+    const paths = buildPublicTrafficPaths(outputDir, runDate);
+    const rawTables = [raw('1d'), raw('7d'), raw('30d')];
+
+    await mkdir(paths.dir, { recursive: true });
+    await writeFile(paths.reportContext, `${JSON.stringify({ date: dataDate, dataQualityNotes: [], rows: [] })}\n`, 'utf8');
+    await writeFile(paths.publicTrafficRunState, `${JSON.stringify({
+      date: dataDate,
+      firstReportSent: true,
+      firstReportGeneratedAt: '2026-07-14T00:00:00.000Z',
+      firstDashboardQuality: missing,
+      dashboardRefreshResent: false,
+    })}\n`, 'utf8');
+
+    const result = await saveDashboardRefreshCapture({
+      config: config(outputDir),
+      dataDate,
+      capture: { tables: rawTables, actualPageDate: dataDate },
+      sendReport: false,
+      sendTo: 'group',
+    });
+
+    expect(collectDashboardPage).not.toHaveBeenCalled();
+    expect(rebuildPublicTrafficReport).toHaveBeenCalledWith(expect.objectContaining({ send: false, sendTo: 'group' }));
+    expect(result).toMatchObject({ status: 'saved_existing_complete', rebuild: 'performed', resend: 'skipped' });
+    expect(result.message).toContain('未重发公域日报');
     await expect(readFile(paths.publicTrafficRunState, 'utf8')).resolves.toContain('"dashboardRefreshResent": false');
   });
 });
