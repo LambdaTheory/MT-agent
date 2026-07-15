@@ -2,11 +2,13 @@ import type { DaemonCatalogSnapshot } from './daemonCatalog.js';
 import type { ProductIdMapping } from '../mapping/productIdMapping.js';
 import type { GoodsLinkLifecycleState, GoodsRemovedLinkItem } from '../publicTraffic/goodsLinkLifecycle.js';
 import type { GoodsFirstSeenIndex } from '../publicTraffic/goodsSnapshot.js';
-import type { ExposureCumulativeProduct, GoodsSnapshotItem } from '../publicTraffic/types.js';
+import type { ExposureCumulativeProduct, GoodsSnapshotItem, PlatformRestrictionObservation } from '../publicTraffic/types.js';
 import { canonicalProductShortName, type ProductNameMap } from '../publicTraffic/productDisplayName.js';
 import type { LinkListingState, LinkRegistryEntry, LinkRegistrySource, LinkRegistryStatus } from './types.js';
 import { arbitrateListingState, listingStateToStatus, parseListingStateFromText, type ListingStateObservation } from './listingState.js';
 import { sameSkuGroupRules } from './overrides.js';
+import { attributeDelist } from './delistAttribution.js';
+import type { AgentDelistEvent } from './delistOperationEvidence.js';
 
 const LISTING_STATE_FRESHNESS_OVERRIDE_MS = 24 * 60 * 60 * 1000;
 
@@ -19,6 +21,7 @@ export interface BuildLinkRegistryInput {
   firstSeen?: GoodsFirstSeenIndex;
   lifecycle?: GoodsLinkLifecycleState | null;
   daemonCatalog?: DaemonCatalogSnapshot | null;
+  agentDelistEvents?: AgentDelistEvent[];
 }
 
 interface DraftEntry {
@@ -43,6 +46,7 @@ interface DraftEntry {
   daemonRowText?: string;
   daemonSnapshotAt?: string;
   listingObservations: ListingStateObservation[];
+  platformRestrictions: PlatformRestrictionObservation[];
   nameHints: Set<string>;
   aliases: Set<string>;
   sources: Set<LinkRegistrySource>;
@@ -66,7 +70,7 @@ function draftFor(drafts: Map<string, DraftEntry>, internalProductId: string): D
   const existing = drafts.get(internalProductId);
   if (existing) return existing;
 
-  const draft: DraftEntry = { internalProductId, listingObservations: [], nameHints: new Set<string>(), aliases: new Set<string>(), sources: new Set<LinkRegistrySource>() };
+  const draft: DraftEntry = { internalProductId, listingObservations: [], platformRestrictions: [], nameHints: new Set<string>(), aliases: new Set<string>(), sources: new Set<LinkRegistrySource>() };
   drafts.set(internalProductId, draft);
   return draft;
 }
@@ -193,6 +197,9 @@ function addGoodsSnapshot(drafts: Map<string, DraftEntry>, goodsSnapshot: GoodsS
         observedAt: item.observedAt,
         rawText: item.listingStatusText,
       });
+    }
+    if (item.platformRestriction?.reasonText.trim()) {
+      draft.platformRestrictions.push(item.platformRestriction);
     }
     addNameHint(draft, item.productName);
     draft.sources.add('goods_snapshot');
@@ -626,9 +633,15 @@ function updatedAtFor(draft: DraftEntry): string | undefined {
   return [draft.lastSeenDate, draft.firstSeenDate].find((value) => !!value);
 }
 
-function finalizeEntry(draft: DraftEntry): LinkRegistryEntry {
+function finalizeEntry(draft: DraftEntry, agentDelistEvents: AgentDelistEvent[]): LinkRegistryEntry {
   const listingDecision = arbitrateListingState(draft.listingObservations, { freshnessOverrideMs: LISTING_STATE_FRESHNESS_OVERRIDE_MS });
   const status = listingDecision.state === 'unknown' && draft.status ? draft.status : listingStateToStatus(listingDecision.state);
+  const attribution = attributeDelist({
+    listingState: listingDecision.state,
+    statusObservedAt: listingDecision.observedAt,
+    platformRestrictions: draft.platformRestrictions,
+    agentDelistEvents: agentDelistEvents.filter((event) => event.internalProductId === draft.internalProductId),
+  });
   const aliases = [...draft.aliases]
     .map((value) => value.trim())
     .filter((value) => !!value)
@@ -657,6 +670,11 @@ function finalizeEntry(draft: DraftEntry): LinkRegistryEntry {
     ...(draft.daemonStockText ? { daemonStockText: draft.daemonStockText } : {}),
     ...(draft.daemonRowText ? { daemonRowText: draft.daemonRowText } : {}),
     ...(draft.daemonSnapshotAt ? { daemonSnapshotAt: draft.daemonSnapshotAt } : {}),
+    ...(attribution ? {
+      delistCause: attribution.cause,
+      delistCauseConfidence: attribution.confidence,
+      delistCauseEvidence: attribution.evidence,
+    } : {}),
     confidence: confidenceFor(draft),
     ...(updatedAtFor(draft) ? { updatedAt: updatedAtFor(draft) } : {}),
     source: [...draft.sources].sort(),
@@ -679,5 +697,7 @@ export function buildLinkRegistry(input: BuildLinkRegistryInput): LinkRegistryEn
   applyGroupLevelClassification(drafts);
   inferDraftMetadata(drafts);
 
-  return [...drafts.values()].map(finalizeEntry).sort(compareInternalProductId);
+  return [...drafts.values()]
+    .map((draft) => finalizeEntry(draft, input.agentDelistEvents ?? []))
+    .sort(compareInternalProductId);
 }

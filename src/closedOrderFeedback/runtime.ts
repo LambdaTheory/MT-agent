@@ -1,6 +1,8 @@
 import { access, readdir, readFile } from 'node:fs/promises';
 import { isAbsolute, resolve } from 'node:path';
+import { loadOperationLedgerStore } from '../agentRuntime/operationLedger.js';
 import { buildLinkRegistry } from '../linkRegistry/buildRegistry.js';
+import { collectAgentDelistEvents } from '../linkRegistry/delistOperationEvidence.js';
 import { loadOptionalDaemonCatalogSnapshot } from '../linkRegistry/daemonCatalog.js';
 import { applyLinkRegistryOverrides, parseLinkRegistryOverrides, type LinkRegistryOverrideRisk } from '../linkRegistry/overrides.js';
 import { createLinkRegistryQuery, type LinkRegistryQuery } from '../linkRegistry/queryRegistry.js';
@@ -224,7 +226,7 @@ export async function loadClosedOrderRegistryContext(
   cwd = process.cwd(),
 ): Promise<ClosedOrderRegistryContext> {
   const resolvedPaths = await resolveClosedOrderRegistryPaths(input, cwd);
-  const [productIdMapping, productNameMap, goodsSnapshot, firstSeen, lifecycle] = await Promise.all([
+  const [productIdMapping, productNameMap, goodsSnapshot, firstSeen, lifecycle, operationLedger] = await Promise.all([
     loadProductIdMapping(resolvedPaths.productIdMapPath).catch((error) => {
       if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return {};
       throw error;
@@ -233,6 +235,7 @@ export async function loadClosedOrderRegistryContext(
     loadOptionalJson<GoodsSnapshotItem[]>(resolvedPaths.goodsSnapshotPath, []),
     loadOptionalJson<GoodsFirstSeenIndex>(resolvedPaths.firstSeenPath, {}),
     loadOptionalJson<GoodsLinkLifecycleState | null>(resolvedPaths.lifecyclePath, null),
+    loadOperationLedgerStore(resolvedPaths.artifactsDir),
   ]);
   const [productNameHints, exposureCumulativeProducts, daemonCatalog, rawOverrides] = await Promise.all([
     collectArtifactProductNameHints(resolvedPaths.artifactsDir, productIdMapping),
@@ -249,6 +252,7 @@ export async function loadClosedOrderRegistryContext(
     firstSeen,
     lifecycle,
     daemonCatalog,
+    agentDelistEvents: collectAgentDelistEvents(operationLedger.journal),
   });
   const overrideResult = rawOverrides === null
     ? { entries: baseRegistry, risks: [] }

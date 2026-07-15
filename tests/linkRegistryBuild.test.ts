@@ -602,4 +602,59 @@ describe('link registry build', () => {
     });
     expect(parsed.entries?.[0]?.sameSkuGroupId).toBe('fujifilm-instax-mini-90');
   });
+
+  it('materializes platform freeze attribution for a delisted goods snapshot', () => {
+    expect(buildLinkRegistry({
+      goodsSnapshot: [{
+        platformProductId: 'platform-1701',
+        internalProductId: '1701',
+        productName: '冻结商品',
+        listingState: 'delisted',
+        listingStatusText: '已下架',
+        observedAt: '2026-07-14T10:00:00.000Z',
+        platformRestriction: { kind: 'frozen', reasonText: '涉嫌违规冻结', observedAt: '2026-07-14T10:00:00.000Z' },
+      }],
+    })[0]).toMatchObject({
+      listingState: 'delisted',
+      delistCause: 'platform_frozen',
+      delistCauseConfidence: 'confirmed',
+      delistCauseEvidence: [{ source: 'goods_snapshot', reasonText: '涉嫌违规冻结' }],
+    });
+  });
+
+  it('uses verified agent delist only after a later delisted observation', () => {
+    expect(buildLinkRegistry({
+      daemonCatalog: {
+        generatedAt: '2026-07-14T10:00:00.000Z', count: 1, excludedCount: 0,
+        entries: [{ internalProductId: '1702', productName: 'Agent下架商品', syncStatus: '已下架', discoveredAt: '2026-07-14T10:00:00.000Z' }],
+      },
+      agentDelistEvents: [{ internalProductId: '1702', at: '2026-07-14T09:00:00.000Z', toolName: 'rental.delist', runId: 'run-1' }],
+    })[0]).toMatchObject({
+      delistCause: 'agent_confirmed_manual_off_shelf',
+      delistCauseConfidence: 'confirmed',
+    });
+  });
+
+  it('keeps on-sale priority and clears current delist attribution despite old restriction data', () => {
+    expect(buildLinkRegistry({
+      goodsSnapshot: [{
+        platformProductId: 'platform-1703', internalProductId: '1703', productName: '已恢复商品',
+        listingState: 'on_sale', listingStatusText: '出售中', observedAt: '2026-07-14T10:00:00.000Z',
+        platformRestriction: { kind: 'review_rejected', reasonText: '旧审核原因', observedAt: '2026-07-13T10:00:00.000Z' },
+      }],
+    })[0]).not.toHaveProperty('delistCause');
+  });
+
+  it('uses external manual pending confirmation when a delisted link has no platform or agent evidence', () => {
+    expect(buildLinkRegistry({
+      daemonCatalog: {
+        generatedAt: '2026-07-14T10:00:00.000Z', count: 1, excludedCount: 0,
+        entries: [{ internalProductId: '1704', productName: '外部下架商品', syncStatus: '已下架', discoveredAt: '2026-07-14T10:00:00.000Z' }],
+      },
+    })[0]).toMatchObject({
+      delistCause: 'external_manual_off_shelf_pending_confirmation',
+      delistCauseConfidence: 'suspected',
+      delistCauseEvidence: [],
+    });
+  });
 });
