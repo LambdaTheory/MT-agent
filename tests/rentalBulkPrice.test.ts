@@ -49,6 +49,8 @@ describe('rental bulk price workflow', () => {
       arguments: { items: [
         { productId: '../648', fields: { rent1day: 88 } },
         { productId: '649', fields: { nope: 1 } },
+        { productId: '651', fields: { rent1day: 88, nope: 1 } },
+        { productId: '652', fields: { rent1day: Number.POSITIVE_INFINITY } },
         { productId: '650', fields: { rent1day: 88 } },
         { productId: '650', fields: { rent1day: 99 } },
       ] },
@@ -56,7 +58,7 @@ describe('rental bulk price workflow', () => {
     }, outputDir, {});
 
     expect(response.card).toBeUndefined();
-    expect(response.metadata).toMatchObject({ toolName: 'rental.bulkPricePlan', ok: false, blockedCount: 3 });
+    expect(response.metadata).toMatchObject({ toolName: 'rental.bulkPricePlan', ok: false, blockedCount: 5 });
   });
 
   it('applies the persisted plan by planId, writes a report, and records ledger events', async () => {

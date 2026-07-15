@@ -86,9 +86,22 @@ function buildPlan(args: Record<string, unknown>, reason: string): RentalBulkPri
       continue;
     }
     const fields: Record<string, string> = {};
+    const invalidFields: string[] = [];
     for (const [field, value] of Object.entries(item.fields)) {
-      const normalizedValue = PRICE_FIELDS.has(field) ? normalizePrice(value) : null;
+      if (!PRICE_FIELDS.has(field)) {
+        invalidFields.push(field);
+        continue;
+      }
+      const normalizedValue = normalizePrice(value);
+      if (normalizedValue === null) {
+        invalidFields.push(field);
+        continue;
+      }
       if (normalizedValue !== null) fields[field] = normalizedValue;
+    }
+    if (invalidFields.length) {
+      blockedItems.push({ productId, reason: `invalid rental price fields: ${invalidFields.join(', ')}` });
+      continue;
     }
     if (!Object.keys(fields).length) {
       blockedItems.push({ productId, reason: 'no valid rental price fields' });
