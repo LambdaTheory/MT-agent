@@ -92,6 +92,7 @@ async function recordWriteEvent(
   event: RentalWriteEvent,
   toolName: string,
   productId: string,
+  rentalAction: RentalOperationConfirmRequest['action'],
 ): Promise<void> {
   if (!context) return;
   await recordOperationEvent(context.outputDir, {
@@ -102,7 +103,10 @@ async function recordWriteEvent(
     ...(context.runId ? { runId: context.runId } : {}),
     ...(context.decisionId ? { decisionId: context.decisionId } : {}),
     subject: { kind: 'product', id: productId },
-    ...(context.missionDate ? { metadata: { missionDate: context.missionDate } } : {}),
+    metadata: {
+      ...(context.missionDate ? { missionDate: context.missionDate } : {}),
+      rentalAction,
+    },
   });
 }
 
@@ -110,9 +114,10 @@ async function recordFailedWriteEvent(
   context: RentalWriteLedgerContext | undefined,
   toolName: string,
   productId: string,
+  rentalAction: RentalOperationConfirmRequest['action'],
 ): Promise<void> {
   try {
-    await recordWriteEvent(context, 'execution_failed', toolName, productId);
+    await recordWriteEvent(context, 'execution_failed', toolName, productId, rentalAction);
   } catch (ledgerError) {
     console.warn('Failed to record rental write failure event.', ledgerError);
   }
@@ -126,10 +131,10 @@ export async function executeRentalWriteOperationHandler(
   if (request.toolName === 'rental.operationConfirmRequest') {
     const rentalRequest = rentalOperationConfirmRequestFromToolArguments(request.arguments);
     if (!rentalRequest) throw new Error('租赁商品操作参数无效，请重新发起。');
-    await recordWriteEvent(ledgerContext, 'execution_started', request.toolName, rentalRequest.productId);
+    await recordWriteEvent(ledgerContext, 'execution_started', request.toolName, rentalRequest.productId, rentalRequest.action);
     try {
       const result = await executeRentalOperationConfirmRequest(client, rentalRequest);
-      await recordWriteEvent(ledgerContext, result.ok ? 'execution_succeeded' : 'execution_failed', request.toolName, rentalRequest.productId);
+      await recordWriteEvent(ledgerContext, result.ok ? 'execution_succeeded' : 'execution_failed', request.toolName, rentalRequest.productId, rentalRequest.action);
       return {
         text: result.text,
         metadata: {
@@ -140,17 +145,17 @@ export async function executeRentalWriteOperationHandler(
         },
       };
     } catch (error) {
-      await recordFailedWriteEvent(ledgerContext, request.toolName, rentalRequest.productId);
+      await recordFailedWriteEvent(ledgerContext, request.toolName, rentalRequest.productId, rentalRequest.action);
       throw error;
     }
   }
 
   const rentalRequest = rentalAgentToolRequest(request.toolName, request.arguments);
   if (!rentalRequest) throw new Error('租赁商品操作参数无效，请重新发起。');
-  await recordWriteEvent(ledgerContext, 'execution_started', request.toolName, rentalRequest.productId);
+  await recordWriteEvent(ledgerContext, 'execution_started', request.toolName, rentalRequest.productId, rentalRequest.action);
   try {
     const result = await executeRentalOperationConfirmRequest(client, rentalRequest);
-    await recordWriteEvent(ledgerContext, result.ok ? 'execution_succeeded' : 'execution_failed', request.toolName, rentalRequest.productId);
+    await recordWriteEvent(ledgerContext, result.ok ? 'execution_succeeded' : 'execution_failed', request.toolName, rentalRequest.productId, rentalRequest.action);
     return {
       text: result.text,
       metadata: {
@@ -161,7 +166,7 @@ export async function executeRentalWriteOperationHandler(
       },
     };
   } catch (error) {
-    await recordFailedWriteEvent(ledgerContext, request.toolName, rentalRequest.productId);
+    await recordFailedWriteEvent(ledgerContext, request.toolName, rentalRequest.productId, rentalRequest.action);
     throw error;
   }
 }
