@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
-import { dirname, resolve, sep, join, isAbsolute } from 'node:path';
+import { basename, dirname, resolve, sep, join, isAbsolute } from 'node:path';
 import { promisify } from 'node:util';
 import { parseAgentToolConfirmContinuation, type AgentToolConfirmContinuation } from '../agentRuntime/approvalCard.js';
 import { validateAgentToolArguments } from '../agentRuntime/planner.js';
@@ -271,6 +271,35 @@ const SPEC_REMOVE_CONFIRM_MAX_ITEMS = 50;
 const SPEC_REMOVE_BULK_WARNING_ITEMS = 12;
 const PLATFORM_SEARCH_ALL_DEFAULT_LIMIT = 100;
 const PLATFORM_SEARCH_ALL_MAX_LIMIT = 200;
+const STABLE_RENTAL_SKILL_VERSION = '1.0.0';
+
+type RentalDaemonActionClass = 'diagnostic' | 'safe-read' | 'mutation' | 'lifecycle-control';
+
+interface RentalDaemonNegotiation {
+  nonce: string;
+  expectedInstanceId: string;
+  expectedStateDigest: string;
+  actionClass: RentalDaemonActionClass;
+  client: {
+    skillVersion: string;
+    protocolVersion: string;
+    configSchemaVersion: string;
+    stateSchemaVersion: string;
+    compatibility: {
+      skill: { min: string; max: string };
+      daemon: { min: string; max: string };
+      protocol: { min: string; max: string };
+      configSchema: { min: string; max: string };
+      stateSchema: { min: string; max: string };
+    };
+  };
+}
+
+interface RentalDaemonHelloMetadata {
+  instanceId: string;
+  persistedStateDigest: string;
+  persistedStateReady?: boolean;
+}
 
 function money(value: string | number): string {
   return Number(value).toFixed(2);
@@ -854,6 +883,88 @@ async function readOptionalText(path: string): Promise<string | null> {
   }
 }
 
+function stableSiblingDataRoot(rootDir: string): string {
+  const resolvedRoot = resolve(rootDir);
+  return join(dirname(resolvedRoot), `.${basename(resolvedRoot)}-data`);
+}
+
+function actionClassForDaemonCommand(action: string | undefined): RentalDaemonActionClass {
+  switch (action) {
+    case 'ping':
+    case 'hello':
+      return 'diagnostic';
+    case 'platform-search':
+    case 'platform-search-all':
+    case 'batch-read':
+    case 'read':
+    case 'spec-discover':
+      return 'safe-read';
+    case 'status':
+      return 'lifecycle-control';
+    default:
+      return 'mutation';
+  }
+}
+
+function stableClientMetadata(): RentalDaemonNegotiation['client'] {
+  const exactRange = { min: STABLE_RENTAL_SKILL_VERSION, max: STABLE_RENTAL_SKILL_VERSION };
+  return {
+    skillVersion: STABLE_RENTAL_SKILL_VERSION,
+    protocolVersion: STABLE_RENTAL_SKILL_VERSION,
+    configSchemaVersion: STABLE_RENTAL_SKILL_VERSION,
+    stateSchemaVersion: STABLE_RENTAL_SKILL_VERSION,
+    compatibility: {
+      skill: exactRange,
+      daemon: exactRange,
+      protocol: exactRange,
+      configSchema: exactRange,
+      stateSchema: exactRange,
+    },
+  };
+}
+
+function readManifestRecord(value: Record<string, unknown>): Record<string, unknown> {
+  if (isRecord(value.manifest)) return value.manifest;
+  if (isRecord(value.daemon)) return value.daemon;
+  return value;
+}
+
+function readStableVersion(value: Record<string, unknown>, keys: string[]): string | undefined {
+  for (const key of keys) {
+    const raw = value[key];
+    if (typeof raw === 'string' && raw.trim()) return raw.trim();
+  }
+  return undefined;
+}
+
+function assertStableVersion(label: string, version: string | undefined): void {
+  if (version !== undefined && version !== STABLE_RENTAL_SKILL_VERSION) {
+    throw new Error(`rental-price-agent ${label} version mismatch: expected ${STABLE_RENTAL_SKILL_VERSION}, got ${version}`);
+  }
+}
+
+function readHelloMetadata(response: Record<string, unknown>): RentalDaemonHelloMetadata {
+  const manifest = readManifestRecord(response);
+  assertStableVersion('skill', readStableVersion(manifest, ['skillVersion', 'skillSchemaVersion', 'version']));
+  assertStableVersion('daemon', readStableVersion(manifest, ['daemonVersion']));
+  assertStableVersion('daemon protocol', readStableVersion(manifest, ['daemonProtocolVersion', 'protocolVersion']));
+  assertStableVersion('config schema', readStableVersion(manifest, ['configSchemaVersion']));
+  assertStableVersion('state schema', readStableVersion(manifest, ['stateSchemaVersion']));
+
+  const instanceId = readStableVersion(manifest, ['instanceId']);
+  const persistedStateDigest = readStableVersion(manifest, ['persistedStateDigest', 'stateDigest', 'currentStateDigest']);
+  const persistedStateReady = typeof manifest.persistedStateReady === 'boolean'
+    ? manifest.persistedStateReady
+    : typeof response.persistedStateReady === 'boolean'
+      ? response.persistedStateReady
+      : undefined;
+  return {
+    instanceId: instanceId ?? 'legacy-daemon',
+    persistedStateDigest: persistedStateDigest ?? '0'.repeat(64),
+    ...(persistedStateReady !== undefined ? { persistedStateReady } : {}),
+  };
+}
+
 function compactErrorMessage(error: unknown): string {
   if (error instanceof Error) {
     const cause = (error as Error & { cause?: unknown }).cause;
@@ -877,19 +988,22 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
   const configuredDaemonToken = options.daemonToken ?? process.env.RENTAL_PRICE_AGENT_DAEMON_TOKEN;
 
   async function resolveDaemonConfig(): Promise<{ daemonUrl: string; daemonToken: string | null }> {
-    const [port, fileToken] = await Promise.all([
+    const stableDataRoot = stableSiblingDataRoot(rootDir);
+    const [stablePort, legacyPort, stableToken, legacyToken] = await Promise.all([
+      configuredDaemonUrl ? Promise.resolve<string | null>(null) : readOptionalText(join(stableDataRoot, 'daemon', 'daemon.port')),
       configuredDaemonUrl ? Promise.resolve<string | null>(null) : readOptionalText(join(rootDir, '.daemon.port')),
+      configuredDaemonToken ? Promise.resolve<string | null>(null) : readOptionalText(join(stableDataRoot, 'daemon', 'daemon.token')),
       configuredDaemonToken ? Promise.resolve<string | null>(null) : readOptionalText(join(rootDir, '.daemon.token')),
     ]);
 
+    const port = stablePort ?? legacyPort;
     return {
       daemonUrl: configuredDaemonUrl ?? (port ? `http://127.0.0.1:${port}` : 'http://127.0.0.1:9223'),
-      daemonToken: configuredDaemonToken ?? fileToken,
+      daemonToken: configuredDaemonToken ?? stableToken ?? legacyToken,
     };
   }
 
-  async function send(command: Record<string, unknown>): Promise<Record<string, unknown>> {
-    const { daemonUrl, daemonToken } = await resolveDaemonConfig();
+  async function postDaemon(daemonUrl: string, daemonToken: string | null, command: Record<string, unknown>): Promise<Record<string, unknown>> {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (daemonToken) headers['x-rental-agent-token'] = daemonToken;
     let response: Response;
@@ -899,6 +1013,34 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
       throw daemonUnavailableError(daemonUrl, error);
     }
     return (await response.json()) as Record<string, unknown>;
+  }
+
+  async function negotiate(daemonUrl: string, daemonToken: string | null, actionClass: RentalDaemonActionClass, nonce: string): Promise<RentalDaemonNegotiation> {
+    const hello = await postDaemon(daemonUrl, daemonToken, {
+      action: 'hello',
+      negotiationNonce: nonce,
+      client: stableClientMetadata(),
+    });
+    const metadata = readHelloMetadata(hello);
+    if (actionClass === 'mutation' && metadata.persistedStateReady === false) {
+      throw new Error('rental-price-agent stable state is not ready for mutation commands');
+    }
+    return {
+      nonce,
+      expectedInstanceId: metadata.instanceId,
+      expectedStateDigest: metadata.persistedStateDigest,
+      actionClass,
+      client: stableClientMetadata(),
+    };
+  }
+
+  async function send(command: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const { daemonUrl, daemonToken } = await resolveDaemonConfig();
+    const action = typeof command.action === 'string' ? command.action : undefined;
+    if (action === 'ping' || action === 'hello') return postDaemon(daemonUrl, daemonToken, command);
+    const nonce = randomUUID();
+    const negotiation = await negotiate(daemonUrl, daemonToken, actionClassForDaemonCommand(action), nonce);
+    return postDaemon(daemonUrl, daemonToken, { ...command, _negotiation: negotiation });
   }
 
   return {
@@ -939,7 +1081,7 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
     },
     async platformSearchAll(limit = PLATFORM_SEARCH_ALL_DEFAULT_LIMIT) {
       const cappedLimit = Math.max(1, Math.min(Math.trunc(limit), PLATFORM_SEARCH_ALL_MAX_LIMIT));
-      const result = await send({ action: 'platform-search-all' });
+      const result = await send({ action: 'platform-search', keyword: '' });
       const status = commandStatus(result);
       const allRows = Array.isArray(result.products)
         ? result.products

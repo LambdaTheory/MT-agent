@@ -285,7 +285,7 @@ describe('rental price skill client copy diagnostics', () => {
 
     const result = await client.platformSearch!('x200u');
 
-    expect(calls).toEqual([{ action: 'platform-search', keyword: 'x200u' }]);
+    expect(calls).toEqual([{ action: 'hello', negotiationNonce: expect.any(String), client: expect.any(Object) }, { action: 'platform-search', keyword: 'x200u', _negotiation: expect.any(Object) }]);
     expect(result.ok).toBe(true);
     expect(result.keyword).toBe('x200u');
     expect(result.count).toBe(1);
@@ -294,7 +294,7 @@ describe('rental price skill client copy diagnostics', () => {
     expect(result.lines.join('\n')).toContain('761');
   });
 
-  it('exposes full platform search through a read-only platform-search-all action with local truncation', async () => {
+  it('exposes full platform search through stable platform-search with local truncation', async () => {
     const calls: unknown[] = [];
     vi.stubGlobal('fetch', vi.fn(async (_input, init) => {
       calls.push(JSON.parse(String(init?.body ?? '{}')));
@@ -315,7 +315,7 @@ describe('rental price skill client copy diagnostics', () => {
 
     const result = await client.platformSearchAll!(2);
 
-    expect(calls).toEqual([{ action: 'platform-search-all' }]);
+    expect(calls).toEqual([{ action: 'hello', negotiationNonce: expect.any(String), client: expect.any(Object) }, { action: 'platform-search', keyword: '', _negotiation: expect.any(Object) }]);
     expect(result.ok).toBe(true);
     expect(result.count).toBe(3);
     expect(result.rows).toHaveLength(2);
@@ -345,7 +345,7 @@ describe('rental price skill client copy diagnostics', () => {
 
     const result = await client.batchRead!(['761', '762']);
 
-    expect(calls).toEqual([{ action: 'batch-read', productIds: ['761', '762'] }]);
+    expect(calls).toEqual([{ action: 'hello', negotiationNonce: expect.any(String), client: expect.any(Object) }, { action: 'batch-read', productIds: ['761', '762'], _negotiation: expect.any(Object) }]);
     expect(result.ok).toBe(true);
     expect(result.count).toBe(2);
     expect(result.results).toMatchObject({
@@ -369,7 +369,7 @@ describe('rental price skill client copy diagnostics', () => {
 
     const result = await client.specDiscoverFull!('761');
 
-    expect(calls).toEqual([{ action: 'spec-discover', productId: '761' }]);
+    expect(calls).toEqual([{ action: 'hello', negotiationNonce: expect.any(String), client: expect.any(Object) }, { action: 'spec-discover', productId: '761', _negotiation: expect.any(Object) }]);
     expect(result.ok).toBe(true);
     expect(result.productId).toBe('761');
     expect(result.dimensions).toEqual([{ specId: '1355', title: '颜色', items: [{ id: '1', title: '黑色' }] }]);
@@ -395,7 +395,7 @@ describe('rental price skill client copy diagnostics', () => {
 
     const result = await client.readRaw!('761', ['rent1day']);
 
-    expect(calls).toEqual([{ action: 'read', productId: '761', fields: ['rent1day'] }]);
+    expect(calls).toEqual([{ action: 'hello', negotiationNonce: expect.any(String), client: expect.any(Object) }, { action: 'read', productId: '761', fields: ['rent1day'], _negotiation: expect.any(Object) }]);
     expect(result.ok).toBe(true);
     expect(result.status).toBe('partial');
     expect(result.productId).toBe('761');

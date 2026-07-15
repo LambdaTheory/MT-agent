@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -613,7 +613,7 @@ describe('rental price card action', () => {
       const result = await client.execute({ mode: 'explicit_fields', productId: '761', fields: { rent1day: '22.00' } });
 
       expect(result).toEqual({ productId: '761', ok: false, lines: ['apply: partial', 'submit: skipped', 'verify: skipped'] });
-      expect(commands).toEqual(['apply']);
+      expect(commands).toEqual(['hello', 'apply']);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -629,7 +629,7 @@ describe('rental price card action', () => {
       if (command.action === 'spec-discover') {
         return new Response(JSON.stringify({
           status: 'ok',
-          dimensions: [{ specId: 'kit', title: '套装', items: command.productId === '761' && commands.length > 4 ? [{ id: 'std', title: '标准' }] : [{ id: 'std', title: '标准' }, { id: 'handle', title: '含手柄' }] }],
+          dimensions: [{ specId: 'kit', title: '套装', items: command.productId === '761' && commands.filter((item) => item.action === 'spec-discover').length > 1 ? [{ id: 'std', title: '标准' }] : [{ id: 'std', title: '标准' }, { id: 'handle', title: '含手柄' }] }],
         }));
       }
       return new Response(JSON.stringify({ status: 'ok' }));
@@ -640,17 +640,18 @@ describe('rental price card action', () => {
       const result = await client.specRemoveItem!({ productId: '761', specDimId: 'kit', itemId: 'handle', itemTitle: '含手柄' });
 
       expect(result.ok).toBe(true);
-      expect(commands.map((command) => command.action)).toEqual(['spec-discover', 'spec-remove-item', 'spec-refresh', 'submit', 'spec-discover']);
-      expect(commands[1]).toMatchObject({
+      expect(commands.map((command) => command.action)).toEqual(['hello', 'spec-discover', 'hello', 'spec-remove-item', 'hello', 'spec-refresh', 'hello', 'submit', 'hello', 'spec-discover']);
+      expect(commands.find((command) => command.action === 'spec-remove-item')).toMatchObject({
         action: 'spec-remove-item',
         productId: '761',
         expectedProductId: '761',
         specDimId: 'kit',
         itemId: 'handle',
         itemTitle: '含手柄',
+        _negotiation: { actionClass: 'mutation' },
       });
-      expect(commands[2]).toMatchObject({ action: 'spec-refresh', allowCurrentPage: true, expectedProductId: '761' });
-      expect(commands[3]).toMatchObject({ action: 'submit', expectedProductId: '761' });
+      expect(commands.find((command) => command.action === 'spec-refresh')).toMatchObject({ action: 'spec-refresh', allowCurrentPage: true, expectedProductId: '761', _negotiation: { actionClass: 'mutation' } });
+      expect(commands.find((command) => command.action === 'submit')).toMatchObject({ action: 'submit', expectedProductId: '761', _negotiation: { actionClass: 'mutation' } });
       expect(result.lines).toContain('item: removed');
       expect(result.audit?.resultFile).toContain('spec-remove-761-');
       expect(await readFile(result.audit!.resultFile!, 'utf8')).toContain('"itemTitle": "含手柄"');
@@ -676,9 +677,77 @@ describe('rental price card action', () => {
       const preview = await client.preview({ mode: 'explicit_fields', productId: '761', fields: { rent1day: '22.00' } });
 
       expect(preview.fields).toEqual({ rent1day: '22.00' });
-      expect(requests).toHaveLength(1);
+      expect(requests).toHaveLength(2);
       expect(requests[0]?.input).toBe('http://127.0.0.1:9333');
       expect(requests[0]?.headers.get('x-rental-agent-token')).toBe('secret-token');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('prefers stable sibling data-root daemon files before legacy files', async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), 'mt-agent-rental-price-'));
+    const rootName = rootDir.split(/[\\/]/).at(-1);
+    if (!rootName) throw new Error('temporary root missing basename');
+    const stableDataRoot = join(tmpdir(), `.${rootName}-data`);
+    await mkdir(join(stableDataRoot, 'daemon'), { recursive: true });
+    await writeFile(join(stableDataRoot, 'daemon', 'daemon.port'), '9444\n', 'utf8');
+    await writeFile(join(stableDataRoot, 'daemon', 'daemon.token'), 'stable-token\n', 'utf8');
+    await writeFile(join(rootDir, '.daemon.port'), '9333\n', 'utf8');
+    await writeFile(join(rootDir, '.daemon.token'), 'legacy-token\n', 'utf8');
+
+    const requests: Array<{ input: string; headers: Headers; body: Record<string, unknown> }> = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input, init) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      requests.push({ input: String(input), headers: new Headers(init?.headers), body });
+      if (body.action === 'hello') {
+        return new Response(JSON.stringify({
+          status: 'ok',
+          manifest: {
+            skillVersion: '1.0.0',
+            daemonVersion: '1.0.0',
+            daemonProtocolVersion: '1.0.0',
+            configSchemaVersion: '1.0.0',
+            stateSchemaVersion: '1.0.0',
+            instanceId: 'stable-instance',
+            persistedStateDigest: 'a'.repeat(64),
+            persistedStateReady: true,
+          },
+        }));
+      }
+      return new Response(JSON.stringify({ status: 'ok', productId: '761', values: { rent1day: '22.00' } }));
+    };
+
+    try {
+      const client = createRentalPriceSkillClient({ rootDir });
+      if (!client.read) throw new Error('read client method missing');
+      await client.read('761');
+
+      expect(requests.map((request) => request.input)).toEqual(['http://127.0.0.1:9444', 'http://127.0.0.1:9444']);
+      expect(requests[0]?.headers.get('x-rental-agent-token')).toBe('stable-token');
+      expect(requests[1]?.body).toMatchObject({
+        action: 'read',
+        productId: '761',
+        _negotiation: {
+          expectedInstanceId: 'stable-instance',
+          expectedStateDigest: 'a'.repeat(64),
+          actionClass: 'safe-read',
+          client: {
+            skillVersion: '1.0.0',
+            protocolVersion: '1.0.0',
+            configSchemaVersion: '1.0.0',
+            stateSchemaVersion: '1.0.0',
+            compatibility: {
+              skill: { min: '1.0.0', max: '1.0.0' },
+              daemon: { min: '1.0.0', max: '1.0.0' },
+              protocol: { min: '1.0.0', max: '1.0.0' },
+              configSchema: { min: '1.0.0', max: '1.0.0' },
+              stateSchema: { min: '1.0.0', max: '1.0.0' },
+            },
+          },
+        },
+      });
     } finally {
       globalThis.fetch = originalFetch;
     }
