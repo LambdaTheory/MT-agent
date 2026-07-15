@@ -405,12 +405,14 @@ MT-agent 当前的 rental 解耦边界：
 
 - `src/feishuBot/rentalPrice.ts` 的 `RentalPriceSkillClient` 是主要适配层，负责 daemon HTTP JSON action、单品预览、执行、回滚、当前页操作和审计文件。
 - `src/agentRuntime/toolRegistry.ts` 暴露 planner 可见/隐藏的 `rental.*` 工具 schema、风险等级和确认要求。
+- `rental.bulkPricePlan` 是当前唯一 planner-visible 的业务级批量租赁改价入口；`rental.bulkPriceApply` 是 hidden runtime 工具，只能通过持久化 `planId` 和确认卡触发。
+- `src/feishuBot/rentalBulkPriceHandlers.ts` 负责批量计划持久化、候选预览、执行报告和 ledger 记录；测试基线在 `tests/rentalBulkPrice.test.ts`。
 - `src/feishuBot/rentalBatchHandlers.ts`、`rentalMirrorHandlers.ts` 仍直接通过 `node scripts/batch-runner.js` / `mirror-search.js` 调 CLI，不经过 `RentalPriceSkillClient`。
 - `src/linkRegistry/daemonCatalog.ts` 会直接调用 daemon/CLI 的 `platform-search-all` 来刷新链接档案候选。
 
 新版接入的已知阻断/适配点：
 
-1. 稳定版 daemon `submit` 必须传 `expectedProductId` 并校验当前 canonical 商品编辑页；MT 当前仍有多处 `send({ action: 'submit' })`，会与稳定版不兼容。单品改价、per-spec 改价、回滚、`submitCurrent`、规格增删等链路都必须补齐该参数和回归测试。
+1. 稳定版 daemon `submit` 必须传 `expectedProductId` 并校验当前 canonical 商品编辑页；MT 单品改价、per-spec 改价、回滚、`submitCurrent`、规格增删等 submit 路径已经补齐该参数和回归测试。新增 submit 调用不得退回裸 `send({ action: 'submit' })`。
 2. `apply-current` 必须传 `allowCurrentPage: true` 与 `expectedProductId`；当前 MT 适配层大体符合，但正式替换前仍需回归。
 3. legacy `verify` 变为 `verify <productId> <changes.json>`；新增代码不要依赖旧的单参数 verify。
 4. `config.json` 的租期字段应迁移到 `_dynamicFields.rentDays`，不要继续假设只存在固定 `rent1day/rent10day/rent30day` 等 selector。
@@ -421,15 +423,17 @@ MT-agent 当前的 rental 解耦边界：
 9. MT 直接读旧 `.daemon.port` / `.daemon.token` 的逻辑需要适配稳定版 sibling data root 下的 `daemon/daemon.port`、`daemon/daemon.token`，并优先使用稳定版 `daemon send` negotiation/client 行为，而不是裸 HTTP mutation。
 10. lifecycle 命令、PM2 daemon 启停、真实 SaaS 操作、浏览器 profile 和 `.env` 都有外部副作用；审计和开发默认只做静态检查、单元测试、schema/contract 测试，不自动执行真实操作。
 
-业务流程工具开发方向：
+业务级批量租赁改价基线（2026-07-15 已合入 master）：
 
 - 飞书定位为控制面和审批媒介：展示任务简报、影响范围、风险摘要、确认/取消、进度和最终报告，不承载完整上下文或执行状态。
 - 大批量、高风险、多步骤任务必须落本地持久化 plan/run state，由 `planId/runId/decisionId` 关联确认卡、执行队列、operation ledger、报告和 recovery。飞书卡片只引用 plan 摘要和确认 key。
 - LLM 只负责把自然语言转成结构化意图，例如商品线索、规格关键词、字段、调价方式、上下限、排除规则和说明；商品范围解析、规格/字段匹配、价格计算、diff、队列执行、checkpoint、readback 和 recovery 必须由确定性代码完成。
-- 第一优先级不要开放低层 rental action 链给 LLM 自由组合，而是建设 `rental.bulkPricePlan` / `rental.bulkPriceApply(planId)`：用 `scope`、`selector`、`operation`、`guards` 表达“pocket3 所有含安心保字样的规格价格上调 30 块”这类需求，plan 产出候选商品、命中规格、字段变更、排除项、预览 diff、风险和不可回滚范围。
-- `bulkPriceApply` 只接受已持久化且已确认的 `planId`，执行时生成稳定版 batch spec，调用 rental executor adapter，串行执行，记录 submit checkpoint、verify、delayed-verify 待办、mirror writeback 条件和 final report。不得从自由文本重新解析执行参数。
+- 已建设 `rental.bulkPricePlan` / `rental.bulkPriceApply(planId)`：用 `scope`、`selector`、`operation`、`guards` 表达“pocket3 所有含安心保字样的规格价格上调 30 块”这类需求，plan 产出候选商品、命中规格、字段变更、排除项、预览 diff、风险和不可回滚范围。
+- `bulkPriceApply` 只接受已持久化且已确认的 `planId`，执行时使用持久化 plan 逐项执行、记录 operation ledger 和 final report。不得从自由文本重新解析执行参数，也不得允许 planner/continuation 直接构造 hidden apply 参数。
+- Agent Explore 只能为 `rental.delist`、`rental.delistBatch`、`rental.priceRollback` 生成低层 rental 写确认；不得让 Explore 自由串联 `rental.priceApply`、`rental.perSpecPriceApply`、`rental.specDimApply` 等低层改价/规格写工具来绕过业务级 plan/apply。
+- hidden 工具确认必须依赖已存储的 `requestRef`，确认时重新加载完整请求并拒绝 inline hidden payload；这条边界由 `approvalCard` 和 `agentToolConfirmStore` 维护，防止确认卡篡改或工具参数被卡片 payload 替换。
 - executor adapter 应独立于业务 planner：负责稳定版 skill 路径、sibling data root、daemon token/port、hello negotiation、`expectedProductId`、batch CLI 参数、错误码归一化和 no-real-op 测试替身。
-- 不同业务域共享计划对象、审批、执行、状态机和报告规范，但不要合并成一个万能工具。批量改价、日报驱动下架/补链、新链复制、规格清理、图片/VAS 应保留各自的 plan/apply 工具。
+- 不同业务域可共享计划对象、审批、执行、状态机和报告规范，但不要合并成一个万能工具。批量改价、日报驱动下架/补链、新链复制、规格清理、图片/VAS 应保留各自的 plan/apply 工具。
 - 图片/VAS、规格/租期结构变更、release lifecycle 暂不作为第一阶段 LLM planner-visible 写工具；等字段批量改价 plan/apply 跑通并补齐回归后，再按同一计划框架逐项开放。
 
 ---
