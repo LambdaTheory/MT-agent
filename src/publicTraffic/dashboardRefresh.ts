@@ -39,7 +39,7 @@ export async function captureDashboardRawTables(config: AgentConfig): Promise<Ra
   try {
     const dashboard = await collectDashboardPage(config, page);
     completed = true;
-    return dashboard;
+    return dashboard.tables;
   } finally {
     if (completed || !shouldKeepBrowserOpenOnFailure(process.env.MT_AGENT_KEEP_BROWSER_ON_FAILURE)) {
       await browser.close();

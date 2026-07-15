@@ -87,9 +87,26 @@ describe('public traffic crawler orchestration', () => {
 
     expect(source).toContain('export async function crawlPublicTrafficSources(');
     expect(source).toContain('ensureAuthenticatedMerchantSession(config, { acceptDownloads: true, stage: \'public-traffic-full\' });');
+    const dashboardCall = 'collectDashboardPage(config, page)';
+    const dashboardCallIndex = source.indexOf(dashboardCall);
+    const dashboardTablesAccess = source.indexOf('.tables', dashboardCallIndex);
+
     expect(source).toContain('await collectExposurePage(config, page);');
-    expect(source).toContain('await collectDashboardPage(config, page);');
+    expect(dashboardCallIndex).toBeGreaterThan(-1);
+    expect(dashboardTablesAccess).toBeGreaterThan(dashboardCallIndex);
+    expect(source).not.toContain('collectDashboardPage(config, page,');
     expect(source).not.toContain('chromium.launchPersistentContext');
+  });
+
+  it('adapts dashboard collection result objects back to raw table arrays', async () => {
+    const refreshSource = await readFile(new URL('../src/publicTraffic/dashboardRefresh.ts', import.meta.url), 'utf8');
+    const refreshCall = 'collectDashboardPage(config, page)';
+    const refreshCallIndex = refreshSource.indexOf(refreshCall);
+    const refreshTablesAccess = refreshSource.indexOf('.tables', refreshCallIndex);
+
+    expect(refreshCallIndex).toBeGreaterThan(-1);
+    expect(refreshTablesAccess).toBeGreaterThan(refreshCallIndex);
+    expect(refreshSource).toContain('Promise<RawTableData[]>');
   });
 
   it('downloads goods export in the same persistent browser context before traffic pages', async () => {

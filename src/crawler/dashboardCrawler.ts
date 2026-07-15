@@ -89,6 +89,65 @@ async function dashboardTargetState(target: DashboardTarget): Promise<'table' | 
     .catch(() => null) as Promise<'table' | 'empty' | null>;
 }
 
+interface DashboardObservableState {
+  kind: 'table' | 'empty' | 'none';
+  signature: string;
+  loading: boolean;
+}
+
+async function captureDashboardObservableState(target: DashboardTarget): Promise<DashboardObservableState> {
+  return target
+    .evaluate(`(() => {
+      const normalizeText = (value) => String(value || '').replace(/\s+/g, ' ').trim();
+      const isVisible = (element) => {
+        const rect = element.getBoundingClientRect();
+        const style = window.getComputedStyle(element);
+        return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+      };
+      const loading = Array.from(document.querySelectorAll('.ant-spin-spinning, .ant-spin-dot-spin, [aria-busy="true"]')).some((element) => isVisible(element));
+      const table = Array.from(document.querySelectorAll('.ant-table table, table, [role="table"]')).find((element) => isVisible(element));
+      if (table) return { kind: 'table', signature: normalizeText(table.textContent || '').slice(0, 2000), loading };
+      const empty = Array.from(document.querySelectorAll('.emptyTxt-LkXGcaGA')).find((element) => isVisible(element) && /未查询到相关数据|暂无数据/.test(String(element.textContent ?? '')));
+      if (empty) return { kind: 'empty', signature: normalizeText(empty.textContent || '').slice(0, 500), loading };
+      return { kind: 'none', signature: normalizeText(document.body?.textContent || '').slice(0, 500), loading };
+    })()`)
+    .catch(() => ({ kind: 'none', signature: 'unreadable', loading: false })) as Promise<DashboardObservableState>;
+}
+
+function dashboardObservableStateChanged(before: DashboardObservableState, after: DashboardObservableState): boolean {
+  return before.kind !== after.kind || before.signature !== after.signature;
+}
+
+function dashboardObservableStateFingerprint(state: DashboardObservableState): string {
+  let hash = 0;
+  for (const char of state.signature) hash = ((hash << 5) - hash + char.charCodeAt(0)) | 0;
+  return `${state.kind}:${state.signature.length}:${hash >>> 0}:loading=${state.loading}`;
+}
+
+async function waitForDashboardRefreshAfterDateSelection(target: DashboardTarget, before: DashboardObservableState, dataDate: string): Promise<void> {
+  const deadline = Date.now() + 30000;
+  let lastState = before;
+  let loadingSeen = false;
+  let loadingTransitionObserved = false;
+
+  while (Date.now() < deadline) {
+    const current = await captureDashboardObservableState(target);
+    lastState = current;
+    if (current.loading) loadingSeen = true;
+    else if (loadingSeen) loadingTransitionObserved = true;
+
+    const settled = current.kind === 'table' || current.kind === 'empty';
+    if (settled && (dashboardObservableStateChanged(before, current) || loadingTransitionObserved)) return;
+
+    await waitForDashboardTargetTimeout(target, 1000);
+  }
+
+  throw dashboardDateFailure(
+    `Dashboard did not refresh after selecting requested dataDate; before=${dashboardObservableStateFingerprint(before)}; after=${dashboardObservableStateFingerprint(lastState)}; loadingTransitionObserved=${loadingTransitionObserved}`,
+    dataDate,
+  );
+}
+
 async function waitForTableOrEmptyState(page: Page, timeout: number): Promise<DashboardTarget> {
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {
@@ -403,9 +462,10 @@ export async function selectDashboardDataDate(page: Page, target: DashboardTarge
   const input = target.locator('input[placeholder="请选择日期"]').first();
 
   if ((await input.count().catch(() => 0)) === 0 || !(await input.isVisible().catch(() => false))) {
-    throw new Error('Dashboard date picker was not found');
+    throw dashboardDateFailure('Dashboard date picker was not found', requestedDate);
   }
 
+  const preSelectionState = await captureDashboardObservableState(target);
   const pickerShell = input.locator('xpath=ancestor::*[contains(concat(" ", normalize-space(@class), " "), " ant-picker ")][1]');
   if ((await pickerShell.count().catch(() => 0)) > 0 && (await pickerShell.first().isVisible().catch(() => false))) await pickerShell.first().click();
   else await input.click();
@@ -413,8 +473,13 @@ export async function selectDashboardDataDate(page: Page, target: DashboardTarge
   await alignDashboardDatePickerMonth(target, requestedDate);
   await clickDashboardDateCell(target, requestedDate);
   await confirmDashboardDatePickerIfNeeded(target);
+  const refreshAfterSelection = waitForDashboardRefreshAfterDateSelection(target, preSelectionState, requestedDate).then(
+    () => null,
+    (error: unknown) => (error instanceof Error ? error : new Error(String(error))),
+  );
   const confirmedDate = await waitForDashboardDateReadback(input, target, requestedDate);
-  await waitForDashboardTargetTableOrEmptyState(target, 30000);
+  const refreshError = await refreshAfterSelection;
+  if (refreshError) throw refreshError;
   return confirmedDate;
 }
 async function collectPeriodWithAdaptivePageSize(page: DashboardTarget, period: keyof typeof PERIOD_LABELS, preferredPageSize: number): Promise<RawTableData> {

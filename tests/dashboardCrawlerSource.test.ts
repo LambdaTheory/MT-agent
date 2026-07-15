@@ -68,6 +68,25 @@ describe('dashboard crawler source', () => {
     expect(dateSelection).toBeLessThan(periodLoop);
   });
 
+  it('guards against stale pre-selection dashboard state after date readback', async () => {
+    const source = await readFile(new URL('../src/crawler/dashboardCrawler.ts', import.meta.url), 'utf8');
+    const selectStart = source.indexOf('export async function selectDashboardDataDate');
+    const readbackWait = source.indexOf('waitForDashboardDateReadback(input, target, requestedDate)', selectStart);
+    const staleGuardStart = source.indexOf('waitForDashboardRefreshAfterDateSelection', selectStart);
+    const staleGuardAwait = source.indexOf('await refreshAfterSelection', readbackWait);
+    const staleFingerprint = source.indexOf('captureDashboardObservableState', selectStart);
+
+    expect(source).toContain('captureDashboardObservableState');
+    expect(source).toContain('waitForDashboardRefreshAfterDateSelection');
+    expect(source).toContain('loadingTransitionObserved');
+    expect(source).toContain('Dashboard did not refresh after selecting requested dataDate');
+    expect(staleFingerprint).toBeGreaterThan(selectStart);
+    expect(staleFingerprint).toBeLessThan(staleGuardStart);
+    expect(staleGuardStart).toBeGreaterThan(staleFingerprint);
+    expect(staleGuardStart).toBeLessThan(readbackWait);
+    expect(staleGuardAwait).toBeGreaterThan(readbackWait);
+  });
+
   it('keeps automatic merchant sub-account selection in the dashboard flow', async () => {
     const source = await readFile(new URL('../src/crawler/dashboardCrawler.ts', import.meta.url), 'utf8');
     expect(source).toContain('await selectSubAccountIfNeeded(page);');
