@@ -44,7 +44,7 @@ MT-agent 是一个服务于支付宝商品运营场景的 `Node.js + TypeScript`
 
 根配置文件：
 
-- `package.json`：55 个脚本、依赖与 PM2 相关操作入口。
+- `package.json`：50+ 个脚本、依赖与 PM2 相关操作入口。
 - `tsconfig.json`：包含 `src/**/*.ts` 与 `tests/**/*.ts`，构建输出到 `dist/`。
 - `vitest.config.ts`：Vitest Node 测试环境。
 - `ecosystem.config.cjs`：PM2 配置。
@@ -116,7 +116,8 @@ MT-agent/
 | `syncProductIdMap.ts` | `sync-product-id-map` | 商品 ID 映射同步 |
 | `refreshProductIdMap.ts` | `refresh-product-id-map` | 商品 ID 映射刷新 |
 | `rebuildLatestReport.ts` | `rebuild-latest` | 重建最新日报 |
-| `captureDashboard.ts` | `capture-dashboard` | 仪表盘诊断截图 |
+| `captureDashboard.ts` | `capture-dashboard` | 仪表盘诊断截图 / 单日访问页补抓 |
+| `captureDashboardBatch.ts` | `capture-dashboard-batch` | 指定多个业务数据日的访问页批量补抓；一次 Playwright 登录循环多日 |
 | `probePageSize.ts` | `probe-page-size` | 分页大小探测 |
 | `probeExposurePage.ts` | `probe-exposure-page` | 曝光页结构探测 |
 | `operationsLearningLoopPreview.ts` | `operations-learning-loop:preview` | 运营学习闭环预览 |
@@ -166,7 +167,7 @@ MT-agent/
 - `buildPublicTrafficFeishu.ts`：飞书消息格式。
 - `mergePublicTrafficData.ts`：多周期数据合并。
 - `exposureAggregate.ts`、`exposureDelta.ts`、`exposureNormalize.ts`、`exposureStatus.ts`：曝光数据处理管线。
-- `dashboardQuality.ts`、`dashboardRefresh.ts`：数据质量与仪表盘刷新。
+- `dashboardQuality.ts`、`dashboardRefresh.ts`：数据质量、指定业务日期访问页补抓、日报定位、raw 写入、重建/重发状态语义。
 - `goodsSnapshot.ts`、`goodsLinkLifecycle.ts`、`goodsStatePersistence.ts`：商品首次出现、生命周期、持久化状态。
 - `goodsManagerNewProducts.ts`：goods-manager 新品池集成。
 - `orderAnalysis.ts`：订单分析。
@@ -175,6 +176,22 @@ MT-agent/
 - `artifacts.ts`、`paths.ts`、`observationState.ts`、`publicTrafficRunState.ts`：运行产物和状态辅助。
 
 输出默认写在 `output/`，典型包含按日期分目录的日报 Markdown/XLSX、源数据/中间 JSON、运行日志，以及 `output/state/` 下的生命周期状态。
+
+#### 指定业务日期访问页补抓基线（2026-07-15）
+
+已完成正式批量 CLI `npm run capture-dashboard-batch -- --dates <YYYY-MM-DD,...>`，用于一次 Playwright 登录/子账号选择后循环多个业务数据日，复用单日补抓的日报定位、raw 写入、质量判断、重建/重发和结构化状态语义。
+
+关键语义和边界：
+
+- `date` / `dataDate` 指支付宝后台访问页的业务截止日期，不是 `output/<runDate>/` 目录日期；查找既有日报必须读取 `公域数据上下文_<runDate>.json` 中的 `date`。
+- 找到既有日报时，将 `公域访问数据_1日.json`、`公域访问数据_7日.json`、`公域访问数据_30日.json` 写入对应 `runDate` 目录，并按 `public-traffic-run-state.json` 判断是否需要重建/重发。
+- 批量 CLI 的 `sendReport` 固定为 `false`：可重建本地日报，但不重发飞书日报；`--send-to` 只发送每个日期的补抓结果卡，不代表日报重发。
+- 未找到既有日报上下文时，只归档到 `output/historical-dashboard-captures/<dataDate>/`，不重建、不重发。
+- 结构化状态包括 `repaired`、`still_missing`、`saved_existing_complete`、`saved_already_resent`、`saved_historical_without_report`；绿色只用于真实修复并重发，橙色用于执行后仍缺失，蓝色用于安全保存但无需修复或仅归档。
+- 日期选择器回读可能显示 `MM-DD ~ MM-DD` 范围；只要范围结束日期等于请求业务日即可确认。页面推荐浮层可能遮挡日期选择器或周期 tab，`dashboardCrawler.ts` 已有受遮挡点击后备。
+- 从 worktree 对主仓库 `output` 做人工回灌/补抓时，`outputDir`、`productIdMappingPath`、`browserProfileDir` 等相对配置必须显式指向主仓库绝对路径，否则会写到 worktree 或读取不到映射文件。
+
+2026-07-15 已完成一次历史缺口回补：业务数据日 `2026-06-12`、`2026-06-13`、`2026-06-16`、`2026-06-17`、`2026-06-19`、`2026-06-22`、`2026-06-29`、`2026-07-01`、`2026-07-02`、`2026-07-08`、`2026-07-10` 的三周期访问页 raw 已写入主仓库 `C:/works/MT-agent/output` 并重建对应本地日报，未重发飞书日报。复核扫描了 35 个日报目录、34 个业务数据日，`2026-06-10` 至 `2026-07-14` 范围内有日报上下文的业务日期均无访问页 raw 缺失；`2026-06-18` 本地无对应日报上下文，不计为访问页缺失。
 
 ### 4.4 `src/agentData/`：Agent 数据理解层
 
@@ -495,7 +512,10 @@ npm test -- tests/feishuBot*.test.ts
 npm test -- tests/linkRegistry*.test.ts
 npm test -- tests/publicTraffic*.test.ts
 npm test -- tests/dailyMission*.test.ts
+npm test -- --run tests/dashboardCrawlerSource.test.ts tests/dashboardCaptureDate.test.ts tests/captureDashboardBatchCli.test.ts tests/dashboardRefresh.test.ts tests/captureDashboardCliSource.test.ts tests/exposureCrawlerSource.test.ts
 ```
+
+访问页补抓完成后，必须按业务数据日复核 `output`：读取每个 `公域数据上下文_<runDate>.json` 的 `date`，再检查同目录 `公域访问数据_1日.json`、`公域访问数据_7日.json`、`公域访问数据_30日.json` 是否存在、JSON 可读、`collection.complete === true` 且 `rowCount > 0`。不要只按目录名判断数据日期。
 
 测试库覆盖 crawler、日报、报表、映射、飞书卡片/Bot、Agent runtime、链接治理、库存、活动自动化、关单信息和 LLM provider。自然语言决策相关 fixtures 位于 `tests/nl-decision-golden/`；新增语义能力应同步增加可读、稳定的 regression cases。
 
