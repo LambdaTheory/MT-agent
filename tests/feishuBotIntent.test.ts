@@ -29,6 +29,22 @@ describe('parseBotIntent', () => {
     });
   });
 
+  it('resolves dashboard refresh relative dates with the Shanghai business calendar', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-14T16:30:00.000Z'));
+
+    expect(parseBotIntent('补抓昨天访问页')).toEqual({
+      type: 'refresh_public_traffic_dashboard',
+      date: '2026-07-14',
+      sendTo: undefined,
+    });
+    expect(parseBotIntent('补抓前天访问页')).toEqual({
+      type: 'refresh_public_traffic_dashboard',
+      date: '2026-07-13',
+      sendTo: undefined,
+    });
+  });
+
   it('parses resend report intent', () => {
     expect(parseBotIntent('重发日报')).toEqual({ type: 'resend_latest_report', sendTo: undefined });
     expect(parseBotIntent('重发公域日报 发全部')).toEqual({ type: 'resend_latest_report', sendTo: 'both' });

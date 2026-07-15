@@ -1,10 +1,13 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MAX_CLARIFY_DEPTH } from '../src/agentRuntime/intentResolution.js';
 import type { AgentRequest } from '../src/agentRuntime/types.js';
 import { createFeishuMessageDispatcher, MAX_SEEN_MESSAGE_IDS } from '../src/feishuBot/dispatcher.js';
 import type { BotIntent } from '../src/feishuBot/types.js';
 
 describe('createFeishuMessageDispatcher', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
   it('resolves intent and handles a text message', async () => {
     const intents: BotIntent[] = [];
     const dispatcher = createFeishuMessageDispatcher({
@@ -175,6 +178,21 @@ describe('createFeishuMessageDispatcher', () => {
 
     await expect(dispatcher.dispatch({ messageId: 'mid-link-maintenance-daemon', text: '链接维护 daemon', source: 'sdk' })).resolves.toEqual({ text: 'link_registry_maintenance_prompt', skipped: false });
     expect(intents).toEqual([{ type: 'link_registry_maintenance_prompt', sourceMode: 'daemon_only' }]);
+  });
+
+  it('preserves Shanghai relative dashboard refresh dates through canonicalization', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-14T16:30:00.000Z'));
+    const intents: BotIntent[] = [];
+    const dispatcher = createFeishuMessageDispatcher({
+      handleIntent: async (intent) => {
+        intents.push(intent);
+        return { text: intent.type };
+      },
+    });
+
+    await expect(dispatcher.dispatch({ messageId: 'mid-dashboard-refresh-yesterday-shanghai', text: '补抓昨天访问页', source: 'sdk' })).resolves.toEqual({ text: 'refresh_public_traffic_dashboard', skipped: false });
+    expect(intents).toEqual([{ type: 'refresh_public_traffic_dashboard', date: '2026-07-14', sendTo: undefined }]);
   });
 
   it('skips group messages that do not mention the bot', async () => {

@@ -3,6 +3,7 @@ import {
   assertDashboardDataDate,
   assessDashboardDateReadback,
   formatShanghaiDate,
+  offsetShanghaiDate,
   previousShanghaiDate,
 } from '../src/publicTraffic/dashboardCaptureDate.js';
 
@@ -15,6 +16,19 @@ describe('formatShanghaiDate', () => {
 
   it('defaults to current time when no argument is passed', () => {
     const result = formatShanghaiDate();
+    expect(result).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+});
+
+describe('offsetShanghaiDate', () => {
+  it('offsets from the Shanghai calendar day even when UTC is still the previous day', () => {
+    const boundary = new Date('2026-07-14T16:30:00.000Z');
+    expect(offsetShanghaiDate(-1, boundary)).toBe('2026-07-14');
+    expect(offsetShanghaiDate(-2, boundary)).toBe('2026-07-13');
+  });
+
+  it('defaults to current time when no argument is passed', () => {
+    const result = offsetShanghaiDate(-1);
     expect(result).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 });

@@ -28,7 +28,7 @@ export function formatShanghaiDate(now?: Date): string {
 /**
  * Return the previous calendar day in Asia/Shanghai timezone.
  */
-export function previousShanghaiDate(now?: Date): string {
+export function offsetShanghaiDate(days: number, now?: Date): string {
   const d = now ?? new Date();
   // Get current Shanghai date components
   const fmt = new Intl.DateTimeFormat('en-CA', {
@@ -43,14 +43,18 @@ export function previousShanghaiDate(now?: Date): string {
   const day = Number(parts.find((p) => p.type === 'day')?.value ?? '0');
 
   // Construct a Date in UTC that represents the Shanghai calendar date,
-  // then subtract one day
+  // then apply the calendar-day offset.
   const shanghaiDate = new Date(Date.UTC(year, month - 1, day));
-  shanghaiDate.setUTCDate(shanghaiDate.getUTCDate() - 1);
+  shanghaiDate.setUTCDate(shanghaiDate.getUTCDate() + days);
 
   const y = shanghaiDate.getUTCFullYear();
   const m = String(shanghaiDate.getUTCMonth() + 1).padStart(2, '0');
   const d2 = String(shanghaiDate.getUTCDate()).padStart(2, '0');
   return `${y}-${m}-${d2}`;
+}
+
+export function previousShanghaiDate(now?: Date): string {
+  return offsetShanghaiDate(-1, now);
 }
 
 /**

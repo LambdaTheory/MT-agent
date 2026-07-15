@@ -3253,9 +3253,12 @@ describe('handleBotIntent', () => {
     expect(JSON.stringify(runReport.card)).toContain('agent_tool_confirm');
     expect(mocks.runPublicTrafficReportCli).not.toHaveBeenCalled();
 
-    const refreshDashboard = await handleBotIntent({ type: 'refresh_public_traffic_dashboard', sendTo: 'group' }, outputDir);
+    const refreshDashboard = await handleBotIntent({ type: 'refresh_public_traffic_dashboard', sendTo: 'group', date: '2026-07-14' }, outputDir);
     expect(refreshDashboard.text).toContain('publicTraffic.refreshDashboard');
-    expect(JSON.stringify(refreshDashboard.card)).toContain('agent_tool_confirm');
+    const refreshCardText = JSON.stringify(refreshDashboard.card);
+    expect(refreshCardText).toContain('agent_tool_confirm');
+    expect(refreshCardText).toContain('2026-07-14');
+    expect(refreshCardText).toContain('group');
     expect(mocks.runDashboardRefresh).not.toHaveBeenCalled();
 
     const resend = await handleBotIntent({ type: 'resend_latest_report', sendTo: 'both' }, outputDir);

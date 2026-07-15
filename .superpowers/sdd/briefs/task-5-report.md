@@ -82,3 +82,60 @@ No real Playwright backend capture was run. No Feishu delivery was sent. No PM2 
 - The plan-listed focused suite includes `tests/feishuBotTools.test.ts`; one unrelated closed-order observation test depended on the current calendar date and failed because 2026-07-05/06 fixtures were outside the current 7-day window. I fixed the test by freezing time to 2026-07-07 for that case.
 - `DashboardRefreshResult` textual rendering remains the existing temporary text fallback; dedicated result cards and SDK/server presentation are intentionally left for Task 6.
 - The deprecated `{ date }` bridge inside `runDashboardRefresh` remains untouched for compatibility until Task 6/removal cleanup.
+
+
+## Reviewer Finding Fix: Shanghai relative refresh dates
+
+### Status
+
+Completed narrow reviewer fix for `refresh_public_traffic_dashboard` relative date parsing. Generic `parseDateHint()` behavior remains host-local for other report/read intents, and dashboard refresh absolute / Chinese explicit dates continue to flow through the existing parser.
+
+### Root Cause
+
+`src/feishuBot/intent.ts` used generic `parseDateHint()` for exact dashboard refresh commands. Its relative `昨天` / `前天` branch calls host-local `offsetLocalDate(-1/-2)`, so on UTC hosts near Shanghai midnight an exact command such as `补抓昨天访问页` could resolve to the wrong business data day.
+
+### RED
+
+Ran before production changes:
+
+```powershell
+npm --prefix "C:\works\MT-agent\.claude\worktrees\dated-dashboard-recapture-design" test -- tests/feishuBotIntent.test.ts tests/feishuBotDispatcher.test.ts tests/dashboardCaptureDate.test.ts
+```
+
+Observed expected failure in `tests/dashboardCaptureDate.test.ts`: `offsetShanghaiDate` was missing. The new `tests/feishuBotIntent.test.ts` fake-timer regression covers `2026-07-14T16:30:00Z` and asserts `补抓昨天访问页` -> `2026-07-14`, `补抓前天访问页` -> `2026-07-13`.
+
+### GREEN / Implementation
+
+- Added `offsetShanghaiDate(days, now?)` in `src/publicTraffic/dashboardCaptureDate.ts` and kept `previousShanghaiDate()` as `offsetShanghaiDate(-1, now)`.
+- Added `parseDashboardRefreshDateHint()` in `src/feishuBot/intent.ts` that delegates to existing `parseDateHint()` and only overrides relative `昨天` / `前天` using the Shanghai helper.
+- Left all other intents using existing `parseDateHint()` unchanged.
+- Added dispatcher canonicalization coverage for the Shanghai-resolved refresh date.
+- Extended confirmation coverage to assert the refresh confirmation card preserves explicit `date` and `sendTo`.
+
+### Verification
+
+```powershell
+npm --prefix "C:\works\MT-agent\.claude\worktrees\dated-dashboard-recapture-design" test -- tests/feishuBotIntent.test.ts tests/feishuBotDispatcher.test.ts tests/dashboardCaptureDate.test.ts tests/feishuBotTools.test.ts tests/agentToolExecutorPublicTraffic.test.ts tests/captureDashboardCliSource.test.ts tests/agentRuntimeToolRegistry.test.ts
+```
+
+Result: PASS — 7 files, 191 tests.
+
+```powershell
+npm --prefix "C:\works\MT-agent\.claude\worktrees\dated-dashboard-recapture-design" run build
+```
+
+Result: PASS — `tsc -p tsconfig.json` completed with no diagnostics.
+
+### Files Changed
+
+- `src/publicTraffic/dashboardCaptureDate.ts`
+- `src/feishuBot/intent.ts`
+- `tests/dashboardCaptureDate.test.ts`
+- `tests/feishuBotIntent.test.ts`
+- `tests/feishuBotDispatcher.test.ts`
+- `tests/feishuBotTools.test.ts`
+
+### Concerns / Notes
+
+- The direct intent regression may already pass on hosts configured to Asia/Shanghai; the helper-level RED test anchors the UTC/Shanghai boundary behavior independently of host timezone.
+- No external backend capture, Feishu send, PM2 action, `.env`, browser profile, or output data access was performed.
