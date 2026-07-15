@@ -101,8 +101,9 @@ import {
   PRICE_ADJUSTMENT_CONFLICT_MESSAGE,
 } from './priceChangeContract.js';
 import { inferPriceMultiplierFromText, readPriceMultiplierArgument } from './priceMultiplier.js';
-import { runPublicTrafficReportDateComparison, runPublicTrafficReportQuery, type PublicTrafficReportQueryArguments } from './reportQuery.js';
-import { findLatestReportContext, findReportContextByDate, formatConversionSummary, formatLatestSummary, formatProductRows, parseNumericProductIdList, queryProductRows } from './reportStore.js';
+import { buildReportSectionCardData, runPublicTrafficReportDateComparison, runPublicTrafficReportQuery, type PublicTrafficReportQueryArguments } from './reportQuery.js';
+import { buildProblemSectionCard, buildProductDetailCard } from './queryCards.js';
+import { findLatestReportContext, findReportContextByDate, formatConversionSummary, formatLatestSummary, formatProductQueryResult, formatProductRows, parseNumericProductIdList, queryProductResult } from './reportStore.js';
 import { saveAgentToolConfirmRequest } from './agentToolConfirmStore.js';
 import { refreshActivityPlanConfirmationKey, saveRefreshActivityPlan, type RefreshActivityPlan } from './refreshActivityPlanStore.js';
 import type { RentalWriteLedgerContext } from './rentalWriteOperationHandlers.js';
@@ -2332,11 +2333,29 @@ export async function executeAgentToolRequest(
             : missingReportContextText(compareDate),
         };
       }
-      return {
-        text: report
-          ? runPublicTrafficReportQuery(report.context, { ...request.arguments, ...(date ? { date } : {}) } as PublicTrafficReportQueryArguments)
-          : missingReportContextText(date),
-      };
+      const text = report
+        ? runPublicTrafficReportQuery(report.context, { ...request.arguments, ...(date ? { date } : {}) } as PublicTrafficReportQueryArguments)
+        : missingReportContextText(date);
+      if (report && request.arguments.target === 'section') {
+        const args = { ...request.arguments, ...(date ? { date } : {}) } as PublicTrafficReportQueryArguments;
+        const sectionData = buildReportSectionCardData(report.context, args);
+        if (sectionData) {
+          const productIds = sectionData.rows.map((row) => row.id.replace(/^端内ID\s*/i, ''));
+          const result = queryProductResult(report.context, productIds.join(','));
+          return {
+            text,
+            card: buildProblemSectionCard({
+              title: sectionData.label,
+              context: report.context,
+              result,
+              actionRows: sectionData.rows.map((row, index) => ({ ...row, id: productIds[index] ?? row.id })),
+              total: sectionData.total,
+              queryRef: `${report.context.date}:${args.section ?? 'recommendedActions'}`,
+            }),
+          };
+        }
+      }
+      return { text };
     }
     case 'product.query': {
       const date = readOptionalDate(request.arguments.date);
@@ -2344,8 +2363,13 @@ export async function executeAgentToolRequest(
       const keyword = requireString(request.arguments.keyword, 'keyword');
       const productIds = parseNumericProductIdList(keyword);
       if (report) {
-        const rows = queryProductRows(report.context, keyword);
-        if (rows.length > 0) return { text: formatProductRows(rows) };
+        const result = queryProductResult(report.context, keyword);
+        if (result.matches.length > 0 || result.ambiguous.length > 0) {
+          return {
+            text: formatProductQueryResult(result),
+            ...(result.matches.length === 1 ? { card: buildProductDetailCard(report.context, result) } : {}),
+          };
+        }
       }
       if (!report && date) return { text: missingReportContextText(date) };
       if (productIds.length > 0) {

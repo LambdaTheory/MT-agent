@@ -55,9 +55,13 @@ function parseShortMultiProductQuery(text: string): string | null {
   return productIds.length > 0 ? productIds.join(', ') : null;
 }
 
-function looksLikeInternalProductIdQuery(text: string): string | null {
-  const match = /^(?:查询商品|查商品|查询|查|商品)\s*(\d{3,6})$/.exec(text);
+function looksLikeProductQuery(text: string): string | null {
+  const match = /^(?:查询商品|查商品|查询|查|商品)\s*(\d{3,})$/.exec(text);
   return match?.[1] ?? null;
+}
+
+function looksLikeExplicitIdMapping(text: string): boolean {
+  return /(映射|转换|转|对应)/.test(text) && /(?:端内|平台|商品)?ID/i.test(text);
 }
 
 interface DateHint {
@@ -156,7 +160,7 @@ function parseDatedReadIntent(text: string): BotIntent | null {
   const idLookup = /^(?:查\s*ID|ID\s*查询)\s*(\d+)$/i.exec(rest);
   if (idLookup?.[1]) return { type: 'lookup_product_id', query: idLookup[1], date: hint.date };
 
-  const internalProductIdQuery = looksLikeInternalProductIdQuery(rest);
+  const internalProductIdQuery = looksLikeProductQuery(rest);
   if (internalProductIdQuery) return { type: 'query_product', keyword: internalProductIdQuery, date: hint.date };
 
   const query = /^(?:查询商品|查商品|查询|查|商品)\s+(.+)$/.exec(rest);
@@ -227,7 +231,12 @@ export function parseExactBotIntent(input: string): BotIntent {
   if (/^(链接档案维护|维护链接档案|链接维护卡|链接档案治理)$/.test(canonicalText)) return { type: 'link_registry_maintenance_hub' };
   if (/^(?:商品)?ID(?:查询|互查|转换|换算)$|^打开(?:商品)?ID(?:查询|互查|转换|换算)$|^查ID$/i.test(canonicalText)) return { type: 'lookup_product_id_card' };
 
-  const internalProductIdQuery = looksLikeInternalProductIdQuery(canonicalText);
+  if (looksLikeExplicitIdMapping(canonicalText)) {
+    const explicitLookup = /((?:端内|平台|商品)?ID\s*(?:转|转换|映射|对应)?\s*\d+|\d+\s*(?:的平台ID|的端内ID))/i.exec(canonicalText);
+    if (explicitLookup?.[1]) return { type: 'lookup_product_id', query: explicitLookup[1].trim() };
+  }
+
+  const internalProductIdQuery = looksLikeProductQuery(canonicalText);
   if (internalProductIdQuery) return { type: 'query_product', keyword: internalProductIdQuery };
 
   if (/^(链接维护|开始链接维护|打开链接维护|呼出链接维护卡)\s+daemon$/i.test(canonicalText)) {
@@ -293,6 +302,7 @@ function isAgentFirstLocalDirectIntent(intent: BotIntent): boolean {
     case 'agent_learning_summary':
     case 'lookup_product_id_card':
     case 'lookup_product_id':
+    case 'query_product':
     case 'link_registry_overview':
     case 'link_registry_maintenance_prompt':
     case 'link_registry_governance_prompt':

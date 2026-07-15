@@ -30,6 +30,7 @@ import {
   botResponseFromRentalOperationResult,
   botResponseFromRentalPriceExecution,
 } from './agentSpecializedContinuation.js';
+import { resolveQueryFullListText } from './queryFullListAction.js';
 import { buildIdLookupCard } from './idLookupCard.js';
 import { lookupProductId } from './idLookup.js';
 import {
@@ -202,6 +203,7 @@ function expectedActionForButtonName(name: string | undefined): string | undefin
     activity_price_callback_confirm_submit: 'activity_price_callback_confirm',
     activity_price_callback_cancel_submit: 'activity_price_callback_cancel',
     id_lookup_submit: 'id_lookup',
+    query_full_list_submit: 'query_full_list',
     link_registry_maintenance_start_submit: 'link_registry_maintenance_start',
     link_registry_maintenance_start_form: 'link_registry_maintenance_start',
     link_registry_maintenance_snooze_submit: 'link_registry_maintenance_snooze',
@@ -1302,6 +1304,11 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
           }
           setRentalActionStatus(claim.key, 'cancelled');
           return replaceCard(client, messageId, statusCard('租赁商品操作已取消', `商品 ${productId} 操作已取消。`, 'grey'));
+        }
+
+        if (actionName === 'query_full_list') {
+          const text = await resolveQueryFullListText(outputDir, value?.queryRef);
+          return cardActionUpdateResponse(statusCard('完整清单', text, 'blue'));
         }
 
         if (actionName === 'id_lookup') {

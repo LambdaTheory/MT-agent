@@ -129,10 +129,17 @@ function isMissingConfiguredOutputRoot(error: unknown, outputDir: string): boole
       && 'path' in error && error.path === outputDir,
   );
 }
-export async function runDashboardRefresh(input: DashboardRefreshRequest): Promise<DashboardRefreshResult> {
-  const dataDate = assertDashboardDataDate('dataDate' in input ? input.dataDate : input.date);
-  const capture = await captureDashboardRawTables(input.config, dataDate);
-  const refreshQuality = assessDashboardQuality(capture.tables, []);
+export interface DashboardRefreshCaptureInput {
+  config: AgentConfig;
+  dataDate: string;
+  capture: { tables: RawTableData[]; actualPageDate: string };
+  sendReport?: boolean;
+  sendTo?: 'personal' | 'group' | 'both';
+}
+
+export async function saveDashboardRefreshCapture(input: DashboardRefreshCaptureInput): Promise<DashboardRefreshResult> {
+  const dataDate = assertDashboardDataDate(input.dataDate);
+  const refreshQuality = assessDashboardQuality(input.capture.tables, []);
   const capturedAt = new Date().toISOString();
   const located = await findPublicTrafficReportByDataDate(input.config.outputDir, dataDate).catch((error: unknown) => {
     if (isMissingConfiguredOutputRoot(error, input.config.outputDir)) return null;
@@ -143,8 +150,8 @@ export async function runDashboardRefresh(input: DashboardRefreshRequest): Promi
     const archived = await saveHistoricalDashboardCapture({
       outputDir: input.config.outputDir,
       dataDate,
-      actualPageDate: capture.actualPageDate,
-      rawTables: capture.tables,
+      actualPageDate: input.capture.actualPageDate,
+      rawTables: input.capture.tables,
       refreshQuality,
       capturedAt,
     });
@@ -152,7 +159,7 @@ export async function runDashboardRefresh(input: DashboardRefreshRequest): Promi
     return {
       status,
       dataDate,
-      actualPageDate: capture.actualPageDate,
+      actualPageDate: input.capture.actualPageDate,
       refreshQuality,
       refreshQualityText: formatDashboardQuality(refreshQuality),
       rebuild: 'skipped',
@@ -163,7 +170,7 @@ export async function runDashboardRefresh(input: DashboardRefreshRequest): Promi
   }
 
   const paths = buildPublicTrafficPaths(input.config.outputDir, located.runDate);
-  await writeDashboardRaw(paths, capture.tables);
+  await writeDashboardRaw(paths, input.capture.tables);
 
   const existingState = await loadPublicTrafficRunState(paths.publicTrafficRunState);
   const state = existingState ?? conservativeState(dataDate);
@@ -185,10 +192,13 @@ export async function runDashboardRefresh(input: DashboardRefreshRequest): Promi
       date: located.runDate,
       productIdMappingPath: input.config.productIdMappingPath,
       sendTo: input.sendTo,
-      send: true,
+      send: input.sendReport ?? true,
     });
     rebuild = 'performed';
-    if (rebuildResult.sent) {
+    if (input.sendReport === false) {
+      status = 'saved_existing_complete';
+      message = '已补抓完整访问页 raw 并重建日报，未重发公域日报';
+    } else if (rebuildResult.sent) {
       resend = 'performed';
     } else {
       status = 'saved_existing_complete';
@@ -207,7 +217,7 @@ export async function runDashboardRefresh(input: DashboardRefreshRequest): Promi
   return {
     status,
     dataDate,
-    actualPageDate: capture.actualPageDate,
+    actualPageDate: input.capture.actualPageDate,
     resolvedReportRunDate: located.runDate,
     firstQuality: state.firstDashboardQuality,
     refreshQuality,
@@ -218,6 +228,12 @@ export async function runDashboardRefresh(input: DashboardRefreshRequest): Promi
     rawLocation: paths.dir,
     message,
   };
+}
+
+export async function runDashboardRefresh(input: DashboardRefreshRequest): Promise<DashboardRefreshResult> {
+  const dataDate = assertDashboardDataDate('dataDate' in input ? input.dataDate : input.date);
+  const capture = await captureDashboardRawTables(input.config, dataDate);
+  return saveDashboardRefreshCapture({ config: input.config, dataDate, capture, sendReport: true, sendTo: input.sendTo });
 }
 
 

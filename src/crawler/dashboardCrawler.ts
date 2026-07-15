@@ -174,11 +174,23 @@ async function waitForTableRefresh(page: DashboardTarget): Promise<void> {
   await waitForDashboardTargetTimeout(page, 2000);
 }
 
+async function clickDashboardLocator(locator: Locator): Promise<void> {
+  await locator.click().catch(async (error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!message.includes('intercepts pointer events') && !message.includes('Timeout')) throw error;
+    await locator.evaluate((element) => {
+      const target = element as HTMLElement;
+      target.scrollIntoView({ block: 'center', inline: 'center' });
+      target.click();
+    });
+  });
+}
+
 async function selectPeriod(page: DashboardTarget, period: keyof typeof PERIOD_LABELS): Promise<void> {
   const label = PERIOD_LABELS[period];
   const target = page.getByText(label, { exact: true }).first();
   await target.waitFor({ state: 'visible', timeout: 30000 });
-  await target.click();
+  await clickDashboardLocator(target);
   await waitForTableRefresh(page);
 }
 
@@ -483,8 +495,8 @@ export async function selectDashboardDataDate(page: Page, target: DashboardTarge
 
   const preSelectionState = await captureDashboardObservableState(target);
   const pickerShell = input.locator('xpath=ancestor::*[contains(concat(" ", normalize-space(@class), " "), " ant-picker ")][1]');
-  if ((await pickerShell.count().catch(() => 0)) > 0 && (await pickerShell.first().isVisible().catch(() => false))) await pickerShell.first().click();
-  else await input.click();
+  if ((await pickerShell.count().catch(() => 0)) > 0 && (await pickerShell.first().isVisible().catch(() => false))) await clickDashboardLocator(pickerShell.first());
+  else await clickDashboardLocator(input);
 
   await alignDashboardDatePickerMonth(target, requestedDate);
   await clickDashboardDateCell(target, requestedDate);

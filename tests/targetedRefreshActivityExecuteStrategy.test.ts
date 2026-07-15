@@ -41,6 +41,13 @@ async function writeStrategyFixtures() {
 
   const source30d = { ...metric, exposure: 600, publicVisits: 80, dashboardVisits: 60, createdOrders: 3, shippedOrders: 2, amount: 900, hasDashboardData: true };
   const zero30d = { ...metric, exposure: 300, publicVisits: 30, dashboardVisits: 20, createdOrders: 0, amount: 0, hasDashboardData: true };
+  const dailyRows = [
+    { productName: 'R50 健康源', platformProductId: 'p680', displayProductId: '端内ID 680', custodyDays: 50, periods: { '1d': source30d } },
+    { productName: 'R50 零金额', platformProductId: 'p681', displayProductId: '端内ID 681', custodyDays: 45, periods: { '1d': zero30d } },
+    { productName: 'Pocket 3 blocker', platformProductId: 'p901', displayProductId: '端内ID 901', custodyDays: 45, periods: { '1d': zero30d } },
+    { productName: 'SQ1 健康源', platformProductId: 'p902', displayProductId: '端内ID 902', custodyDays: 50, periods: { '1d': source30d } },
+    { productName: 'SQ1 零金额', platformProductId: 'p903', displayProductId: '端内ID 903', custodyDays: 45, periods: { '1d': zero30d } },
+  ];
   await writeFile(join(outputDir, '2026-06-11', 'report-context.json'), JSON.stringify({
     date: '2026-06-11',
     summary: { '1d': metric, '7d': metric, '30d': metric },
@@ -60,6 +67,12 @@ async function writeStrategyFixtures() {
     lifecycleGovernance: [],
     recommendedActions: [],
     emptySectionNotes: {},
+  }), 'utf8');
+  await writeFile(join(outputDir, '2026-06-11', '公域数据上下文_2026-06-11.json'), JSON.stringify({
+    date: '2026-06-11',
+    summary: { '1d': metric, '7d': metric, '30d': metric },
+    conclusions: [],
+    rows: dailyRows,
   }), 'utf8');
   await writeFile(join(configDir, 'product-id-map.json'), JSON.stringify({ p680: '680', p681: '681', p901: '901', p902: '902', p903: '903' }), 'utf8');
   await writeFile(join(configDir, 'product-name-map.json'), JSON.stringify({ '680': 'R50 健康源', '681': 'R50 零金额', '901': 'Pocket 3 blocker', '902': 'SQ1 健康源', '903': 'SQ1 零金额' }), 'utf8');
@@ -93,7 +106,7 @@ describe('targeted refresh activity execute strategy', () => {
     const { outputDir, registryPaths } = await writeStrategyFixtures();
 
     const response = await executeAgentToolRequest(
-      { toolName: 'operations.refreshActivityPlan', arguments: { zeroMetric: 'amount' }, reason: 'plan refresh strategy' },
+      { toolName: 'operations.refreshActivityPlan', arguments: { conditions: [{ metric: 'amount', operator: 'eq', value: 0 }], windowDays: 1 }, reason: 'plan refresh strategy' },
       outputDir,
       { closedOrderRegistryPaths: registryPaths },
     );
@@ -107,7 +120,7 @@ describe('targeted refresh activity execute strategy', () => {
     const { outputDir, registryPaths } = await writeStrategyFixtures();
 
     const response = await executeAgentToolRequest(
-      { toolName: 'operations.refreshActivityPlan', arguments: { zeroMetric: 'amount' }, reason: 'plan refresh strategy' },
+      { toolName: 'operations.refreshActivityPlan', arguments: { conditions: [{ metric: 'amount', operator: 'eq', value: 0 }], windowDays: 1 }, reason: 'plan refresh strategy' },
       outputDir,
       { closedOrderRegistryPaths: registryPaths },
     );

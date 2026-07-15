@@ -29,7 +29,7 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import { parseBotIntent } from '../src/feishuBot/intent.js';
+import { parseAgentFirstBotIntent, parseBotIntent } from '../src/feishuBot/intent.js';
 import { createFeishuMessageDispatcher } from '../src/feishuBot/dispatcher.js';
 import type { BotIntent } from '../src/feishuBot/types.js';
 
@@ -271,14 +271,19 @@ describe('explicit commands — current parser behavior', () => {
 
   it('parses query_product intent', () => {
     expect(parseBotIntent('查询 565')).toEqual({ type: 'query_product', keyword: '565' });
+    expect(parseBotIntent('查2000000000000000000001')).toEqual({ type: 'query_product', keyword: '2000000000000000000001' });
+    expect(parseBotIntent('查703,706,736')).toEqual({ type: 'query_product', keyword: '703, 706, 736' });
+    expect(parseAgentFirstBotIntent('查703,706,736')).toEqual({ type: 'query_product', keyword: '703, 706, 736' });
     expect(parseBotIntent('查询商品 721')).toEqual({ type: 'query_product', keyword: '721' });
     expect(parseBotIntent('查商品 721')).toEqual({ type: 'query_product', keyword: '721' });
     expect(parseBotIntent('商品 iPhone')).toEqual({ type: 'query_product', keyword: 'iPhone' });
     expect(parseBotIntent('这个商品 721 数据如何')).toEqual({ type: 'query_product', keyword: '721' });
   });
 
-  it('parses lookup_product_id intent', () => {
+  it('parses lookup_product_id intent only for explicit lookup wording', () => {
     expect(parseBotIntent('查ID 565')).toEqual({ type: 'lookup_product_id', query: '565' });
+    expect(parseBotIntent('端内ID 565 转商品ID')).toEqual({ type: 'lookup_product_id', query: '端内ID 565' });
+    expect(parseBotIntent('商品ID 2000000000000000000001 转端内ID')).toEqual({ type: 'lookup_product_id', query: '商品ID 2000000000000000000001' });
   });
 
   it('parses lookup_product_id_card intent', () => {

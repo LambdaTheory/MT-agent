@@ -78,6 +78,11 @@ async function writeRefreshActivityFixtures(): Promise<{ outputDir: string; regi
   await mkdir(stateDir, { recursive: true });
   const zero30d = { ...metric, exposure: 300, publicVisits: 30, dashboardVisits: 20, createdOrders: 0, hasDashboardData: true };
   const active30d = { ...metric, exposure: 600, publicVisits: 80, dashboardVisits: 60, createdOrders: 3, hasDashboardData: true };
+  const dailyRows = [
+    { productName: 'Pocket3 健康源', platformProductId: 'p900', displayProductId: '端内ID 900', custodyDays: 50, periods: { '1d': active30d } },
+    { productName: 'Pocket3 零创单 A', platformProductId: 'p901', displayProductId: '端内ID 901', custodyDays: 35, periods: { '1d': zero30d } },
+    { productName: 'Pocket3 零创单 B', platformProductId: 'p902', displayProductId: '端内ID 902', custodyDays: 40, periods: { '1d': zero30d } },
+  ];
   await writeFile(join(outputDir, '2026-06-11', 'report-context.json'), JSON.stringify({
     date: '2026-06-11',
     summary: { '1d': summary, '7d': summary, '30d': summary },
@@ -95,6 +100,12 @@ async function writeRefreshActivityFixtures(): Promise<{ outputDir: string; regi
     lifecycleGovernance: [],
     recommendedActions: [],
     emptySectionNotes: {},
+  }), 'utf8');
+  await writeFile(join(outputDir, '2026-06-11', '公域数据上下文_2026-06-11.json'), JSON.stringify({
+    date: '2026-06-11',
+    summary: { '1d': summary, '7d': summary, '30d': summary },
+    conclusions: [],
+    rows: dailyRows,
   }), 'utf8');
   await writeFile(join(configDir, 'product-id-map.json'), JSON.stringify({ p900: '900', p901: '901', p902: '902' }), 'utf8');
   await writeFile(join(configDir, 'product-name-map.json'), JSON.stringify({ '900': 'Pocket3 健康源', '901': 'Pocket3 零创单 A', '902': 'Pocket3 零创单 B' }), 'utf8');
@@ -184,7 +195,7 @@ describe('refresh activity three-step cards', () => {
     const { outputDir, registryPaths } = await writeRefreshActivityFixtures();
 
     const response = await executeAgentToolRequest(
-      { toolName: 'operations.refreshActivityPlan', arguments: {}, reason: '测试生成活跃度刷新计划' },
+      { toolName: 'operations.refreshActivityPlan', arguments: { conditions: [{ metric: 'createdOrders', operator: 'eq', value: 0 }], windowDays: 1 }, reason: '测试生成活跃度刷新计划' },
       outputDir,
       { closedOrderRegistryPaths: registryPaths },
     );

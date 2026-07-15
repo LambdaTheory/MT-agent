@@ -24,7 +24,7 @@
       "lookup-then-copy",
       "window-then-delist-refill"
     ],
-    "routingPassed": ["query-status-956", "daily-summary"],
+    "routingPassed": ["daily-summary"],
     "blockedByCapability": [],
     "blockedByRouting": [
       "best-r50-20d",
@@ -57,22 +57,22 @@
         "evidenceSummary": "Direct product.query lookup can resolve the single internal product ID status."
       },
       "routing": {
-        "ok": true,
+        "ok": false,
         "matchedCapability": "product.query",
-        "responseType": "text",
-        "failureLayer": null,
-        "evidenceSummary": "parseBotIntent reaches query_product and handleBotIntent returns text."
+        "responseType": "execute_confirm_card",
+        "failureLayer": "routing",
+        "evidenceSummary": "parseBotIntent reaches query_product, but the current single-product result returns a card rather than the text response expected by this audit case."
       }
     },
     {
       "caseId": "best-r50-20d",
       "category": "query",
-      "utterance": "近20天数据最好r50是哪个id",
+      "utterance": "近2天数据最好r50是哪个id",
       "capability": {
         "ok": true,
         "toolName": "product.rankBestSameSku",
         "responseType": "text",
-        "evidenceSummary": "Direct same-SKU ranking can identify the best R50 link by 20-day amount metadata."
+        "evidenceSummary": "Direct same-SKU ranking can identify the best R50 link by 2-day amount metadata."
       },
       "routing": {
         "ok": false,
