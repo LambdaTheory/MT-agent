@@ -4156,6 +4156,11 @@ describe('handleBotIntent', () => {
     const registryRoot = await mkdtemp(join(tmpdir(), 'mt-agent-closed-order-registry-'));
     const registryPaths = await writeClosedOrderRegistryFixtures(registryRoot);
     await mkdir(join(outputDir, 'state'), { recursive: true });
+    const closedAtBase = new Date();
+    const pricingClosedAt = new Date(closedAtBase.getTime() - 24 * 60 * 60 * 1000).toISOString();
+    const pricingIngestedAt = new Date(new Date(pricingClosedAt).getTime() + 5 * 60 * 1000).toISOString();
+    const inventoryClosedAt = new Date(closedAtBase.getTime() - 2 * 24 * 60 * 60 * 1000).toISOString();
+    const inventoryIngestedAt = new Date(new Date(inventoryClosedAt).getTime() + 5 * 60 * 1000).toISOString();
     await writeFile(join(outputDir, 'state', 'closed-order-feedback-ingest.json'), JSON.stringify({
       version: 1,
       items: [
@@ -4164,9 +4169,9 @@ describe('handleBotIntent', () => {
           closeId: 'close-1',
           internalProductId: '560',
           rawRemark: '价格太低，不接单',
-          closedAt: '2026-07-06T01:00:00.000Z',
-          firstIngestedAt: '2026-07-06T01:05:00.000Z',
-          lastIngestedAt: '2026-07-06T01:05:00.000Z',
+          closedAt: pricingClosedAt,
+          firstIngestedAt: pricingIngestedAt,
+          lastIngestedAt: pricingIngestedAt,
           seenCount: 1,
         },
         {
@@ -4174,9 +4179,9 @@ describe('handleBotIntent', () => {
           closeId: 'close-2',
           internalProductId: '561',
           rawRemark: '库存不足',
-          closedAt: '2026-07-05T08:00:00.000Z',
-          firstIngestedAt: '2026-07-05T08:05:00.000Z',
-          lastIngestedAt: '2026-07-05T08:05:00.000Z',
+          closedAt: inventoryClosedAt,
+          firstIngestedAt: inventoryIngestedAt,
+          lastIngestedAt: inventoryIngestedAt,
           seenCount: 1,
         },
       ],

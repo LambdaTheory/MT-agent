@@ -307,7 +307,8 @@ describe('createFeishuSdkBot', () => {
       message: { message_id: 'mid-sdk-llm-agent', message_type: 'text', content: JSON.stringify({ text: '帮我看看苹果手机' }) },
     });
 
-    expect(JSON.stringify(sent)).toContain('端内ID 565 iPhone 15');
+    expect(JSON.stringify(sent)).toContain('端内ID 565｜商品ID p565');
+    expect(JSON.stringify(sent)).toContain('iPhone 15');
   });
 
   it('keeps product-modifying exact SDK text commands planner-first but opens operations learning locally', async () => {

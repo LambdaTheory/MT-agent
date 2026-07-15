@@ -1109,13 +1109,13 @@ describe('createFeishuSdkBot card.action.trigger', () => {
       },
     });
 
-    for (let attempt = 0; attempt < 100 && !sent.some((item) => JSON.stringify(item).includes('步骤 2/2：product.query')); attempt += 1) {
+    for (let attempt = 0; attempt < 100 && !sent.some((item) => JSON.stringify(item).includes('端内ID 565')); attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
 
     expect(calls).toEqual(['388', '388']);
-    const finalPatch = sent.map(patchedCard).find((card) => JSON.stringify(card).includes('步骤 2/2：product.query'));
-    expect(JSON.stringify(finalPatch)).toContain('新链批量复制完成');
+    const finalPatch = sent.map(patchedCard).find((card) => JSON.stringify(card).includes('端内ID 565'));
+    expect(JSON.stringify(finalPatch)).toContain('商品查询结果');
     expect(JSON.stringify(finalPatch)).toContain('端内ID 565');
   });
 
@@ -1179,13 +1179,13 @@ describe('createFeishuSdkBot card.action.trigger', () => {
       },
     });
 
-    for (let attempt = 0; attempt < 100 && !sent.some((item) => JSON.stringify(item).includes('步骤 2/2：product.query')); attempt += 1) {
+    for (let attempt = 0; attempt < 100 && !sent.some((item) => JSON.stringify(item).includes('端内ID 565')); attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
 
     expect(executions).toHaveLength(1);
-    const finalPatch = sent.map(patchedCard).find((card) => JSON.stringify(card).includes('步骤 2/2：product.query'));
-    expect(JSON.stringify(finalPatch)).toContain('改价执行成功');
+    const finalPatch = sent.map(patchedCard).find((card) => JSON.stringify(card).includes('端内ID 565'));
+    expect(JSON.stringify(finalPatch)).toContain('商品查询结果');
     expect(JSON.stringify(finalPatch)).toContain('端内ID 565');
   });
 
@@ -1228,13 +1228,13 @@ describe('createFeishuSdkBot card.action.trigger', () => {
       },
     });
 
-    for (let attempt = 0; attempt < 100 && !sent.some((item) => JSON.stringify(item).includes('步骤 2/2：product.query')); attempt += 1) {
+    for (let attempt = 0; attempt < 100 && !sent.some((item) => JSON.stringify(item).includes('端内ID 565')); attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
 
     expect(calls).toEqual(['761']);
-    const finalPatch = sent.map(patchedCard).find((card) => JSON.stringify(card).includes('步骤 2/2：product.query'));
-    expect(JSON.stringify(finalPatch)).toContain('下架成功');
+    const finalPatch = sent.map(patchedCard).find((card) => JSON.stringify(card).includes('端内ID 565'));
+    expect(JSON.stringify(finalPatch)).toContain('商品查询结果');
     expect(JSON.stringify(finalPatch)).toContain('端内ID 565');
   });
 
