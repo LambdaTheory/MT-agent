@@ -44,8 +44,18 @@ describe('parseAgentDataIntent', () => {
   });
 
   it('maps data and strategy capability questions before workflow-like routing', () => {
-    expect(parseAgentDataIntent('为什么 R50 一个候选都没有')).toEqual({ type: 'refresh_candidate_explain', query: 'R50', zeroMetric: 'created_orders' });
+    expect(parseAgentDataIntent('为什么 R50 一个候选都没有')).toEqual({ type: 'unknown', text: '为什么 R50 一个候选都没有' });
     expect(parseAgentDataIntent('最近哪些组没有安全源商品')).toEqual({ type: 'safe_source_groups' });
     expect(parseAgentDataIntent('r50 这个组可不可以补链，源商品是谁')).toEqual({ type: 'safe_source_resolve', query: 'r50' });
+  });
+
+  it('maps explain-only refresh candidate questions to exact metric threshold conditions', () => {
+    expect(parseAgentDataIntent('为什么 R50 近15天访问量为0候选是0')).toEqual({ type: 'refresh_candidate_explain', query: 'R50', metric: 'publicVisits', operator: 'eq', value: 0, windowDays: 15 });
+    expect(parseAgentDataIntent('为什么 R50 近15天曝光量为0候选是0')).toEqual({ type: 'refresh_candidate_explain', query: 'R50', metric: 'exposure', operator: 'eq', value: 0, windowDays: 15 });
+    expect(parseAgentDataIntent('为什么 R50 近15天签约金额为0候选是0')).toEqual({ type: 'refresh_candidate_explain', query: 'R50', metric: 'signedOrderAmount', operator: 'eq', value: 0, windowDays: 15 });
+  });
+
+  it('does not guess unsupported refresh candidate metric language in direct routes', () => {
+    expect(parseAgentDataIntent('为什么 R50 近15天转化表现候选是0')).toEqual({ type: 'unknown', text: '为什么 R50 近15天转化表现候选是0' });
   });
 });

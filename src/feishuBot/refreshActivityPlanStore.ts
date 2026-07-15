@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { parseAgentToolConfirmContinuation, type AgentToolConfirmContinuation } from '../agentRuntime/approvalCard.js';
+import { getPublicTrafficMetric, type PublicTrafficMetricKey } from '../agentData/publicTrafficMetricCatalog.js';
+import type { MetricThresholdCondition, MetricThresholdOperator } from '../agentData/metricThresholdStrategy.js';
 
 export interface RefreshActivityNewLinkItem {
   keyword: string;
@@ -11,6 +13,17 @@ export interface RefreshActivityNewLinkItem {
   sameSkuGroupId?: string;
 }
 
+export interface RefreshActivityGroupPlan {
+  sameSkuGroupId: string;
+  label: string;
+  delistProductIds: string[];
+  delistCount: number;
+  refillCount: number;
+  sourceProductId?: string;
+  sourceProductName?: string;
+  blockers: string[];
+}
+
 export interface RefreshActivityPlan {
   date: string;
   delistProductIds: string[];
@@ -18,6 +31,9 @@ export interface RefreshActivityPlan {
   newLinkItemsForRefill: RefreshActivityNewLinkItem[];
   skippedGroups: string[];
   canRefill: boolean;
+  conditions?: MetricThresholdCondition[];
+  conditionSummary?: string;
+  groupPlans?: RefreshActivityGroupPlan[];
   continuation?: AgentToolConfirmContinuation;
 }
 
@@ -44,6 +60,55 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === 'string');
+}
+
+function parseMetricThresholdOperator(value: unknown): MetricThresholdOperator | null {
+  if (value === 'eq' || value === 'neq' || value === 'gt' || value === 'gte' || value === 'lt' || value === 'lte') return value;
+  return null;
+}
+
+function parseMetricThresholdConditions(value: unknown): MetricThresholdCondition[] | null {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 6) return null;
+  const conditions: MetricThresholdCondition[] = [];
+  for (const item of value) {
+    if (!isRecord(item)) return null;
+    if (typeof item.metric !== 'string' || !getPublicTrafficMetric(item.metric)) return null;
+    const metric = item.metric as PublicTrafficMetricKey;
+    const operator = parseMetricThresholdOperator(item.operator);
+    if (!operator) return null;
+    if (typeof item.value !== 'number' || !Number.isFinite(item.value)) return null;
+    conditions.push({ metric, operator, value: item.value });
+  }
+  return conditions;
+}
+
+function parseGroupPlans(value: unknown): RefreshActivityGroupPlan[] | null {
+  if (!Array.isArray(value)) return null;
+  const plans: RefreshActivityGroupPlan[] = [];
+  const allowedKeys = new Set(['sameSkuGroupId', 'label', 'delistProductIds', 'delistCount', 'refillCount', 'sourceProductId', 'sourceProductName', 'blockers']);
+  for (const item of value) {
+    if (!isRecord(item)) return null;
+    if (Object.keys(item).some((key) => !allowedKeys.has(key))) return null;
+    if (typeof item.sameSkuGroupId !== 'string') return null;
+    if (typeof item.label !== 'string') return null;
+    if (!isStringArray(item.delistProductIds)) return null;
+    if (typeof item.delistCount !== 'number') return null;
+    if (typeof item.refillCount !== 'number') return null;
+    if (item.sourceProductId !== undefined && typeof item.sourceProductId !== 'string') return null;
+    if (item.sourceProductName !== undefined && typeof item.sourceProductName !== 'string') return null;
+    if (!isStringArray(item.blockers)) return null;
+    plans.push({
+      sameSkuGroupId: item.sameSkuGroupId,
+      label: item.label,
+      delistProductIds: item.delistProductIds,
+      delistCount: item.delistCount,
+      refillCount: item.refillCount,
+      ...(item.sourceProductId === undefined ? {} : { sourceProductId: item.sourceProductId }),
+      ...(item.sourceProductName === undefined ? {} : { sourceProductName: item.sourceProductName }),
+      blockers: item.blockers,
+    });
+  }
+  return plans;
 }
 
 function parseNewLinkItems(value: unknown): RefreshActivityNewLinkItem[] | null {
@@ -77,6 +142,19 @@ function parseRefreshActivityPlan(value: unknown): RefreshActivityPlan | null {
   if (!newLinkItemsForRefill) return null;
   if (!isStringArray(value.skippedGroups)) return null;
   if (typeof value.canRefill !== 'boolean') return null;
+  let conditions: MetricThresholdCondition[] | undefined;
+  if (value.conditions !== undefined) {
+    const parsedConditions = parseMetricThresholdConditions(value.conditions);
+    if (!parsedConditions) return null;
+    conditions = parsedConditions;
+  }
+  if (value.conditionSummary !== undefined && typeof value.conditionSummary !== 'string') return null;
+  let groupPlans: RefreshActivityGroupPlan[] | undefined;
+  if (value.groupPlans !== undefined) {
+    const parsedGroupPlans = parseGroupPlans(value.groupPlans);
+    if (!parsedGroupPlans) return null;
+    groupPlans = parsedGroupPlans;
+  }
   const continuation = parseAgentToolConfirmContinuation(value.continuation);
   if (value.continuation !== undefined && !continuation) return null;
   return {
@@ -86,6 +164,9 @@ function parseRefreshActivityPlan(value: unknown): RefreshActivityPlan | null {
     newLinkItemsForRefill,
     skippedGroups: value.skippedGroups,
     canRefill: value.canRefill,
+    ...(conditions === undefined ? {} : { conditions }),
+    ...(value.conditionSummary === undefined ? {} : { conditionSummary: value.conditionSummary }),
+    ...(groupPlans === undefined ? {} : { groupPlans }),
     ...(continuation ? { continuation } : {}),
   };
 }

@@ -1,5 +1,6 @@
 import { findProductBySectionIdentifier } from '../agentData/productQuery.js';
 import type { PeriodKey } from '../domain/types.js';
+import { getPublicTrafficMetric, metricAvailabilityForFixedPeriod, publicTrafficMetricKeys, type MetricAvailability, type PublicTrafficMetricDefinition, type PublicTrafficMetricKey } from '../agentData/publicTrafficMetricCatalog.js';
 import { derivedOrderBusinessMetrics, fulfillmentRateLines, ORDER_ANALYSIS_PAGE_LABELS, type OrderAnalysisPageKey } from '../publicTraffic/orderAnalysis.js';
 import type { PublicTrafficDataReportContext, PublicTrafficPeriodMetrics, PublicTrafficProductDataRow, PublicTrafficReportSectionItem } from '../publicTraffic/types.js';
 
@@ -7,26 +8,9 @@ const PERIODS: PeriodKey[] = ['1d', '7d', '30d'];
 const DEFAULT_LIMIT = 10;
 const MAX_LIMIT = 50;
 
-export const reportMetricNames = [
-  'exposure',
-  'publicVisits',
-  'dashboardVisits',
-  'createdOrders',
-  'signedOrders',
-  'reviewedOrders',
-  'shippedOrders',
-  'createdOrderAmount',
-  'signedOrderAmount',
-  'reviewedOrderAmount',
-  'shippedOrderAmount',
-  'amount',
-  'exposureVisitRate',
-  'visitCreatedOrderRate',
-  'visitShipmentRate',
-  'custodyDays',
-] as const;
+export const reportMetricNames = publicTrafficMetricKeys;
 
-export type ReportMetricName = typeof reportMetricNames[number];
+export type ReportMetricName = PublicTrafficMetricKey;
 
 export const reportAggregationNames = ['count', 'sum', 'avg', 'min', 'max'] as const;
 
@@ -88,32 +72,6 @@ export interface PublicTrafficReportQueryArguments {
   orderIndicator?: string;
   orderDerivedMetric?: ReportOrderDerivedMetricName;
 }
-
-interface ReportMetricDefinition {
-  label: string;
-  format?: 'number' | 'money' | 'percent' | 'raw';
-  summary?: (metric: PublicTrafficDataReportContext['summary']['1d']) => number | string | undefined;
-  product?: (row: PublicTrafficProductDataRow, period: PeriodKey) => number | string | null | undefined;
-}
-
-const metricDefinitions: Record<ReportMetricName, ReportMetricDefinition> = {
-  exposure: { label: '曝光', summary: (metric) => metric.exposure, product: (row, period) => row.periods[period]?.exposure },
-  publicVisits: { label: '公域访问', summary: (metric) => metric.publicVisits, product: (row, period) => row.periods[period]?.publicVisits },
-  dashboardVisits: { label: '访问页访问', summary: (metric) => metric.dashboardVisits, product: (row, period) => row.periods[period]?.dashboardVisits },
-  createdOrders: { label: '创建订单', summary: (metric) => metric.createdOrders, product: (row, period) => row.periods[period]?.createdOrders },
-  signedOrders: { label: '签约订单', product: (row, period) => row.periods[period]?.signedOrders },
-  reviewedOrders: { label: '审核订单', product: (row, period) => row.periods[period]?.reviewedOrders },
-  shippedOrders: { label: '发货', summary: (metric) => metric.shippedOrders, product: (row, period) => row.periods[period]?.shippedOrders },
-  createdOrderAmount: { label: '创建金额', format: 'money', product: (row, period) => row.periods[period]?.createdOrderAmount },
-  signedOrderAmount: { label: '签约金额', format: 'money', product: (row, period) => row.periods[period]?.signedOrderAmount },
-  reviewedOrderAmount: { label: '审核金额', format: 'money', product: (row, period) => row.periods[period]?.reviewedOrderAmount },
-  shippedOrderAmount: { label: '发货金额', format: 'money', product: (row, period) => row.periods[period]?.shippedOrderAmount },
-  amount: { label: '金额', format: 'money', summary: (metric) => metric.amount, product: (row, period) => row.periods[period]?.amount },
-  exposureVisitRate: { label: '曝光到访问率', format: 'percent', summary: (metric) => metric.exposureVisitRate, product: (row, period) => row.periods[period]?.exposureVisitRate },
-  visitCreatedOrderRate: { label: '访问到创建率', format: 'percent', summary: (metric) => metric.visitCreatedOrderRate, product: (row, period) => row.periods[period]?.visitCreatedOrderRate },
-  visitShipmentRate: { label: '访问到发货率', format: 'percent', summary: (metric) => metric.visitShipmentRate, product: (row, period) => row.periods[period]?.visitShipmentRate },
-  custodyDays: { label: '托管天数', product: (row) => row.custodyDays },
-};
 
 const defaultMetricsByTarget: Record<'summary' | 'products', ReportMetricName[]> = {
   summary: ['exposure', 'publicVisits', 'createdOrders', 'shippedOrders', 'amount', 'exposureVisitRate', 'visitShipmentRate'],
@@ -246,7 +204,41 @@ function metricList(args: PublicTrafficReportQueryArguments, target: 'summary' |
   return metrics.length ? metrics : defaultMetricsByTarget[target];
 }
 
-function formatValue(value: unknown, definition?: ReportMetricDefinition): string {
+function metricDefinition(metric: ReportMetricName): PublicTrafficMetricDefinition {
+  const definition = getPublicTrafficMetric(metric);
+  if (!definition) throw new Error(`Unknown public traffic metric: ${metric}`);
+  return definition;
+}
+
+function metricSourceLabel(availability: MetricAvailability): string {
+  if (availability.source === 'exposure' || availability.source === 'derived_exposure') return '曝光数据';
+  if (availability.source === 'dashboard' || availability.source === 'derived_dashboard') return '访问页数据';
+  return '商品状态';
+}
+
+function metricUnavailableMessage(metric: ReportMetricName): string {
+  return `没有可用于筛选的${metricDefinition(metric).label}数据：${metricSourceLabel(metricAvailabilityForFixedPeriod({ productName: '', platformProductId: '', displayProductId: '', custodyDays: null, periods: { '1d': emptyMetric(), '7d': emptyMetric(), '30d': emptyMetric() } }, '1d', metric))}未完整更新。`;
+}
+
+function emptyMetric(): PublicTrafficPeriodMetrics {
+  return {
+    exposure: 0,
+    publicVisits: 0,
+    dashboardVisits: 0,
+    createdOrders: 0,
+    signedOrders: 0,
+    reviewedOrders: 0,
+    shippedOrders: 0,
+    amount: 0,
+    exposureVisitRate: 0,
+    visitCreatedOrderRate: 0,
+    visitShipmentRate: 0,
+    hasExposureData: false,
+    hasDashboardData: false,
+  };
+}
+
+function formatValue(value: unknown, definition?: Pick<PublicTrafficMetricDefinition, 'format'>): string {
   if (value === undefined || value === null || value === '') return '-';
   if (typeof value === 'number') {
     if (definition?.format === 'percent') return `${(value * 100).toFixed(2)}%`;
@@ -256,7 +248,7 @@ function formatValue(value: unknown, definition?: ReportMetricDefinition): strin
   return String(value);
 }
 
-function formatSignedNumber(value: number, definition?: ReportMetricDefinition): string {
+function formatSignedNumber(value: number, definition?: Pick<PublicTrafficMetricDefinition, 'format'>): string {
   const prefix = value > 0 ? '+' : '';
   return `${prefix}${formatValue(value, definition)}`;
 }
@@ -268,8 +260,14 @@ function formatRelativeChange(current: number, previous: number): string {
   return `${prefix}${change.toFixed(2)}%`;
 }
 
+function summaryMetricValue(metric: ReportMetricName, summary: PublicTrafficDataReportContext['summary']['1d']): number | undefined {
+  if (metric === 'custodyDays') return undefined;
+  const value = summary[metric as keyof PublicTrafficDataReportContext['summary']['1d']];
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
 function formatComparisonValue(metric: ReportMetricName, current: unknown, previous: unknown): string {
-  const definition = metricDefinitions[metric];
+  const definition = metricDefinition(metric);
   if (typeof current !== 'number' || typeof previous !== 'number') {
     return `${definition.label}：当前 ${formatValue(current, definition)}，前日 ${formatValue(previous, definition)}`;
   }
@@ -284,7 +282,7 @@ function formatComparisonValue(metric: ReportMetricName, current: unknown, previ
 }
 
 function formatLabeledComparisonValue(metric: ReportMetricName, current: unknown, previous: unknown, currentLabel: string, previousLabel: string): string {
-  const definition = metricDefinitions[metric];
+  const definition = metricDefinition(metric);
   if (typeof current !== 'number' || typeof previous !== 'number') {
     return `${definition.label}：${currentLabel} ${formatValue(current, definition)}，${previousLabel} ${formatValue(previous, definition)}`;
   }
@@ -298,8 +296,19 @@ function formatLabeledComparisonValue(metric: ReportMetricName, current: unknown
   return `${definition.label}：${currentLabel} ${formatValue(current, definition)}，${previousLabel} ${formatValue(previous, definition)}，变化 ${formatSignedNumber(current - previous, definition)}（${formatRelativeChange(current, previous)}）`;
 }
 
+function productMetricAvailable(row: PublicTrafficProductDataRow, metric: ReportMetricName, period: PeriodKey): boolean {
+  return metricAvailabilityForFixedPeriod(row, period, metric).available;
+}
+
 function productMetricValue(row: PublicTrafficProductDataRow, metric: ReportMetricName, period: PeriodKey): unknown {
-  return metricDefinitions[metric]?.product?.(row, period);
+  if (!productMetricAvailable(row, metric, period)) return undefined;
+  if (metric === 'custodyDays') return row.custodyDays;
+  return row.periods[period]?.[metric as keyof PublicTrafficPeriodMetrics];
+}
+
+function formatProductMetricValue(row: PublicTrafficProductDataRow, metric: ReportMetricName, period: PeriodKey): string {
+  if (!productMetricAvailable(row, metric, period)) return '不可用';
+  return formatValue(productMetricValue(row, metric, period), metricDefinition(metric));
 }
 
 function productFieldValue(row: PublicTrafficProductDataRow, field: ReportQueryFilter['field'], period: PeriodKey): unknown {
@@ -333,6 +342,28 @@ function compareValues(left: unknown, right: unknown, operator: ReportQueryFilte
 function productMatchesFilters(row: PublicTrafficProductDataRow, filters: ReportQueryFilter[] | undefined, period: PeriodKey): boolean {
   if (!filters?.length) return true;
   return filters.every((filter) => compareValues(productFieldValue(row, filter.field, period), filter.value, filter.operator));
+}
+
+function metricFilterFields(filters: ReportQueryFilter[] | undefined): ReportMetricName[] {
+  return Array.from(new Set((filters ?? [])
+    .map((filter) => filter.field)
+    .filter((field): field is ReportMetricName => reportMetricNames.includes(field as ReportMetricName))));
+}
+
+function unavailableFilterMessage(rows: PublicTrafficProductDataRow[], filters: ReportQueryFilter[] | undefined, period: PeriodKey): string | null {
+  for (const metric of metricFilterFields(filters)) {
+    if (!rows.some((row) => productMetricAvailable(row, metric, period))) return metricUnavailableMessage(metric);
+  }
+  return null;
+}
+
+function availabilityFooter(rows: PublicTrafficProductDataRow[], matchedRows: PublicTrafficProductDataRow[], metrics: ReportMetricName[], period: PeriodKey): string[] {
+  return metrics.flatMap((metric) => {
+    const unavailableCount = rows.filter((row) => !productMetricAvailable(row, metric, period)).length;
+    if (unavailableCount === 0) return [];
+    const availableCount = rows.length - unavailableCount;
+    return [`数据覆盖：${metricDefinition(metric).label} 可用 ${availableCount}/${rows.length} 条；已排除 ${rows.length - matchedRows.length} 条缺失来源数据。`];
+  });
 }
 
 function productMatchesQuery(row: PublicTrafficProductDataRow, query: string | undefined): boolean {
@@ -373,18 +404,18 @@ function sortableProductValue(row: PublicTrafficProductDataRow, sortBy: PublicTr
 
 function formatProductLine(row: PublicTrafficProductDataRow, period: PeriodKey, metrics: ReportMetricName[], index: number): string {
   const metricText = metrics
-    .map((metric) => `${metricDefinitions[metric].label} ${formatValue(productMetricValue(row, metric, period), metricDefinitions[metric])}`)
+    .map((metric) => `${metricDefinition(metric).label} ${formatProductMetricValue(row, metric, period)}`)
     .join('，');
   return `${index + 1}. 端内ID ${internalProductId(row)} ${row.productName}：${period} ${metricText}`;
 }
 
 function formatSummary(context: PublicTrafficDataReportContext, args: PublicTrafficReportQueryArguments): string {
   const periods = periodsFromArgs(args);
-  const metrics = metricList(args, 'summary').filter((metric) => metricDefinitions[metric].summary);
+  const metrics = metricList(args, 'summary').filter((metric) => summaryMetricValue(metric, context.summary['1d']) !== undefined);
   const lines = periods.map((period) => {
     const summary = context.summary[period];
     const metricText = metrics
-      .map((metric) => `${metricDefinitions[metric].label} ${formatValue(metricDefinitions[metric].summary?.(summary), metricDefinitions[metric])}`)
+      .map((metric) => `${metricDefinition(metric).label} ${formatValue(summaryMetricValue(metric, summary), metricDefinition(metric))}`)
       .join('，');
     return `${period}：${metricText}`;
   });
@@ -395,10 +426,10 @@ function formatComparison(context: PublicTrafficDataReportContext, args: PublicT
   const previous = context.previousSummary;
   if (!previous) return `公域日报较前日变化 ${context.date}\n暂无前日汇总数据，无法计算较前日变化。`;
   const current = context.summary['1d'];
-  const metrics = metricList(args, 'summary').filter((metric) => metricDefinitions[metric].summary);
+  const metrics = metricList(args, 'summary').filter((metric) => summaryMetricValue(metric, current) !== undefined);
   return [
     `公域日报较前日变化 ${context.date}`,
-    ...metrics.map((metric) => formatComparisonValue(metric, metricDefinitions[metric].summary?.(current), metricDefinitions[metric].summary?.(previous))),
+    ...metrics.map((metric) => formatComparisonValue(metric, summaryMetricValue(metric, current), summaryMetricValue(metric, previous))),
   ].join('\n');
 }
 
@@ -414,9 +445,15 @@ function formatProducts(context: PublicTrafficDataReportContext, args: PublicTra
     ? args.sortBy
     : args.sortBy ?? metrics[0] ?? 'publicVisits';
 
-  const rows = context.rows
-    .filter((row) => productMatchesQuery(row, args.productQuery))
+  const scopedRows = context.rows
+    .filter((row) => productMatchesQuery(row, args.productQuery));
+  const unavailableMessage = unavailableFilterMessage(scopedRows, args.filters, period);
+  if (unavailableMessage) return `公域日报商品查询 ${context.date}\n${unavailableMessage}`;
+
+  const filteredRows = scopedRows
     .filter((row) => productMatchesFilters(row, args.filters, period))
+    .filter((row) => !reportMetricNames.includes(sortBy as ReportMetricName) || productMetricAvailable(row, sortBy as ReportMetricName, period));
+  const rows = filteredRows
     .sort((left, right) => {
       const compared = compareSortableValues(sortableProductValue(left, sortBy, period), sortableProductValue(right, sortBy, period));
       return sortDirection === 'asc' ? compared : -compared;
@@ -426,8 +463,9 @@ function formatProducts(context: PublicTrafficDataReportContext, args: PublicTra
   if (rows.length === 0) return `公域日报商品查询 ${context.date}\n暂无匹配商品。`;
   return [
     `公域日报商品查询 ${context.date}`,
-    `${period}，按 ${metricDefinitions[sortBy as ReportMetricName]?.label ?? sortBy} ${sortDirection === 'asc' ? '升序' : '降序'}，前 ${rows.length} 条`,
+    `${period}，按 ${reportMetricNames.includes(sortBy as ReportMetricName) ? metricDefinition(sortBy as ReportMetricName).label : sortBy} ${sortDirection === 'asc' ? '升序' : '降序'}，前 ${rows.length} 条`,
     ...rows.map((row, index) => formatProductLine(row, period, metrics, index)),
+    ...availabilityFooter(scopedRows, filteredRows, metricFilterFields(args.filters), period),
   ].join('\n');
 }
 
@@ -450,15 +488,15 @@ export function runPublicTrafficReportDateComparison(
     return `公域日报区间对比 ${currentContext.date} vs ${previousContext.date}\n缺少 ${period} 汇总数据，无法计算。`;
   }
 
-  const metrics = metricList(args, 'summary').filter((metric) => metricDefinitions[metric].summary);
+  const metrics = metricList(args, 'summary').filter((metric) => summaryMetricValue(metric, current) !== undefined);
   const currentLabel = `${currentContext.date} ${period}`;
   const previousLabel = `${previousContext.date} ${period}`;
   return [
     `公域日报区间对比 ${currentLabel} vs ${previousLabel}`,
     ...metrics.map((metric) => formatLabeledComparisonValue(
       metric,
-      metricDefinitions[metric].summary?.(current),
-      metricDefinitions[metric].summary?.(previous),
+      summaryMetricValue(metric, current),
+      summaryMetricValue(metric, previous),
       currentLabel,
       previousLabel,
     )),
@@ -471,7 +509,10 @@ function formatProductAggregation(context: PublicTrafficDataReportContext, args:
 
   const period = periodsFromArgs(args)[0] ?? '1d';
   const aggregation = args.aggregation && reportAggregationNames.includes(args.aggregation) ? args.aggregation : 'count';
-  const rows = matchingProductRows(context, args, period);
+  const scopedRows = context.rows.filter((row) => productMatchesQuery(row, args.productQuery));
+  const unavailableMessage = unavailableFilterMessage(scopedRows, args.filters, period);
+  if (unavailableMessage) return `公域日报商品聚合统计 ${context.date}\n${unavailableMessage}`;
+  const rows = scopedRows.filter((row) => productMatchesFilters(row, args.filters, period));
   const header = [
     `公域日报商品聚合统计 ${context.date}`,
     `范围：${period}，匹配 ${rows.length} 条商品`,
@@ -492,7 +533,7 @@ function formatProductAggregation(context: PublicTrafficDataReportContext, args:
     ].join('\n');
   }
 
-  const definition = metricDefinitions[metric];
+  const definition = metricDefinition(metric);
   const values = rows
     .map((row) => ({ row, value: numericProductMetricValue(row, metric, period) }))
     .filter((item): item is { row: PublicTrafficProductDataRow; value: number } => item.value !== undefined);
@@ -604,18 +645,18 @@ function formatSourceCoverage(context: PublicTrafficDataReportContext, args: Pub
   return lines.join('\n');
 }
 
-function formatProductDetailPeriod(row: PublicTrafficProductDataRow, period: PeriodKey): string {
-  const metricText = productDetailMetrics
-    .map((metric) => `${metricDefinitions[metric].label} ${formatValue(productMetricValue(row, metric, period), metricDefinitions[metric])}`)
+function formatProductDetailPeriod(row: PublicTrafficProductDataRow, period: PeriodKey, metrics: ReportMetricName[]): string {
+  const metricText = metrics
+    .map((metric) => `${metricDefinition(metric).label} ${formatProductMetricValue(row, metric, period)}`)
     .join('，');
   return `${period}：${metricText}`;
 }
 
-function formatProductDetailLine(row: PublicTrafficProductDataRow, periods: PeriodKey[], index: number): string {
+function formatProductDetailLine(row: PublicTrafficProductDataRow, periods: PeriodKey[], metrics: ReportMetricName[], index: number): string {
   return [
     `${index + 1}. 端内ID ${internalProductId(row)} ${row.productName}`,
     `平台商品ID ${row.platformProductId}，托管天数 ${formatValue(row.custodyDays)}`,
-    ...periods.map((period) => formatProductDetailPeriod(row, period)),
+    ...periods.map((period) => formatProductDetailPeriod(row, period, metrics)),
   ].join('\n');
 }
 
@@ -625,6 +666,7 @@ function formatProductDetail(context: PublicTrafficDataReportContext, args: Publ
 
   const periods = args.period || args.periods?.length ? periodsFromArgs(args) : PERIODS;
   const sortPeriod = periods[0] ?? '1d';
+  const metrics = args.metrics?.filter((metric): metric is ReportMetricName => reportMetricNames.includes(metric)) ?? productDetailMetrics;
   const sortDirection = args.sortDirection ?? 'desc';
   const sortBy = args.sortBy && reportMetricNames.includes(args.sortBy as ReportMetricName) ? args.sortBy : args.sortBy ?? 'publicVisits';
   const limit = args.limit === undefined ? 5 : clampLimit(args.limit);
@@ -641,7 +683,7 @@ function formatProductDetail(context: PublicTrafficDataReportContext, args: Publ
   return [
     `公域日报商品全量明细 ${context.date}`,
     `展示 ${rows.length} 条，周期 ${periods.join('、')}`,
-    ...rows.map((row, index) => formatProductDetailLine(row, periods, index)),
+    ...rows.map((row, index) => formatProductDetailLine(row, periods, metrics, index)),
   ].join('\n\n');
 }
 

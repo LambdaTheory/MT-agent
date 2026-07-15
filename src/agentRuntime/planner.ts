@@ -142,6 +142,9 @@ function isReferenceToPriorStep(reference: string, priorStepIds: Set<string>, ha
 function schemaAllowsValue(schema: unknown, value: unknown, options: { allowPlaceholders?: boolean }): boolean {
   if (!isRecord(schema)) return true;
   if (options.allowPlaceholders && isPlannerPlaceholder(value)) return true;
+  if (Array.isArray(schema.anyOf) && !schema.anyOf.some((item) => schemaAllowsValue(item, value, options))) return false;
+  if (Array.isArray(schema.oneOf) && schema.oneOf.filter((item) => schemaAllowsValue(item, value, options)).length !== 1) return false;
+  if (schema.not !== undefined && schemaAllowsValue(schema.not, value, options)) return false;
   if (Array.isArray(schema.enum) && !schema.enum.includes(value)) return false;
 
   const schemaTypes = readSchemaTypes(schema.type);

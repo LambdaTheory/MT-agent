@@ -1,5 +1,7 @@
 import type { AgentToolDefinition } from './tool.js';
+import { publicTrafficMetricKeys } from '../agentData/publicTrafficMetricCatalog.js';
 
+const arbitraryWindowDaysSchema = { type: ['integer', 'string'], pattern: '^(?:[1-9]|[1-8]\\d|90)$', minimum: 1, maximum: 90 };
 const noArgumentsSchema = { type: 'object', additionalProperties: false };
 const reportDateSchema = { type: 'string', pattern: '^(?:\\d{4}-\\d{2}-\\d{2}|\\d{2,4}[./-]\\d{1,2}[./-]\\d{1,2}|\\d{1,2}[./-]\\d{1,2}|\\d{1,2}月\\d{1,2}日)$' };
 const optionalReportDateArgumentsSchema = { type: 'object', properties: { date: reportDateSchema }, additionalProperties: false };
@@ -8,7 +10,7 @@ const windowAggregateArgumentsSchema = {
   properties: {
     date: reportDateSchema,
     endDate: reportDateSchema,
-    windowDays: { type: ['integer', 'string'], pattern: '^[1-9]\\d*$', minimum: 1 },
+    windowDays: arbitraryWindowDaysSchema,
   },
   required: ['windowDays'],
   additionalProperties: false,
@@ -30,31 +32,53 @@ const refreshCandidateExplainArgumentsSchema = {
     query: { type: 'string' },
     sameSkuGroupId: { type: 'string' },
     zeroMetric: { type: 'string', enum: ['created_orders', 'amount'] },
+    windowDays: arbitraryWindowDaysSchema,
   },
   required: ['zeroMetric'],
   additionalProperties: false,
 };
-const reportPeriodSchema = { type: 'string', enum: ['1d', '7d', '30d'] };
+const metricThresholdOperatorSchema = { type: 'string', enum: ['eq', 'neq', 'gt', 'gte', 'lt', 'lte'] };
 const reportMetricSchema = {
   type: 'string',
-  enum: [
-    'exposure',
-    'publicVisits',
-    'dashboardVisits',
-    'createdOrders',
-    'signedOrders',
-    'reviewedOrders',
-    'shippedOrders',
-    'createdOrderAmount',
-    'signedOrderAmount',
-    'reviewedOrderAmount',
-    'shippedOrderAmount',
-    'amount',
-    'exposureVisitRate',
-    'visitCreatedOrderRate',
-    'visitShipmentRate',
-    'custodyDays',
+  enum: [...publicTrafficMetricKeys],
+};
+const metricThresholdConditionSchema = {
+  type: 'object',
+  properties: {
+    metric: reportMetricSchema,
+    operator: metricThresholdOperatorSchema,
+    value: { type: 'number' },
+  },
+  required: ['metric', 'operator', 'value'],
+  additionalProperties: false,
+};
+const metricThresholdExplainArgumentsSchema = {
+  type: 'object',
+  anyOf: [
+    { required: ['conditions'] },
+    { required: ['metric', 'operator', 'value'] },
   ],
+  properties: {
+    date: reportDateSchema,
+    query: { type: 'string' },
+    sameSkuGroupId: { type: 'string' },
+    metric: { type: 'string', enum: [...publicTrafficMetricKeys] },
+    operator: metricThresholdOperatorSchema,
+    value: { type: 'number' },
+    conditions: { type: 'array', minItems: 1, maxItems: 6, items: metricThresholdConditionSchema },
+    windowDays: arbitraryWindowDaysSchema,
+    requireActive: { type: 'boolean' },
+    requireOnlineDays: { type: ['integer', 'string'], pattern: '^[1-9]\\d*$', minimum: 1 },
+  },
+  additionalProperties: false,
+};
+const reportPeriodSchema = { type: 'string', enum: ['1d', '7d', '30d'] };
+const stableMetricMetadataProperties = {
+  metric: { type: 'string', enum: [...publicTrafficMetricKeys] },
+  windowDays: { type: 'integer' },
+  endDate: { type: 'string' },
+  availability: { type: 'object' },
+  productIds: { type: 'array', items: { type: 'string' } },
 };
 const reportAggregationSchema = { type: 'string', enum: ['count', 'sum', 'avg', 'min', 'max'] };
 const reportSourceSchema = { type: 'string', enum: ['exposure', 'dashboard', 'all'] };
@@ -143,13 +167,46 @@ const publicTrafficReportQueryArgumentsSchema = {
   required: ['target'],
   additionalProperties: false,
 };
+const publicTrafficWindowQueryArgumentsSchema = {
+  type: 'object',
+  properties: {
+    date: reportDateSchema,
+    endDate: reportDateSchema,
+    windowDays: arbitraryWindowDaysSchema,
+    productQuery: { type: 'string' },
+    sameSkuGroupId: { type: 'string' },
+    metrics: { type: 'array', minItems: 1, maxItems: 16, items: reportMetricSchema },
+    filters: {
+      type: 'array',
+      maxItems: 6,
+      items: {
+        type: 'object',
+        properties: {
+          field: reportMetricSchema,
+          operator: { type: 'string', enum: ['eq', 'neq', 'gt', 'gte', 'lt', 'lte'] },
+          value: { type: 'number' },
+        },
+        required: ['field', 'operator', 'value'],
+        additionalProperties: false,
+      },
+    },
+    sortBy: reportMetricSchema,
+    sortDirection: { type: 'string', enum: ['asc', 'desc'] },
+    aggregation: reportAggregationSchema,
+    limit: { type: 'integer', minimum: 1, maximum: 50 },
+  },
+  required: ['windowDays'],
+  additionalProperties: false,
+};
 const keywordArgumentsSchema = { type: 'object', properties: { keyword: { type: 'string' }, date: reportDateSchema }, required: ['keyword'], additionalProperties: false };
 const productRankingArgumentsSchema = {
   type: 'object',
   properties: {
     query: { type: 'string' },
-    metric: { type: 'string', enum: ['shippedOrders', 'amount', 'exposure'] },
-    periodDays: { type: ['integer', 'string'], pattern: '^[1-9]\\d*$', minimum: 1 },
+    metric: reportMetricSchema,
+    date: reportDateSchema,
+    endDate: reportDateSchema,
+    periodDays: arbitraryWindowDaysSchema,
   },
   required: ['query'],
   additionalProperties: false,
@@ -159,8 +216,10 @@ const categoryRankingArgumentsSchema = {
   type: 'object',
   properties: {
     category: { type: 'string' },
-    metric: { type: 'string', enum: ['shippedOrders', 'amount', 'exposure'] },
-    periodDays: { type: ['integer', 'string'], enum: [1, 7, 30, '1', '7', '30'] },
+    metric: reportMetricSchema,
+    date: reportDateSchema,
+    endDate: reportDateSchema,
+    periodDays: arbitraryWindowDaysSchema,
     limit: positiveIntegerLikeSchema,
   },
   required: ['metric', 'periodDays'],
@@ -184,7 +243,7 @@ const linkRegistryResolveProductsResultMetadataSchema = {
     status: { type: 'string' },
     query: { type: 'string' },
     resolutionMode: { type: 'string' },
-    sameSkuGroupId: { type: 'string' },
+    sameSkuGroupId: { type: ['string', 'null'] },
     productIds: { type: 'array', items: { type: 'string' }, description: 'Internal product ids resolved for follow-up tools such as rental.pricePreview.productIds.' },
     count: { type: 'integer' },
     matchText: { type: 'string' },
@@ -194,32 +253,54 @@ const productRankingResultMetadataSchema = {
   type: 'object',
   description: 'Metadata available to later planner steps after product.rankBestSameSku.',
   properties: {
+    ...stableMetricMetadataProperties,
     status: { type: 'string' },
     query: { type: 'string' },
     bestProductId: { type: 'string', description: 'Best internal product id for follow-up actions such as rental.newLinkBatchPlan.sourceProductId.' },
     sameSkuGroupId: { type: 'string' },
-    productIds: { type: 'array', items: { type: 'string' }, description: 'Stable ranked internal product ids for later planner steps.' },
+    productIds: { ...stableMetricMetadataProperties.productIds, description: 'Stable ranked internal product ids for later planner steps.' },
     rankingCount: { type: 'integer', description: 'Number of ranked products available to later planner steps.' },
     periodDays: { type: 'integer' },
-    metric: { type: 'string' },
     date: { type: 'string' },
     best: { type: 'object' },
     ranking: { type: 'array' },
+  },
+};
+const categoryRankingResultMetadataSchema = {
+  type: 'object',
+  description: 'Metadata available to later planner steps after product.rankByCategory.',
+  properties: {
+    ...stableMetricMetadataProperties,
+    toolName: { type: 'string' },
+    date: { type: 'string' },
+    category: { type: ['string', 'null'] },
+    period: { type: 'string' },
+    periodDays: { type: 'integer' },
+    items: { type: 'array' },
   },
 };
 const windowAggregateResultMetadataSchema = {
   type: 'object',
   description: 'Metadata available to later planner steps after publicTraffic.windowAggregate; use productIds instead of guessing item internals.',
   properties: {
+    ...stableMetricMetadataProperties,
     toolName: { type: 'string' },
     status: { type: 'string' },
-    endDate: { type: 'string' },
     windowDays: { type: 'integer', description: 'Window length used for the aggregation.' },
     productCount: { type: 'integer', description: 'Number of aggregated products.' },
-    productIds: { type: 'array', items: { type: 'string' }, description: 'Stable internal product ids for follow-up planner steps.' },
+    productIds: { ...stableMetricMetadataProperties.productIds, description: 'Stable internal product ids for follow-up planner steps.' },
     fullyCoveredProductIds: { type: 'array', items: { type: 'string' }, description: 'Product ids with complete daily coverage for the requested window.' },
     partialCoveredProductIds: { type: 'array', items: { type: 'string' }, description: 'Product ids with partial daily coverage for the requested window.' },
     missingDatesByProduct: { type: 'object', description: 'Missing daily report dates keyed by internal product id.' },
+    items: { type: 'array' },
+  },
+};
+const windowQueryResultMetadataSchema = {
+  type: 'object',
+  description: 'Metadata available to later planner steps after publicTraffic.windowQuery.',
+  properties: {
+    ...stableMetricMetadataProperties,
+    toolName: { type: 'string' },
     items: { type: 'array' },
   },
 };
@@ -241,9 +322,11 @@ const refreshCandidateExplainResultMetadataSchema = {
   type: 'object',
   description: 'Metadata available to later planner steps after strategy.refreshCandidateExplain.',
   properties: {
+    ...stableMetricMetadataProperties,
     toolName: { type: 'string' },
     status: { type: 'string' },
     zeroMetric: { type: 'string' },
+    legacyArgumentAdapted: { type: 'boolean' },
     query: { type: 'string' },
     sameSkuGroupId: { type: 'string' },
     candidateCount: { type: 'integer', description: 'Number of refresh candidates in scope.' },
@@ -253,6 +336,29 @@ const refreshCandidateExplainResultMetadataSchema = {
     skipped: { type: 'object' },
     skippedReasons: { type: 'array', items: { type: 'string' }, description: 'Human-readable skip reasons for follow-up planner branching.' },
     scopeLine: { type: 'string' },
+    reasonSummary: { type: 'array', items: { type: 'string' } },
+  },
+};
+const metricThresholdExplainResultMetadataSchema = {
+  type: 'object',
+  description: 'Metadata available to later planner steps after strategy.metricThresholdExplain.',
+  properties: {
+    ...stableMetricMetadataProperties,
+    toolName: { type: 'string' },
+    status: { type: 'string' },
+    metricLabel: { type: 'string' },
+    metricSource: { type: 'string' },
+    operator: { type: 'string' },
+    value: { type: 'number' },
+    conditions: { type: 'array' },
+    conditionSummary: { type: 'string' },
+    query: { type: 'string' },
+    sameSkuGroupId: { type: 'string' },
+    candidateCount: { type: 'integer', description: 'Number of products matching the threshold.' },
+    candidateProductIds: { type: 'array', items: { type: 'string' }, description: 'Stable internal product ids that matched the threshold.' },
+    unavailableMetricProductIds: { type: 'array', items: { type: 'string' }, description: 'Product ids skipped because the requested metric is unavailable in the window.' },
+    skipped: { type: 'object' },
+    skippedReasons: { type: 'array', items: { type: 'string' }, description: 'Human-readable skip reasons for follow-up planner branching.' },
     reasonSummary: { type: 'array', items: { type: 'string' } },
   },
 };
@@ -289,6 +395,10 @@ const refreshActivityPlanResultMetadataSchema = {
   type: 'object',
   description: 'Metadata available after operations.refreshActivityPlan planning.',
   properties: {
+    ...stableMetricMetadataProperties,
+    conditions: { type: 'array' },
+    conditionSummary: { type: 'string' },
+    groupPlans: { type: 'array' },
     date: { type: 'string' },
     candidateCount: { type: 'integer' },
     shownCandidateCount: { type: 'integer' },
@@ -307,7 +417,10 @@ const refreshActivityPlanResultMetadataSchema = {
     blockers: { type: 'array', items: { type: 'string' } },
     skippedGroups: { type: 'array', items: { type: 'string' } },
     scope: { type: ['string', 'null'] },
-    zeroMetric: { type: 'string', enum: ['created_orders', 'amount'] },
+    metricLabel: { type: 'string' },
+    operator: { type: 'string' },
+    value: { type: 'number' },
+    legacyArgumentAdapted: { type: 'boolean' },
   },
 };
 const refreshActivityExecuteResultMetadataSchema = {
@@ -367,11 +480,12 @@ const productIdArgumentsSchema = {
   required: ['productId'],
   additionalProperties: false,
 };
+const internalProductIdSchema = { type: 'string', pattern: '^\\d+$' };
 const rentalDelistArgumentsSchema = {
   type: 'object',
   properties: {
-    productId: { type: 'string', description: 'Single internal product id, or a comma/newline separated list for batch delist compatibility.' },
-    productIds: { type: 'array', minItems: 1, maxItems: 80, items: { type: 'string' }, description: 'Internal product ids to delist in one confirmed batch.' },
+    productId: { type: 'string', pattern: '^\\d+(?:[\\s,，;；]+\\d+)*$', description: 'Single internal product id, or a comma/newline separated list for batch delist compatibility.' },
+    productIds: { type: 'array', minItems: 1, maxItems: 80, items: internalProductIdSchema, description: 'Internal product ids to delist in one confirmed batch.' },
   },
   minProperties: 1,
   additionalProperties: false,
@@ -379,7 +493,7 @@ const rentalDelistArgumentsSchema = {
 const rentalDelistBatchArgumentsSchema = {
   type: 'object',
   properties: {
-    productIds: { type: 'array', minItems: 1, maxItems: 80, items: { type: 'string' } },
+    productIds: { type: 'array', minItems: 1, maxItems: 80, items: internalProductIdSchema },
   },
   required: ['productIds'],
   additionalProperties: false,
@@ -497,8 +611,10 @@ const refreshActivityPlanArgumentsSchema = {
     maxCandidates: { type: 'number' },
     query: { type: 'string' },
     sameSkuGroupId: { type: 'string' },
-    zeroMetric: { type: 'string', enum: ['created_orders', 'amount'] },
+    conditions: { type: 'array', minItems: 1, maxItems: 6, items: metricThresholdConditionSchema },
+    windowDays: arbitraryWindowDaysSchema,
   },
+  required: ['conditions', 'windowDays'],
   additionalProperties: false,
 };
 const refreshActivityExecuteArgumentsSchema = {
@@ -529,10 +645,11 @@ const refreshActivityExecuteArgumentsSchema = {
 };
 const rentalPriceChangeArgumentsSchema = {
   type: 'object',
+  not: { required: ['discount', 'adjustmentAmount'] },
   properties: {
-    productId: { type: 'string' },
+    productId: internalProductIdSchema,
     fields: { type: 'object' },
-    discount: { type: 'number', description: 'Explicit multiplier only. Use 0.8 for 8-fold, 1.8 for 180%; never use bare fold numbers such as 8.' },
+    discount: { type: ['number', 'string'], description: 'Explicit multiplier only. Use 0.8 for 8-fold, 1.8 for 180%; never use bare fold numbers such as 8.' },
     adjustmentAmount: { type: ['number', 'string'], description: 'Absolute amount to add to every rental price field. Use negative values such as -1 to subtract 1 yuan.' },
     scope: { type: 'string', enum: ['rent_fields', 'all_price_fields'], description: '兼容旧参数；倍数/折扣类改价会被强制限制为 rent_fields。非租金字段必须用 fields 精准点名。' },
   },
@@ -541,8 +658,9 @@ const rentalPriceChangeArgumentsSchema = {
 };
 const rentalPricePreviewArgumentsSchema = {
   type: 'object',
+  not: { required: ['discount', 'adjustmentAmount'] },
   properties: {
-    productIds: { type: 'array', minItems: 1, maxItems: 24, items: { type: 'string' } },
+    productIds: { type: 'array', minItems: 1, maxItems: 24, items: internalProductIdSchema },
     fields: { type: 'object' },
     discount: { type: ['number', 'string'], description: 'Explicit multiplier only. Use 0.8 for 8-fold, 1.8 for 180%; never use bare fold numbers such as 8.' },
     adjustmentAmount: { type: ['number', 'string'], description: 'Absolute amount to add to every rental price field. Use negative values such as -1 to subtract 1 yuan.' },
@@ -625,12 +743,21 @@ const rentalSpecDimArgumentsSchema = {
 };
 const rentalPriceRollbackArgumentsSchema = {
   type: 'object',
+  oneOf: [
+    { required: ['taskId'] },
+    { required: ['rollbackFile'] },
+  ],
   properties: {
-    productId: { type: 'string' },
-    taskId: { type: 'string' },
+    productId: internalProductIdSchema,
+    taskId: { type: 'string', pattern: '^task_\\d+_[a-fA-F0-9]+$' },
     rollbackFile: { type: 'string' },
   },
-  minProperties: 1,
+  additionalProperties: false,
+};
+const rentalPriceSnapshotArgumentsSchema = {
+  type: 'object',
+  properties: { query: { type: 'string' } },
+  required: ['query'],
   additionalProperties: false,
 };
 const newLinkBatchPlanArgumentsSchema = {
@@ -713,7 +840,7 @@ const agentTools: AgentToolDefinition[] = [
   },
   {
     name: 'product.rankBestSameSku',
-    description: '按链接维护档案解析商品名、别名、端内ID或同款组，并返回同款组里公域数据表现最好的端内ID。适用于“s23最好的链接是哪条”“数据最好的 pocket3 的端内id是多少”“近20天金额最好的 r50 是哪条”。metric 支持 shippedOrders/amount/exposure，periodDays 支持 1/7/15/20/30 等正整数；非 1/7/30 窗口会回到逐日 1d 数据聚合。',
+    description: '按链接维护档案解析商品名、别名、端内ID或同款组，并返回同款组里公域数据表现最好的端内ID。适用于“s23最好的链接是哪条”“数据最好的 pocket3 的端内id是多少”“近20天公域访问最好的 r50 是哪条”。metric 支持公域日报全指标目录，periodDays 支持 1..90 天任意窗口。',
     risk: 'read',
     requiresConfirmation: false,
     inputSchema: productRankingArgumentsSchema,
@@ -721,10 +848,11 @@ const agentTools: AgentToolDefinition[] = [
   },
   {
     name: 'product.rankByCategory',
-    description: '按链接档案里的品类/类型筛选商品，并按公域日报指标排名。metric 支持 shippedOrders/amount/exposure，periodDays 支持 1/7/30。',
+    description: '按链接档案里的品类/类型筛选商品，并按公域日报指标排名。metric 支持公域日报全指标目录，periodDays 支持 1..90 天任意窗口。',
     risk: 'read',
     requiresConfirmation: false,
     inputSchema: categoryRankingArgumentsSchema,
+    resultMetadataSchema: categoryRankingResultMetadataSchema,
   },
   {
     name: 'productId.lookup',
@@ -883,11 +1011,19 @@ const agentTools: AgentToolDefinition[] = [
   },
   {
     name: 'publicTraffic.windowAggregate',
-    description: '从逐日公域数据上下文按 1d 明细聚合任意窗口商品指标，支持 7/15/20/30 等 windowDays；不使用既有 30d 汇总倒推。',
+    description: '从逐日公域数据上下文按 1d 明细聚合任意窗口商品指标，支持 7/15/20/30 等 windowDays；不使用既有 30d 汇总倒推。不筛选、不排序；需要条件查询时使用 publicTraffic.windowQuery。',
     risk: 'read',
     requiresConfirmation: false,
     inputSchema: windowAggregateArgumentsSchema,
     resultMetadataSchema: windowAggregateResultMetadataSchema,
+  },
+  {
+    name: 'publicTraffic.windowQuery',
+    description: '按任意 1..90 天窗口查询每日公域商品总表全指标，支持字段选择、AND 筛选、排序、排名、聚合和限制条数；不可用字段不会按 0 参与比较。',
+    risk: 'read',
+    requiresConfirmation: false,
+    inputSchema: publicTrafficWindowQueryArgumentsSchema,
+    resultMetadataSchema: windowQueryResultMetadataSchema,
   },
   {
     name: 'system.dataHealth',
@@ -905,8 +1041,16 @@ const agentTools: AgentToolDefinition[] = [
     resultMetadataSchema: safeSourceResolveResultMetadataSchema,
   },
   {
+    name: 'strategy.metricThresholdExplain',
+    description: '通用来源感知指标阈值解释工具：按任意公域日报指标、比较符和值筛选候选，支持 query/sameSkuGroupId 缩小范围、windowDays 任意窗口、requireActive 和 requireOnlineDays；不可用指标不会按 0 参与筛选。',
+    risk: 'read',
+    requiresConfirmation: false,
+    inputSchema: metricThresholdExplainArgumentsSchema,
+    resultMetadataSchema: metricThresholdExplainResultMetadataSchema,
+  },
+  {
     name: 'strategy.refreshCandidateExplain',
-    description: '独立解释活跃度刷新候选数量，说明为什么某查询或同款组 0 候选，包括 inactive、无日报行、30d 访问缺失、上线天数不足或未知。',
+    description: '兼容旧参数的活跃度刷新候选解释工具，已被 strategy.metricThresholdExplain 取代；必须显式传 zeroMetric=amount 或 zeroMetric=created_orders，不再默认创单。',
     risk: 'read',
     requiresConfirmation: false,
     inputSchema: refreshCandidateExplainArgumentsSchema,
@@ -942,7 +1086,7 @@ const agentTools: AgentToolDefinition[] = [
   },
   {
     name: 'operations.refreshActivityPlan',
-    description: '按最新或指定日期公域日报筛选近30天零创单或零订单金额 active 链接，按链接档案汇总待下架链接和补链建议；可传 query 或 sameSkuGroupId 将范围收窄到指定商品/同款组，可传 zeroMetric=amount 表示订单金额为0、zeroMetric=created_orders 表示创单为0；返回只下架 / 下架+补链策略选择卡，确认前不下架、不补链。',
+    description: '按最新或指定日期公域日报筛选满足显式 conditions[]/windowDays 阈值的 active 链接；conditions 使用 AND 语义并保留每个用户指定指标，按链接档案汇总待下架链接和补链建议。可传 query 或 sameSkuGroupId 将范围收窄到指定商品/同款组；任一未授权为自动下架条件的指标只返回解释，不生成执行策略卡。确认前不下架、不补链。',
     risk: 'read',
     requiresConfirmation: false,
     inputSchema: refreshActivityPlanArgumentsSchema,
@@ -950,7 +1094,7 @@ const agentTools: AgentToolDefinition[] = [
   },
   {
     name: 'operations.refreshActivityExecute',
-    description: '确认后执行活跃度刷新计划：批量下架近 30 天零创单链接，并按同款组补回新链',
+    description: '确认后执行活跃度刷新计划：批量下架计划中选定的低活跃链接，并按同款组补回新链',
     risk: 'high',
     requiresConfirmation: true,
     plannerVisible: false,
@@ -1168,7 +1312,7 @@ const agentTools: AgentToolDefinition[] = [
     description: '按端内ID、商品别名或同款组读取租赁后台当前规格价格，并按 SKU 聚合平均租金。适用于“x200u 的定价情况怎么样”。这是只读查询，不用于改价。',
     risk: 'read',
     requiresConfirmation: false,
-    inputSchema: productRankingArgumentsSchema,
+    inputSchema: rentalPriceSnapshotArgumentsSchema,
   },
   {
     name: 'rental.newLinkBatchPlan',

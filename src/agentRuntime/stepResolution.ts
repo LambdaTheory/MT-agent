@@ -1,3 +1,5 @@
+import { schemaAllowsArguments } from './planner.js';
+
 export type AgentStepMetadataStore = Record<string, unknown>;
 
 export interface AgentStepResponseLike {
@@ -9,13 +11,30 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function omitUndefinedProperties(value: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined));
+}
+
+function readSegmentValue(current: unknown, part: string): unknown {
+  const indexed = /^(\w+)\[(\d+)\]$/.exec(part);
+  if (indexed) {
+    if (!isRecord(current) && !Array.isArray(current)) return undefined;
+    const container = (current as Record<string, unknown>)[indexed[1]];
+    if (!Array.isArray(container)) return undefined;
+    return container[Number(indexed[2])];
+  }
+
+  if (!isRecord(current) && !Array.isArray(current)) return undefined;
+  return (current as Record<string, unknown>)[part];
+}
+
 function readPath(root: unknown, path: string): unknown {
   if (!path.trim()) return undefined;
   let current: unknown = root;
   for (const part of path.split('.')) {
     if (!part) return undefined;
-    if (!isRecord(current) && !Array.isArray(current)) return undefined;
-    current = (current as Record<string, unknown>)[part];
+    current = readSegmentValue(current, part);
+    if (current === undefined) return undefined;
   }
   return current;
 }
@@ -84,8 +103,12 @@ export function resolvePlannerArguments(
   return resolved.ok && isRecord(resolved.value) ? { ok: true, value: resolved.value } : resolved.ok ? { ok: false, reference: '<arguments>' } : resolved;
 }
 
-export function rememberStepMetadata(store: AgentStepMetadataStore, stepId: string, response: AgentStepResponseLike): void {
-  const metadata = response.metadata ?? { text: response.text };
+export function rememberStepMetadata(store: AgentStepMetadataStore, stepId: string, response: AgentStepResponseLike, resultMetadataSchema?: unknown): void {
+  const candidate = response.metadata ?? { text: response.text };
+  const validationCandidate = response.metadata === undefined ? undefined : omitUndefinedProperties(response.metadata);
+  const metadata = resultMetadataSchema !== undefined && validationCandidate !== undefined && !schemaAllowsArguments(resultMetadataSchema, validationCandidate)
+    ? { text: response.text, metadataValidationError: stepId }
+    : candidate;
   store[stepId] = metadata;
   store.last = metadata;
 }
