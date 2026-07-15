@@ -302,6 +302,7 @@ function isAgentFirstLocalDirectIntent(intent: BotIntent): boolean {
     case 'agent_learning_summary':
     case 'lookup_product_id_card':
     case 'lookup_product_id':
+    case 'query_product':
     case 'link_registry_overview':
     case 'link_registry_maintenance_prompt':
     case 'link_registry_governance_prompt':

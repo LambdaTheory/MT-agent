@@ -29,7 +29,7 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import { parseBotIntent } from '../src/feishuBot/intent.js';
+import { parseAgentFirstBotIntent, parseBotIntent } from '../src/feishuBot/intent.js';
 import { createFeishuMessageDispatcher } from '../src/feishuBot/dispatcher.js';
 import type { BotIntent } from '../src/feishuBot/types.js';
 
@@ -272,6 +272,8 @@ describe('explicit commands — current parser behavior', () => {
   it('parses query_product intent', () => {
     expect(parseBotIntent('查询 565')).toEqual({ type: 'query_product', keyword: '565' });
     expect(parseBotIntent('查2000000000000000000001')).toEqual({ type: 'query_product', keyword: '2000000000000000000001' });
+    expect(parseBotIntent('查703,706,736')).toEqual({ type: 'query_product', keyword: '703, 706, 736' });
+    expect(parseAgentFirstBotIntent('查703,706,736')).toEqual({ type: 'query_product', keyword: '703, 706, 736' });
     expect(parseBotIntent('查询商品 721')).toEqual({ type: 'query_product', keyword: '721' });
     expect(parseBotIntent('查商品 721')).toEqual({ type: 'query_product', keyword: '721' });
     expect(parseBotIntent('商品 iPhone')).toEqual({ type: 'query_product', keyword: 'iPhone' });
