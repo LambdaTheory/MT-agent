@@ -29,7 +29,7 @@ describe('createAgentRuntime', () => {
     expect(handledIntents).toEqual([{ type: 'query_product', keyword: '565' }]);
   });
 
-  it('uses planner-first resolving when an agent planner is configured', async () => {
+  it('keeps product queries local-direct when an agent planner is configured', async () => {
     const handledIntents: BotIntent[] = [];
     const runtime = createAgentRuntime({
       agentPlannerProvider: { async proposePlan() { return '{}'; } },
@@ -39,8 +39,8 @@ describe('createAgentRuntime', () => {
       },
     });
 
-    await expect(runtime.handle({ source: 'api', text: '查询 565' })).resolves.toEqual({ text: 'unknown' });
-    expect(handledIntents).toEqual([{ type: 'unknown', text: '查询 565' }]);
+    await expect(runtime.handle({ source: 'api', text: '查询 565' })).resolves.toEqual({ text: 'query_product' });
+    expect(handledIntents).toEqual([{ type: 'query_product', keyword: '565' }]);
   });
 
   it('preserves request metadata without requiring adapter-specific fields', async () => {

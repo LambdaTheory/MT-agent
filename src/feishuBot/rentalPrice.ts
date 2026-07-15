@@ -1090,7 +1090,7 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
         };
       }
 
-      const submit = await send({ action: 'submit' });
+      const submit = await send({ action: 'submit', expectedProductId: request.productId });
       const submitStatus = commandStatus(submit);
       if (submitStatus !== 'ok') {
         await updateAuditTask(rootDir, audit, 'failed');
@@ -1147,7 +1147,7 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
         return { productId: safeProductId, ok: false, lines: [`apply: ${applyStatus}`, 'submit: skipped', 'verify: skipped', `changesFile: ${changesFile}`] };
       }
 
-      const submit = await send({ action: 'submit' });
+      const submit = await send({ action: 'submit', expectedProductId: safeProductId });
       const submitStatus = commandStatus(submit);
       if (submitStatus !== 'ok') {
         return { productId: safeProductId, ok: false, lines: [`apply: ${applyStatus}`, `submit: ${submitStatus}`, 'verify: skipped', `changesFile: ${changesFile}`] };
@@ -1197,7 +1197,7 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
         };
       }
 
-      const submit = await send({ action: 'submit' });
+      const submit = await send({ action: 'submit', expectedProductId: productId });
       const submitStatus = commandStatus(submit);
       if (submitStatus !== 'ok') {
         await updateAuditTask(rootDir, audit, 'rollback_failed');
@@ -1310,7 +1310,7 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
     async submitCurrent(expectedProductId) {
       const safeProductId = readProductId(expectedProductId);
       if (!safeProductId) throw new Error('expectedProductId must be a numeric string');
-      const result = await send({ action: 'submit' });
+      const result = await send({ action: 'submit', expectedProductId: safeProductId });
       const status = commandStatus(result);
       return { productId: safeProductId, ok: status === 'ok', lines: [`submit: ${status}`] };
     },
@@ -1319,7 +1319,7 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
       if (!safeProductId) throw new Error('productId must be a numeric string');
       const result = await send({ action: 'spec-add-dim', productId: safeProductId, itemTitle: title });
       const status = commandStatus(result);
-      const submit = await send({ action: 'submit' });
+      const submit = await send({ action: 'submit', expectedProductId: safeProductId });
       const submitStatus = commandStatus(submit);
       const discovered = await send({ action: 'spec-discover', productId: safeProductId });
       const discoverStatus = commandStatus(discovered);
@@ -1342,7 +1342,7 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
         expectedProductId: safeProductId,
       });
       const removeStatus = commandStatus(remove);
-      const submit = await send({ action: 'submit' });
+      const submit = await send({ action: 'submit', expectedProductId: safeProductId });
       const submitStatus = commandStatus(submit);
       const discovered = await send({ action: 'spec-discover', productId: safeProductId });
       const discoverStatus = commandStatus(discovered);
@@ -1407,7 +1407,7 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
         };
       }
 
-      const submit = await send({ action: 'submit' });
+      const submit = await send({ action: 'submit', expectedProductId: request.productId });
       const submitStatus = commandStatus(submit);
       if (submitStatus !== 'ok') {
         return {

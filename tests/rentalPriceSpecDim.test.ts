@@ -23,7 +23,7 @@ describe('spec dimension client', () => {
     expect(result.ok).toBe(true);
     expect(commands).toEqual([
       { action: 'spec-add-dim', productId: '648', itemTitle: '激光险' },
-      { action: 'submit' },
+      { action: 'submit', expectedProductId: '648' },
       { action: 'spec-discover', productId: '648' },
     ]);
   });
@@ -71,7 +71,7 @@ describe('spec dimension client', () => {
     expect(result.ok).toBe(true);
     expect(commands).toEqual([
       { action: 'spec-remove-dim', productId: '648', specDimId: 'dim-1', expectedProductId: '648' },
-      { action: 'submit' },
+      { action: 'submit', expectedProductId: '648' },
       { action: 'spec-discover', productId: '648' },
     ]);
   });

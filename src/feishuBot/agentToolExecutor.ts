@@ -109,6 +109,7 @@ import { refreshActivityPlanConfirmationKey, saveRefreshActivityPlan, type Refre
 import type { RentalWriteLedgerContext } from './rentalWriteOperationHandlers.js';
 import { rentalPerSpecPriceApplyResponse, rentalPerSpecPricePlanResponse } from './rentalPerSpecPriceHandlers.js';
 import { rentalSpecDimApplyResponse, rentalSpecDimPlanResponse } from './rentalSpecDimHandlers.js';
+import { rentalBulkPriceApplyResponse, rentalBulkPricePlanResponse } from './rentalBulkPriceHandlers.js';
 import { buildRefreshActivityStrategyCard } from './refreshActivityCard.js';
 
 export interface AgentToolExecutionOptions {
@@ -2657,6 +2658,10 @@ export async function executeAgentToolRequest(
       return rentalPricePreviewResponse(request.arguments, request.reason, options.rentalPriceClient ?? createRentalPriceSkillClient(), outputDir, request.continuation);
     case 'rental.priceApply':
       return rentalPriceApplyResponse(request.arguments, options.rentalPriceClient ?? createRentalPriceSkillClient(), options.ledgerContext);
+    case 'rental.bulkPricePlan':
+      return rentalBulkPricePlanResponse(request.arguments, request.reason, options.rentalPriceClient ?? createRentalPriceSkillClient(), outputDir, request.continuation);
+    case 'rental.bulkPriceApply':
+      return rentalBulkPriceApplyResponse(request.arguments, options.rentalPriceClient ?? createRentalPriceSkillClient(), outputDir, options.ledgerContext);
     case 'rental.perSpecPricePlan':
       return rentalPerSpecPricePlanResponse(request.arguments, request.reason, options.rentalPriceClient ?? createRentalPriceSkillClient(), outputDir, request.continuation);
     case 'rental.perSpecPriceApply':

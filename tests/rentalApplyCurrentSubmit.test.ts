@@ -77,7 +77,7 @@ describe('rental apply-current and submitCurrent tools', () => {
     expect(JSON.parse(await readFile(String(applyBody.changesFile), 'utf8'))).toEqual(changes);
     expect(apply.changesFile).toBe(applyBody.changesFile);
     expect(fetch).toHaveBeenNthCalledWith(2, 'http://127.0.0.1:9223', expect.objectContaining({
-      body: JSON.stringify({ action: 'submit' }),
+      body: JSON.stringify({ action: 'submit', expectedProductId: '648' }),
     }));
   });
 

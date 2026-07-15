@@ -196,7 +196,7 @@ describe('agent runtime planner proposal validation', () => {
 
   it('rejects all planner-hidden tools even when they exist in the internal registry', () => {
     const hiddenTools = listAgentTools().filter((tool) => tool.plannerVisible === false);
-    expect(hiddenTools.map((tool) => tool.name)).toEqual(['operations.refreshActivityExecute', 'rental.priceApply', 'rental.operationConfirmRequest', 'rental.perSpecPriceApply', 'rental.specDimApply']);
+    expect(hiddenTools.map((tool) => tool.name)).toEqual(['operations.refreshActivityExecute', 'rental.bulkPriceApply', 'rental.priceApply', 'rental.operationConfirmRequest', 'rental.perSpecPriceApply', 'rental.specDimApply']);
 
     for (const tool of hiddenTools) {
       expect(validateAgentPlannerProposal(JSON.stringify({

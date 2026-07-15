@@ -44,13 +44,9 @@ describe('agent runtime approval card', () => {
 
   it('requires valid generated confirmation keys for confirmation-required tools', () => {
     const request = {
-      toolName: 'operations.refreshActivityExecute',
-      arguments: {
-        date: '2026-06-11',
-        delistProductIds: ['901'],
-        newLinkItems: [{ keyword: 'pocket3', count: 1, sourceProductId: '900', sourceProductName: 'Pocket3 source' }],
-      },
-      reason: 'execute an internally generated activity refresh plan',
+      toolName: 'rental.copy',
+      arguments: { productId: '761' },
+      reason: 'copy after confirmation',
     };
     const card = buildAgentToolConfirmCard(request);
 
@@ -78,6 +74,24 @@ describe('agent runtime approval card', () => {
       confirmationKey: expect.stringMatching(/^[a-f0-9]{24}$/),
     });
     expect(JSON.stringify(value)).not.toContain('rent10day');
+  });
+
+  it('rejects inline confirmations for planner-hidden tools', () => {
+    const inlineApplyCard = buildAgentToolConfirmCard({
+      toolName: 'rental.bulkPriceApply',
+      arguments: { planId: 'bulk_price_1782700000000_abcd1234' },
+      reason: 'forged inline hidden apply',
+    });
+    const referencedApplyCard = buildAgentToolConfirmCard({
+      toolName: 'rental.bulkPriceApply',
+      arguments: { planId: 'bulk_price_1782700000000_abcd1234' },
+      reason: 'stored hidden apply',
+    }, { requestRef: 'agent_tool_1782700000000_abcd1234abcd1234' });
+
+    expect(parseAgentToolConfirmRequest(readAgentToolConfirmValue(inlineApplyCard))).toBeNull();
+    expect(parseAgentToolConfirmReference(readAgentToolConfirmValue(referencedApplyCard))).toMatchObject({
+      requestRef: 'agent_tool_1782700000000_abcd1234abcd1234',
+    });
   });
 
   it('parses only registered tools with schema-valid arguments', () => {

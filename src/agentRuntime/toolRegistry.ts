@@ -533,6 +533,39 @@ const submitCurrentArgumentsSchema = {
   required: ['expectedProductId'],
   additionalProperties: false,
 };
+const rentalBulkPriceFieldSchema = {
+  type: 'object',
+  minProperties: 1,
+  additionalProperties: { type: ['string', 'number'] },
+};
+const rentalBulkPricePlanArgumentsSchema = {
+  type: 'object',
+  properties: {
+    items: {
+      type: 'array',
+      minItems: 1,
+      maxItems: 80,
+      items: {
+        type: 'object',
+        properties: {
+          productId: { type: 'string' },
+          fields: rentalBulkPriceFieldSchema,
+        },
+        required: ['productId', 'fields'],
+        additionalProperties: false,
+      },
+    },
+    reason: { type: 'string' },
+  },
+  required: ['items'],
+  additionalProperties: false,
+};
+const rentalBulkPriceApplyArgumentsSchema = {
+  type: 'object',
+  properties: { planId: { type: 'string' } },
+  required: ['planId'],
+  additionalProperties: false,
+};
 const specRemovePlanArgumentsSchema = {
   type: 'object',
   properties: {
@@ -1313,6 +1346,21 @@ const agentTools: AgentToolDefinition[] = [
     risk: 'read',
     requiresConfirmation: false,
     inputSchema: rentalPriceSnapshotArgumentsSchema,
+  },
+  {
+    name: 'rental.bulkPricePlan',
+    description: '生成批量租赁改价计划和确认卡；只接受每个商品的绝对价格字段，确认前不会改价。',
+    risk: 'high',
+    requiresConfirmation: true,
+    inputSchema: rentalBulkPricePlanArgumentsSchema,
+  },
+  {
+    name: 'rental.bulkPriceApply',
+    description: '确认后按 planId 执行已持久化的批量租赁改价计划。',
+    risk: 'high',
+    requiresConfirmation: true,
+    plannerVisible: false,
+    inputSchema: rentalBulkPriceApplyArgumentsSchema,
   },
   {
     name: 'rental.newLinkBatchPlan',

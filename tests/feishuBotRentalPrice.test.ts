@@ -537,6 +537,7 @@ describe('rental price skill client copy diagnostics', () => {
     await copyRentalPriceAuditScripts(rootDir);
     const currentValues = { rent1day: '30.00', rent10day: '80.00' };
     const applyProductIds: unknown[] = [];
+    const submitExpectedProductIds: unknown[] = [];
     vi.stubGlobal('fetch', vi.fn(async (_input, init) => {
       const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
       if (body.action === 'read') {
@@ -553,6 +554,7 @@ describe('rental price skill client copy diagnostics', () => {
         if (typeof changes.rent1day === 'string') currentValues.rent1day = changes.rent1day;
         return new Response(JSON.stringify({ status: 'ok' }));
       }
+      if (body.action === 'submit') submitExpectedProductIds.push(body.expectedProductId);
       return new Response(JSON.stringify({ status: 'ok' }));
     }));
     const client = createRentalPriceSkillClient({ rootDir, daemonUrl: 'http://127.0.0.1:9223' });
@@ -581,6 +583,7 @@ describe('rental price skill client copy diagnostics', () => {
     expect(rollback.productId).toBe('761');
     expect(rollback.lines.join('\n')).toContain(`auditTask: ${preview.audit?.taskId}`);
     expect(applyProductIds).toEqual(['761', '761']);
+    expect(submitExpectedProductIds).toEqual(['761', '761']);
     expect(currentValues.rent1day).toBe('30.00');
     const rolledBackTask = JSON.parse(await readFile(join(rootDir, 'tasks', `${preview.audit?.taskId}.json`), 'utf8')) as { status: string; evidence: Array<{ type: string }> };
     expect(rolledBackTask.status).toBe('rolled_back');
