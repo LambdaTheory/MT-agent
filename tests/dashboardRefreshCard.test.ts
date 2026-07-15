@@ -42,9 +42,14 @@ describe('dashboard refresh result cards', () => {
     expect(rendered).not.toContain('\"tag\":\"button\"');
   });
 
-  it('maps saved existing outcomes to blue saved-data cards', () => {
+  it('maps saved existing outcomes to blue saved-data cards with a layered layout', () => {
     for (const status of ['saved_existing_complete', 'saved_already_resent'] as const) {
-      expect(buildDashboardRefreshResultCard(result(status)).header).toMatchObject({ title: { content: SAVED_TITLE }, template: 'blue' });
+      const card = buildDashboardRefreshResultCard(result(status));
+      expect(card.header).toMatchObject({ title: { content: SAVED_TITLE }, template: 'blue' });
+      expect((card.body as { elements: unknown[] }).elements).toHaveLength(4);
+      expect(JSON.stringify(card)).toContain('\u4e1a\u52a1\u6570\u636e\u65e5');
+      expect(JSON.stringify(card)).toContain('\u4e09\u5468\u671f\u8d28\u91cf');
+      expect(JSON.stringify(card)).toContain('raw \u53bb\u5411');
     }
     expect(JSON.stringify(buildDashboardRefreshResultCard(result('saved_already_resent')))).toContain('\u65e5\u62a5\u5904\u7406\uff1a\u5df2\u8df3\u8fc7\u91cd\u590d\u91cd\u53d1');
   });
