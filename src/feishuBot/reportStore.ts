@@ -1,6 +1,7 @@
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { findOrderAnalysisIndicator } from '../publicTraffic/orderAnalysis.js';
+import { findPublicTrafficReportByDataDate } from '../publicTraffic/reportContextLocator.js';
 import type { PublicTrafficDataReportContext, PublicTrafficProductDataRow } from '../publicTraffic/types.js';
 
 const reportDatePattern = /^\d{4}-\d{2}-\d{2}$/;
@@ -42,15 +43,9 @@ export async function findLatestReportContext(outputDir = 'output'): Promise<{ p
 
 export async function findReportContextByDate(outputDir: string, date: string): Promise<{ path: string; context: PublicTrafficDataReportContext } | null> {
   if (!reportDatePattern.test(date)) throw new Error('date must be YYYY-MM-DD');
-  const directoryDates = await datedOutputDirs(outputDir);
-  const candidates = [date, ...directoryDates.filter((directoryDate) => directoryDate !== date)];
-
-  for (const directoryDate of candidates) {
-    const found = await readReportContextFromDateDir(outputDir, directoryDate);
-    if (found?.context.date === date) return found;
-  }
-
-  return null;
+  const located = await findPublicTrafficReportByDataDate(outputDir, date);
+  if (!located) return null;
+  return { path: located.contextPath, context: located.context };
 }
 
 function percent(value: number): string {
