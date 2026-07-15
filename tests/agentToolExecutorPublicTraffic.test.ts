@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { executeAgentToolRequest } from '../src/feishuBot/agentToolExecutor.js';
+import { resolveQueryFullListText } from '../src/feishuBot/queryFullListAction.js';
 
 const mocks = vi.hoisted(() => ({
   runPublicTrafficReportCli: vi.fn(),
@@ -193,6 +194,159 @@ describe('executeAgentToolRequest public traffic report', () => {
     expect(response.text).toContain('公域日报商品查询 2026-06-22');
     expect(response.text).toContain('端内ID 102');
     expect(response.text).not.toContain('端内ID 101');
+  });
+
+  it('runs productLink.query product detail through the unified query executor', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'mt-agent-product-link-detail-'));
+    const runDir = join(dir, '2026-06-23');
+    await mkdir(runDir, { recursive: true });
+    const metric = {
+      exposure: 10,
+      publicVisits: 2,
+      dashboardVisits: 2,
+      createdOrders: 0,
+      signedOrders: 0,
+      reviewedOrders: 0,
+      shippedOrders: 0,
+      amount: 0,
+      exposureVisitRate: 0.2,
+      visitCreatedOrderRate: 0,
+      visitShipmentRate: 0,
+      hasExposureData: true,
+      hasDashboardData: true,
+    };
+    await writeFile(join(runDir, 'report-context.json'), JSON.stringify({
+      date: '2026-06-22',
+      summary: { '1d': metric, '7d': metric, '30d': metric },
+      conclusions: [],
+      rows: [
+        { productName: 'Pocket 3', platformProductId: 'platform-733', displayProductId: '端内ID 733', custodyDays: 1, periods: { '1d': metric, '7d': { ...metric, exposure: 70 }, '30d': { ...metric, exposure: 300 } } },
+      ],
+      lowExposure: [],
+      weakClick: [],
+      weakConversion: [],
+      highPotential: [],
+      newProductObservation: [],
+      lifecycleGovernance: [],
+      recommendedActions: [],
+      emptySectionNotes: {},
+    }));
+
+    const response = await executeAgentToolRequest(
+      { toolName: 'productLink.query', arguments: { queryType: 'productDetail', productQuery: '733', date: '2026-06-22' }, reason: '统一商品查询' },
+      dir,
+    );
+
+    expect(response.text).toContain('端内ID 733｜商品ID platform-733');
+    expect(JSON.stringify(response.card)).toContain('商品查询结果');
+    expect(response.metadata).toMatchObject({ toolName: 'productLink.query', queryType: 'productDetail', productIds: ['733'] });
+  });
+
+  it('runs productLink.query problem pools with a capped card and controlled queryRef', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'mt-agent-product-link-problem-pool-'));
+    const runDir = join(dir, '2026-06-23');
+    await mkdir(runDir, { recursive: true });
+    const metric = {
+      exposure: 10,
+      publicVisits: 2,
+      dashboardVisits: 2,
+      createdOrders: 0,
+      signedOrders: 0,
+      reviewedOrders: 0,
+      shippedOrders: 0,
+      amount: 0,
+      exposureVisitRate: 0.2,
+      visitCreatedOrderRate: 0,
+      visitShipmentRate: 0,
+      hasExposureData: true,
+      hasDashboardData: true,
+    };
+    const ids = ['701', '702', '703', '704', '705', '706'];
+    await writeFile(join(runDir, 'report-context.json'), JSON.stringify({
+      date: '2026-06-22',
+      summary: { '1d': metric, '7d': metric, '30d': metric },
+      conclusions: [],
+      rows: ids.map((id) => ({ productName: `托管异常商品 ${id}`, platformProductId: `platform-${id}`, displayProductId: `端内ID ${id}`, custodyDays: 10, periods: { '1d': metric, '7d': metric, '30d': metric } })),
+      lowExposure: [],
+      weakClick: [],
+      weakConversion: [],
+      highPotential: [],
+      newProductObservation: [],
+      lifecycleGovernance: [],
+      custodyAbnormal: ids.map((id) => ({ identifier: `端内ID ${id}`, action: '检查托管', reason: '托管异常', priority: 'high' })),
+      recommendedActions: [],
+      emptySectionNotes: {},
+    }));
+
+    const response = await executeAgentToolRequest(
+      { toolName: 'productLink.query', arguments: { queryType: 'problemPool', section: 'custodyAbnormal', date: '2026-06-22' }, reason: '统一问题池查询' },
+      dir,
+    );
+
+    const cardText = JSON.stringify(response.card);
+    expect(response.text).toContain('托管异常');
+    expect(cardText).toContain('query_full_list');
+    expect(cardText).toContain('q2:');
+    expect(cardText).toContain('剩余 1 条可查看完整清单');
+    expect(response.metadata).toMatchObject({
+      toolName: 'productLink.query',
+      queryType: 'problemPool',
+      section: 'custodyAbnormal',
+      count: 6,
+      shownCount: 5,
+    });
+    expect(String(response.metadata?.queryRef)).toMatch(/^q2:/);
+  });
+
+  it('keeps filtered problem-pool full-list callbacks bound to the original controlled query', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'mt-agent-product-link-filtered-full-list-'));
+    const runDir = join(dir, '2026-06-23');
+    await mkdir(runDir, { recursive: true });
+    const metric = {
+      exposure: 10,
+      publicVisits: 2,
+      dashboardVisits: 2,
+      createdOrders: 0,
+      signedOrders: 0,
+      reviewedOrders: 0,
+      shippedOrders: 0,
+      amount: 0,
+      exposureVisitRate: 0.2,
+      visitCreatedOrderRate: 0,
+      visitShipmentRate: 0,
+      hasExposureData: true,
+      hasDashboardData: true,
+    };
+    await writeFile(join(runDir, 'report-context.json'), JSON.stringify({
+      date: '2026-06-22',
+      summary: { '1d': metric, '7d': metric, '30d': metric },
+      conclusions: [],
+      rows: ['701', '702', '703'].map((id) => ({ productName: `托管异常商品 ${id}`, platformProductId: `platform-${id}`, displayProductId: `端内ID ${id}`, custodyDays: 10, periods: { '1d': metric, '7d': metric, '30d': metric } })),
+      lowExposure: [],
+      weakClick: [],
+      weakConversion: [],
+      highPotential: [],
+      newProductObservation: [],
+      lifecycleGovernance: [],
+      custodyAbnormal: [
+        { identifier: '端内ID 701', action: '检查托管', reason: '托管异常', priority: 'high' },
+        { identifier: '端内ID 702', action: '观察', reason: '托管异常', priority: 'low' },
+        { identifier: '端内ID 703', action: '检查托管', reason: '托管异常', priority: 'high' },
+      ],
+      recommendedActions: [],
+      emptySectionNotes: {},
+    }));
+
+    const response = await executeAgentToolRequest(
+      { toolName: 'productLink.query', arguments: { queryType: 'problemPool', section: 'custodyAbnormal', filters: [{ field: 'priority', operator: 'eq', value: 'high' }], sortBy: 'productId', date: '2026-06-22' }, reason: '筛选高优先级问题池' },
+      dir,
+    );
+    const fullText = await resolveQueryFullListText(dir, response.metadata?.queryRef);
+
+    expect(response.metadata).toMatchObject({ count: 2, shownCount: 2 });
+    expect(fullText).toContain('端内ID 701｜商品ID platform-701');
+    expect(fullText).toContain('端内ID 703｜商品ID platform-703');
+    expect(fullText).not.toContain('端内ID 702｜商品ID platform-702');
   });
 
   it('normalizes short report dates before querying saved report contexts', async () => {

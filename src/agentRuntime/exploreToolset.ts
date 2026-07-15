@@ -8,6 +8,7 @@ const EXPLORE_SAFE_READ_TOOLS = new Set([
   'publicTraffic.latestSummary',
   'publicTraffic.conversionSummary',
   'publicTraffic.reportQuery',
+  'productLink.query',
   'product.query',
   'product.rankBestSameSku',
   'product.rankByCategory',

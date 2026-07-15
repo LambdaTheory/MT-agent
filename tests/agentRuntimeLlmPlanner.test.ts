@@ -44,7 +44,8 @@ describe('agent runtime LLM planner', () => {
     expect(system).toContain('arbitrary read-only questions about saved public traffic report data');
     expect(system).toContain('target productAggregation');
     expect(system).toContain('aggregation count/sum/avg/min/max');
-    expect(system).toContain('target sourceCoverage');
+    expect(system).toContain('queryType sourceCoverage');
+    expect(system).not.toContain('use publicTraffic.reportQuery with target sourceCoverage');
     expect(system).toContain('coverageStatus missing');
     expect(system).toContain('use publicTraffic.windowQuery');
     expect(system).toContain('访问量 / 公域访问 → publicVisits');
@@ -65,8 +66,9 @@ describe('agent runtime LLM planner', () => {
     expect(system).toContain('Do not jump directly to operations.refreshActivityPlan');
     expect(system).toContain('target orderDerived');
     expect(system).toContain('orderDerivedMetric closeRateStatus');
-    expect(system).toContain('target productDetail');
-    expect(system).toContain('target comparison');
+    expect(system).toContain('productLink.query');
+    expect(system).toContain('queryType productDetail');
+    expect(system).toContain('target dateComparison');
     expect(system).toContain('Normalize short report dates such as 26.6.18');
     expect(system).toContain('use rental.priceSnapshot');
     expect(system).toContain('linkRegistry.resolveProducts');
@@ -76,6 +78,7 @@ describe('agent runtime LLM planner', () => {
     expect(system).not.toContain('For composite flows, return selectedWorkflow');
     expect(user.tools.map((tool) => tool.name)).toContain('rental.newLinkBatchPlan');
     expect(user.tools.map((tool) => tool.name)).toContain('publicTraffic.reportQuery');
+    expect(user.tools.map((tool) => tool.name)).toContain('productLink.query');
     expect(user.tools.map((tool) => tool.name)).toContain('publicTraffic.windowAggregate');
     expect(user.tools.map((tool) => tool.name)).toContain('publicTraffic.windowQuery');
     expect(user.tools.map((tool) => tool.name)).toContain('strategy.refreshCandidateExplain');

@@ -1686,7 +1686,7 @@ describe('createFeishuSdkBot card.action.trigger', () => {
     await expect(readFile(submitSessionPath, 'utf8')).resolves.toContain('"status": "price_callback_pending"');
   });
 
-  it('handles query full-list card action by returning a read-only text card', async () => {
+  it('handles query full-list card action by replying with read-only text', async () => {
     const outputDir = await writeContext();
     const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
     const sent: unknown[] = [];
@@ -1700,12 +1700,22 @@ describe('createFeishuSdkBot card.action.trigger', () => {
       },
     });
 
-    expect(sent).toEqual([]);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({
+      kind: 'reply',
+      request: {
+        path: { message_id: 'om-query-full-list' },
+        data: { msg_type: 'text' },
+      },
+    });
+    const textContent = JSON.parse((sent[0] as { request: { data: { content: string } } }).request.data.content) as { text: string };
+    expect(textContent.text).toContain('托管异常 2026-06-11');
+    expect(textContent.text).toContain('暂无数据。');
     expect(result).toMatchObject({ card: { type: 'raw', data: { schema: '2.0' } } });
     const cardText = JSON.stringify((result as any).card.data);
-    expect(cardText).toContain('完整清单');
-    expect(cardText).toContain('托管异常 2026-06-11');
-    expect(cardText).toContain('暂无数据。');
+    expect(cardText).toContain('完整清单已发送');
+    expect(cardText).not.toContain('托管异常 2026-06-11');
+    expect(cardText).not.toContain('暂无数据。');
   });
 
   it('handles id_lookup form submit by returning the updated card', async () => {

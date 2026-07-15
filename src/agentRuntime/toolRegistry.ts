@@ -199,6 +199,41 @@ const publicTrafficWindowQueryArgumentsSchema = {
   additionalProperties: false,
 };
 const keywordArgumentsSchema = { type: 'object', properties: { keyword: { type: 'string' }, date: reportDateSchema }, required: ['keyword'], additionalProperties: false };
+const productLinkQueryArgumentsSchema = {
+  type: 'object',
+  properties: {
+    queryType: { type: 'string', enum: ['productDetail', 'productList', 'problemPool', 'problemPoolCounts', 'sourceCoverage', 'linkStatus'] },
+    date: reportDateSchema,
+    productQuery: { type: 'string' },
+    section: reportSectionSchema,
+    period: reportPeriodSchema,
+    periods: { type: 'array', minItems: 1, maxItems: 3, items: reportPeriodSchema },
+    metrics: { type: 'array', minItems: 1, maxItems: 16, items: reportMetricSchema },
+    filters: publicTrafficReportQueryArgumentsSchema.properties.filters,
+    sortBy: reportQuerySortFieldSchema,
+    sortDirection: { type: 'string', enum: ['asc', 'desc'] },
+    limit: { type: ['integer', 'string'], pattern: '^[1-9]\\d*$', minimum: 1 },
+    source: reportSourceSchema,
+    coverageStatus: reportCoverageStatusSchema,
+    display: { type: 'string', enum: ['auto', 'card', 'text', 'fullText'] },
+  },
+  required: ['queryType'],
+  additionalProperties: false,
+};
+const productLinkQueryResultMetadataSchema = {
+  type: 'object',
+  description: 'Metadata available after unified product/link/report-section query execution.',
+  properties: {
+    status: { type: 'string' },
+    queryType: { type: 'string' },
+    date: { type: 'string' },
+    section: { type: 'string' },
+    productIds: { type: 'array', items: { type: 'string' } },
+    count: { type: 'integer' },
+    shownCount: { type: 'integer' },
+    queryRef: { type: 'string' },
+  },
+};
 const productRankingArgumentsSchema = {
   type: 'object',
   properties: {
@@ -859,10 +894,18 @@ const agentTools: AgentToolDefinition[] = [
   },
   {
     name: 'publicTraffic.reportQuery',
-    description: '通用只读日报查询工具：查询已保存公域日报中的汇总、商品明细、问题池、订单分析、数据源状态和结论。适合“访问最高前20”“各问题池多少条”“托管异常有哪些”“失活/生命周期治理候选有哪些”“订单签约发货率多少”等自然语言问题。不用于“某商品有多少条链接/有哪些端内ID”这类链接档案总数问题。',
+    description: '通用只读日报查询工具：查询已保存公域日报中的汇总、订单分析、数据源状态和结论。普通商品、链接列表、问题池、托管异常、筛选条件查询优先使用 productLink.query。',
     risk: 'read',
     requiresConfirmation: false,
     inputSchema: publicTrafficReportQueryArgumentsSchema,
+  },
+  {
+    name: 'productLink.query',
+    description: '统一商品/链接/问题池只读查询入口：用于正常“查商品/查链接/托管异常/问题池/筛选条件/链接状态/数据源缺失”等查询。LLM 只提供结构化参数；工具负责确定性查询、筛选、双ID展示、卡片和完整清单引用。不要用于明确“映射/转换/互查/对应平台ID”的 ID 转换需求。',
+    risk: 'read',
+    requiresConfirmation: false,
+    inputSchema: productLinkQueryArgumentsSchema,
+    resultMetadataSchema: productLinkQueryResultMetadataSchema,
   },
   {
     name: 'product.query',

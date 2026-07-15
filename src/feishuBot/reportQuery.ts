@@ -746,7 +746,7 @@ export function buildReportSectionCardData(context: PublicTrafficDataReportConte
       reason: String(item.reason ?? item.note ?? ''),
       ...(typeof item.priority === 'string' ? { priority: item.priority } : {}),
     }));
-  return { label: sectionLabels[section], total: sectionItems(context, section).length, rows };
+  return { label: sectionLabels[section], total: rows.length, rows };
 }
 
 function formatSection(context: PublicTrafficDataReportContext, args: PublicTrafficReportQueryArguments): string {

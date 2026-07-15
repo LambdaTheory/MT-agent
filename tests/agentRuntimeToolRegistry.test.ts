@@ -13,6 +13,7 @@ describe('agent runtime tool registry', () => {
       'publicTraffic.latestSummary',
       'publicTraffic.conversionSummary',
       'publicTraffic.reportQuery',
+      'productLink.query',
       'product.query',
       'product.rankBestSameSku',
       'product.rankByCategory',
@@ -168,6 +169,7 @@ describe('agent runtime tool registry', () => {
     expect(findAgentTool('publicTraffic.latestSummary')).toMatchObject({ risk: 'read', requiresConfirmation: false });
     expect(findAgentTool('publicTraffic.conversionSummary')).toMatchObject({ risk: 'read', requiresConfirmation: false });
     expect(findAgentTool('publicTraffic.reportQuery')).toMatchObject({ risk: 'read', requiresConfirmation: false });
+    expect(findAgentTool('productLink.query')).toMatchObject({ risk: 'read', requiresConfirmation: false });
     expect(findAgentTool('product.rankBestSameSku')).toMatchObject({ risk: 'read', requiresConfirmation: false });
     expect(findAgentTool('productId.lookupCard')).toMatchObject({ risk: 'read', requiresConfirmation: false });
     expect(findAgentTool('inventory.statusOverview')).toMatchObject({ risk: 'read', requiresConfirmation: false });
@@ -246,6 +248,18 @@ describe('agent runtime tool registry', () => {
       required: ['target'],
       additionalProperties: false,
     });
+    expect(findAgentTool('productLink.query')?.inputSchema).toMatchObject({
+      properties: {
+        queryType: { enum: ['productDetail', 'productList', 'problemPool', 'problemPoolCounts', 'sourceCoverage', 'linkStatus'] },
+        productQuery: { type: 'string' },
+        section: { enum: expect.arrayContaining(['custodyAbnormal', 'recommendedActions', 'removedLinks']) },
+        filters: { type: 'array' },
+        sortBy: { type: 'string' },
+        limit: { type: ['integer', 'string'] },
+      },
+      required: ['queryType'],
+      additionalProperties: false,
+    });
     expect(findAgentTool('product.query')?.inputSchema).toMatchObject({
       properties: { keyword: { type: 'string' }, date: { type: 'string' } },
       required: ['keyword'],
@@ -292,6 +306,7 @@ describe('agent runtime tool registry', () => {
       'publicTraffic.latestSummary',
       'publicTraffic.conversionSummary',
       'publicTraffic.reportQuery',
+      'productLink.query',
       'product.query',
       'product.rankBestSameSku',
       'product.rankByCategory',
@@ -378,6 +393,13 @@ describe('agent runtime tool registry', () => {
       properties: {
         bestProductId: { type: 'string' },
         ranking: { type: 'array' },
+      },
+    });
+    expect(plannerTools.find((tool) => tool.name === 'productLink.query')?.resultMetadataSchema).toMatchObject({
+      properties: {
+        queryType: { type: 'string' },
+        productIds: { type: 'array' },
+        queryRef: { type: 'string' },
       },
     });
     expect(plannerTools.find((tool) => tool.name === 'linkRegistry.resolveProducts')?.resultMetadataSchema).toMatchObject({
