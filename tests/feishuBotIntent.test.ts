@@ -201,7 +201,6 @@ it('parses daemon-only link registry maintenance commands', () => {
 
 describe('parseAgentFirstBotIntent', () => {
   it('keeps natural commands unknown so the Agent planner chooses tools', () => {
-    expect(parseAgentFirstBotIntent('查 565')).toEqual({ type: 'unknown', text: '查 565' });
     expect(parseAgentFirstBotIntent('发个日报')).toEqual({ type: 'unknown', text: '发个日报' });
     expect(parseAgentFirstBotIntent('s23最好的链接是哪条?')).toEqual({ type: 'unknown', text: 's23最好的链接是哪条?' });
   });
@@ -229,8 +228,12 @@ describe('parseAgentFirstBotIntent', () => {
     expect(parseAgentFirstBotIntent('重发6.22日报')).toEqual({ type: 'unknown', text: '重发6.22日报' });
     expect(parseAgentFirstBotIntent('2026-06-22 的转化率多少')).toEqual({ type: 'unknown', text: '2026-06-22 的转化率多少' });
     expect(parseAgentFirstBotIntent('库存情况 pocket3')).toEqual({ type: 'unknown', text: '库存情况 pocket3' });
-    expect(parseAgentFirstBotIntent('查 433, 798, 872')).toEqual({ type: 'unknown', text: '查 433, 798, 872' });
     expect(parseAgentFirstBotIntent('同步关单')).toEqual({ type: 'unknown', text: '同步关单' });
     expect(parseAgentFirstBotIntent('复制商品 761')).toEqual({ type: 'unknown', text: '复制商品 761' });
+  });
+
+  it('keeps product queries local-direct in Agent-first mode', () => {
+    expect(parseAgentFirstBotIntent('查 565')).toEqual({ type: 'query_product', keyword: '565' });
+    expect(parseAgentFirstBotIntent('查 433, 798, 872')).toEqual({ type: 'query_product', keyword: '433, 798, 872' });
   });
 });
