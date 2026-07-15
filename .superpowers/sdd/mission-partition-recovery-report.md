@@ -22,7 +22,7 @@
 - Build: PASS — `tsc -p tsconfig.json`.
 - Full `npm test`: FAIL — unrelated pre-existing source-string assertion:
   - `tests/publicTrafficCliSource.test.ts` > `public traffic CLI wiring` > `stamps nested platform restriction observation time in current goods snapshot`
-  - Expected `src/cli/publicTrafficReport.ts` to contain `platformRestriction: { ...item.platformRestriction, observedAt: now }`.
+  - Exact assertion: expected `src/cli/publicTrafficReport.ts` to contain `platformRestriction: { ...item.platformRestriction, observedAt: item.platformRestriction.observedAt ?? runDate }`.
   - The output otherwise showed this one failed test; no failure implicated the cherry-pick or mission-partition changes.
 
 ## Concern
