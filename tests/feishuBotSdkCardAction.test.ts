@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { buildAgentToolConfirmCard, type AgentToolConfirmContinuation } from '../src/agentRuntime/approvalCard.js';
 import { buildAgentClarificationCard } from '../src/agentRuntime/clarificationCard.js';
 import { MAX_CLARIFY_DEPTH } from '../src/agentRuntime/intentResolution.js';
@@ -26,6 +26,24 @@ import { openLinkRegistryGovernancePrompt } from '../src/linkRegistry/governance
 import type { LinkRegistryEntry } from '../src/linkRegistry/types.js';
 import { openLinkRegistryMaintenancePrompt } from '../src/linkRegistry/maintenanceSession.js';
 import type { LinkRegistryOverrideRisk } from '../src/linkRegistry/overrides.js';
+
+const dashboardRefreshMocks = vi.hoisted(() => ({
+  loadEnv: vi.fn(),
+  loadConfig: vi.fn(),
+  runDashboardRefresh: vi.fn(),
+}));
+
+vi.mock('../src/config/loadEnv.js', () => ({
+  loadEnv: dashboardRefreshMocks.loadEnv,
+}));
+
+vi.mock('../src/config/loadConfig.js', () => ({
+  loadConfig: dashboardRefreshMocks.loadConfig,
+}));
+
+vi.mock('../src/publicTraffic/dashboardRefresh.js', () => ({
+  runDashboardRefresh: dashboardRefreshMocks.runDashboardRefresh,
+}));
 
 const metric = {
   exposure: 10,
@@ -380,6 +398,53 @@ async function seedLinkGovernanceSession(outputDir: string): Promise<void> {
     referenceDate: '2026-06-24',
   });
 }
+
+describe('dashboard refresh SDK card delivery contract', () => {
+  it('patches an executor-provided orange refresh card instead of the generic green completion card', async () => {
+    const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
+    const sent: unknown[] = [];
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-sdk-dashboard-refresh-card-'));
+    const config = { targetUrl: 'https://example.test/dashboard', periods: ['1d', '7d', '30d'], preferredPageSize: 100, outputDir, browserProfileDir: 'profile' };
+    dashboardRefreshMocks.loadConfig.mockResolvedValueOnce(config);
+    dashboardRefreshMocks.runDashboardRefresh.mockResolvedValueOnce({
+      status: 'still_missing',
+      dataDate: '2026-06-24',
+      actualPageDate: '2026-06-24',
+      refreshQuality: { hasMissing: true, notes: [], periods: { '1d': { complete: true, rowCount: 12 }, '7d': { complete: false, rowCount: 0, reason: 'rowCount=0' }, '30d': { complete: true, rowCount: 300 } } },
+      rebuild: 'skipped',
+      resend: 'skipped',
+      rawLocation: `${outputDir}/2026-06-25`,
+      message: 'saved safely',
+    });
+    const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', outputDir, sdk: fakeSdk(sent, registered) });
+    const confirmValue = agentToolConfirmActionValue(buildAgentToolConfirmCard({
+      toolName: 'publicTraffic.refreshDashboard',
+      arguments: { date: '2026-06-24' },
+      reason: '补抓 2026-06-24 访问页',
+    }));
+
+    bot.start();
+    await registered['card.action.trigger']({
+      event: {
+        context: { open_message_id: 'om-dashboard-refresh-card' },
+        operator: { open_id: 'ou_dashboard' },
+        action: { tag: 'button', name: 'agent_tool_confirm_submit', behaviors: [{ type: 'callback', value: confirmValue }] },
+      },
+    });
+
+    for (let attempt = 0; attempt < 100 && !JSON.stringify(sent).includes('访问页补抓完成，但数据仍未完整'); attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    expect(dashboardRefreshMocks.runDashboardRefresh).toHaveBeenCalledWith({ config, dataDate: '2026-06-24', sendTo: undefined });
+    const finalCard = patchedCard(sent[sent.length - 1]) as { header?: { title?: { content?: string }; template?: string } };
+    expect(finalCard.header?.title?.content).toBe('访问页补抓完成，但数据仍未完整');
+    expect(finalCard.header?.template).toBe('orange');
+    expect(JSON.stringify(finalCard)).toContain('rowCount=0');
+    expect(JSON.stringify(finalCard)).toContain('未重建、未重发');
+    expect(JSON.stringify(finalCard)).not.toContain('Agent 操作已完成');
+  });
+});
 
 describe('createFeishuSdkBot card.action.trigger', () => {
   it('returns a replacement status card when cancelling an Agent clarification and suppresses duplicate text replies', async () => {

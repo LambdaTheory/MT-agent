@@ -46,7 +46,9 @@ import { sendFeishuCard } from '../notify/feishu.js';
 import { summarizeOperationsLearningHistory, summarizeOperationsLearningSession } from '../operationsLearningLoop/session.js';
 import { buildPublicTrafficCard } from '../publicTraffic/buildPublicTrafficCard.js';
 import { buildPublicTrafficFeishuText } from '../publicTraffic/buildPublicTrafficFeishu.js';
+import { assertDashboardDataDate, previousShanghaiDate } from '../publicTraffic/dashboardCaptureDate.js';
 import { runDashboardRefresh } from '../publicTraffic/dashboardRefresh.js';
+import { buildDashboardRefreshResultCard, formatDashboardRefreshResultText } from './dashboardRefreshCard.js';
 import { buildPublicTrafficPaths } from '../publicTraffic/paths.js';
 import type { PublicTrafficDataReportContext, PublicTrafficPeriodMetrics, PublicTrafficProductDataRow } from '../publicTraffic/types.js';
 import { startOperationsLearningSession } from '../operationsLearningLoop/session.js';
@@ -2522,17 +2524,22 @@ export async function executeAgentToolRequest(
       await loadEnv();
       const config = await loadConfig();
       const sendTo = readSendTo(request.arguments.sendTo);
-      const date = readOptionalDate(request.arguments.date) ?? today();
-      const result = await runDashboardRefresh({ config, date, sendTo });
+      const parsedDate = readOptionalDate(request.arguments.date);
+      const dataDate = parsedDate ? assertDashboardDataDate(parsedDate) : previousShanghaiDate();
+      const result = await runDashboardRefresh({ config, dataDate, sendTo });
       return {
-        text: [
-          `访问页补抓完成：${result.message}`,
-          `日期：${date}`,
-          '',
-          `补抓结果：${result.refreshQualityText}`,
-          '',
-          `首版状态：${result.firstQualityText}`,
-        ].join('\n'),
+        text: formatDashboardRefreshResultText(result),
+        card: buildDashboardRefreshResultCard(result),
+        metadata: {
+          toolName: 'publicTraffic.refreshDashboard',
+          ok: true,
+          status: result.status,
+          dataDate: result.dataDate,
+          actualPageDate: result.actualPageDate,
+          rawLocation: result.rawLocation,
+          rebuild: result.rebuild,
+          resend: result.resend,
+        },
       };
     }
     case 'operations.refreshActivityPlan':

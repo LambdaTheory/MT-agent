@@ -23,10 +23,12 @@ describe('public traffic run state', () => {
             '30d': { complete: true, rowCount: 1 },
           },
         },
+        dashboardRefreshDecision: 'saved_existing_complete',
         dashboardRefreshResent: false,
       });
       const loaded = await loadPublicTrafficRunState(path);
       expect(loaded?.date).toBe('2026-06-15');
+      expect(loaded?.dashboardRefreshDecision).toBe('saved_existing_complete');
       expect(loaded?.firstDashboardQuality.hasMissing).toBe(false);
     } finally {
       await rm(dir, { recursive: true, force: true });

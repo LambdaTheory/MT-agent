@@ -21,7 +21,7 @@ export async function crawlPublicTrafficSources(config: AgentConfig, goodsExport
   try {
     await collectGoodsExportPage(config, browser, page, goodsExportPath);
     const exposure = await collectExposurePage(config, page);
-    const dashboard = await collectDashboardPage(config, page);
+    const dashboard = (await collectDashboardPage(config, page)).tables;
     const orderAnalysis = await collectOrderAnalysisPages(config, page);
 
     completed = true;

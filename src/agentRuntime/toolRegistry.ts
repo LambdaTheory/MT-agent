@@ -469,7 +469,7 @@ const optionalSendToArgumentsSchema = {
 const optionalDashboardRefreshArgumentsSchema = {
   type: 'object',
   properties: {
-    date: reportDateSchema,
+    date: { ...reportDateSchema, description: '业务数据截止日；默认昨天，不是日报目录日期' },
     sendTo: { type: 'string' },
   },
   additionalProperties: false,
@@ -1079,7 +1079,7 @@ const agentTools: AgentToolDefinition[] = [
   },
   {
     name: 'publicTraffic.refreshDashboard',
-    description: '补抓访问页/后链路数据；自动使用默认配置保存 raw，必要时重建并重发日报',
+    description: '补抓指定业务数据日的访问页 1日、7日、30日数据；页面日期经回读确认后保存 raw，必要时修复并最多重发一次对应日报。未传 date 时默认昨天。',
     risk: 'write',
     requiresConfirmation: true,
     inputSchema: optionalDashboardRefreshArgumentsSchema,

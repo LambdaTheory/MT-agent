@@ -55,4 +55,61 @@ describe('dashboard crawler source', () => {
     expect(source).toContain('dashboardTarget = await waitForTableOrEmptyState(page, 180000);');
     expect(source).toContain('collectPeriodWithAdaptivePageSize(dashboardTarget');
   });
+
+  it('selects and verifies the requested page date before collecting periods', async () => {
+    const source = await readFile(new URL('../src/crawler/dashboardCrawler.ts', import.meta.url), 'utf8');
+    const collectStart = source.indexOf('export async function collectDashboardPage');
+    const dateSelection = source.indexOf('selectDashboardDataDate', collectStart);
+    const periodLoop = source.indexOf('for (const period of periods)', collectStart);
+
+    expect(source).toContain('input[placeholder="请选择日期"]');
+    expect(source).toContain('assessDashboardDateReadback');
+    expect(dateSelection).toBeGreaterThan(collectStart);
+    expect(dateSelection).toBeLessThan(periodLoop);
+  });
+
+  it('guards against stale pre-selection dashboard state after date readback', async () => {
+    const source = await readFile(new URL('../src/crawler/dashboardCrawler.ts', import.meta.url), 'utf8');
+    const selectStart = source.indexOf('export async function selectDashboardDataDate');
+    const readbackWait = source.indexOf('waitForDashboardDateReadback(input, target, requestedDate)', selectStart);
+    const staleGuardStart = source.indexOf('waitForDashboardRefreshAfterDateSelection', selectStart);
+    const staleGuardAwait = source.indexOf('await refreshAfterSelection', readbackWait);
+    const staleFingerprint = source.indexOf('captureDashboardObservableState', selectStart);
+
+    expect(source).toContain('captureDashboardObservableState');
+    expect(source).toContain('waitForDashboardRefreshAfterDateSelection');
+    expect(source).toContain('loadingTransitionObserved');
+    expect(source).toContain('Dashboard did not refresh after selecting requested dataDate');
+    expect(staleFingerprint).toBeGreaterThan(selectStart);
+    expect(staleFingerprint).toBeLessThan(staleGuardStart);
+    expect(staleGuardStart).toBeGreaterThan(staleFingerprint);
+    expect(staleGuardStart).toBeLessThan(readbackWait);
+    expect(staleGuardAwait).toBeGreaterThan(readbackWait);
+  });
+
+  it('accepts an already-confirmed date readback before reopening the picker', async () => {
+    const source = await readFile(new URL('../src/crawler/dashboardCrawler.ts', import.meta.url), 'utf8');
+    const selectStart = source.indexOf('export async function selectDashboardDataDate');
+    const currentReadback = source.indexOf('input.inputValue', selectStart);
+    const earlyReturn = source.indexOf('assessDashboardDateReadback(requestedDate, currentValue).confirmed', currentReadback);
+    const staleFingerprint = source.indexOf('captureDashboardObservableState', selectStart);
+
+    expect(currentReadback).toBeGreaterThan(selectStart);
+    expect(earlyReturn).toBeGreaterThan(currentReadback);
+    expect(earlyReturn).toBeLessThan(staleFingerprint);
+  });
+
+  it('waits for a visible picker panel and skips hidden locator matches', async () => {
+    const source = await readFile(new URL('../src/crawler/dashboardCrawler.ts', import.meta.url), 'utf8');
+
+    expect(source).toContain('async function waitForVisibleDashboardPickerPanel');
+    expect(source).toContain('while (Date.now() < deadline)');
+    expect(source).toContain('locator.nth(index)');
+    expect(source).toContain('if (visiblePanel) return visiblePanel;');
+  });
+
+  it('keeps automatic merchant sub-account selection in the dashboard flow', async () => {
+    const source = await readFile(new URL('../src/crawler/dashboardCrawler.ts', import.meta.url), 'utf8');
+    expect(source).toContain('await selectSubAccountIfNeeded(page);');
+  });
 });

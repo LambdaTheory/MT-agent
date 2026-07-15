@@ -3340,9 +3340,12 @@ describe('handleBotIntent', () => {
     expect(JSON.stringify(runReport.card)).toContain('agent_tool_confirm');
     expect(mocks.runPublicTrafficReportCli).not.toHaveBeenCalled();
 
-    const refreshDashboard = await handleBotIntent({ type: 'refresh_public_traffic_dashboard', sendTo: 'group' }, outputDir);
+    const refreshDashboard = await handleBotIntent({ type: 'refresh_public_traffic_dashboard', sendTo: 'group', date: '2026-07-14' }, outputDir);
     expect(refreshDashboard.text).toContain('publicTraffic.refreshDashboard');
-    expect(JSON.stringify(refreshDashboard.card)).toContain('agent_tool_confirm');
+    const refreshCardText = JSON.stringify(refreshDashboard.card);
+    expect(refreshCardText).toContain('agent_tool_confirm');
+    expect(refreshCardText).toContain('2026-07-14');
+    expect(refreshCardText).toContain('group');
     expect(mocks.runDashboardRefresh).not.toHaveBeenCalled();
 
     const resend = await handleBotIntent({ type: 'resend_latest_report', sendTo: 'both' }, outputDir);
@@ -4092,6 +4095,8 @@ describe('handleBotIntent', () => {
   });
 
   it('runs a closed-order observation report directly from exact intent', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-07T08:00:00.000Z'));
     const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-closed-order-bot-report-'));
     const registryRoot = await mkdtemp(join(tmpdir(), 'mt-agent-closed-order-registry-'));
     const registryPaths = await writeClosedOrderRegistryFixtures(registryRoot);
@@ -4122,7 +4127,12 @@ describe('handleBotIntent', () => {
       ],
     }), 'utf8');
 
-    const response = await handleBotIntent({ type: 'run_closed_order_observation_report' }, outputDir, { closedOrderRegistryPaths: registryPaths });
+    let response;
+    try {
+      response = await handleBotIntent({ type: 'run_closed_order_observation_report' }, outputDir, { closedOrderRegistryPaths: registryPaths });
+    } finally {
+      vi.useRealTimers();
+    }
     expect(response.text).toContain('关单观察');
     expect(response.text).toContain('报告已写入');
     expect(response.card).toBeDefined();

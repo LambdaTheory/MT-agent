@@ -9,7 +9,17 @@ export interface PublicTrafficRunState {
   firstDashboardQuality: DashboardQualitySummary;
   dashboardRefreshResent: boolean;
   dashboardRefreshResentAt?: string;
-  dashboardRefreshDecision?: 'saved_raw_only' | 'rebuilt_and_resent' | 'first_report_complete' | 'refresh_still_missing' | 'already_resent';
+  dashboardRefreshDecision?:
+    | 'saved_raw_only'
+    | 'rebuilt_and_resent'
+    | 'first_report_complete'
+    | 'refresh_still_missing'
+    | 'already_resent'
+    | 'repaired'
+    | 'still_missing'
+    | 'saved_existing_complete'
+    | 'saved_already_resent'
+    | 'saved_historical_without_report';
 }
 
 export async function loadPublicTrafficRunState(path: string): Promise<PublicTrafficRunState | null> {
@@ -25,3 +35,4 @@ export async function savePublicTrafficRunState(path: string, state: PublicTraff
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, `${JSON.stringify(state, null, 2)}\n`, 'utf8');
 }
+

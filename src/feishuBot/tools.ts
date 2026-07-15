@@ -828,8 +828,11 @@ export async function handleBotIntent(intent: BotIntent, outputDir = 'output', o
   if (intent.type === 'refresh_public_traffic_dashboard') {
     return agentToolConfirmResponse(
       'publicTraffic.refreshDashboard',
-      intent.sendTo ? { sendTo: intent.sendTo } : {},
-      '明确飞书命令需要二次确认后才能补抓访问页数据；若补抓后数据完整，可能重建并重发日报。',
+      {
+        ...(intent.date ? { date: intent.date } : {}),
+        ...(intent.sendTo ? { sendTo: intent.sendTo } : {}),
+      },
+      '明确飞书命令需要二次确认后才能补抓目标业务数据日的访问页 1日、7日、30日数据；若补抓后数据完整，可能重建并重发对应日报。',
     );
   }
 

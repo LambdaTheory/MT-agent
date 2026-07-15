@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { buildAgentToolConfirmCard } from '../src/agentRuntime/approvalCard.js';
 import { MAX_CLARIFY_DEPTH } from '../src/agentRuntime/intentResolution.js';
 import { clarificationConfirmationKey, saveClarificationContext } from '../src/feishuBot/clarificationStore.js';
@@ -28,6 +28,24 @@ import { buildRefreshActivityStrategyCard } from '../src/feishuBot/refreshActivi
 import { refreshActivityPlanConfirmationKey, saveRefreshActivityPlan, type RefreshActivityPlan } from '../src/feishuBot/refreshActivityPlanStore.js';
 import type { FeishuBotIncomingTextMessage } from '../src/feishuBot/types.js';
 import { buildFeishuSignature } from '../src/feishuBot/verify.js';
+
+const dashboardRefreshMocks = vi.hoisted(() => ({
+  loadEnv: vi.fn(),
+  loadConfig: vi.fn(),
+  runDashboardRefresh: vi.fn(),
+}));
+
+vi.mock('../src/config/loadEnv.js', () => ({
+  loadEnv: dashboardRefreshMocks.loadEnv,
+}));
+
+vi.mock('../src/config/loadConfig.js', () => ({
+  loadConfig: dashboardRefreshMocks.loadConfig,
+}));
+
+vi.mock('../src/publicTraffic/dashboardRefresh.js', () => ({
+  runDashboardRefresh: dashboardRefreshMocks.runDashboardRefresh,
+}));
 
 function readAgentToolConfirmValue(card: unknown): unknown {
   const body = (card as { body?: { elements?: Array<{ elements?: Array<{ name?: string; behaviors?: Array<{ value?: unknown }> }> }> } }).body;
@@ -324,6 +342,72 @@ describe('extractTextMessage', () => {
 
   it('ignores non-text messages', () => {
     expect(extractTextMessage({ event: { message: { message_id: 'mid', message_type: 'image', content: '{}' } } } as any)).toBeNull();
+  });
+});
+
+describe('dashboard refresh HTTP card delivery contract', () => {
+  it('replies with an executor-provided orange refresh card instead of generic green completion text', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-http-dashboard-refresh-card-'));
+    const config = { targetUrl: 'https://example.test/dashboard', periods: ['1d', '7d', '30d'], preferredPageSize: 100, outputDir, browserProfileDir: 'profile' };
+    dashboardRefreshMocks.loadConfig.mockResolvedValueOnce(config);
+    dashboardRefreshMocks.runDashboardRefresh.mockResolvedValueOnce({
+      status: 'still_missing',
+      dataDate: '2026-06-24',
+      actualPageDate: '2026-06-24',
+      refreshQuality: { hasMissing: true, notes: [], periods: { '1d': { complete: true, rowCount: 12 }, '7d': { complete: false, rowCount: 0, reason: 'rowCount=0' }, '30d': { complete: true, rowCount: 300 } } },
+      rebuild: 'skipped',
+      resend: 'skipped',
+      rawLocation: `${outputDir}/2026-06-25`,
+      message: 'saved safely',
+    });
+    const cards: Array<{ messageId: string; card: Record<string, unknown> }> = [];
+    const texts: Array<{ messageId: string; text: string }> = [];
+    const server = startFeishuBotServer({
+      port: 0,
+      appId: 'app',
+      appSecret: 'secret',
+      outputDir,
+      replyCard: async ({ messageId }, card) => {
+        cards.push({ messageId, card });
+        return { sent: true, channel: 'app' };
+      },
+      replyText: async ({ messageId }, text) => {
+        texts.push({ messageId, text });
+        return { sent: true, channel: 'app' };
+      },
+    });
+    try {
+      await new Promise<void>((resolve) => server.once('listening', resolve));
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+      const confirmValue = readAgentToolConfirmValue(buildAgentToolConfirmCard({
+        toolName: 'publicTraffic.refreshDashboard',
+        arguments: { date: '2026-06-24' },
+        reason: '补抓 2026-06-24 访问页',
+      }));
+
+      const response = await fetch(`http://127.0.0.1:${address.port}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          header: { event_type: 'card.action.trigger' },
+          event: { context: { open_message_id: 'mid-http-dashboard-refresh-card' }, action: { value: confirmValue } },
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(dashboardRefreshMocks.runDashboardRefresh).toHaveBeenCalledWith({ config, dataDate: '2026-06-24', sendTo: undefined });
+      expect(texts).toEqual([]);
+      expect(cards).toHaveLength(1);
+      expect(cards[0]?.messageId).toBe('mid-http-dashboard-refresh-card');
+      expect((cards[0]?.card as { header?: { title?: { content?: string }; template?: string } }).header?.title?.content).toBe('访问页补抓完成，但数据仍未完整');
+      expect((cards[0]?.card as { header?: { template?: string } }).header?.template).toBe('orange');
+      expect(JSON.stringify(cards[0]?.card)).toContain('rowCount=0');
+      expect(JSON.stringify(cards[0]?.card)).toContain('未重建、未重发');
+      expect(JSON.stringify(cards[0]?.card)).not.toContain('Agent 操作已完成');
+    } finally {
+      server.close();
+    }
   });
 });
 

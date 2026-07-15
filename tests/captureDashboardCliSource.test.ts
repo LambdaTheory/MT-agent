@@ -7,6 +7,9 @@ describe('capture dashboard cli source', () => {
     expect(source).toContain('loadEnv');
     expect(source).toContain('loadConfig');
     expect(source).toContain('runDashboardRefresh');
+    expect(source).toContain('previousShanghaiDate');
+    expect(source).toContain('assertDashboardDataDate');
+    expect(source).toContain('dataDate');
     expect(source).toContain('--date');
     expect(source).toContain('--send-to');
   });
