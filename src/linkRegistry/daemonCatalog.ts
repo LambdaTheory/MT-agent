@@ -297,6 +297,7 @@ export function mergeGoodsSnapshotWithDaemon(base: GoodsSnapshotItem[], daemonEn
       ...(item.listingState ? { listingState: item.listingState } : {}),
       ...(item.listingStatusText ? { listingStatusText: item.listingStatusText.trim() } : {}),
       ...(item.observedAt ? { observedAt: item.observedAt.trim() } : {}),
+      ...(item.platformRestriction ? { platformRestriction: item.platformRestriction } : {}),
     });
   }
 
@@ -311,6 +312,7 @@ export function mergeGoodsSnapshotWithDaemon(base: GoodsSnapshotItem[], daemonEn
       ...(current?.listingState ? { listingState: current.listingState } : {}),
       ...(current?.listingStatusText ? { listingStatusText: current.listingStatusText.trim() } : {}),
       ...(current?.observedAt ? { observedAt: current.observedAt.trim() } : {}),
+      ...(current?.platformRestriction ? { platformRestriction: current.platformRestriction } : {}),
     });
   }
 

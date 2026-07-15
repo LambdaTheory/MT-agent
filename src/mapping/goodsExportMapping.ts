@@ -1,6 +1,6 @@
 import XLSX from 'xlsx-js-style';
 import { parseListingStateFromText } from '../linkRegistry/listingState.js';
-import type { GoodsSnapshotItem } from '../publicTraffic/types.js';
+import type { GoodsSnapshotItem, PlatformRestrictionObservation } from '../publicTraffic/types.js';
 import type { ProductIdMapping } from './productIdMapping.js';
 
 export interface GoodsExportSkippedRow {
@@ -49,6 +49,7 @@ function goodsSnapshotItem(input: {
   internalProductId: string;
   productName: string;
   listingStatusText?: string;
+  platformRestriction?: PlatformRestrictionObservation;
 }): GoodsSnapshotItem {
   const listingStatusText = input.listingStatusText?.trim();
   return {
@@ -56,6 +57,7 @@ function goodsSnapshotItem(input: {
     internalProductId: input.internalProductId,
     productName: input.productName,
     ...(listingStatusText ? { listingState: parseListingStateFromText(listingStatusText), listingStatusText } : {}),
+    ...(input.platformRestriction ? { platformRestriction: input.platformRestriction } : {}),
   };
 }
 
@@ -77,6 +79,8 @@ export function parseGoodsExportWorkbook(path: string): GoodsExportWorkbookResul
   const merchantCodeIndex = findColumn(headers, '商家侧编码');
   const platformProductIdIndex = findColumn(headers, '平台侧编码');
   const listingStatusIndex = findOptionalColumn(headers, ['商品状态', '上架状态']);
+  const reviewRejectionReasonIndex = findOptionalColumn(headers, ['审核不通过原因']);
+  const freezeReasonIndex = findOptionalColumn(headers, ['冻结原因']);
   const mapping: ProductIdMapping = {};
   const skippedRows: GoodsExportSkippedRow[] = [];
   const snapshotByInternalId = new Map<string, GoodsSnapshotItem>();
@@ -87,6 +91,13 @@ export function parseGoodsExportWorkbook(path: string): GoodsExportWorkbookResul
     const merchantCode = normalize(row[merchantCodeIndex]);
     const platformProductId = normalize(row[platformProductIdIndex]);
     const listingStatusText = listingStatusIndex === null ? undefined : normalize(row[listingStatusIndex]);
+    const reviewRejectionReason = reviewRejectionReasonIndex === null ? '' : normalize(row[reviewRejectionReasonIndex]);
+    const freezeReason = freezeReasonIndex === null ? '' : normalize(row[freezeReasonIndex]);
+    const platformRestriction: PlatformRestrictionObservation | undefined = freezeReason
+      ? { kind: 'frozen', reasonText: freezeReason }
+      : reviewRejectionReason
+        ? { kind: 'review_rejected', reasonText: reviewRejectionReason }
+        : undefined;
 
     if (!productName && !platformProductId && !merchantCode) {
       continue;
@@ -105,6 +116,7 @@ export function parseGoodsExportWorkbook(path: string): GoodsExportWorkbookResul
         internalProductId,
         productName,
         listingStatusText,
+        platformRestriction,
       }));
       continue;
     }
@@ -115,6 +127,7 @@ export function parseGoodsExportWorkbook(path: string): GoodsExportWorkbookResul
       internalProductId,
       productName: current.productName || productName,
       listingStatusText: current.listingStatusText || listingStatusText,
+      platformRestriction: current.platformRestriction ?? platformRestriction,
     }));
   }
 

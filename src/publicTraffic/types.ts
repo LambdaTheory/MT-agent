@@ -49,6 +49,12 @@ export interface ExposureProductSummary {
   flags: ExposureDeltaFlag[];
 }
 
+export interface PlatformRestrictionObservation {
+  kind: 'review_rejected' | 'frozen' | 'other';
+  reasonText: string;
+  observedAt?: string;
+}
+
 export interface GoodsSnapshotItem {
   platformProductId: string;
   internalProductId: string;
@@ -56,6 +62,7 @@ export interface GoodsSnapshotItem {
   listingState?: LinkListingState;
   listingStatusText?: string;
   observedAt?: string;
+  platformRestriction?: PlatformRestrictionObservation;
 }
 
 export interface NewProductObservationItem extends GoodsSnapshotItem {

@@ -150,7 +150,13 @@ export async function refreshLinkRegistryForPrompt(
     try {
       const goodsExportPath = await downloadGoodsExport(config, paths.goodsExportWorkbook);
       await writeProductIdMappingFromExport(goodsExportPath, resolvedPaths.productIdMapPath, paths.productIdMappingSyncLog);
-      goodsSnapshotFromExport = parseGoodsExportSnapshot(goodsExportPath);
+      goodsSnapshotFromExport = parseGoodsExportSnapshot(goodsExportPath).map((item) => ({
+        ...item,
+        ...(item.listingState ? { observedAt: referenceDate } : {}),
+        ...(item.platformRestriction
+          ? { platformRestriction: { ...item.platformRestriction, observedAt: referenceDate } }
+          : {}),
+      }));
       goodsExportRefreshed = true;
     } catch (error) {
       warnings.push(`商品总表刷新失败：${errorMessage(error)}`);
