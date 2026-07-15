@@ -152,6 +152,47 @@ describe('executeAgentToolRequest ledgerContext', () => {
     recordSpy.mockRestore();
   });
 
+  it('preserves refresh activity success when final audit file writing fails', async () => {
+    const calls: string[] = [];
+    await writeFile(join(dir, 'agent-audit'), 'not a directory', 'utf8');
+
+    const response = await executeAgentToolRequest(
+      {
+        toolName: 'operations.refreshActivityExecute',
+        arguments: { date: '2026-07-14', strategy: 'delist_only', delistProductIds: ['648', '649'] },
+        reason: 'refresh',
+      },
+      dir,
+      {
+        rentalPriceClient: {
+          ...fakeClient(),
+          delist: async (productId: string) => {
+            calls.push(productId);
+            return { productId, ok: true, lines: ['delisted'] };
+          },
+        },
+        ledgerContext: { outputDir: dir, runId: 'run-refresh-audit-file-fail', decisionId: 'dec-refresh-audit-file-fail' },
+      },
+    );
+
+    const date = new Date().toISOString().slice(0, 10);
+    const entries = await loadOperationLedgerJsonlEntries(dir, date);
+    expect(calls).toEqual(['648', '649']);
+    expect(response.text).toContain('活跃度刷新执行完成：2026-07-14');
+    expect(response.text).toContain('下架：成功 2/2');
+    expect(response.text).toContain('审计警告：');
+    expect(response.text).not.toContain('审计文件：');
+    expect(response.metadata).toMatchObject({
+      ok: true,
+      delistedProductIds: ['648', '649'],
+      blockingDelistFailureProductIds: [],
+      auditWarnings: [expect.stringContaining('活跃度刷新审计文件写入失败')],
+    });
+    expect(response.metadata?.auditPath).toBeNull();
+    expect(entries.filter((entry) => entry.event === 'execution_failed')).toHaveLength(0);
+    expect(entries.filter((entry) => entry.event === 'execution_succeeded')).toHaveLength(2);
+  });
+
   it('records refresh activity delists as attributable delist success evidence', async () => {
     const response = await executeAgentToolRequest(
       {

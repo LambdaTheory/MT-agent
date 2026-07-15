@@ -1641,15 +1641,22 @@ async function refreshActivityExecuteResponse(
   }
   const overallOk = request.strategy === 'delist_only' ? allDelisted : allDelisted && Boolean(newLinkResult?.ok);
 
-  const auditPath = await writeRefreshActivityAudit(outputDir, {
-    request,
-    delistResults,
-    skippedMissingDelistProductIds: skippedMissingDelist.map((result) => result.productId),
-    blockingDelistFailureProductIds: blockingDelistFailures.map((result) => result.productId),
-    newLinkResult,
-    ok: overallOk,
-    createdAt: new Date().toISOString(),
-  });
+  let auditPath: string | null = null;
+  try {
+    auditPath = await writeRefreshActivityAudit(outputDir, {
+      request,
+      delistResults,
+      skippedMissingDelistProductIds: skippedMissingDelist.map((result) => result.productId),
+      blockingDelistFailureProductIds: blockingDelistFailures.map((result) => result.productId),
+      newLinkResult,
+      ok: overallOk,
+      createdAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    if (auditWarnings.length < RENTAL_DELIST_MAX_AUDIT_WARNINGS) {
+      auditWarnings.push(`活跃度刷新审计文件写入失败（${error instanceof Error ? error.message : String(error)}）`);
+    }
+  }
 
   const typeLines = request.newLinkItems.map((item, index) =>
     `${index + 1}. ${item.keyword}${item.sameSkuGroupId ? `｜${item.sameSkuGroupId}` : ''}：下架/补链 ${item.count} 条，补链源 ${item.sourceProductId} ${item.sourceProductName}`);
@@ -1668,7 +1675,7 @@ async function refreshActivityExecuteResponse(
       ...delistLines,
       ...(newLinkResult ? ['', '补链明细：', newLinkResult.text] : []),
       '',
-      `审计文件：${auditPath}`,
+      ...(auditPath ? [`审计文件：${auditPath}`] : []),
     ].join('\n'),
     metadata: {
       toolName: 'operations.refreshActivityExecute',
