@@ -96,6 +96,7 @@ import {
 import { inferPriceMultiplierFromText, readPriceMultiplierArgument } from './priceMultiplier.js';
 import { buildReportSectionCardData, runPublicTrafficReportDateComparison, runPublicTrafficReportQuery, type PublicTrafficReportQueryArguments } from './reportQuery.js';
 import { buildProblemSectionCard, buildProductDetailCard } from './queryCards.js';
+import { runProductLinkQuery, type ProductLinkQueryArguments } from './productLinkQuery.js';
 import { findLatestReportContext, findReportContextByDate, formatConversionSummary, formatLatestSummary, formatProductQueryResult, formatProductRows, parseNumericProductIdList, queryProductResult } from './reportStore.js';
 import { saveAgentToolConfirmRequest } from './agentToolConfirmStore.js';
 import { refreshActivityPlanConfirmationKey, saveRefreshActivityPlan, type RefreshActivityPlan } from './refreshActivityPlanStore.js';
@@ -2319,21 +2320,26 @@ export async function executeAgentToolRequest(
       }
       return { text };
     }
+    case 'productLink.query': {
+      const date = readOptionalDate(request.arguments.date);
+      const report = await findReportContextForTool(outputDir, date);
+      if (!report) return { text: missingReportContextText(date) };
+      return runProductLinkQuery(report.context, { ...request.arguments, ...(date ? { date } : {}) } as ProductLinkQueryArguments).response;
+    }
     case 'product.query': {
       const date = readOptionalDate(request.arguments.date);
       const report = await findReportContextForTool(outputDir, date);
       const keyword = requireString(request.arguments.keyword, 'keyword');
-      const productIds = parseNumericProductIdList(keyword);
       if (report) {
-        const result = queryProductResult(report.context, keyword);
-        if (result.matches.length > 0 || result.ambiguous.length > 0) {
-          return {
-            text: formatProductQueryResult(result),
-            ...(result.matches.length === 1 ? { card: buildProductDetailCard(report.context, result) } : {}),
-          };
-        }
+        const unified = runProductLinkQuery(report.context, {
+          queryType: parseNumericProductIdList(keyword).length > 1 ? 'productList' : 'productDetail',
+          productQuery: keyword,
+          ...(date ? { date } : {}),
+        });
+        if (unified.result && (unified.result.matches.length > 0 || unified.result.ambiguous.length > 0)) return unified.response;
       }
       if (!report && date) return { text: missingReportContextText(date) };
+      const productIds = parseNumericProductIdList(keyword);
       if (productIds.length > 0) {
         const registryContext = await loadClosedOrderRegistryContext(options.closedOrderRegistryPaths);
         return { text: formatRegistryProductRows(productIds, registryContext.registry) };
