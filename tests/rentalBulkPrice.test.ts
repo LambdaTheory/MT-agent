@@ -39,8 +39,12 @@ describe('rental bulk price workflow', () => {
     expect(planId).toMatch(/^bulk_price_/);
     const plan = JSON.parse(await readFile(planPath, 'utf8')) as { items: Array<{ productId: string; fields: Record<string, string> }> };
     expect(plan.items).toEqual([{ productId: '648', fields: { rent1day: '88.00', rent10day: '199.50' } }]);
-    expect(JSON.stringify(response.card)).toContain('rental.bulkPriceApply');
-    expect(JSON.stringify(response.card)).toContain(planId);
+    const cardJson = JSON.stringify(response.card);
+    expect(cardJson).toContain('rental.bulkPriceApply');
+    expect(cardJson).toContain(planId);
+    expect(cardJson).toContain('影响商品：648');
+    expect(cardJson).toContain('rent1day=88.00');
+    expect(cardJson).toContain('rent10day=199.50');
   });
 
   it('blocks invalid and conflicting items before confirmation', async () => {
@@ -59,6 +63,19 @@ describe('rental bulk price workflow', () => {
 
     expect(response.card).toBeUndefined();
     expect(response.metadata).toMatchObject({ toolName: 'rental.bulkPricePlan', ok: false, blockedCount: 5 });
+  });
+
+  it('accepts identical duplicate fields regardless of input key order', async () => {
+    const response = await executeAgentToolRequest({
+      toolName: 'rental.bulkPricePlan',
+      arguments: { items: [
+        { productId: '648', fields: { rent1day: 88, rent10day: 199.5 } },
+        { productId: '648', fields: { rent10day: '199.50', rent1day: '88.00' } },
+      ] },
+      reason: 'duplicate order should collapse',
+    }, outputDir, {});
+
+    expect(response.metadata).toMatchObject({ toolName: 'rental.bulkPricePlan', ok: true, productCount: 1 });
   });
 
   it('applies the persisted plan by planId, writes a report, and records ledger events', async () => {
@@ -92,6 +109,8 @@ describe('rental bulk price workflow', () => {
     const events = await loadOperationLedgerJsonlEntries(outputDir, '2026-07-15');
     expect(events.some((event) => event.event === 'execution_started' && event.toolName === 'rental.bulkPriceApply')).toBe(true);
     expect(events.some((event) => event.event === 'execution_succeeded' && event.toolName === 'rental.bulkPriceApply')).toBe(true);
+    expect(events.some((event) => event.event === 'execution_succeeded' && event.subject?.kind === 'product' && event.subject.id === '648')).toBe(true);
+    expect(events.some((event) => event.event === 'execution_succeeded' && event.subject?.kind === 'product' && event.subject.id === '649')).toBe(true);
   });
 
   it('continues remaining products and reports completed_with_failures when one item throws', async () => {
@@ -122,5 +141,6 @@ describe('rental bulk price workflow', () => {
     ]);
     const events = await loadOperationLedgerJsonlEntries(outputDir, '2026-07-15');
     expect(events.some((event) => event.event === 'execution_failed' && event.toolName === 'rental.bulkPriceApply')).toBe(true);
+    expect(events.some((event) => event.event === 'execution_failed' && event.subject?.kind === 'product' && event.subject.id === '648')).toBe(true);
   });
 });

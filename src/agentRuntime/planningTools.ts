@@ -2,6 +2,7 @@ export const PRE_CONFIRMATION_PLANNING_TOOLS = new Set([
   'operations.refreshActivityPlan',
   'rental.priceChange',
   'rental.pricePreview',
+  'rental.bulkPricePlan',
   'rental.specRemovePlan',
   'rental.newLinkBatchPlan',
   'rental.perSpecPricePlan',

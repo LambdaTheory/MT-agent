@@ -9,6 +9,7 @@ import type { RentalWriteLedgerContext } from './rentalWriteOperationHandlers.js
 import type { BotResponse } from './types.js';
 
 const PRICE_FIELDS = new Set(['rent1day', 'rent2day', 'rent3day', 'rent4day', 'rent5day', 'rent7day', 'rent10day', 'rent15day', 'rent30day', 'rent60day', 'rent90day', 'rent180day', 'marketPrice', 'deposit', 'purchasePrice', 'costPrice', 'finalPayment']);
+const MAX_BULK_ITEMS = 80;
 
 interface BulkPlanItem { productId: string; fields: Record<string, string> }
 interface BlockedItem { productId?: string; reason: string }
@@ -54,6 +55,29 @@ function normalizePrice(value: unknown): string | null {
   return Number.isFinite(numeric) ? numeric.toFixed(2) : null;
 }
 
+function canonicalFields(fields: Record<string, string>): string {
+  return JSON.stringify(Object.fromEntries(Object.entries(fields).sort(([left], [right]) => left.localeCompare(right))));
+}
+
+function formatFieldChanges(fields: Record<string, string>): string {
+  return Object.entries(fields).map(([field, value]) => `${field}=${value}`).join(', ');
+}
+
+function approvalSummaryLines(plan: RentalBulkPricePlan, planPath: string): string[] {
+  const productIds = plan.items.map((item) => item.productId);
+  const fieldNames = [...new Set(plan.items.flatMap((item) => Object.keys(item.fields)))];
+  const representatives = plan.items.slice(0, 5).map((item) => `- ${item.productId}: ${formatFieldChanges(item.fields)}`);
+  return [
+    `业务摘要：准备批量修改 ${plan.summary.productCount} 个租赁商品价格。`,
+    `影响商品：${productIds.slice(0, 10).join('、')}${productIds.length > 10 ? ` 等 ${productIds.length} 个` : ''}`,
+    `涉及字段：${fieldNames.join('、')}`,
+    '代表变更：',
+    ...representatives,
+    `计划文件：${planPath}`,
+    '确认后：按持久化计划执行 apply、submit、verify、ledger 和报告。',
+  ];
+}
+
 function paths(outputDir: string, planId: string): { planPath: string; reportPath: string } {
   const root = join(outputDir, 'rental-bulk-price');
   return {
@@ -71,6 +95,7 @@ function buildPlan(args: Record<string, unknown>, reason: string): RentalBulkPri
   const items = Array.isArray(args.items) ? args.items : [];
   const normalized = new Map<string, Record<string, string>>();
   const blockedItems: BlockedItem[] = [];
+  if (items.length > MAX_BULK_ITEMS) blockedItems.push({ reason: `items must contain at most ${MAX_BULK_ITEMS} products` });
   for (const item of items) {
     if (!isRecord(item)) {
       blockedItems.push({ reason: 'item must be an object' });
@@ -108,7 +133,7 @@ function buildPlan(args: Record<string, unknown>, reason: string): RentalBulkPri
       continue;
     }
     const existing = normalized.get(productId);
-    if (existing && JSON.stringify(existing) !== JSON.stringify(fields)) {
+    if (existing && canonicalFields(existing) !== canonicalFields(fields)) {
       blockedItems.push({ productId, reason: 'conflicting duplicate productId' });
       continue;
     }
@@ -135,7 +160,7 @@ async function readPlan(outputDir: string, planId: string): Promise<RentalBulkPr
   return raw as unknown as RentalBulkPricePlan;
 }
 
-async function recordBulkEvent(context: RentalWriteLedgerContext | undefined, event: 'execution_started' | 'execution_succeeded' | 'execution_failed', planId: string, status?: string): Promise<void> {
+async function recordBulkEvent(context: RentalWriteLedgerContext | undefined, event: 'execution_started' | 'execution_succeeded' | 'execution_failed', planId: string, status?: string, productId?: string): Promise<void> {
   if (!context) return;
   await recordOperationEvent(context.outputDir, {
     planId: context.decisionId ?? context.runId ?? planId,
@@ -145,6 +170,7 @@ async function recordBulkEvent(context: RentalWriteLedgerContext | undefined, ev
     toolName: 'rental.bulkPriceApply',
     ...(context.runId ? { runId: context.runId } : {}),
     ...(context.decisionId ? { decisionId: context.decisionId } : {}),
+    ...(productId ? { subject: { kind: 'product' as const, id: productId } } : {}),
     metadata: { planId, ...(status ? { status } : {}), ...(context.missionDate ? { missionDate: context.missionDate } : {}) },
   });
 }
@@ -166,10 +192,10 @@ export async function rentalBulkPricePlanResponse(args: Record<string, unknown>,
     ...(continuation ? { continuation } : {}),
   };
   const requestRef = await saveAgentToolConfirmRequest(outputDir, confirmRequest);
-  const fieldNames = [...new Set(plan.items.flatMap((item) => Object.keys(item.fields)))];
+  const summaryLines = approvalSummaryLines(plan, planPath);
   return {
-    text: [`批量租赁改价计划：${plan.summary.productCount} 个商品`, `字段：${fieldNames.join(', ')}`, `计划文件：${planPath}`, '确认后将按计划执行 apply、submit、verify、ledger 和报告。'].join('\n'),
-    card: buildAgentToolConfirmCard(confirmRequest, { requestRef }),
+    text: ['批量租赁改价计划', ...summaryLines].join('\n'),
+    card: buildAgentToolConfirmCard(confirmRequest, { requestRef, summaryLines }),
     metadata: { toolName: 'rental.bulkPricePlan', ok: true, planId: plan.planId, planPath, productCount: plan.summary.productCount, fieldCount: plan.summary.fieldCount },
   };
 }
@@ -179,16 +205,20 @@ export async function rentalBulkPriceApplyResponse(args: Record<string, unknown>
   if (!planId) throw new Error('planId is required');
   const plan = await readPlan(outputDir, planId);
   if (plan.status !== 'planned' || plan.blockedItems.length) throw new Error('批量改价计划不可执行。');
+  if (plan.items.length === 0 || plan.items.length > MAX_BULK_ITEMS) throw new Error('批量改价计划商品数量无效。');
   await recordBulkEvent(ledgerContext, 'execution_started', planId);
   const startedAt = new Date().toISOString();
   const results: RentalBulkPriceResult[] = [];
   for (const item of plan.items) {
+    await recordBulkEvent(ledgerContext, 'execution_started', planId, undefined, item.productId);
     try {
       const result = await client.execute({ mode: 'explicit_fields', productId: item.productId, fields: item.fields });
       results.push({ productId: result.productId, ok: result.ok, lines: result.lines, ...(result.audit?.resultFile ? { resultFile: result.audit.resultFile } : {}), ...(result.audit?.rollbackFile ? { rollbackFile: result.audit.rollbackFile } : {}) });
+      await recordBulkEvent(ledgerContext, result.ok ? 'execution_succeeded' : 'execution_failed', planId, undefined, result.productId);
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       results.push({ productId: item.productId, ok: false, lines: [`error: ${message}`] });
+      await recordBulkEvent(ledgerContext, 'execution_failed', planId, undefined, item.productId);
     }
   }
   const ok = results.every((result) => result.ok);
