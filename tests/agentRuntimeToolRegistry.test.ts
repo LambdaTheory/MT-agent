@@ -68,6 +68,16 @@ describe('agent runtime tool registry', () => {
       'rental.mirrorBatchSpec',
       'rental.specDiscoverFull',
       'rental.readRaw',
+      'rental.imageRead',
+      'rental.imageUpload',
+      'rental.imagePick',
+      'rental.imageOrder',
+      'rental.whiteImageSet',
+      'rental.imageVerify',
+      'rental.vasRead',
+      'rental.vasCatalogRead',
+      'rental.vasApply',
+      'rental.vasVerify',
       'rental.copy',
       'rental.delist',
       'rental.delistBatch',
@@ -104,7 +114,7 @@ describe('agent runtime tool registry', () => {
 
     const tools = listAgentTools();
     tools.pop();
-    expect(listAgentTools()).toHaveLength(83);
+    expect(listAgentTools()).toHaveLength(93);
   });
 
   it('returns defensive copies of tool metadata', () => {
@@ -204,6 +214,16 @@ describe('agent runtime tool registry', () => {
     expect(findAgentTool('rental.daemonStatus')).toMatchObject({ risk: 'read', requiresConfirmation: false });
     expect(findAgentTool('rental.platformSearch')).toMatchObject({ risk: 'read', requiresConfirmation: false });
     expect(findAgentTool('rental.batchRead')).toMatchObject({ risk: 'read', requiresConfirmation: false });
+    expect(findAgentTool('rental.imageRead')).toMatchObject({ risk: 'read', requiresConfirmation: false, plannerVisible: false });
+    expect(findAgentTool('rental.imageUpload')).toMatchObject({ risk: 'high', requiresConfirmation: true, plannerVisible: false });
+    expect(findAgentTool('rental.imagePick')).toMatchObject({ risk: 'high', requiresConfirmation: true, plannerVisible: false });
+    expect(findAgentTool('rental.imageOrder')).toMatchObject({ risk: 'high', requiresConfirmation: true, plannerVisible: false });
+    expect(findAgentTool('rental.whiteImageSet')).toMatchObject({ risk: 'high', requiresConfirmation: true, plannerVisible: false });
+    expect(findAgentTool('rental.imageVerify')).toMatchObject({ risk: 'read', requiresConfirmation: false, plannerVisible: false });
+    expect(findAgentTool('rental.vasRead')).toMatchObject({ risk: 'read', requiresConfirmation: false, plannerVisible: false });
+    expect(findAgentTool('rental.vasCatalogRead')).toMatchObject({ risk: 'read', requiresConfirmation: false, plannerVisible: false });
+    expect(findAgentTool('rental.vasApply')).toMatchObject({ risk: 'high', requiresConfirmation: true, plannerVisible: false });
+    expect(findAgentTool('rental.vasVerify')).toMatchObject({ risk: 'read', requiresConfirmation: false, plannerVisible: false });
     expect(findAgentTool('rental.copy')).toMatchObject({ risk: 'high', requiresConfirmation: true });
     expect(findAgentTool('rental.delist')).toMatchObject({ risk: 'high', requiresConfirmation: true });
     expect(findAgentTool('rental.delistBatch')).toMatchObject({ risk: 'high', requiresConfirmation: true });
@@ -372,6 +392,7 @@ describe('agent runtime tool registry', () => {
     expect(plannerToolNames).not.toContain('rental.bulkPriceApply');
     expect(plannerToolNames).not.toContain('rental.mirrorWritebackState');
     expect(plannerToolNames.some((name) => /image/i.test(name))).toBe(false);
+    expect(plannerToolNames.some((name) => /vas/i.test(name))).toBe(false);
     expect(plannerToolNames).not.toContain('rental.perSpecPriceApply');
     expect(plannerToolNames).not.toContain('rental.specDimApply');
     expect(plannerToolNames).not.toContain('operations.refreshActivityExecute');

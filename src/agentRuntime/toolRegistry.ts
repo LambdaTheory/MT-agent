@@ -606,7 +606,7 @@ const rentalBatchSpecFileArgumentsSchema = {
 };
 const rentalBatchExecuteArgumentsSchema = {
   type: 'object',
-  properties: { specFile: { type: 'string' }, confirmFormSetupWithoutPreview: { type: 'boolean' } },
+  properties: { specFile: { type: 'string' }, confirmFormSetupWithoutPreview: { type: 'boolean' }, confirmImageWithoutPreview: { type: 'boolean' } },
   required: ['specFile'],
   additionalProperties: false,
 };
@@ -642,6 +642,99 @@ const rentalReadRawArgumentsSchema = {
     fields: { type: 'array', maxItems: 32, items: { type: 'string' } },
   },
   required: ['productId'],
+  additionalProperties: false,
+};
+const stringArraySchema = { type: 'array', minItems: 1, items: { type: 'string' } };
+const rentalImageReadArgumentsSchema = productIdArgumentsSchema;
+const rentalImageUploadArgumentsSchema = {
+  type: 'object',
+  properties: {
+    productId: internalProductIdSchema,
+    sectionType: { type: 'string' },
+    categoryName: { type: 'string' },
+    uploadFile: { type: 'string' },
+    confirmSelection: { type: 'boolean' },
+    allowDuplicateFileName: { type: 'boolean' },
+  },
+  required: ['productId', 'sectionType', 'categoryName', 'uploadFile'],
+  additionalProperties: false,
+};
+const rentalImagePickArgumentsSchema = {
+  type: 'object',
+  properties: {
+    productId: internalProductIdSchema,
+    categoryName: { type: 'string' },
+    fileNames: stringArraySchema,
+    skipIfAlreadyPresent: { type: 'boolean' },
+  },
+  required: ['productId', 'categoryName', 'fileNames'],
+  additionalProperties: false,
+};
+const rentalImageOrderArgumentsSchema = {
+  type: 'object',
+  properties: { productId: internalProductIdSchema, orderedUrls: stringArraySchema },
+  required: ['productId', 'orderedUrls'],
+  additionalProperties: false,
+};
+const rentalWhiteImageSetArgumentsSchema = {
+  type: 'object',
+  properties: {
+    productId: internalProductIdSchema,
+    categoryName: { type: 'string' },
+    fileName: { type: 'string' },
+    skipIfWhiteImageMatched: { type: 'boolean' },
+  },
+  required: ['productId', 'categoryName', 'fileName'],
+  additionalProperties: false,
+};
+const rentalImageVerifyArgumentsSchema = {
+  type: 'object',
+  properties: { productId: internalProductIdSchema, expectedImages: { type: 'object', additionalProperties: true } },
+  required: ['productId', 'expectedImages'],
+  additionalProperties: false,
+};
+const rentalVasCurrentPageReadArgumentsSchema = {
+  type: 'object',
+  oneOf: [
+    { required: ['productId'] },
+    { required: ['allowCurrentPage', 'expectedProductId'] },
+  ],
+  properties: {
+    productId: internalProductIdSchema,
+    allowCurrentPage: { type: 'boolean' },
+    expectedProductId: internalProductIdSchema,
+  },
+  additionalProperties: false,
+};
+const rentalVasCatalogReadArgumentsSchema = {
+  type: 'object',
+  oneOf: [
+    { required: ['productId'] },
+    { required: ['allowCurrentPage', 'expectedProductId'] },
+  ],
+  properties: {
+    productId: internalProductIdSchema,
+    allowCurrentPage: { type: 'boolean' },
+    expectedProductId: internalProductIdSchema,
+    ids: { type: 'array', items: { type: 'string' } },
+    keyword: { type: 'string' },
+  },
+  additionalProperties: false,
+};
+const rentalVasApplyArgumentsSchema = {
+  type: 'object',
+  properties: {
+    allowCurrentPage: { type: 'boolean' },
+    expectedProductId: internalProductIdSchema,
+    expectedVAS: { type: 'object', additionalProperties: true },
+  },
+  required: ['allowCurrentPage', 'expectedProductId', 'expectedVAS'],
+  additionalProperties: false,
+};
+const rentalVasVerifyArgumentsSchema = {
+  type: 'object',
+  properties: { productId: internalProductIdSchema, expectedVAS: { type: 'object', additionalProperties: true } },
+  required: ['productId', 'expectedVAS'],
   additionalProperties: false,
 };
 const refreshActivityPlanArgumentsSchema = {
@@ -1267,6 +1360,86 @@ const agentTools: AgentToolDefinition[] = [
     risk: 'read',
     requiresConfirmation: false,
     inputSchema: rentalReadRawArgumentsSchema,
+  },
+  {
+    name: 'rental.imageRead',
+    description: '隐藏只读工具：读取租赁商品当前图片、首图和白底图状态；不执行图片修改。',
+    risk: 'read',
+    requiresConfirmation: false,
+    plannerVisible: false,
+    inputSchema: rentalImageReadArgumentsSchema,
+  },
+  {
+    name: 'rental.imageUpload',
+    description: '隐藏高风险工具：确认后上传图片素材，并可选择回填到当前商品图片表单。',
+    risk: 'high',
+    requiresConfirmation: true,
+    plannerVisible: false,
+    inputSchema: rentalImageUploadArgumentsSchema,
+  },
+  {
+    name: 'rental.imagePick',
+    description: '隐藏高风险工具：确认后从素材库精确选择图片并回填商品图片。',
+    risk: 'high',
+    requiresConfirmation: true,
+    plannerVisible: false,
+    inputSchema: rentalImagePickArgumentsSchema,
+  },
+  {
+    name: 'rental.imageOrder',
+    description: '隐藏高风险工具：确认后按完整 URL 列表重排商品图片。',
+    risk: 'high',
+    requiresConfirmation: true,
+    plannerVisible: false,
+    inputSchema: rentalImageOrderArgumentsSchema,
+  },
+  {
+    name: 'rental.whiteImageSet',
+    description: '隐藏高风险工具：确认后从素材库设置商品白底图。',
+    risk: 'high',
+    requiresConfirmation: true,
+    plannerVisible: false,
+    inputSchema: rentalWhiteImageSetArgumentsSchema,
+  },
+  {
+    name: 'rental.imageVerify',
+    description: '隐藏只读工具：按 expectedImages 验证已保存的商品图片状态。',
+    risk: 'read',
+    requiresConfirmation: false,
+    plannerVisible: false,
+    inputSchema: rentalImageVerifyArgumentsSchema,
+  },
+  {
+    name: 'rental.vasRead',
+    description: '隐藏只读工具：读取商品当前 VAS 绑定状态，不修改服务。',
+    risk: 'read',
+    requiresConfirmation: false,
+    plannerVisible: false,
+    inputSchema: rentalVasCurrentPageReadArgumentsSchema,
+  },
+  {
+    name: 'rental.vasCatalogRead',
+    description: '隐藏只读工具：读取现有 VAS 服务目录，可按 id 或关键词过滤；不创建、不修改、不删除服务。',
+    risk: 'read',
+    requiresConfirmation: false,
+    plannerVisible: false,
+    inputSchema: rentalVasCatalogReadArgumentsSchema,
+  },
+  {
+    name: 'rental.vasApply',
+    description: '隐藏高风险工具：确认后在当前商品表单应用完整 expectedVAS 绑定状态；不暴露给 planner。',
+    risk: 'high',
+    requiresConfirmation: true,
+    plannerVisible: false,
+    inputSchema: rentalVasApplyArgumentsSchema,
+  },
+  {
+    name: 'rental.vasVerify',
+    description: '隐藏只读工具：按 expectedVAS 验证已保存的商品 VAS 绑定状态。',
+    risk: 'read',
+    requiresConfirmation: false,
+    plannerVisible: false,
+    inputSchema: rentalVasVerifyArgumentsSchema,
   },
   {
     name: 'rental.copy',

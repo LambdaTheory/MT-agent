@@ -92,7 +92,9 @@ import {
   RENTAL_DELIST_MAX_AUDIT_WARNINGS,
 } from './rentalWriteOperationHandlers.js';
 import { executeRentalBatchTool } from './rentalBatchHandlers.js';
+import { executeRentalImageTool } from './rentalImageHandlers.js';
 import { executeRentalMirrorTool } from './rentalMirrorHandlers.js';
+import { executeRentalVasTool } from './rentalVasHandlers.js';
 import { findReadOnlyTool } from './readOnlyToolRegistry.js';
 import { inferPriceAdjustmentAmountFromText, readPriceAdjustmentAmountArgument } from './priceAdjustment.js';
 import {
@@ -2613,6 +2615,18 @@ export async function executeAgentToolRequest(
     case 'rental.specDiscoverFull':
     case 'rental.readRaw':
       return executeRentalReadOnlyOperationHandler(request, options.rentalPriceClient ?? createRentalPriceSkillClient());
+    case 'rental.imageRead':
+    case 'rental.imageUpload':
+    case 'rental.imagePick':
+    case 'rental.imageOrder':
+    case 'rental.whiteImageSet':
+    case 'rental.imageVerify':
+      return executeRentalImageTool(request, options.rentalPriceClient);
+    case 'rental.vasRead':
+    case 'rental.vasCatalogRead':
+    case 'rental.vasApply':
+    case 'rental.vasVerify':
+      return executeRentalVasTool(request, options.rentalPriceClient);
     case 'rental.copy':
     case 'rental.tenancySet':
     case 'rental.specDiscover':
