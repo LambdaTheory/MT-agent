@@ -246,6 +246,11 @@ function cardActionValue(payload: FeishuCardActionEvent): Record<string, unknown
   return undefined;
 }
 
+function isSensitiveUnsignedCardAction(payload: FeishuCardActionEvent): boolean {
+  const value = cardActionValue(payload);
+  return readString(value?.action) === 'query_full_list';
+}
+
 type ServerCardActionStatus = 'processing' | 'completed' | 'failed' | 'cancelled';
 
 interface ServerCardActionClaim {
@@ -923,7 +928,8 @@ async function handleCardActionTrigger(
 
   if (actionName === 'query_full_list') {
     const text = await resolveQueryFullListText(config.outputDir ?? 'output', value?.queryRef);
-    return statusCard('完整清单', text, 'blue');
+    await replyText(replyConfig, text);
+    return statusCard('完整清单已发送', '完整清单已通过纯文本消息发送，请在当前会话查看。', 'blue');
   }
 
   if (actionName === 'id_lookup') {
@@ -971,6 +977,7 @@ export function startFeishuBotServer(config: FeishuBotServerConfig) {
         secret: config.callbackSignatureSecret,
         body,
       });
+      if (!config.callbackSignatureSecret && isSensitiveUnsignedCardAction(payload)) return writeJson(res, 401, { error: 'missing callback signature secret' });
       if (!validSignature) return writeJson(res, 401, { error: 'invalid signature' });
       const card = await handleCardActionTrigger(payload, config, dispatchMessage);
       writeJson(res, 200, card ?? { ok: true });
