@@ -56,7 +56,7 @@ describe('rental batch runner tools', () => {
     }), 'utf8');
 
     const preview = await executeAgentToolRequest({ toolName: 'rental.batchPreview', arguments: { specFile }, reason: 'preview batch' }, outputDir);
-    const execute = await executeAgentToolRequest({ toolName: 'rental.batchExecute', arguments: { specFile, confirmFormSetupWithoutPreview: true }, reason: 'execute batch' }, outputDir, { ledgerContext: { outputDir, runId: 'run-batch', decisionId: 'dec-batch' } });
+    const execute = await executeAgentToolRequest({ toolName: 'rental.batchExecute', arguments: { specFile, confirmFormSetupWithoutPreview: true, confirmImageWithoutPreview: true }, reason: 'execute batch' }, outputDir, { ledgerContext: { outputDir, runId: 'run-batch', decisionId: 'dec-batch' } });
     const status = await executeAgentToolRequest({ toolName: 'rental.batchStatus', arguments: { stateFile }, reason: 'status batch' }, outputDir);
     const resume = await executeAgentToolRequest({ toolName: 'rental.batchResume', arguments: { stateFile }, reason: 'resume batch' }, outputDir, { ledgerContext: { outputDir, runId: 'run-batch', decisionId: 'dec-batch' } });
     const report = await executeAgentToolRequest({ toolName: 'rental.batchReport', arguments: { stateFile }, reason: 'report batch' }, outputDir);
@@ -67,6 +67,7 @@ describe('rental batch runner tools', () => {
     expect(preview.text).toContain('preview');
     expect(execute.text).toContain('execute');
     expect(execute.text).toContain('confirmFormSetupWithoutPreview');
+    expect(execute.text).toContain('confirmImageWithoutPreview');
     expect(status.text).toContain('status');
     expect(resume.text).toContain('execute');
     expect(resume.text).toContain('resumeFrom');
@@ -84,5 +85,16 @@ describe('rental batch runner tools', () => {
       expect.objectContaining({ toolName: 'rental.batchResume' }),
       expect.objectContaining({ toolName: 'rental.batchRollback' }),
     ]));
+  });
+
+  it('injects confirmImageWithoutPreview only when rental.batchExecute explicitly sets it', async () => {
+    const specFile = join(rentalRoot, 'tasks', 'batches', 'spec.json');
+    await writeFile(specFile, JSON.stringify({ items: [{ productId: '648', images: { pick: ['a.jpg'] } }] }), 'utf8');
+
+    const withoutImageConfirm = await executeAgentToolRequest({ toolName: 'rental.batchExecute', arguments: { specFile }, reason: 'execute without image confirmation' }, outputDir);
+    const withImageConfirm = await executeAgentToolRequest({ toolName: 'rental.batchExecute', arguments: { specFile, confirmImageWithoutPreview: true }, reason: 'execute with image confirmation' }, outputDir);
+
+    expect(withoutImageConfirm.text).not.toContain('confirmImageWithoutPreview');
+    expect(withImageConfirm.text).toContain('confirmImageWithoutPreview');
   });
 });

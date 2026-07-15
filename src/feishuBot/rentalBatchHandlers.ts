@@ -15,6 +15,7 @@ interface BatchToolRequest {
   fileArg?: string;
   confirm?: boolean;
   confirmFormSetupWithoutPreview?: boolean;
+  confirmImageWithoutPreview?: boolean;
 }
 
 interface ResumeSpec {
@@ -60,7 +61,7 @@ function requestFromTool(toolName: string, args: Record<string, unknown>, rootDi
     case 'rental.batchPreview':
       return { command: 'preview', fileArg: safeBatchPath(rootDir, args.specFile, 'specFile') };
     case 'rental.batchExecute':
-      return { command: 'execute', fileArg: safeBatchPath(rootDir, args.specFile, 'specFile'), confirmFormSetupWithoutPreview: args.confirmFormSetupWithoutPreview === true };
+      return { command: 'execute', fileArg: safeBatchPath(rootDir, args.specFile, 'specFile'), confirmFormSetupWithoutPreview: args.confirmFormSetupWithoutPreview === true, confirmImageWithoutPreview: args.confirmImageWithoutPreview === true };
     case 'rental.batchStatus':
       return { command: 'status', fileArg: safeBatchPath(rootDir, args.stateFile, 'stateFile') };
     case 'rental.batchResume':
@@ -76,15 +77,22 @@ function requestFromTool(toolName: string, args: Record<string, unknown>, rootDi
   }
 }
 
-async function executionSpecFile(rootDir: string, specFile: string, confirmFormSetupWithoutPreview: boolean): Promise<string> {
-  if (!confirmFormSetupWithoutPreview) return specFile;
+async function executionSpecFile(rootDir: string, specFile: string, options: { confirmFormSetupWithoutPreview: boolean; confirmImageWithoutPreview: boolean }): Promise<string> {
+  if (!options.confirmFormSetupWithoutPreview && !options.confirmImageWithoutPreview) return specFile;
   const parsed = JSON.parse(await readFile(specFile, 'utf8')) as unknown;
   if (!isRecord(parsed)) throw new Error('specFile must contain an object');
-  const options = isRecord(parsed.options) ? parsed.options : {};
+  const existingOptions = isRecord(parsed.options) ? parsed.options : {};
   const batchesDir = resolve(rootDir, 'tasks', 'batches');
   await mkdir(batchesDir, { recursive: true });
   const file = join(batchesDir, `mt-agent-batch-execute-${Date.now()}.json`);
-  await writeFile(file, `${JSON.stringify({ ...parsed, options: { ...options, confirmFormSetupWithoutPreview: true } }, null, 2)}\n`, 'utf8');
+  await writeFile(file, `${JSON.stringify({
+    ...parsed,
+    options: {
+      ...existingOptions,
+      ...(options.confirmFormSetupWithoutPreview ? { confirmFormSetupWithoutPreview: true } : {}),
+      ...(options.confirmImageWithoutPreview ? { confirmImageWithoutPreview: true } : {}),
+    },
+  }, null, 2)}\n`, 'utf8');
   return file;
 }
 
@@ -160,7 +168,7 @@ async function runBatchRunner(rootDir: string, request: BatchToolRequest): Promi
   const script = join(rootDir, 'scripts', 'batch-runner.js');
   let resume: ResumeSpec | undefined;
   const fileArg = request.command === 'execute' && request.fileArg
-    ? await executionSpecFile(rootDir, request.fileArg, request.confirmFormSetupWithoutPreview === true)
+    ? await executionSpecFile(rootDir, request.fileArg, { confirmFormSetupWithoutPreview: request.confirmFormSetupWithoutPreview === true, confirmImageWithoutPreview: request.confirmImageWithoutPreview === true })
     : request.command === 'resume' && request.fileArg
       ? (resume = await resumeSpecFile(rootDir, request.fileArg)).file
       : request.fileArg;
