@@ -7,6 +7,7 @@ const MAX_RESTRICTION_FRESHNESS_MS = 24 * 60 * 60 * 1000;
 export interface PlatformRestrictionAttributionObservation {
   restriction: PlatformRestrictionObservation;
   listingState?: LinkListingState;
+  listingStatusText?: string;
   observedAt?: string;
 }
 
@@ -92,6 +93,7 @@ export function attributeDelist(input: DelistAttributionInput): DelistAttributio
         kind: 'platform_restriction',
         observedAt: restriction.observedAt,
         reasonText: restriction.restriction.reasonText,
+        ...(restriction.listingStatusText?.trim() ? { listingStatusText: restriction.listingStatusText.trim() } : {}),
       }],
     };
   }

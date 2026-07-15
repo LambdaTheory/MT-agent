@@ -618,7 +618,7 @@ describe('link registry build', () => {
       listingState: 'delisted',
       delistCause: 'platform_frozen',
       delistCauseConfidence: 'confirmed',
-      delistCauseEvidence: [{ source: 'goods_snapshot', reasonText: '涉嫌违规冻结' }],
+      delistCauseEvidence: [{ source: 'goods_snapshot', reasonText: '涉嫌违规冻结', listingStatusText: '已下架' }],
     });
   });
 

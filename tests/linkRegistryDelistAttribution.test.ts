@@ -98,6 +98,22 @@ describe('attributeDelist', () => {
     });
   });
 
+  it('includes listingStatusText in platform restriction evidence when nonblank', () => {
+    expect(attributeDelist({
+      ...delisted,
+      platformRestrictions: [{
+        restriction: { kind: 'frozen', reasonText: '冻结', observedAt: '2026-07-14T09:00:00.000Z' },
+        listingState: 'delisted',
+        listingStatusText: '已下架',
+        observedAt: '2026-07-14T09:00:00.000Z',
+      }],
+    })).toMatchObject({
+      cause: 'platform_frozen',
+      confidence: 'confirmed',
+      evidence: [{ observedAt: '2026-07-14T09:00:00.000Z', reasonText: '冻结', listingStatusText: '已下架' }],
+    });
+  });
+
   it('suppresses all attribution when the source health gate requires it', () => {
     expect(attributeDelist({
       ...delisted,

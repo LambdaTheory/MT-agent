@@ -203,6 +203,7 @@ function addGoodsSnapshot(drafts: Map<string, DraftEntry>, goodsSnapshot: GoodsS
       draft.platformRestrictions.push({
         restriction: item.platformRestriction,
         ...(item.listingState ? { listingState: item.listingState } : {}),
+        ...(item.listingStatusText?.trim() ? { listingStatusText: item.listingStatusText.trim() } : {}),
         ...(item.observedAt ? { observedAt: item.observedAt } : {}),
       });
     }

@@ -16,6 +16,7 @@ export interface LinkDelistCauseEvidence {
   kind: 'platform_restriction' | 'agent_delist_execution';
   observedAt?: string;
   reasonText?: string;
+  listingStatusText?: string;
   toolName?: string;
   operationEventAt?: string;
   runId?: string;
