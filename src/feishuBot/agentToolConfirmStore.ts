@@ -51,5 +51,5 @@ export async function loadAgentToolConfirmRequestFromValue(outputDir: string, va
   }
 
   if (!isRecord(parsed) || parsed.ref !== ref.requestRef || !isRecord(parsed.request)) return null;
-  return parseAgentToolConfirmRequest({ request: parsed.request, confirmationKey: ref.confirmationKey });
+  return parseAgentToolConfirmRequest({ request: parsed.request, confirmationKey: ref.confirmationKey }, { allowHiddenTool: true });
 }

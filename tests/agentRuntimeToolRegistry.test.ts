@@ -80,6 +80,8 @@ describe('agent runtime tool registry', () => {
       'rental.priceChange',
       'rental.pricePreview',
       'rental.priceSnapshot',
+      'rental.bulkPricePlan',
+      'rental.bulkPriceApply',
       'rental.newLinkBatchPlan',
       'rental.priceRollback',
       'rental.priceApply',
@@ -100,7 +102,7 @@ describe('agent runtime tool registry', () => {
 
     const tools = listAgentTools();
     tools.pop();
-    expect(listAgentTools()).toHaveLength(79);
+    expect(listAgentTools()).toHaveLength(81);
   });
 
   it('returns defensive copies of tool metadata', () => {
@@ -356,6 +358,7 @@ describe('agent runtime tool registry', () => {
       'rental.priceChange',
       'rental.pricePreview',
       'rental.priceSnapshot',
+      'rental.bulkPricePlan',
       'rental.newLinkBatchPlan',
       'rental.priceRollback',
       'rental.perSpecPricePlan',
@@ -363,6 +366,7 @@ describe('agent runtime tool registry', () => {
     ]);
     expect(plannerToolNames).not.toContain('rental.operationConfirmRequest');
     expect(plannerToolNames).not.toContain('rental.priceApply');
+    expect(plannerToolNames).not.toContain('rental.bulkPriceApply');
     expect(plannerToolNames).not.toContain('rental.perSpecPriceApply');
     expect(plannerToolNames).not.toContain('rental.specDimApply');
     expect(plannerToolNames).not.toContain('operations.refreshActivityExecute');

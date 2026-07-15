@@ -112,7 +112,7 @@ describe('createFeishuMessageDispatcher', () => {
     await expect(dispatcher.dispatch({ messageId: 'mid-default-resolver', text: '查询 565', source: 'sdk' })).resolves.toEqual({ text: 'query_product', skipped: false });
   });
 
-  it('uses Agent-first resolving when a planner is configured', async () => {
+  it('keeps product queries local-direct when a planner is configured', async () => {
     const intents: BotIntent[] = [];
     const dispatcher = createFeishuMessageDispatcher({
       agentPlannerProvider: { async proposePlan() { return '{}'; } },
@@ -122,8 +122,8 @@ describe('createFeishuMessageDispatcher', () => {
       },
     });
 
-    await expect(dispatcher.dispatch({ messageId: 'mid-agent-first-resolver', text: '查询 565', source: 'sdk' })).resolves.toEqual({ text: 'unknown', skipped: false });
-    expect(intents).toEqual([{ type: 'unknown', text: '查询 565' }]);
+    await expect(dispatcher.dispatch({ messageId: 'mid-agent-first-resolver', text: '查询 565', source: 'sdk' })).resolves.toEqual({ text: 'query_product', skipped: false });
+    expect(intents).toEqual([{ type: 'query_product', keyword: '565' }]);
   });
 
   it('passes clarification depth metadata into default Agent planner handling', async () => {

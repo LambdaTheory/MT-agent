@@ -25,6 +25,7 @@ export interface AgentToolConfirmContinuation {
 
 export interface AgentToolConfirmCardOptions {
   requestRef?: string;
+  summaryLines?: string[];
 }
 
 export interface AgentToolConfirmReference {
@@ -169,6 +170,7 @@ export function buildAgentToolConfirmCard(request: AgentToolConfirmRequest, opti
             `工具：${request.toolName}`,
             `参数：${compactJson(request.arguments)}`,
             `LLM 理解原因：${request.reason}`,
+            ...(options.summaryLines?.length ? ['', ...options.summaryLines] : []),
           ].join('\n'),
         },
         {
@@ -206,7 +208,7 @@ export function parseAgentToolConfirmReference(value: unknown): AgentToolConfirm
   return { requestRef, confirmationKey: key };
 }
 
-export function parseAgentToolConfirmRequest(value: unknown): AgentToolConfirmRequest | null {
+export function parseAgentToolConfirmRequest(value: unknown, options: { allowHiddenTool?: boolean } = {}): AgentToolConfirmRequest | null {
   if (!isRecord(value) || !isRecord(value.request)) return null;
   const request = value.request;
   const toolName = readString(request.toolName);
@@ -215,6 +217,7 @@ export function parseAgentToolConfirmRequest(value: unknown): AgentToolConfirmRe
   if (!toolName || !reason || !isRecord(args)) return null;
   const tool = findAgentTool(toolName);
   if (!tool || !validateAgentToolArguments(toolName, args)) return null;
+  if (tool.plannerVisible === false && !options.allowHiddenTool) return null;
   const continuation = parseAgentToolConfirmContinuation(request.continuation);
   if (request.continuation !== undefined && !continuation) return null;
   const parsedRequest = { toolName, arguments: args, reason, ...(continuation ? { continuation } : {}) };
