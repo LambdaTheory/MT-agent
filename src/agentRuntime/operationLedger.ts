@@ -158,11 +158,14 @@ export async function recordOperationEvent(
     const jsonlEntries = await loadOperationLedgerJsonlEntries(outputDir, date);
     const ledger = await loadOperationLedgerStore(outputDir);
     const daily = await loadDailyOperationJournalStore(outputDir, date);
-    if (jsonlEntries.some((item) => operationEventKey(item) === key) || daily.entries.some((item) => operationEventKey(item) === key)) return entry;
+    const jsonlHasEntry = jsonlEntries.some((item) => operationEventKey(item) === key);
+    const ledgerHasEntry = ledger.journal.some((item) => operationEventKey(item) === key);
+    const dailyHasEntry = daily.entries.some((item) => operationEventKey(item) === key);
+    if (jsonlHasEntry && ledgerHasEntry && dailyHasEntry) return entry;
     const now = new Date().toISOString();
-    await writeJsonl(jsonlPath, [...jsonlEntries, entry]);
-    await writeJson(operationLedgerPath(outputDir), { ...ledger, updatedAt: now, journal: [...ledger.journal, entry] });
-    await writeJson(dailyOperationJournalPath(outputDir, date), { ...daily, date, updatedAt: now, entries: [...daily.entries, entry] });
+    if (!jsonlHasEntry) await writeJsonl(jsonlPath, [...jsonlEntries, entry]);
+    if (!ledgerHasEntry) await writeJson(operationLedgerPath(outputDir), { ...ledger, updatedAt: now, journal: [...ledger.journal, entry] });
+    if (!dailyHasEntry) await writeJson(dailyOperationJournalPath(outputDir, date), { ...daily, date, updatedAt: now, entries: [...daily.entries, entry] });
     return entry;
   });
 }

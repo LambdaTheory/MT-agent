@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -6,6 +6,8 @@ import {
   loadDailyOperationJournalStore,
   loadOperationLedgerJsonlEntries,
   loadOperationLedgerStore,
+  dailyOperationJournalPath,
+  operationLedgerPath,
   recordOperationEvent,
 } from '../src/agentRuntime/operationLedger.js';
 
@@ -72,6 +74,73 @@ describe('operation ledger attribution', () => {
     expect(ledger.journal).toEqual(jsonl);
   });
 
+  it('repairs canonical and daily journals on retry after canonical ledger write fails', async () => {
+    const entry = {
+      planId: 'plan-1',
+      at: '2026-07-01T09:00:00.000Z',
+      event: 'execution_succeeded',
+      runId: 'run-1',
+      decisionId: 'dec-1',
+      toolName: 'rental.priceApply',
+      subject: { kind: 'product' as const, id: '648' },
+    };
+    const ledgerPath = operationLedgerPath(dir);
+
+    await mkdir(ledgerPath, { recursive: true });
+    await expect(recordOperationEvent(dir, entry)).rejects.toThrow();
+
+    const jsonlAfterFailure = await loadOperationLedgerJsonlEntries(dir, '2026-07-01');
+    expect(jsonlAfterFailure).toEqual([entry]);
+    await expect(readFile(ledgerPath, 'utf8')).rejects.toThrow();
+
+    await rm(ledgerPath, { recursive: true, force: true });
+    await recordOperationEvent(dir, entry);
+
+    const [jsonlAfterRetry, dailyAfterRetry, ledgerAfterRetry] = await Promise.all([
+      loadOperationLedgerJsonlEntries(dir, '2026-07-01'),
+      loadDailyOperationJournalStore(dir, '2026-07-01'),
+      loadOperationLedgerStore(dir),
+    ]);
+    expect(jsonlAfterRetry).toEqual([entry]);
+    expect(dailyAfterRetry.entries).toEqual([entry]);
+    expect(ledgerAfterRetry.journal).toEqual([entry]);
+  });
+
+  it('repairs only the daily journal on retry after daily journal write fails', async () => {
+    const entry = {
+      planId: 'plan-1',
+      at: '2026-07-01T09:00:00.000Z',
+      event: 'execution_succeeded',
+      runId: 'run-1',
+      decisionId: 'dec-1',
+      toolName: 'rental.priceApply',
+      subject: { kind: 'product' as const, id: '648' },
+    };
+    const dailyPath = dailyOperationJournalPath(dir, '2026-07-01');
+
+    await mkdir(dailyPath, { recursive: true });
+    await expect(recordOperationEvent(dir, entry)).rejects.toThrow();
+
+    const [jsonlAfterFailure, ledgerAfterFailure] = await Promise.all([
+      loadOperationLedgerJsonlEntries(dir, '2026-07-01'),
+      loadOperationLedgerStore(dir),
+    ]);
+    expect(jsonlAfterFailure).toEqual([entry]);
+    expect(ledgerAfterFailure.journal).toEqual([entry]);
+    await expect(readFile(dailyPath, 'utf8')).rejects.toThrow();
+
+    await rm(dailyPath, { recursive: true, force: true });
+    await recordOperationEvent(dir, entry);
+
+    const [jsonlAfterRetry, dailyAfterRetry, ledgerAfterRetry] = await Promise.all([
+      loadOperationLedgerJsonlEntries(dir, '2026-07-01'),
+      loadDailyOperationJournalStore(dir, '2026-07-01'),
+      loadOperationLedgerStore(dir),
+    ]);
+    expect(jsonlAfterRetry).toEqual([entry]);
+    expect(dailyAfterRetry.entries).toEqual([entry]);
+    expect(ledgerAfterRetry.journal).toEqual([entry]);
+  });
   it('dedupes identical operation events across jsonl and daily journal stores', async () => {
     const entry = {
       planId: 'plan-1',
