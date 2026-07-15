@@ -4,7 +4,7 @@ import { shouldKeepBrowserOpenOnFailure } from '../crawler/failureHandling.js';
 import { ensureAuthenticatedMerchantSession } from '../crawler/merchantSession.js';
 import type { AgentConfig, RawTableData } from '../domain/types.js';
 import { assertDashboardDataDate } from './dashboardCaptureDate.js';
-import { assessDashboardQuality, type DashboardQualitySummary } from './dashboardQuality.js';
+import { assessDashboardQuality, formatDashboardQuality, type DashboardQualitySummary } from './dashboardQuality.js';
 import { findPublicTrafficReportByDataDate } from './reportContextLocator.js';
 import { saveHistoricalDashboardCapture } from './historicalDashboardCapture.js';
 import { buildPublicTrafficPaths } from './paths.js';
@@ -24,6 +24,15 @@ export interface DashboardRefreshInput {
   sendTo?: 'personal' | 'group' | 'both';
 }
 
+/** @deprecated Temporary bridge for pre-Task-5 callers. Remove after Task 5/6 migration. */
+export interface LegacyDashboardRefreshInput {
+  config: AgentConfig;
+  date: string;
+  sendTo?: 'personal' | 'group' | 'both';
+}
+
+export type DashboardRefreshRequest = DashboardRefreshInput | LegacyDashboardRefreshInput;
+
 export interface DashboardRefreshResult {
   status: DashboardRefreshStatus;
   dataDate: string;
@@ -31,6 +40,10 @@ export interface DashboardRefreshResult {
   resolvedReportRunDate?: string;
   firstQuality?: DashboardQualitySummary;
   refreshQuality: DashboardQualitySummary;
+  /** @deprecated Derived from firstQuality; remove after Task 5/6 caller migration. */
+  readonly firstQualityText?: string;
+  /** @deprecated Derived from refreshQuality; remove after Task 5/6 caller migration. */
+  readonly refreshQualityText: string;
   rebuild: 'performed' | 'skipped';
   resend: 'performed' | 'skipped';
   rawLocation: string;
@@ -105,12 +118,22 @@ function conservativeState(dataDate: string): PublicTrafficRunState {
   };
 }
 
-export async function runDashboardRefresh(input: DashboardRefreshInput): Promise<DashboardRefreshResult> {
-  const dataDate = assertDashboardDataDate(input.dataDate);
+
+function isMissingConfiguredOutputRoot(error: unknown, outputDir: string): boolean {
+  return Boolean(
+    error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT'
+      && 'path' in error && error.path === outputDir,
+  );
+}
+export async function runDashboardRefresh(input: DashboardRefreshRequest): Promise<DashboardRefreshResult> {
+  const dataDate = assertDashboardDataDate('dataDate' in input ? input.dataDate : input.date);
   const capture = await captureDashboardRawTables(input.config, dataDate);
   const refreshQuality = assessDashboardQuality(capture.tables, []);
   const capturedAt = new Date().toISOString();
-  const located = await findPublicTrafficReportByDataDate(input.config.outputDir, dataDate);
+  const located = await findPublicTrafficReportByDataDate(input.config.outputDir, dataDate).catch((error: unknown) => {
+    if (isMissingConfiguredOutputRoot(error, input.config.outputDir)) return null;
+    throw error;
+  });
 
   if (!located) {
     const archived = await saveHistoricalDashboardCapture({
@@ -127,6 +150,7 @@ export async function runDashboardRefresh(input: DashboardRefreshInput): Promise
       dataDate,
       actualPageDate: capture.actualPageDate,
       refreshQuality,
+      refreshQualityText: formatDashboardQuality(refreshQuality),
       rebuild: 'skipped',
       resend: 'skipped',
       rawLocation: archived.dir,
@@ -177,6 +201,8 @@ export async function runDashboardRefresh(input: DashboardRefreshInput): Promise
     resolvedReportRunDate: located.runDate,
     firstQuality: state.firstDashboardQuality,
     refreshQuality,
+    firstQualityText: formatDashboardQuality(state.firstDashboardQuality),
+    refreshQualityText: formatDashboardQuality(refreshQuality),
     rebuild,
     resend,
     rawLocation: paths.dir,

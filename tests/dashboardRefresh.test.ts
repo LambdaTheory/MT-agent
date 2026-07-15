@@ -91,6 +91,42 @@ describe('runDashboardRefresh', () => {
     vi.clearAllMocks();
   });
 
+  it('archives the capture when the configured output root does not exist', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mt-agent-dashboard-refresh-'));
+    const outputDir = join(workspace, 'missing-output');
+    const dataDate = '2026-07-13';
+    const rawTables = [raw('1d'), raw('7d'), raw('30d')];
+
+    vi.mocked(collectDashboardPage).mockResolvedValueOnce({ tables: rawTables, actualPageDate: dataDate });
+
+    const result = await runDashboardRefresh({ config: config(outputDir), dataDate });
+
+    expect(rebuildPublicTrafficReport).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      status: 'saved_historical_without_report',
+      dataDate,
+      actualPageDate: dataDate,
+      rebuild: 'skipped',
+      resend: 'skipped',
+      rawLocation: `${outputDir}/historical-dashboard-captures/${dataDate}`,
+    });
+    await expect(readFile(join(result.rawLocation, '公域访问数据_1日.json'), 'utf8')).resolves.toContain('"period": "1d"');
+    await expect(readFile(join(result.rawLocation, 'capture-manifest.json'), 'utf8')).resolves.toContain('"reportContextFound": false');
+  });
+
+  it('normalizes a legacy date input to the canonical dataDate', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mt-agent-dashboard-refresh-'));
+    const outputDir = join(workspace, 'missing-output');
+    const dataDate = '2026-07-13';
+    const rawTables = [raw('1d'), raw('7d'), raw('30d')];
+
+    vi.mocked(collectDashboardPage).mockResolvedValueOnce({ tables: rawTables, actualPageDate: dataDate });
+
+    const result = await runDashboardRefresh({ config: config(outputDir), date: dataDate });
+
+    expect(result.dataDate).toBe(dataDate);
+  });
+
   it('returns only the strict structured contract when no report is found', async () => {
     const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-dashboard-refresh-'));
     const dataDate = '2026-07-13';
@@ -108,9 +144,11 @@ describe('runDashboardRefresh', () => {
       'rawLocation',
       'rebuild',
       'refreshQuality',
+      'refreshQualityText',
       'resend',
       'status',
     ]);
+    expect(result.refreshQualityText).toBe('1d=complete, 7d=complete, 30d=complete');
     expect(result).toMatchObject({
       status: 'saved_historical_without_report',
       dataDate,
@@ -125,6 +163,20 @@ describe('runDashboardRefresh', () => {
       '公域访问数据_7日.json',
       '公域访问数据_30日.json',
     ]));
+  });
+
+  it('propagates malformed report context JSON instead of treating it as no report', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-dashboard-refresh-'));
+    const runDate = '2026-07-14';
+    const dataDate = '2026-07-13';
+    const paths = buildPublicTrafficPaths(outputDir, runDate);
+    const rawTables = [raw('1d'), raw('7d'), raw('30d')];
+
+    await mkdir(paths.dir, { recursive: true });
+    await writeFile(paths.reportContext, '{not valid JSON}', 'utf8');
+    vi.mocked(collectDashboardPage).mockResolvedValueOnce({ tables: rawTables, actualPageDate: dataDate });
+
+    await expect(runDashboardRefresh({ config: config(outputDir), dataDate })).rejects.toThrow(SyntaxError);
   });
 
   it('uses the report run date and skips rebuild when run state is absent', async () => {
