@@ -97,32 +97,42 @@ export function assertDashboardDataDate(date: string, now?: Date): string {
  * - MM-DD (e.g. "07-12")
  * - YYYY/MM/DD (e.g. "2026/07/12")
  * - YYYY-MM-DD (e.g. "2026-07-12")
- * - Date ranges (e.g. "07-07 ~ 07-13" or "07-07～07-13")
+ * - Date ranges whose end date is the requested cutoff (e.g. "07-06 ~ 07-12")
  */
+function parseDisplayedDashboardDate(token: string, requestedYear: string): string | null {
+  const normalized = token.trim();
+  const slashMatch = normalized.match(/^(\d{4})\/(\d{2})\/(\d{2})$/);
+  if (slashMatch) return `${slashMatch[1]}-${slashMatch[2]}-${slashMatch[3]}`;
+
+  const isoMatch = normalized.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (isoMatch) return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
+
+  const mmddMatch = normalized.match(/^(\d{2})-(\d{2})$/);
+  if (mmddMatch) return `${requestedYear}-${mmddMatch[1]}-${mmddMatch[2]}`;
+
+  return null;
+}
+
 export function assessDashboardDateReadback(
   requestedDate: string,
   displayedValue: string,
 ): DashboardDateReadback {
   const normalized = displayedValue.trim();
+  const requestedYear = requestedDate.slice(0, 4);
 
-  // Detect date ranges using ~ or full-width ～
   if (/[~～]/.test(normalized)) {
+    const parts = normalized.split(/[~～]/).map((part) => part.trim()).filter(Boolean);
+    const displayedEndDate = parts.length === 2 ? parseDisplayedDashboardDate(parts[1], requestedYear) : null;
     return {
       requestedDate,
       displayedValue: normalized,
-      confirmed: false,
-      reason: 'picker displays a date range',
+      confirmed: displayedEndDate === requestedDate,
+      reason: displayedEndDate === requestedDate ? undefined : 'picker date range end does not match requested date',
     };
   }
 
-  // Extract the month-day part from the requested date
-  const requestedMMDD = requestedDate.slice(5); // "MM-DD"
-
-  // Try to match the displayed value against known formats
-  // Format: YYYY/MM/DD
-  const slashMatch = normalized.match(/^(\d{4})\/(\d{2})\/(\d{2})$/);
-  if (slashMatch) {
-    const displayedDate = `${slashMatch[1]}-${slashMatch[2]}-${slashMatch[3]}`;
+  const displayedDate = parseDisplayedDashboardDate(normalized, requestedYear);
+  if (displayedDate) {
     return {
       requestedDate,
       displayedValue: normalized,
@@ -131,31 +141,6 @@ export function assessDashboardDateReadback(
     };
   }
 
-  // Format: YYYY-MM-DD (full ISO)
-  const isoMatch = normalized.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (isoMatch) {
-    const displayedDate = `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
-    return {
-      requestedDate,
-      displayedValue: normalized,
-      confirmed: displayedDate === requestedDate,
-      reason: displayedDate === requestedDate ? undefined : 'picker date does not match requested date',
-    };
-  }
-
-  // Format: MM-DD
-  const mmddMatch = normalized.match(/^(\d{2})-(\d{2})$/);
-  if (mmddMatch) {
-    const displayedMMDD = `${mmddMatch[1]}-${mmddMatch[2]}`;
-    return {
-      requestedDate,
-      displayedValue: normalized,
-      confirmed: displayedMMDD === requestedMMDD,
-      reason: displayedMMDD === requestedMMDD ? undefined : 'picker date does not match requested date',
-    };
-  }
-
-  // Unknown format - treat as mismatch
   return {
     requestedDate,
     displayedValue: normalized,

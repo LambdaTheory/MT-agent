@@ -348,7 +348,11 @@ function parseDashboardDateParts(dataDate: string): { year: number; month: numbe
 }
 
 async function visibleLocator(locator: Locator): Promise<Locator | null> {
-  if ((await locator.count().catch(() => 0)) > 0 && (await locator.first().isVisible().catch(() => false))) return locator.first();
+  const count = await locator.count().catch(() => 0);
+  for (let index = 0; index < count; index += 1) {
+    const candidate = locator.nth(index);
+    if (await candidate.isVisible().catch(() => false)) return candidate;
+  }
   return null;
 }
 
@@ -385,13 +389,22 @@ async function clickVisibleDashboardPickerControl(target: DashboardTarget, selec
   return false;
 }
 
+async function waitForVisibleDashboardPickerPanel(target: DashboardTarget, dataDate: string): Promise<Locator> {
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    const visiblePanel = await visibleLocator(target.locator('.ant-picker-panel, .ant-picker-dropdown'));
+    if (visiblePanel) return visiblePanel;
+    await waitForDashboardTargetTimeout(target, 200);
+  }
+  throw dashboardDateFailure('Dashboard date picker panel was not visible', dataDate);
+}
+
 async function alignDashboardDatePickerMonth(target: DashboardTarget, dataDate: string): Promise<void> {
   const { year, month } = parseDashboardDateParts(dataDate);
   const deadline = Date.now() + 30000;
 
   while (Date.now() < deadline) {
-    const visiblePanel = await visibleLocator(target.locator('.ant-picker-panel, .ant-picker-dropdown'));
-    if (!visiblePanel) throw dashboardDateFailure('Dashboard date picker panel was not visible', dataDate);
+    await waitForVisibleDashboardPickerPanel(target, dataDate);
 
     const panelDate = await readVisibleAntPickerPanelDate(target);
     if (!panelDate) throw dashboardDateFailure('Dashboard date picker month could not be read', dataDate);
@@ -464,6 +477,9 @@ export async function selectDashboardDataDate(page: Page, target: DashboardTarge
   if ((await input.count().catch(() => 0)) === 0 || !(await input.isVisible().catch(() => false))) {
     throw dashboardDateFailure('Dashboard date picker was not found', requestedDate);
   }
+
+  const currentValue = await input.inputValue({ timeout: 1000 }).catch(() => '');
+  if (assessDashboardDateReadback(requestedDate, currentValue).confirmed) return requestedDate;
 
   const preSelectionState = await captureDashboardObservableState(target);
   const pickerShell = input.locator('xpath=ancestor::*[contains(concat(" ", normalize-space(@class), " "), " ant-picker ")][1]');

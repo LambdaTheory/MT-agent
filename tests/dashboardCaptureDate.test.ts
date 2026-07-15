@@ -93,13 +93,22 @@ describe('assessDashboardDateReadback', () => {
     });
   });
 
-  it('rejects a date range with reason', () => {
+  it('confirms a date range when the end date is the requested business cutoff', () => {
+    const result = assessDashboardDateReadback('2026-07-12', '07-06 ~ 07-12');
+    expect(result).toEqual({
+      requestedDate: '2026-07-12',
+      displayedValue: '07-06 ~ 07-12',
+      confirmed: true,
+    });
+  });
+
+  it('rejects a date range whose end date does not match the requested cutoff', () => {
     const result = assessDashboardDateReadback('2026-07-12', '07-07 ~ 07-13');
     expect(result).toEqual({
       requestedDate: '2026-07-12',
       displayedValue: '07-07 ~ 07-13',
       confirmed: false,
-      reason: 'picker displays a date range',
+      reason: 'picker date range end does not match requested date',
     });
   });
 
@@ -119,7 +128,7 @@ describe('assessDashboardDateReadback', () => {
       requestedDate: '2026-07-12',
       displayedValue: '07-07～07-13',
       confirmed: false,
-      reason: 'picker displays a date range',
+      reason: 'picker date range end does not match requested date',
     });
   });
 

@@ -87,6 +87,27 @@ describe('dashboard crawler source', () => {
     expect(staleGuardAwait).toBeGreaterThan(readbackWait);
   });
 
+  it('accepts an already-confirmed date readback before reopening the picker', async () => {
+    const source = await readFile(new URL('../src/crawler/dashboardCrawler.ts', import.meta.url), 'utf8');
+    const selectStart = source.indexOf('export async function selectDashboardDataDate');
+    const currentReadback = source.indexOf('input.inputValue', selectStart);
+    const earlyReturn = source.indexOf('assessDashboardDateReadback(requestedDate, currentValue).confirmed', currentReadback);
+    const staleFingerprint = source.indexOf('captureDashboardObservableState', selectStart);
+
+    expect(currentReadback).toBeGreaterThan(selectStart);
+    expect(earlyReturn).toBeGreaterThan(currentReadback);
+    expect(earlyReturn).toBeLessThan(staleFingerprint);
+  });
+
+  it('waits for a visible picker panel and skips hidden locator matches', async () => {
+    const source = await readFile(new URL('../src/crawler/dashboardCrawler.ts', import.meta.url), 'utf8');
+
+    expect(source).toContain('async function waitForVisibleDashboardPickerPanel');
+    expect(source).toContain('while (Date.now() < deadline)');
+    expect(source).toContain('locator.nth(index)');
+    expect(source).toContain('if (visiblePanel) return visiblePanel;');
+  });
+
   it('keeps automatic merchant sub-account selection in the dashboard flow', async () => {
     const source = await readFile(new URL('../src/crawler/dashboardCrawler.ts', import.meta.url), 'utf8');
     expect(source).toContain('await selectSubAccountIfNeeded(page);');
