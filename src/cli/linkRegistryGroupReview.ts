@@ -3,13 +3,13 @@ import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { loadClosedOrderRegistryContext } from '../closedOrderFeedback/runtime.js';
-import type { InventoryStatusSnapshot } from '../inventoryStatus/types.js';
 import {
   buildLinkRegistryGroupReviewReport,
   renderLinkRegistryGroupReviewApprovalCsv,
   renderLinkRegistryGroupReviewApprovalGuide,
   renderLinkRegistryGroupReviewMarkdown,
 } from '../linkRegistry/groupReview.js';
+import { readInventorySameSkuSnapshot } from '../inventoryStatus/store.js';
 import { parseLinkRegistryOverrides, type LinkRegistryOverrides } from '../linkRegistry/overrides.js';
 import type { LinkRegistryEntry } from '../linkRegistry/types.js';
 import { buildPublicTrafficPaths } from '../publicTraffic/paths.js';
@@ -37,15 +37,6 @@ async function readOptionalJson(path: string): Promise<unknown | null> {
   }
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === 'object' && !Array.isArray(value);
-}
-
-function parseSnapshot(value: unknown): InventoryStatusSnapshot {
-  if (!isRecord(value) || !Array.isArray(value.groups) || !isRecord(value.summary)) throw new Error('Invalid inventory snapshot file');
-  return value as unknown as InventoryStatusSnapshot;
-}
-
 async function latestSnapshotDate(outputDir: string): Promise<string | null> {
   const entries: Dirent[] = await readdir(outputDir, { withFileTypes: true }).catch(() => []);
   const dates = entries
@@ -56,8 +47,8 @@ async function latestSnapshotDate(outputDir: string): Promise<string | null> {
 
   for (const date of dates) {
     const snapshotPath = buildPublicTrafficPaths(outputDir, date).sameSkuSnapshot;
-    const found = await readOptionalJson(snapshotPath);
-    if (found) return date;
+    const snapshot = await readInventorySameSkuSnapshot(snapshotPath);
+    if (snapshot) return date;
   }
   return null;
 }
@@ -105,7 +96,10 @@ export async function runLinkRegistryGroupReviewCli(argv = process.argv.slice(2)
   if (!snapshotDate) throw new Error('No same-sku snapshot found under output/');
 
   const snapshotPath = buildPublicTrafficPaths(outputDir, snapshotDate).sameSkuSnapshot;
-  const snapshot = parseSnapshot(await readJson(snapshotPath));
+  const snapshot = await readInventorySameSkuSnapshot(snapshotPath);
+  if (!snapshot) {
+    throw new Error(`Invalid inventory snapshot at ${snapshotPath} (date ${snapshotDate})`);
+  }
   const { entries, overrides } = await loadRegistry(argv, outputDir);
   const report = buildLinkRegistryGroupReviewReport({
     entries,
