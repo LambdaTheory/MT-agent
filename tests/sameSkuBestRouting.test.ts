@@ -43,6 +43,7 @@ const registryEntries: LinkRegistryEntry[] = [
 
 const context: PublicTrafficDataReportContext = {
   date: '2026-07-06',
+  generationId: 'same-sku-best-routing-2026-07-06',
   summary: { '1d': baseMetric, '7d': baseMetric, '30d': baseMetric },
   conclusions: [],
   rows: [
