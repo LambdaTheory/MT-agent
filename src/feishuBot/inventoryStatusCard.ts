@@ -155,6 +155,17 @@ function periodBlock(label: string, period: InventoryStatusPeriodMetrics): strin
   ].join('\n');
 }
 
+function hasMissingOrderMetrics(period: InventoryStatusPeriodMetrics): boolean {
+  return period.createdOrders === null || period.shippedOrders === null || period.visitCreatedOrderRate === null || period.visitShipmentRate === null;
+}
+
+function sourceExplanation(group: InventoryStatusGroupSnapshot): string | null {
+  const hasAmount = Object.values(group.periods).some((period) => period.amount !== null && Number.isFinite(period.amount));
+  const missingOrderMetrics = Object.values(group.periods).some(hasMissingOrderMetrics);
+  if (!hasAmount || !missingOrderMetrics) return null;
+  return '**数据口径**\n金额来自公域曝光侧；商品级创建/发货来自访问页后链路。本次未抓到商品级后链路数据的周期会显示 `-`，不能按 0 单理解。';
+}
+
 function focusGroupLines(result: InventoryStatusOverviewResult): string {
   const lines = result.snapshot.groups
     .slice()
@@ -268,6 +279,7 @@ export function buildInventoryStatusOverviewCard(result: InventoryStatusOverview
 export function buildInventoryStatusDetailCard(result: InventoryStatusDetailResult): FeishuCardPayload {
   const group = result.group;
   const totals = snapshotTotals(result.snapshot);
+  const sourceNote = sourceExplanation(group);
   return {
     schema: '2.0',
     header: {
@@ -326,6 +338,7 @@ export function buildInventoryStatusDetailCard(result: InventoryStatusDetailResu
             note: `\u53d1\u8d27 ${numberText(group.periods['7d'].shippedOrders)}`,
           },
         ], 'inventory_status_detail_periods'),
+        ...(sourceNote ? [markdown(sourceNote)] : []),
         markdown(`**\u8bf4\u660e**\n${ZH.explanation}\uff0c\u4e0d\u662f\u5355\u6761\u94fe\u63a5\u7ed3\u8bba\uff1b\u5b83\u66f4\u9002\u5408\u5e2e\u52a9\u6211\u4eec\u5224\u65ad\u8fd9\u4e2a\u7ec4\u5f53\u524d\u6709\u6ca1\u6709\u7f3a\u6863\u3001\u7f3a\u6570\u6216\u9700\u8981\u7ee7\u7eed\u62c6\u5206\u7ef4\u62a4\u3002`),
         markdown(`${periodBlock('1\u65e5', group.periods['1d'])}\n\n${periodBlock('7\u65e5', group.periods['7d'])}\n\n${periodBlock('30\u65e5', group.periods['30d'])}`),
         markdown(`**${ZH.missingExplainTitle}**\n${missingReportExplanation(group.missingMetricLinkCount)}`),

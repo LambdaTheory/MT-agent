@@ -344,6 +344,29 @@ describe('inventory same sku snapshot', () => {
     });
   });
 
+  it('keeps order metrics unavailable when exposure-side amount exists without dashboard rows', () => {
+    const exposureOnlySale = row(
+      '813',
+      'platform-813',
+      '有金额但无后链路',
+      { exposure: 100, publicVisits: 20, amount: 205, hasExposureData: true, hasDashboardData: false },
+      { exposure: 700, publicVisits: 120, amount: 1279, hasExposureData: true, hasDashboardData: false },
+      { exposure: 3000, publicVisits: 600, amount: 30710, hasExposureData: true, hasDashboardData: false },
+    );
+    const snapshot = buildSnapshot({
+      context: contextWithRows([exposureOnlySale]),
+      registry: [registryEntry({ internalProductId: '813', platformProductId: 'platform-813', sameSkuGroupId: 'exposure-amount-only' })],
+    });
+
+    expect(snapshot.groups[0]?.periods['7d']).toMatchObject({
+      amount: 1279,
+      createdOrders: null,
+      shippedOrders: null,
+      visitCreatedOrderRate: null,
+      visitShipmentRate: null,
+    });
+  });
+
   it('distinguishes zero and one on-sale link inventory risks', () => {
     const zeroOnSaleSnapshot = buildSnapshot({
       context: contextWithRows([]),

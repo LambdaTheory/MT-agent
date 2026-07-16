@@ -262,6 +262,44 @@ describe('inventoryStatusCard', () => {
     expect(serialized).not.toContain('null');
   });
 
+  it('explains that amount can exist while sku-level order metrics are unavailable', () => {
+    const baseGroup = snapshot.groups[1]!;
+    const group = {
+      ...baseGroup,
+      periods: {
+        ...baseGroup.periods,
+        '7d': {
+          ...baseGroup.periods['7d'],
+          amount: 205,
+          createdOrders: null,
+          signedOrders: null,
+          reviewedOrders: null,
+          shippedOrders: null,
+          createdOrderAmount: null,
+          signedOrderAmount: null,
+          reviewedOrderAmount: null,
+          shippedOrderAmount: null,
+          visitCreatedOrderRate: null,
+          visitShipmentRate: null,
+        },
+      },
+    };
+    const result: InventoryStatusDetailResult = {
+      status: 'detail',
+      query: 'sx70',
+      matchedBy: 'alias',
+      sameSkuGroupId: group.sameSkuGroupId,
+      snapshot: { ...snapshot, groups: [snapshot.groups[0]!, group] },
+      group,
+    };
+
+    const serialized = JSON.stringify(buildInventoryStatusDetailCard(result));
+
+    expect(serialized).toContain('金额来自公域曝光侧');
+    expect(serialized).toContain('商品级创建/发货来自访问页后链路');
+    expect(serialized).toContain('本次未抓到商品级后链路数据');
+  });
+
   it('formats ambiguous and fallback text in Chinese', () => {
     const ambiguous: InventoryStatusAmbiguousResult = {
       status: 'ambiguous',
