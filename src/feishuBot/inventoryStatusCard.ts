@@ -70,12 +70,19 @@ function metricRow(metrics: Array<{ label: string; value: string; note?: string 
   };
 }
 
-function percent(value: number, digits = 1): string {
+function percent(value: number | null, digits = 1): string {
+  if (value === null || !Number.isFinite(value)) return '-';
   return `${(value * 100).toFixed(digits)}%`;
 }
 
-function amount(value: number): string {
+function amount(value: number | null): string {
+  if (value === null || !Number.isFinite(value)) return '-';
   return value.toFixed(0);
+}
+
+function numberText(value: number | null): string {
+  if (value === null || !Number.isFinite(value)) return '-';
+  return String(value);
 }
 
 function ratio(numerator: number, denominator: number): number {
@@ -83,12 +90,23 @@ function ratio(numerator: number, denominator: number): number {
   return numerator / denominator;
 }
 
-function contributionText(value: number, total: number): string {
+function contributionText(value: number | null, total: number): string {
+  if (value === null || !Number.isFinite(value)) return '-';
   return percent(ratio(value, total));
 }
 
-function sumGroups(snapshot: InventoryStatusSnapshot, pick: (group: InventoryStatusGroupSnapshot) => number): number {
-  return snapshot.groups.reduce((sum, group) => sum + pick(group), 0);
+function sumGroups(snapshot: InventoryStatusSnapshot, pick: (group: InventoryStatusGroupSnapshot) => number | null): number {
+  return snapshot.groups.reduce((sum, group) => {
+    const value = pick(group);
+    return value === null || !Number.isFinite(value) ? sum : sum + value;
+  }, 0);
+}
+
+function compareNullableDesc(left: number | null, right: number | null): number {
+  if (left === null && right === null) return 0;
+  if (left === null) return 1;
+  if (right === null) return -1;
+  return right - left;
 }
 
 function snapshotTotals(snapshot: InventoryStatusSnapshot): SnapshotTotals {
@@ -113,8 +131,9 @@ function structureChart(snapshot: InventoryStatusSnapshot): CardElement {
       title: { text: '\u94fe\u63a5\u6863\u6848\u72b6\u6001\u5206\u5e03' },
       data: {
         values: [
-          { label: '\u542f\u7528\u4e2d', value: snapshot.registryAuditSummary.activeLinks },
-          { label: '\u5df2\u4e0b\u67b6', value: snapshot.registryAuditSummary.removedLinks },
+          { label: '\u5728\u552e', value: snapshot.registryAuditSummary.onSaleLinks },
+          { label: '\u5df2\u4e0b\u67b6', value: snapshot.registryAuditSummary.delistedLinks },
+          { label: '\u94fe\u63a5\u4e0d\u5b58\u5728', value: snapshot.registryAuditSummary.goneLinks },
           { label: '\u5f85\u786e\u8ba4', value: snapshot.registryAuditSummary.unknownLinks },
         ],
       },
@@ -131,15 +150,18 @@ function structureChart(snapshot: InventoryStatusSnapshot): CardElement {
 function periodBlock(label: string, period: InventoryStatusPeriodMetrics): string {
   return [
     `**${label}**`,
-    `\u66dd\u5149 ${period.exposure} | \u8bbf\u95ee ${period.publicVisits} | \u91d1\u989d ${amount(period.amount)}`,
-    `\u521b\u5efa ${period.createdOrders} | \u53d1\u8d27 ${period.shippedOrders} | \u66dd\u5149-\u8bbf\u95ee\u7387 ${percent(period.exposureVisitRate)} | \u8bbf\u95ee-\u4e0b\u5355\u7387 ${percent(period.visitCreatedOrderRate)} | \u8bbf\u95ee-\u53d1\u8d27\u7387 ${percent(period.visitShipmentRate)}`,
+    `\u66dd\u5149 ${numberText(period.exposure)} | \u8bbf\u95ee ${numberText(period.publicVisits)} | \u91d1\u989d ${amount(period.amount)}`,
+    `\u521b\u5efa ${numberText(period.createdOrders)} | \u53d1\u8d27 ${numberText(period.shippedOrders)} | \u66dd\u5149-\u8bbf\u95ee\u7387 ${percent(period.exposureVisitRate)} | \u8bbf\u95ee-\u4e0b\u5355\u7387 ${percent(period.visitCreatedOrderRate)} | \u8bbf\u95ee-\u53d1\u8d27\u7387 ${percent(period.visitShipmentRate)}`,
   ].join('\n');
 }
 
 function focusGroupLines(result: InventoryStatusOverviewResult): string {
   const lines = result.snapshot.groups
     .slice()
-    .sort((left, right) => right.missingMetricLinkCount - left.missingMetricLinkCount || right.periods['7d'].amount - left.periods['7d'].amount)
+    .sort((left, right) =>
+      right.missingMetricLinkCount - left.missingMetricLinkCount
+      || compareNullableDesc(left.periods['7d'].amount, right.periods['7d'].amount),
+    )
     .slice(0, 5)
     .map((group, index) => `${index + 1}. ${group.groupName} | active ${group.activeLinkCount}/${group.totalLinkCount} | ${ZH.missingLinks} ${group.missingMetricLinkCount}`);
   return lines.join('\n') || '\u6682\u65e0\u9700\u8981\u5173\u6ce8\u7684\u540c\u6b3e\u7ec4\u3002';
@@ -147,7 +169,7 @@ function focusGroupLines(result: InventoryStatusOverviewResult): string {
 
 function topLinkLines(group: InventoryStatusGroupSnapshot): string {
   const lines = group.topLinks.map((link, index) =>
-    `${index + 1}. ${link.internalProductId} ${link.productName} | 1\u65e5\u91d1\u989d ${amount(link.oneDayAmount)} | \u8bbf\u95ee ${link.oneDayPublicVisits}`,
+    `${index + 1}. ${link.internalProductId} ${link.productName} | 1\u65e5\u91d1\u989d ${amount(link.oneDayAmount)} | \u8bbf\u95ee ${numberText(link.oneDayPublicVisits)}`,
   );
   return lines.join('\n') || '\u6682\u65e0\u4e3b\u529b\u94fe\u63a5\u3002';
 }
@@ -214,24 +236,24 @@ export function buildInventoryStatusOverviewCard(result: InventoryStatusOverview
         ], 'inventory_status_overview_maintenance'),
         metricRow([
           {
-            label: 'active \u94fe\u63a5',
-            value: String(snapshot.registryAuditSummary.activeLinks),
+            label: '\u5728\u552e\u94fe\u63a5',
+            value: String(snapshot.registryAuditSummary.onSaleLinks),
             note: `\u603b\u94fe\u63a5 ${snapshot.registryAuditSummary.totalLinks}`,
           },
           {
-            label: 'removed \u94fe\u63a5',
-            value: String(snapshot.registryAuditSummary.removedLinks),
-            note: '\u9ed8\u8ba4\u4e0d\u53c2\u4e0e active \u67e5\u8be2',
+            label: '\u5df2\u4e0b\u67b6\u94fe\u63a5',
+            value: String(snapshot.registryAuditSummary.delistedLinks),
+            note: '\u4e0a\u67b6\u540e\u53ef\u6062\u590d\u64cd\u4f5c',
           },
           {
-            label: 'unknown \u94fe\u63a5',
+            label: '\u94fe\u63a5\u4e0d\u5b58\u5728',
+            value: String(snapshot.registryAuditSummary.goneLinks),
+            note: '\u5546\u54c1\u603b\u8868\u5df2\u7f3a\u5931',
+          },
+          {
+            label: '\u5f85\u786e\u8ba4\u94fe\u63a5',
             value: String(snapshot.registryAuditSummary.unknownLinks),
-            note: '\u5efa\u8bae\u5c3d\u5feb\u786e\u8ba4\u72b6\u6001',
-          },
-          {
-            label: 'override \u98ce\u9669',
-            value: String(snapshot.registryAuditSummary.overrideRiskCount),
-            note: '\u9700\u8981\u4eba\u5de5\u590d\u6838',
+            note: `\u9700\u786e\u8ba4\uff0c\u8986\u76d6\u89c4\u5219\u98ce\u9669 ${snapshot.registryAuditSummary.overrideRiskCount}`,
           },
         ], 'inventory_status_overview_registry'),
         structureChart(snapshot),
@@ -269,7 +291,7 @@ export function buildInventoryStatusDetailCard(result: InventoryStatusDetailResu
           {
             label: ZH.visitShare7d,
             value: contributionText(group.periods['7d'].publicVisits, totals.totalVisits7d),
-            note: `${group.periods['7d'].publicVisits} / ${totals.totalVisits7d}`,
+            note: `${numberText(group.periods['7d'].publicVisits)} / ${numberText(totals.totalVisits7d)}`,
           },
           {
             label: ZH.missingLinks,
@@ -301,7 +323,7 @@ export function buildInventoryStatusDetailCard(result: InventoryStatusDetailResu
           {
             label: '7\u65e5\u8bbf\u95ee-\u53d1\u8d27\u7387',
             value: percent(group.periods['7d'].visitShipmentRate),
-            note: `\u53d1\u8d27 ${group.periods['7d'].shippedOrders}`,
+            note: `\u53d1\u8d27 ${numberText(group.periods['7d'].shippedOrders)}`,
           },
         ], 'inventory_status_detail_periods'),
         markdown(`**\u8bf4\u660e**\n${ZH.explanation}\uff0c\u4e0d\u662f\u5355\u6761\u94fe\u63a5\u7ed3\u8bba\uff1b\u5b83\u66f4\u9002\u5408\u5e2e\u52a9\u6211\u4eec\u5224\u65ad\u8fd9\u4e2a\u7ec4\u5f53\u524d\u6709\u6ca1\u6709\u7f3a\u6863\u3001\u7f3a\u6570\u6216\u9700\u8981\u7ee7\u7eed\u62c6\u5206\u7ef4\u62a4\u3002`),
