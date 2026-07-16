@@ -197,6 +197,24 @@ MT-agent/
 
 2026-07-15 已完成一次历史缺口回补：业务数据日 `2026-06-12`、`2026-06-13`、`2026-06-16`、`2026-06-17`、`2026-06-19`、`2026-06-22`、`2026-06-29`、`2026-07-01`、`2026-07-02`、`2026-07-08`、`2026-07-10` 的三周期访问页 raw 已写入主仓库 `C:/works/MT-agent/output` 并重建对应本地日报，未重发飞书日报。复核扫描了 35 个日报目录、34 个业务数据日，`2026-06-10` 至 `2026-07-14` 范围内有日报上下文的业务日期均无访问页 raw 缺失；`2026-06-18` 本地无对应日报上下文，不计为访问页缺失。
 
+#### 健康度与托管异常口径（2026-07-16）
+
+公域日报健康度规则已下沉到 `src/publicTraffic/rulesConfig.ts` 的 `health` 配置，并由 `src/cli/publicTrafficReport.ts` / `src/publicTraffic/rebuildPublicTrafficReport.ts` 传入 `analyzePublicTrafficData()`。分析函数仍保持纯函数，不在内部读取配置文件。
+
+默认口径：
+
+- 曝光按日均判定：日均曝光 `<300` 为差，`300-999` 为正常，`>=1000` 为好。
+- 访问按访问率判定：访问 / 曝光 `<2%` 为差，`2%-5%` 为正常，`>5%` 为好。
+- 金额斩杀默认使用近 `14` 天累计金额 `<=0`，由 `health.amountKill.windowDays` 和 `health.amountKill.threshold` 配置；后续可按业务调整窗口和阈值。
+- 缺失数据不得按 0 参与斩杀。金额窗口只有在汇总天数满足配置且未标记 `missing` / `counter_reset_or_data_error` 时才可触发斩杀；否则保持 unknown 或由 1/7 日正金额证据判定为 alive。
+
+日报 `custodyAbnormal` 问题池只收集两类结构化组合，不再按“托管状态包含托管异常”泛化收集：
+
+1. `上架/出售中/可售卖/已同步` + `失败/不通过/未同步/拒绝/驳回` + `托管中`。
+2. `已下架/下架/停售` + `托管中`。
+
+这两个 case 只影响公域日报的托管异常问题池、Markdown/Excel/飞书日报和 Bot 问题池查询展示，不改变链接档案的 `listingState` 仲裁，也不改变商品写操作候选过滤。
+
 ### 4.4 `src/agentData/`：Agent 数据理解层
 
 该层把日报/状态数据转换为可被 Agent 确定性查询的能力。**不要把计算逻辑复制进 LLM prompt 或飞书 handler；新数据查询应优先落在该层。**
@@ -279,6 +297,7 @@ MT-agent/
 - 日报生成与仪表盘刷新属于重抓取操作，也必须确认。
 - 报表重发/推送、关单同步/报告等非商品变更操作可直接执行。
 - 确认卡使用从完整请求派生的 `confirmationKey`，解析时必须复算并验证，防止卡片 payload 篡改。
+- `buildAgentToolConfirmCard()` 仅在展示层把工具名包装成中文操作名，例如 `操作：复制商品（rental.copy）`；callback payload、`request.toolName`、`confirmationKey`、parser、ledger/audit 仍必须使用原始工具名，不能把中文展示文本反解析为执行参数。
 
 #### Daily Mission 当前状态
 
