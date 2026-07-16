@@ -821,12 +821,14 @@ async function writeInventoryStatusFixtures(rootDir: string): Promise<{
   const configDir = join(rootDir, 'config');
   const stateDir = join(outputDir, 'state');
   const runDate = '2026-06-24';
+  const generationId = 'inventory-status-generation-2026-06-24';
   const reportDir = join(outputDir, runDate);
   await mkdir(reportDir, { recursive: true });
   await mkdir(stateDir, { recursive: true });
   await mkdir(configDir, { recursive: true });
 
   await writeFile(join(reportDir, 'report-context.json'), JSON.stringify({
+    generationId,
     date: '2026-06-23',
     summary: { '1d': summary, '7d': summary, '30d': summary },
     conclusions: [],
@@ -842,12 +844,15 @@ async function writeInventoryStatusFixtures(rootDir: string): Promise<{
   }), 'utf8');
 
   await writeFile(join(reportDir, '同款组经营快照_2026-06-24.json'), JSON.stringify({
+    schemaVersion: 1,
+    generationId,
     date: '2026-06-24',
     sourceReportDate: '2026-06-23',
     generatedAt: '2026-06-24T00:00:00.000Z',
+    warnings: ['组内 1 条链接无日报数据'],
     summary: { sameSkuGroupCount: 2, activeLinkCount: 3, totalLinkCount: 4 },
     coverage: { groupedLinkCount: 4, ungroupedLinkCount: 0, groupsWithMetrics: 2, groupsWithoutMetrics: 0 },
-    registryAuditSummary: { totalLinks: 4, activeLinks: 3, removedLinks: 1, unknownLinks: 0, overrideRiskCount: 0 },
+    registryAuditSummary: { totalLinks: 4, onSaleLinks: 3, delistedLinks: 1, goneLinks: 0, unknownLinks: 0, overrideRiskCount: 0 },
     groups: [
       {
         sameSkuGroupId: 'dji-pocket-3',
@@ -864,7 +869,7 @@ async function writeInventoryStatusFixtures(rootDir: string): Promise<{
           '30d': { exposure: 9000, publicVisits: 720, amount: 3600, createdOrders: 35, signedOrders: 32, reviewedOrders: 30, shippedOrders: 28, createdOrderAmount: 3900, signedOrderAmount: 3720, reviewedOrderAmount: 3600, shippedOrderAmount: 3450, exposureVisitRate: 0.08, visitCreatedOrderRate: 35 / 720, visitShipmentRate: 28 / 720 },
         },
         topLinks: [
-          { internalProductId: '560', platformProductId: 'platform-560', productName: 'DJI Pocket 3 创作者套装', shortName: 'DJI Pocket 3', status: 'active', oneDayExposure: 200, oneDayPublicVisits: 20, oneDayAmount: 80 },
+          { internalProductId: '560', platformProductId: 'platform-560', productName: 'DJI Pocket 3 创作者套装', shortName: 'DJI Pocket 3', listingState: 'on_sale', oneDayExposure: 200, oneDayPublicVisits: 20, oneDayAmount: 80 },
         ],
         risks: ['组内 1 条链接无日报数据'],
       },
@@ -928,6 +933,26 @@ async function writeInventoryStatusFixtures(rootDir: string): Promise<{
       artifactsDir: outputDir,
     },
   };
+}
+
+async function rewriteInventoryStatusReportContext(
+  outputDir: string,
+  rewrite: (context: Record<string, unknown>) => void,
+): Promise<void> {
+  const path = join(outputDir, '2026-06-24', 'report-context.json');
+  const context = JSON.parse(await readFile(path, 'utf8')) as Record<string, unknown>;
+  rewrite(context);
+  await writeFile(path, JSON.stringify(context), 'utf8');
+}
+
+async function rewriteInventoryStatusSnapshot(
+  outputDir: string,
+  rewrite: (snapshot: Record<string, unknown>) => void,
+): Promise<void> {
+  const path = join(outputDir, '2026-06-24', '同款组经营快照_2026-06-24.json');
+  const snapshot = JSON.parse(await readFile(path, 'utf8')) as Record<string, unknown>;
+  rewrite(snapshot);
+  await writeFile(path, JSON.stringify(snapshot), 'utf8');
 }
 
 async function writeNewLinkWorkflowContext(): Promise<{
@@ -1227,6 +1252,60 @@ describe('handleBotIntent', () => {
     expect(cardText).toContain('DJI Pocket 3');
     expect(cardText).toContain('主力链接');
     expect(cardText).toContain('1日');
+  });
+
+  it('returns missing text and no card when the inventory status snapshot generation is stale', async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), 'mt-agent-inventory-status-stale-generation-'));
+    const fixtures = await writeInventoryStatusFixtures(rootDir);
+    await rewriteInventoryStatusSnapshot(fixtures.outputDir, (snapshot) => {
+      snapshot.generationId = 'stale-inventory-status-generation';
+    });
+
+    const response = await handleBotIntent(
+      { type: 'inventory_status_overview' },
+      fixtures.outputDir,
+      { closedOrderRegistryPaths: fixtures.registryPaths },
+    );
+
+    expect(response.text).toContain('还没有可用的库存情况快照');
+    expect(response.text).toContain('生成最新日报/快照');
+    expect(response.card).toBeUndefined();
+  });
+
+  it('returns missing text and no card when the report generation id is absent', async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), 'mt-agent-inventory-status-missing-report-generation-'));
+    const fixtures = await writeInventoryStatusFixtures(rootDir);
+    await rewriteInventoryStatusReportContext(fixtures.outputDir, (context) => {
+      delete context.generationId;
+    });
+
+    const response = await handleBotIntent(
+      { type: 'inventory_status_overview' },
+      fixtures.outputDir,
+      { closedOrderRegistryPaths: fixtures.registryPaths },
+    );
+
+    expect(response.text).toContain('还没有可用的库存情况快照');
+    expect(response.text).toContain('生成最新日报/快照');
+    expect(response.card).toBeUndefined();
+  });
+
+  it('returns missing text and no card for report generation mismatch through the Agent inventory status tool', async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), 'mt-agent-inventory-status-agent-stale-generation-'));
+    const fixtures = await writeInventoryStatusFixtures(rootDir);
+    await rewriteInventoryStatusSnapshot(fixtures.outputDir, (snapshot) => {
+      snapshot.generationId = 'stale-inventory-status-generation';
+    });
+
+    const response = await executeAgentToolRequest(
+      { toolName: 'inventory.statusOverview', arguments: {}, reason: 'open inventory status overview' },
+      fixtures.outputDir,
+      { closedOrderRegistryPaths: fixtures.registryPaths },
+    );
+
+    expect(response.text).toContain('还没有可用的库存情况快照');
+    expect(response.text).toContain('生成最新日报/快照');
+    expect(response.card).toBeUndefined();
   });
 
   it('answers latest summary from report context', async () => {
