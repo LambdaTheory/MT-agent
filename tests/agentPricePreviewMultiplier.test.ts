@@ -53,6 +53,25 @@ describe('agent rental price preview multiplier handling', () => {
     expect(response.text).toContain('discount');
   });
 
+  it('rejects planner-inferred discounts when the original wording is a bare price number', async () => {
+    const { client, preview } = fakeRentalPriceClient();
+
+    const response = await executeAgentToolRequest(
+      {
+        toolName: 'rental.pricePreview',
+        arguments: { productIds: ['914'], discount: 0.8, scope: 'rent_fields' },
+        reason: '改价,914所有租期价格8',
+      },
+      'output',
+      { rentalPriceClient: client },
+    );
+
+    expect(preview).not.toHaveBeenCalled();
+    expect(response.metadata).toMatchObject({ toolName: 'rental.pricePreview', ok: false });
+    expect(response.text).toContain('8折');
+    expect(response.card).toBeUndefined();
+  });
+
   it('still infers an 8-fold discount from explicit fold wording', async () => {
     const { client, preview } = fakeRentalPriceClient();
 

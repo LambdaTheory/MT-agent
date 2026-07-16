@@ -905,6 +905,12 @@ function formatAdjustmentAmountText(adjustmentAmount: number): string {
   return `${prefix}${adjustmentAmount.toFixed(2)}`;
 }
 
+function hasAmbiguousBarePriceNumber(text: string): boolean {
+  const compact = text.replace(/\s+/g, '');
+  if (/[折倍xX%％元块+-]/u.test(compact)) return false;
+  return /(?:价格|租金)(?:为|到|成)?\d+(?:\.\d+)?$/u.test(compact);
+}
+
 function compactPreviewLine(productId: string, fields: Record<string, string>): string {
   const fieldCount = Object.keys(fields).length;
   const samples = Object.entries(fields)
@@ -1054,6 +1060,12 @@ async function rentalPricePreviewResponse(
   if (explicitDiscount && parsedDiscount === null) {
     return {
       text: INVALID_DISCOUNT_ARGUMENT_MESSAGE,
+      metadata: { toolName: 'rental.pricePreview', ok: false, productIds },
+    };
+  }
+  if (!hasExplicitFields && explicitDiscount && parsedDiscount !== null && hasAmbiguousBarePriceNumber(reason)) {
+    return {
+      text: `${INVALID_DISCOUNT_ARGUMENT_MESSAGE}\n请明确写成“8折 / 0.8倍 / +8元 / -8元 / 价格改为8元”。`,
       metadata: { toolName: 'rental.pricePreview', ok: false, productIds },
     };
   }
