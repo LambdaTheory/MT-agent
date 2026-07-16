@@ -1,0 +1,19 @@
+{
+  "configSchemaVersion": "1.0.0",
+  "saas": {
+    "baseUrl": "http://127.0.0.1/fixture-only",
+    "productDetailUrl": "http://127.0.0.1/fixture-only/product/{productId}"
+  },
+  "selectors": {},
+  "vas": {},
+  "browser": {
+    "source": "chrome",
+    "allowFallback": false,
+    "headless": true
+  },
+  "rules": {
+    "maxBatchSize": 2
+  },
+  "taskStorage": { "directory": "./tasks" },
+  "mirror": {}
+}

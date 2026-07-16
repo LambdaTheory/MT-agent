@@ -14,10 +14,10 @@
  */
 
 const fs = require("fs");
-const { loadConfig, SKILL_DIR } = require("./lib/config-loader");
+const { loadConfig, LAYOUT } = require("./lib/config-loader");
 const { checkRules } = require("./lib/rule-checker");
 
-const TASKS_DIR = SKILL_DIR + "/tasks";
+const TASKS_DIR = LAYOUT.tasksDir;
 
 function ensureDir(dir) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -31,17 +31,8 @@ function die(msg) {
 const FIELD_META = {
   stock:          { label: "库存",         unit: "",    isPrice: false, isInteger: true  },
   rent1day:       { label: "1天租金",      unit: "元",  isPrice: true,  isInteger: false },
-  rent2day:       { label: "2天租金",      unit: "元",  isPrice: true,  isInteger: false },
-  rent3day:       { label: "3天租金",      unit: "元",  isPrice: true,  isInteger: false },
-  rent4day:       { label: "4天租金",      unit: "元",  isPrice: true,  isInteger: false },
-  rent5day:       { label: "5天租金",      unit: "元",  isPrice: true,  isInteger: false },
-  rent7day:       { label: "7天租金",      unit: "元",  isPrice: true,  isInteger: false },
   rent10day:      { label: "10天租金",     unit: "元",  isPrice: true,  isInteger: false },
-  rent15day:      { label: "15天租金",     unit: "元",  isPrice: true,  isInteger: false },
   rent30day:      { label: "30天租金",     unit: "元",  isPrice: true,  isInteger: false },
-  rent60day:      { label: "60天租金",     unit: "元",  isPrice: true,  isInteger: false },
-  rent90day:      { label: "90天租金",     unit: "元",  isPrice: true,  isInteger: false },
-  rent180day:     { label: "180天租金",    unit: "元",  isPrice: true,  isInteger: false },
   marketPrice:    { label: "市场价",       unit: "元",  isPrice: true,  isInteger: false },
   deposit:        { label: "押金",         unit: "元",  isPrice: true,  isInteger: false },
   purchasePrice:  { label: "采购价",       unit: "元",  isPrice: true,  isInteger: false },
