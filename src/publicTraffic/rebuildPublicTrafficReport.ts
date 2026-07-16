@@ -8,12 +8,15 @@ import { writeInventorySameSkuSnapshot } from '../inventoryStatus/store.js';
 import { loadProductIdMapping, type ProductIdMapping } from '../mapping/productIdMapping.js';
 import { sendFeishuCard } from '../notify/feishu.js';
 import { analyzePublicTrafficData } from './analyzePublicTrafficData.js';
+import { aggregateExposureDeltas } from './exposureAggregate.js';
 import { buildPublicTrafficCard } from './buildPublicTrafficCard.js';
 import { buildPublicTrafficFeishuText } from './buildPublicTrafficFeishu.js';
 import { buildPublicTrafficMarkdown } from './buildPublicTrafficMarkdown.js';
 import { writePublicTrafficWorkbookBuffer } from './buildPublicTrafficWorkbook.js';
 import { mergePublicTrafficData } from './mergePublicTrafficData.js';
 import { buildPublicTrafficPaths } from './paths.js';
+import { loadRecentExposureDeltas } from './recentExposureDeltas.js';
+import { DEFAULT_PUBLIC_TRAFFIC_RULES_CONFIG, type PublicTrafficRulesConfig } from './rulesConfig.js';
 import type { ExposureCumulativeProduct, ExposureDailyDelta, ExposureOverviewMetric, ExposureProductSummary, PublicTrafficDataReportContext } from './types.js';
 
 const PERIODS: PeriodKey[] = ['1d', '7d', '30d'];
@@ -26,6 +29,7 @@ export interface RebuildPublicTrafficReportInput {
   refreshedAt?: string;
   sendTo?: 'personal' | 'group' | 'both';
   send?: boolean;
+  rulesConfig?: PublicTrafficRulesConfig;
 }
 
 export interface RebuildPublicTrafficReportResult {
@@ -105,6 +109,13 @@ export async function rebuildPublicTrafficReport(input: RebuildPublicTrafficRepo
   const dailyDelta = await readJson<ExposureDailyDelta[]>(paths.exposureDailyDelta);
   const sevenDaySummary = await readJson<ExposureProductSummary[]>(paths.exposure7dSummary);
   const thirtyDaySummary = await readJson<ExposureProductSummary[]>(paths.exposure30dSummary);
+  const rulesConfig = input.rulesConfig ?? DEFAULT_PUBLIC_TRAFFIC_RULES_CONFIG;
+  const healthAmountWindowDays = rulesConfig.health.amountKill.windowDays;
+  const healthAmountSummary = healthAmountWindowDays === 7
+    ? sevenDaySummary
+    : healthAmountWindowDays === 30
+      ? thirtyDaySummary
+      : aggregateExposureDeltas(await loadRecentExposureDeltas(input.outputDir, input.date, healthAmountWindowDays), mapping);
   const orderAnalysis = await readJson<PublicTrafficDataReportContext['orderAnalysis']>(paths.orderAnalysis);
 
   const merged = mergePublicTrafficData({
@@ -137,8 +148,10 @@ export async function rebuildPublicTrafficReport(input: RebuildPublicTrafficRepo
       dailyDelta,
       sevenDaySummary,
       thirtyDaySummary,
+      healthAmountSummary,
       cumulativeProducts,
       orderAnalysis,
+      rulesConfig,
     }),
     generationId,
   };

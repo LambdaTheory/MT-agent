@@ -6,18 +6,20 @@ describe('publicTrafficReport rules wiring', () => {
     const source = await readFile(new URL('../src/cli/publicTrafficReport.ts', import.meta.url), 'utf8');
 
     expect(source).not.toContain("import { analyzePublicTraffic } from '../publicTraffic/analyzePublicTraffic.js';");
-    expect(source).not.toContain("import { loadPublicTrafficRulesConfig } from '../publicTraffic/rulesConfig.js';");
     expect(source).not.toContain('analysis.exposureOptimization');
     expect(source).not.toContain('analysis.conversionOptimization');
     expect(source).not.toContain('analysis.newProductObservation');
     expect(source).not.toContain('analysis.lifecycleGovernance');
     expect(source).toContain("import { loadRecentExposureDeltas } from '../publicTraffic/recentExposureDeltas.js';");
+    expect(source).toContain("import { loadPublicTrafficRulesConfig } from '../publicTraffic/rulesConfig.js';");
     expect(source).toContain("import { mergePublicTrafficData } from '../publicTraffic/mergePublicTrafficData.js';");
     expect(source).toContain("import { analyzePublicTrafficData } from '../publicTraffic/analyzePublicTrafficData.js';");
     expect(source).toContain("import { buildPublicTrafficCard } from '../publicTraffic/buildPublicTrafficCard.js';");
     expect(source).toContain("import { sendFeishuCard } from '../notify/feishu.js';");
     expect(source).toContain('aggregateExposureDeltas(sevenDayDeltas, mapping)');
     expect(source).toContain('aggregateExposureDeltas(thirtyDayDeltas, mapping)');
+    expect(source).toContain('loadRecentExposureDeltas(config.outputDir, runDate, healthAmountWindowDays)');
+    expect(source).toContain('rulesConfig,');
     expect(source).toContain('paths.exposure7dSummary');
     expect(source).toContain('paths.exposure30dSummary');
     expect(source.indexOf('const { goodsExportPath, exposure: crawlResult, dashboard: rawTables } = await crawlPublicTrafficSources(config, paths.goodsExportWorkbook);')).toBeLessThan(

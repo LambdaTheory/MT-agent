@@ -46,6 +46,7 @@ import { buildPublicTrafficPaths } from '../publicTraffic/paths.js';
 import { loadProductNameMap } from '../publicTraffic/productDisplayName.js';
 import { savePublicTrafficRunState } from '../publicTraffic/publicTrafficRunState.js';
 import { loadRecentExposureDeltas } from '../publicTraffic/recentExposureDeltas.js';
+import { loadPublicTrafficRulesConfig } from '../publicTraffic/rulesConfig.js';
 import type { PeriodProductMetrics, RawTableData } from '../domain/types.js';
 import type { GoodsManagerNewProductPoolItem } from '../publicTraffic/goodsManagerNewProducts.js';
 import type { ExposureCumulativeProduct, ExposureLinkStatus, ExposureOverviewMetric, GoodsSnapshotItem, PublicTrafficDataReportContext, PublicTrafficDataSummary } from '../publicTraffic/types.js';
@@ -631,10 +632,16 @@ export async function runPublicTrafficReportCli(): Promise<PublicTrafficReportCl
     await writeFile(paths.exposureDailyDelta, JSON.stringify(dailyDelta, null, 2), 'utf8');
     log.addEvent(`日差分: ${dailyDelta.length} 条, 新品=${dailyDelta.filter((row) => row.flags.includes('new_product')).length}, 昨日漏抓=${dailyDelta.filter((row) => row.flags.includes('missing_previous_snapshot_row')).length}`);
 
-    const sevenDayDeltas = await loadRecentExposureDeltas(config.outputDir, runDate, 7);
-    const thirtyDayDeltas = await loadRecentExposureDeltas(config.outputDir, runDate, 30);
+    const rulesConfig = await loadPublicTrafficRulesConfig();
+    const healthAmountWindowDays = rulesConfig.health.amountKill.windowDays;
+    const [sevenDayDeltas, thirtyDayDeltas, healthAmountDeltas] = await Promise.all([
+      loadRecentExposureDeltas(config.outputDir, runDate, 7),
+      loadRecentExposureDeltas(config.outputDir, runDate, 30),
+      loadRecentExposureDeltas(config.outputDir, runDate, healthAmountWindowDays),
+    ]);
     const sevenDaySummary = aggregateExposureDeltas(sevenDayDeltas, mapping);
     const thirtyDaySummary = aggregateExposureDeltas(thirtyDayDeltas, mapping);
+    const healthAmountSummary = healthAmountWindowDays === 7 ? sevenDaySummary : healthAmountWindowDays === 30 ? thirtyDaySummary : aggregateExposureDeltas(healthAmountDeltas, mapping);
     await writeFile(paths.exposure7dSummary, JSON.stringify(sevenDaySummary, null, 2), 'utf8');
     await writeFile(paths.exposure30dSummary, JSON.stringify(thirtyDaySummary, null, 2), 'utf8');
     log.addEvent(`7日汇总: ${sevenDaySummary.length} 条商品`);
@@ -697,8 +704,10 @@ export async function runPublicTrafficReportCli(): Promise<PublicTrafficReportCl
         dailyDelta,
         sevenDaySummary,
         thirtyDaySummary,
+        healthAmountSummary,
         cumulativeProducts: crawlResult.products,
         orderAnalysis,
+        rulesConfig,
       }),
       generationId,
     };
