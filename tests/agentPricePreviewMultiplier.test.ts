@@ -282,6 +282,56 @@ describe('agent rental price preview multiplier handling', () => {
     expect(response.card).toBeDefined();
   });
 
+  it('runs batchRead audit previews concurrently while preserving preview order', async () => {
+    const preview = vi.fn(async () => {
+      throw new Error('preview should not run when batchRead can build the preview');
+    });
+    const productIds = ['900', '901', '902', '903', '904', '905'];
+    const batchRead = vi.fn(async (ids: string[]) => ({
+      ok: true,
+      status: 'ok',
+      count: ids.length,
+      results: Object.fromEntries(ids.map((productId, index) => [productId, {
+        status: 'ok',
+        productId,
+        values: { s1: { rent1day: String(100 + index) } },
+      }])),
+      errors: [],
+      warnings: [],
+      lines: ['batch-read: ok'],
+    }));
+    let activeAudits = 0;
+    let maxActiveAudits = 0;
+    const auditPreviewFromRead = vi.fn(async (productId: string) => {
+      activeAudits += 1;
+      maxActiveAudits = Math.max(maxActiveAudits, activeAudits);
+      await new Promise((resolve) => setTimeout(resolve, productId === '900' ? 35 : 5));
+      activeAudits -= 1;
+      return {
+        taskId: `task_${productId}`,
+        rollbackFile: `rollback-${productId}.json`,
+        changesFile: `changes-${productId}.json`,
+        hasErrors: false,
+      };
+    });
+
+    const response = await executeAgentToolRequest(
+      {
+        toolName: 'rental.pricePreview',
+        arguments: { productIds, adjustmentAmount: -10, scope: 'rent_fields' },
+        reason: '改价,所有x300u链接所有租期价格-10元',
+      },
+      'output',
+      { rentalPriceClient: { preview, batchRead, auditPreviewFromRead } as unknown as RentalPriceSkillClient },
+    );
+
+    expect(maxActiveAudits).toBeGreaterThan(1);
+    expect(preview).not.toHaveBeenCalled();
+    expect(response.metadata).toMatchObject({ toolName: 'rental.pricePreview', ok: true, previewCount: productIds.length });
+    expect(response.text.indexOf('900')).toBeLessThan(response.text.indexOf('901'));
+    expect(response.text.indexOf('901')).toBeLessThan(response.text.indexOf('902'));
+  });
+
   it('blocks batchRead previews when generated audit has errors', async () => {
     const preview = vi.fn(async () => {
       throw new Error('preview should not run when batchRead returns an audit error');

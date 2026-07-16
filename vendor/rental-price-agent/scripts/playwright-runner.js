@@ -2741,7 +2741,9 @@ async function readProductOnTab(tab, productId, fields, explicitFields = false) 
   return { status, productId, url, specs: specs.map(s => ({ specId: s.specId, title: s.title })), values: vals, warnings, missingFields, requestedCount, readCount, dynamicRentFields };
 }
 
-// --- Batch read: parallel multi-tab read (max 3 concurrent) ---
+const BATCH_READ_CONCURRENCY = Math.max(1, Number(process.env.RENTAL_PRICE_AGENT_BATCH_READ_CONCURRENCY || 6));
+
+// --- Batch read: parallel multi-tab read (default max 6 concurrent) ---
 async function actionBatchRead(productIds, fields) {
   if (!Array.isArray(productIds) || productIds.length === 0) {
     return { status: "error", message: "productIds must be a non-empty array" };
@@ -2753,8 +2755,8 @@ async function actionBatchRead(productIds, fields) {
   const errors = [];
   const warnings = [];
 
-  for (let i = 0; i < productIds.length; i += 3) {
-    const chunk = productIds.slice(i, i + 3).map(String);
+  for (let i = 0; i < productIds.length; i += BATCH_READ_CONCURRENCY) {
+    const chunk = productIds.slice(i, i + BATCH_READ_CONCURRENCY).map(String);
     const jobs = chunk.map(async pid => {
       let tab = null;
       try {

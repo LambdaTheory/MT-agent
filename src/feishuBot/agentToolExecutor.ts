@@ -973,12 +973,33 @@ function batchReadPricePreviewFields(
   return fields;
 }
 
+const BATCH_READ_AUDIT_CONCURRENCY = 12;
+
+async function mapConcurrent<T, R>(items: T[], concurrency: number, worker: (item: T, index: number) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(Math.max(1, concurrency), items.length);
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await worker(items[index], index);
+    }
+  }));
+  return results;
+}
+
+type BatchReadPricePreviewOutcome =
+  | { status: 'ready'; item: { productId: string; fields: Record<string, string>; audit?: RentalPriceAuditReference } }
+  | { status: 'blocked'; message: string };
+
 async function batchReadPricePreviewItems(
   productIds: string[],
   client: RentalPriceSkillClient,
   input: { discount?: number; adjustmentAmount?: number },
 ): Promise<{ readyItems: Array<{ productId: string; fields: Record<string, string>; audit?: RentalPriceAuditReference }>; blocked: string[] } | null> {
   if (!client.batchRead || !client.auditPreviewFromRead || productIds.length < 2) return null;
+  const auditPreviewFromRead = client.auditPreviewFromRead;
   let batchRead;
   try {
     batchRead = await client.batchRead(productIds);
@@ -988,31 +1009,31 @@ async function batchReadPricePreviewItems(
   const results = isRecord(batchRead.results) ? batchRead.results : {};
   const readyItems: Array<{ productId: string; fields: Record<string, string>; audit?: RentalPriceAuditReference }> = [];
   const blocked: string[] = [];
-  for (const productId of productIds) {
+  const outcomes = await mapConcurrent(productIds, BATCH_READ_AUDIT_CONCURRENCY, async (productId): Promise<BatchReadPricePreviewOutcome> => {
     const result = results[productId];
     if (!isRecord(result)) {
-      blocked.push(`商品 ${productId}：批量读取失败`);
-      continue;
+      return { status: 'blocked', message: `商品 ${productId}：批量读取失败` };
     }
     const status = readString(result.status);
     const fields = batchReadPricePreviewFields(result.values, input);
     if (Object.keys(fields).length === 0) {
-      blocked.push(`商品 ${productId}：批量读取${status ? ` ${status}` : ''}，没有可改租金字段`);
-      continue;
+      return { status: 'blocked', message: `商品 ${productId}：批量读取${status ? ` ${status}` : ''}，没有可改租金字段` };
     }
     let audit: RentalPriceAuditReference | undefined;
     try {
-      const auditPreview = await client.auditPreviewFromRead(productId, result, fields);
+      const auditPreview = await auditPreviewFromRead(productId, result, fields);
       audit = compactAuditReference(auditPreview ?? undefined);
     } catch (error) {
-      blocked.push(`商品 ${productId}：审计预览失败（${error instanceof Error ? error.message : String(error)}）`);
-      continue;
+      return { status: 'blocked', message: `商品 ${productId}：审计预览失败（${error instanceof Error ? error.message : String(error)}）` };
     }
     if (audit?.hasErrors) {
-      blocked.push(`商品 ${productId}：审计错误，已阻断`);
-      continue;
+      return { status: 'blocked', message: `商品 ${productId}：审计错误，已阻断` };
     }
-    readyItems.push({ productId, fields, ...(audit ? { audit } : {}) });
+    return { status: 'ready', item: { productId, fields, ...(audit ? { audit } : {}) } };
+  });
+  for (const outcome of outcomes) {
+    if (outcome.status === 'ready') readyItems.push(outcome.item);
+    else blocked.push(outcome.message);
   }
   return { readyItems, blocked };
 }

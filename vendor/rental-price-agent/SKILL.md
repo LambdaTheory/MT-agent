@@ -139,7 +139,7 @@ If `init` is ever run without `--target`, treat it as a current-skill diagnostic
 | `delist` | `productId` | Delist product: search → check → click 下架 → verify |
 | `copy` | `productId` | Copy product: search → click 复制 → modal confirm → save → return newProductId |
 | `platform-search` | `keyword` | SaaS fallback search: search platform list and return candidate IDs/names/text |
-| `batch-read` | `productIds`, `fields`? | Read multiple product detail pages in parallel, max 3 tabs |
+| `batch-read` | `productIds`, `fields`? | Read multiple product detail pages in parallel, default max 6 tabs |
 | `image-read` | `productId` | Read current product image URLs, white image URL, and current order |
 | `image-upload` | `productId`, `sectionType`, `categoryName`, `uploadFile`, `confirmSelection`?, `allowDuplicateFileName`? | Upload one local file into the material library, then optionally confirm it back into the current product form |
 | `image-pick` | `productId`, `categoryName`, `fileNames`, `skipIfAlreadyPresent`? | Open image library, select one or more existing materials by exact file name, confirm, and verify `thumbs[]` URL writeback |
@@ -485,5 +485,5 @@ Filtered products are returned in `excluded` with a reason such as `link-price` 
 
 Notes:
 - Do not trigger fallback for "possibly incomplete" mirror results. Only fallback when mirror returns zero results.
-- `batch-read` intentionally limits concurrency to 3 tabs to avoid stressing the platform.
+- `batch-read` intentionally limits concurrency to 6 tabs by default to avoid stressing the platform; override with `RENTAL_PRICE_AGENT_BATCH_READ_CONCURRENCY` when needed.
 - Platform list search is only a coarse locator; final values must come from detail pages via `batch-read`/`read`.
