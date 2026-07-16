@@ -28,12 +28,12 @@ describe('agent runtime planner proposal validation', () => {
     });
   });
 
-  it('validates generic report query arguments for read-only report questions', () => {
+  it('validates product/link query arguments through the unified query tool', () => {
     expect(validateAgentPlannerProposal(JSON.stringify({
       goal: '查询指定日期访问最高商品',
-      selectedTool: 'publicTraffic.reportQuery',
+      selectedTool: 'productLink.query',
       arguments: {
-        target: 'products',
+        queryType: 'productList',
         date: '2026-06-22',
         period: '7d',
         metrics: ['publicVisits', 'amount'],
@@ -45,19 +45,86 @@ describe('agent runtime planner proposal validation', () => {
     }))).toMatchObject({
       ok: true,
       proposal: {
-        selectedTool: 'publicTraffic.reportQuery',
-        arguments: { target: 'products', date: '2026-06-22', period: '7d' },
+        selectedTool: 'productLink.query',
+        arguments: { queryType: 'productList', date: '2026-06-22', period: '7d' },
       },
-      policy: { decision: 'allow', toolName: 'publicTraffic.reportQuery', risk: 'read' },
+      policy: { decision: 'allow', toolName: 'productLink.query', risk: 'read' },
     });
 
     expect(validateAgentPlannerProposal(JSON.stringify({
       goal: 'bad report query metric',
-      selectedTool: 'publicTraffic.reportQuery',
-      arguments: { target: 'products', metrics: ['unknownMetric'] },
+      selectedTool: 'productLink.query',
+      arguments: { queryType: 'productList', metrics: ['unknownMetric'] },
       confidence: 0.8,
       reason: 'invalid metric should be rejected',
     }))).toEqual({ ok: false, reason: 'invalid_arguments' });
+
+    expect(validateAgentPlannerProposal(JSON.stringify({
+      goal: '查询商品全量日报数据',
+      selectedTool: 'productLink.query',
+      arguments: { queryType: 'productDetail', productQuery: '733' },
+      confidence: 0.9,
+      reason: '用户要指定商品的完整日报指标',
+    }))).toMatchObject({ ok: true, policy: { decision: 'allow', toolName: 'productLink.query', risk: 'read' } });
+
+    expect(validateAgentPlannerProposal(JSON.stringify({
+      goal: '查询访问页缺失商品',
+      selectedTool: 'productLink.query',
+      arguments: {
+        queryType: 'sourceCoverage',
+        period: '7d',
+        source: 'dashboard',
+        coverageStatus: 'missing',
+      },
+      confidence: 0.9,
+      reason: '用户要查看日报商品行的数据源覆盖状态',
+    }))).toMatchObject({
+      ok: true,
+      proposal: {
+        selectedTool: 'productLink.query',
+        arguments: { queryType: 'sourceCoverage', period: '7d', source: 'dashboard', coverageStatus: 'missing' },
+      },
+      policy: { decision: 'allow', toolName: 'productLink.query', risk: 'read' },
+    });
+
+    expect(validateAgentPlannerProposal(JSON.stringify({
+      goal: 'bad source',
+      selectedTool: 'productLink.query',
+      arguments: { queryType: 'sourceCoverage', source: 'visitPage' },
+      confidence: 0.8,
+      reason: 'invalid source should be rejected',
+    }))).toEqual({ ok: false, reason: 'invalid_arguments' });
+
+    expect(validateAgentPlannerProposal(JSON.stringify({
+      goal: '查询各问题池数量',
+      selectedTool: 'productLink.query',
+      arguments: { queryType: 'problemPoolCounts', date: '2026-06-22' },
+      confidence: 0.9,
+      reason: '用户要查看各问题池分别多少条',
+    }))).toMatchObject({ ok: true, policy: { decision: 'allow', toolName: 'productLink.query', risk: 'read' } });
+
+    expect(validateAgentPlannerProposal(JSON.stringify({
+      goal: '查询失活链接候选',
+      selectedTool: 'productLink.query',
+      arguments: { queryType: 'linkStatus', date: '2026-06-22' },
+      confidence: 0.9,
+      reason: '用户要查看生命周期治理候选链接',
+    }))).toMatchObject({ ok: true, policy: { decision: 'allow', toolName: 'productLink.query', risk: 'read' } });
+  });
+
+  it('rejects product/link surfaces through publicTraffic.reportQuery planner schema', () => {
+    for (const target of ['products', 'productDetail', 'sourceCoverage', 'section', 'sectionCounts']) {
+      expect(validateAgentPlannerProposal(JSON.stringify({
+        goal: `legacy ${target}`,
+        selectedTool: 'publicTraffic.reportQuery',
+        arguments: { target },
+        confidence: 0.8,
+        reason: 'product/link surfaces must use productLink.query',
+      }))).toEqual({ ok: false, reason: 'invalid_arguments' });
+    }
+  });
+
+  it('validates generic report query arguments for read-only report questions', () => {
 
     expect(validateAgentPlannerProposal(JSON.stringify({
       goal: 'compare weekly conversion rate',
@@ -78,14 +145,6 @@ describe('agent runtime planner proposal validation', () => {
       },
       policy: { decision: 'allow', toolName: 'publicTraffic.reportQuery', risk: 'read' },
     });
-
-    expect(validateAgentPlannerProposal(JSON.stringify({
-      goal: '查询商品全量日报数据',
-      selectedTool: 'publicTraffic.reportQuery',
-      arguments: { target: 'productDetail', productQuery: '733' },
-      confidence: 0.9,
-      reason: '用户要指定商品的完整日报指标',
-    }))).toMatchObject({ ok: true, policy: { decision: 'allow', toolName: 'publicTraffic.reportQuery', risk: 'read' } });
 
     expect(validateAgentPlannerProposal(JSON.stringify({
       goal: '统计7日访问总和',
@@ -132,34 +191,6 @@ describe('agent runtime planner proposal validation', () => {
       arguments: { target: 'productAggregation', aggregation: 'median' },
       confidence: 0.8,
       reason: 'invalid aggregation should be rejected',
-    }))).toEqual({ ok: false, reason: 'invalid_arguments' });
-
-    expect(validateAgentPlannerProposal(JSON.stringify({
-      goal: '查询访问页缺失商品',
-      selectedTool: 'publicTraffic.reportQuery',
-      arguments: {
-        target: 'sourceCoverage',
-        period: '7d',
-        source: 'dashboard',
-        coverageStatus: 'missing',
-      },
-      confidence: 0.9,
-      reason: '用户要查看日报商品行的数据源覆盖状态',
-    }))).toMatchObject({
-      ok: true,
-      proposal: {
-        selectedTool: 'publicTraffic.reportQuery',
-        arguments: { target: 'sourceCoverage', period: '7d', source: 'dashboard', coverageStatus: 'missing' },
-      },
-      policy: { decision: 'allow', toolName: 'publicTraffic.reportQuery', risk: 'read' },
-    });
-
-    expect(validateAgentPlannerProposal(JSON.stringify({
-      goal: 'bad source',
-      selectedTool: 'publicTraffic.reportQuery',
-      arguments: { target: 'sourceCoverage', source: 'visitPage' },
-      confidence: 0.8,
-      reason: 'invalid source should be rejected',
     }))).toEqual({ ok: false, reason: 'invalid_arguments' });
 
     expect(validateAgentPlannerProposal(JSON.stringify({
