@@ -64,9 +64,12 @@ const entries: LinkRegistryEntry[] = [
 ];
 
 const snapshot: InventoryStatusSnapshot = {
+  schemaVersion: 1,
+  generationId: 'link-registry-group-review-2026-06-26',
   date: '2026-06-26',
   sourceReportDate: '2026-06-25',
   generatedAt: '2026-06-26T00:00:00.000Z',
+  warnings: [],
   summary: {
     sameSkuGroupCount: 3,
     activeLinkCount: 4,
@@ -80,8 +83,9 @@ const snapshot: InventoryStatusSnapshot = {
   },
   registryAuditSummary: {
     totalLinks: 5,
-    activeLinks: 4,
-    removedLinks: 0,
+    onSaleLinks: 4,
+    delistedLinks: 0,
+    goneLinks: 0,
     unknownLinks: 1,
     overrideRiskCount: 0,
   },
@@ -176,6 +180,97 @@ describe('linkRegistryGroupReview', () => {
     expect(report.registryBacked).toBe(false);
     expect(report.summary.ungroupedEntries).toBe(1);
     expect(report.groups.map((item) => item.sameSkuGroupId).sort()).toEqual(['vivo-x200-ultra', 'dji-pocket-3-global', 'dji-pocket-3'].sort());
+  });
+
+  it('does not associate sameSkuGroupId by overlap when exact sameSkuGroupId is missing', () => {
+    const report = buildLinkRegistryGroupReviewReport({
+      entries: [
+        {
+          internalProductId: '1901',
+          platformProductId: 'p1901',
+          productName: 'Registry Group 1901',
+          shortName: 'Registry1901',
+          sameSkuGroupId: 'registry-group-1901',
+          categoryId: 'camera',
+          categoryName: '相机',
+          productType: 'gimbal-camera',
+          status: 'active',
+          source: ['goods_first_seen'],
+        },
+      ],
+      snapshot: {
+        schemaVersion: 1,
+        generationId: 'link-registry-group-review-overlap-2026-06-26',
+        date: '2026-06-26',
+        sourceReportDate: '2026-06-25',
+        generatedAt: '2026-06-26T00:00:00.000Z',
+        warnings: [],
+        summary: {
+          sameSkuGroupCount: 1,
+          activeLinkCount: 2,
+          totalLinkCount: 2,
+        },
+        coverage: {
+          groupedLinkCount: 2,
+          ungroupedLinkCount: 0,
+          groupsWithMetrics: 1,
+          groupsWithoutMetrics: 0,
+        },
+        registryAuditSummary: {
+          totalLinks: 2,
+          onSaleLinks: 2,
+          delistedLinks: 0,
+          goneLinks: 0,
+          unknownLinks: 0,
+          overrideRiskCount: 0,
+        },
+        groups: [
+          {
+            sameSkuGroupId: 'snapshot-group-1901',
+            groupName: 'Snapshot 1901',
+            categoryId: 'snapshot-category',
+            categoryName: 'not-a-real-category',
+            productType: 'snapshot-type',
+            activeLinkCount: 3,
+            totalLinkCount: 4,
+            mappedRowCount: 7,
+            missingMetricLinkCount: 3,
+            periods: {
+              '1d': metric(),
+              '7d': metric(),
+              '30d': metric(),
+            },
+            topLinks: [
+              {
+                internalProductId: '1901',
+                platformProductId: 'px-1901',
+                productName: 'Snapshot 1901 Link',
+                shortName: 'Snapshot1901',
+                listingState: 'on_sale',
+                oneDayExposure: 1,
+                oneDayPublicVisits: 1,
+                oneDayAmount: 1,
+              },
+            ],
+            risks: ['only-from-overlap-group'],
+          },
+        ],
+      },
+      generatedAt: '2026-06-26T10:00:00.000Z',
+    });
+
+    expect(report.registryBacked).toBe(true);
+    const registryGroup = report.groups.find((item) => item.sameSkuGroupId === 'registry-group-1901');
+
+    expect(registryGroup).toBeTruthy();
+    expect(registryGroup?.displayName).toBe('Registry1901');
+    expect(registryGroup?.categoryName).toBe('相机');
+    expect(registryGroup?.productType).toBe('gimbal-camera');
+    expect(registryGroup?.activeLinkCount).toBe(1);
+    expect(registryGroup?.totalLinkCount).toBe(1);
+    expect(registryGroup?.mappedRowCount).toBe(0);
+    expect(registryGroup?.missingMetricLinkCount).toBe(0);
+    expect(registryGroup?.risks).toEqual(expect.not.arrayContaining(['only-from-overlap-group']));
   });
 
   it('renders a readable markdown review sheet', () => {
