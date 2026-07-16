@@ -8,6 +8,12 @@ import { buildPublicTrafficPaths } from '../src/publicTraffic/paths.js';
 import { loadRefreshSuppressionState } from '../src/linkRegistry/refreshSuppressionState.js';
 import type { ExposureDailyDelta, PublicTrafficDataReportContext } from '../src/publicTraffic/types.js';
 
+type PublicTrafficDataReportContextWithGeneration = PublicTrafficDataReportContext & { generationId?: unknown };
+type InventorySnapshotBuildInputWithGeneration = {
+  generationId?: unknown;
+  context?: PublicTrafficDataReportContextWithGeneration;
+};
+
 const mocks = vi.hoisted(() => ({
   outputDir: '',
   loadConfig: vi.fn<() => Promise<AgentConfig>>(),
@@ -193,6 +199,87 @@ describe('runPublicTrafficReportCli public traffic sequencing', () => {
     if (mocks.outputDir) {
       await rm(mocks.outputDir, { recursive: true, force: true });
     }
+  });
+
+  it('passes the generated report generation id through same-sku snapshot build and write', async () => {
+    const todayPaths = buildPublicTrafficPaths(mocks.outputDir, '2026-06-10');
+    mocks.loadClosedOrderRegistryContext.mockResolvedValueOnce({
+      registry: [
+        {
+          internalProductId: '701',
+          platformProductId: 'p-current',
+          productName: '当前商品',
+          sameSkuGroupId: 'camera-main',
+          listingState: 'on_sale',
+        },
+      ],
+      query: {},
+      productIdMapping: {},
+      overrideRisks: [],
+      resolvedPaths: {
+        productIdMapPath: join(mocks.outputDir, 'product-id-map.json'),
+        productNameMapPath: join(mocks.outputDir, 'product-name-map.json'),
+        goodsSnapshotPath: todayPaths.goodsCurrentSnapshotState,
+        firstSeenPath: todayPaths.goodsFirstSeenState,
+        lifecyclePath: todayPaths.goodsLinkLifecycleState,
+        daemonCatalogPath: todayPaths.daemonCatalogState,
+        overridesPath: join(mocks.outputDir, 'link-registry-overrides.json'),
+        artifactsDir: mocks.outputDir,
+      },
+    });
+    mocks.buildInventorySameSkuSnapshot.mockImplementationOnce((input: { generationId: string }) => ({
+      schemaVersion: 1,
+      generationId: input.generationId,
+    }));
+    const { runPublicTrafficReportCli } = await import('../src/cli/publicTrafficReport.js');
+
+    await runPublicTrafficReportCli();
+
+    const context = JSON.parse(await readFile(todayPaths.reportContext, 'utf8')) as PublicTrafficDataReportContextWithGeneration;
+    expect(typeof context.generationId).toBe('string');
+    expect(context.generationId).not.toBe('');
+    const buildInput = mocks.buildInventorySameSkuSnapshot.mock.calls[0]?.[0] as InventorySnapshotBuildInputWithGeneration | undefined;
+    expect(buildInput?.generationId).toBe(context.generationId);
+    expect(buildInput?.context).toBeDefined();
+    expect(buildInput?.context?.generationId).toBe(context.generationId);
+    expect(mocks.writeInventorySameSkuSnapshot).toHaveBeenCalledWith(
+      expect.objectContaining({ generationId: context.generationId }),
+      todayPaths.sameSkuSnapshot,
+    );
+  });
+
+  it('keeps report outputs when same-sku snapshot build fails after registry loading succeeds', async () => {
+    const todayPaths = buildPublicTrafficPaths(mocks.outputDir, '2026-06-10');
+    mocks.loadClosedOrderRegistryContext.mockResolvedValueOnce({
+      registry: [],
+      query: {},
+      productIdMapping: {},
+      overrideRisks: [],
+      resolvedPaths: {
+        productIdMapPath: join(mocks.outputDir, 'product-id-map.json'),
+        productNameMapPath: join(mocks.outputDir, 'product-name-map.json'),
+        goodsSnapshotPath: todayPaths.goodsCurrentSnapshotState,
+        firstSeenPath: todayPaths.goodsFirstSeenState,
+        lifecyclePath: todayPaths.goodsLinkLifecycleState,
+        daemonCatalogPath: todayPaths.daemonCatalogState,
+        overridesPath: join(mocks.outputDir, 'link-registry-overrides.json'),
+        artifactsDir: mocks.outputDir,
+      },
+    });
+    mocks.buildInventorySameSkuSnapshot.mockImplementationOnce(() => {
+      throw new Error('snapshot build exploded');
+    });
+    const { runPublicTrafficReportCli } = await import('../src/cli/publicTrafficReport.js');
+
+    await runPublicTrafficReportCli();
+
+    const context = JSON.parse(await readFile(todayPaths.reportContext, 'utf8')) as PublicTrafficDataReportContextWithGeneration;
+    expect(typeof context.generationId).toBe('string');
+    expect(context.generationId).not.toBe('');
+    await expect(readFile(todayPaths.markdown, 'utf8')).resolves.toContain('公域数据日报');
+    await expect(readFile(todayPaths.workbook)).resolves.toBeInstanceOf(Buffer);
+    await expect(readFile(todayPaths.sameSkuSnapshot, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(readFile(todayPaths.log, 'utf8')).resolves.toContain('inventory same-sku snapshot skipped: snapshot build exploded');
   });
 
   it('loads goods-manager new product pool items when GOODS_MANAGER_BASE_URL is configured', async () => {

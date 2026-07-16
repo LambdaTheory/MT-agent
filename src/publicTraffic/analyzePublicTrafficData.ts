@@ -3,7 +3,7 @@ import type {
   ExposureCumulativeProduct,
   ExposureOverviewMetric,
   PublicTrafficDataAnalysisInput,
-  PublicTrafficDataReportContext,
+  PublicTrafficDataReportDraftContext,
   PublicTrafficDataSummary,
   PublicTrafficEmptySectionNotes,
   PublicTrafficPeriodMetrics,
@@ -277,7 +277,7 @@ function lifecyclePriority(row: PublicTrafficProductDataRow): PublicTrafficRepor
   return (row.custodyDays ?? 0) >= 60 || row.periods['30d'].exposure <= 20 ? 'high' : 'medium';
 }
 
-export function analyzePublicTrafficData(input: PublicTrafficDataAnalysisInput): PublicTrafficDataReportContext {
+export function analyzePublicTrafficData(input: PublicTrafficDataAnalysisInput): PublicTrafficDataReportDraftContext {
   const rows = input.rows;
   const one = (row: PublicTrafficProductDataRow) => row.periods['1d'];
   const seven = (row: PublicTrafficProductDataRow) => row.periods['7d'];
