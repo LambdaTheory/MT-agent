@@ -592,6 +592,28 @@ describe('rental price skill client copy diagnostics', () => {
     expect(rolledBackTask.status).toBe('rolled_back');
     expect(rolledBackTask.evidence.some((item) => item.type === 'rollback_verify_result')).toBe(true);
   }, 30000);
+
+  it('keeps fallback price execution artifacts outside lifecycle tasks state', async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), 'mt-agent-rental-price-fallback-artifacts-'));
+    const dataRoot = join(dirname(rootDir), `.${basename(rootDir)}-data`);
+    const applyChangesFiles: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (_input, init) => {
+      const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+      if (body.action === 'hello') return new Response(JSON.stringify({ status: 'ok', hello: true }));
+      if (body.action === 'apply' && typeof body.changesFile === 'string') {
+        applyChangesFiles.push(body.changesFile);
+        return new Response(JSON.stringify({ status: 'error' }));
+      }
+      return new Response(JSON.stringify({ status: 'ok' }));
+    }));
+    const client = createRentalPriceSkillClient({ rootDir, daemonUrl: 'http://127.0.0.1:9223' });
+
+    const result = await client.execute({ mode: 'explicit_fields', productId: '761', fields: { rent1day: '22.00' } });
+
+    expect(result.ok).toBe(false);
+    expect(applyChangesFiles[0]).toContain(join('artifacts', 'mt-agent-audit'));
+    expect(await readdir(join(dataRoot, 'tasks'))).not.toContainEqual(expect.stringMatching(/^mt-agent-|^verify-|^rollback-verify/));
+  });
 });
 
 async function copyRentalPriceAuditScripts(rootDir: string): Promise<void> {

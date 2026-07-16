@@ -939,7 +939,7 @@ async function createAuditPreview(rootDir: string, productId: string, current: R
   if (!scriptsReady.every(Boolean)) return null;
 
   const tasksDir = join(dataRoot, 'tasks');
-  const artifactDir = join(dataRoot, 'artifacts', 'mt-agent-audit');
+  const artifactDir = mtAgentAuditArtifactDir(rootDir);
   await mkdir(tasksDir, { recursive: true });
   await mkdir(artifactDir, { recursive: true });
   const token = timestampToken();
@@ -1096,6 +1096,10 @@ function stableSiblingDataRoot(rootDir: string): string {
 
 function stableTasksDir(rootDir: string): string {
   return join(stableSiblingDataRoot(rootDir), 'tasks');
+}
+
+function mtAgentAuditArtifactDir(rootDir: string): string {
+  return join(stableSiblingDataRoot(rootDir), 'artifacts', 'mt-agent-audit');
 }
 
 function actionClassForDaemonCommand(action: string | undefined): RentalDaemonActionClass {
@@ -1516,7 +1520,9 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
     },
     async execute(request) {
       const tasksDir = stableTasksDir(rootDir);
+      const artifactDir = mtAgentAuditArtifactDir(rootDir);
       await mkdir(tasksDir, { recursive: true });
+      await mkdir(artifactDir, { recursive: true });
       if (request.audit?.hasErrors) {
         return {
           productId: request.productId,
@@ -1528,7 +1534,7 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
       const audit = safeAuditForExecution(rootDir, request.audit);
       let changesFile = audit?.changesFile;
       if (!changesFile || !(await fileExists(changesFile))) {
-        changesFile = join(tasksDir, `mt-agent-changes-${Date.now()}.json`);
+        changesFile = join(artifactDir, `mt-agent-changes-${Date.now()}.json`);
         await writeFile(changesFile, JSON.stringify({ __broadcast: true, ...request.fields }, null, 2), 'utf8');
       }
       const auditLines = [
@@ -1564,7 +1570,7 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
       const fieldsMatch = verifiedFields(verified, request.fields);
       const ok = verifyStatus !== 'error' && fieldsMatch;
       const auditStatus: 'completed' | 'verify_failed' = ok ? 'completed' : 'verify_failed';
-      const resultFile = join(tasksDir, `verify-${request.productId}-${timestampToken()}.json`);
+      const resultFile = join(artifactDir, `verify-${request.productId}-${timestampToken()}.json`);
       await writeJsonFile(resultFile, {
         productId: request.productId,
         ok,
@@ -1589,13 +1595,13 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
     async applyPerSpec(productId, specFields) {
       const safeProductId = readProductId(productId);
       if (!safeProductId) throw new Error('productId must be a numeric string');
-      const tasksDir = stableTasksDir(rootDir);
-      await mkdir(tasksDir, { recursive: true });
+      const artifactDir = mtAgentAuditArtifactDir(rootDir);
+      await mkdir(artifactDir, { recursive: true });
       const normalized = normalizePerSpecPriceFields(specFields);
       if (!Object.keys(normalized).length) {
         return { productId: safeProductId, ok: false, lines: ['apply: skipped', 'submit: skipped', 'verify: skipped', 'fields: empty'] };
       }
-      const changesFile = join(tasksDir, `mt-agent-per-spec-changes-${safeProductId}-${timestampToken()}.json`);
+      const changesFile = join(artifactDir, `mt-agent-per-spec-changes-${safeProductId}-${timestampToken()}.json`);
       await writeJsonFile(changesFile, normalized);
 
       const apply = await send({ action: 'apply', productId: safeProductId, changesFile });
@@ -1614,7 +1620,7 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
       const verifyStatus = commandStatus(verified);
       const fieldsMatch = verifiedPerSpecFields(verified, normalized);
       const ok = verifyStatus !== 'error' && fieldsMatch;
-      const resultFile = join(tasksDir, `per-spec-verify-${safeProductId}-${timestampToken()}.json`);
+      const resultFile = join(artifactDir, `per-spec-verify-${safeProductId}-${timestampToken()}.json`);
       await writeJsonFile(resultFile, {
         productId: safeProductId,
         ok,
@@ -1635,8 +1641,8 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
       };
     },
     async rollback(request) {
-      const tasksDir = stableTasksDir(rootDir);
-      await mkdir(tasksDir, { recursive: true });
+      const artifactDir = mtAgentAuditArtifactDir(rootDir);
+      await mkdir(artifactDir, { recursive: true });
       const { productId, audit, fields } = await resolveRollbackReference(rootDir, request);
       const auditLines = [
         ...(audit.taskId ? [`auditTask: ${audit.taskId}`] : []),
@@ -1671,7 +1677,7 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
       const fieldsMatch = verifiedFields(verified, fields);
       const ok = verifyStatus !== 'error' && fieldsMatch;
       const auditStatus: 'rolled_back' | 'rollback_verify_failed' = ok ? 'rolled_back' : 'rollback_verify_failed';
-      const resultFile = join(tasksDir, `rollback-verify-${productId}-${timestampToken()}.json`);
+      const resultFile = join(artifactDir, `rollback-verify-${productId}-${timestampToken()}.json`);
       await writeJsonFile(resultFile, {
         productId,
         ok,
@@ -1756,9 +1762,9 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
     async applyCurrent(expectedProductId, changes) {
       const safeProductId = readProductId(expectedProductId);
       if (!safeProductId) throw new Error('expectedProductId must be a numeric string');
-      const tasksDir = stableTasksDir(rootDir);
-      await mkdir(tasksDir, { recursive: true });
-      const changesFile = join(tasksDir, `mt-agent-apply-current-${safeProductId}-${timestampToken()}.json`);
+      const artifactDir = mtAgentAuditArtifactDir(rootDir);
+      await mkdir(artifactDir, { recursive: true });
+      const changesFile = join(artifactDir, `mt-agent-apply-current-${safeProductId}-${timestampToken()}.json`);
       await writeJsonFile(changesFile, changes);
       const result = await send({ action: 'apply-current', changesFile, allowCurrentPage: true, expectedProductId: safeProductId });
       const status = commandStatus(result);
@@ -1886,7 +1892,9 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
         item.title.replace(/\s+/g, ' ').trim() === request.itemTitle.replace(/\s+/g, ' ').trim(),
       ));
       const ok = afterStatus === 'ok' && !stillExists;
-      const resultFile = join(stableTasksDir(rootDir), `spec-remove-${request.productId}-${timestampToken()}.json`);
+      const artifactDir = mtAgentAuditArtifactDir(rootDir);
+      await mkdir(artifactDir, { recursive: true });
+      const resultFile = join(artifactDir, `spec-remove-${request.productId}-${timestampToken()}.json`);
       await writeJsonFile(resultFile, {
         productId: request.productId,
         specDimId: request.specDimId,
