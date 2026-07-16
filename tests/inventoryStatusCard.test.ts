@@ -212,13 +212,26 @@ describe('inventoryStatusCard', () => {
     };
     const card = buildInventoryStatusDetailCard(result);
     const serialized = JSON.stringify(card);
+    const elements = (card.body as { elements: Array<Record<string, unknown>> }).elements;
+    const charts = elements.filter((element) => element.tag === 'chart');
+    const panels = elements.filter((element) => element.tag === 'collapsible_panel');
 
     expect(serialized).toContain('Pocket 3');
-    expect(serialized).toContain('近7日金额占比');
-    expect(serialized).toContain('近7日访问占比');
+    expect(serialized).toContain('最新全盘位置');
+    expect(serialized).toContain('曝光贡献');
+    expect(serialized).toContain('访问贡献');
+    expect(serialized).toContain('金额贡献');
+    expect(serialized).toContain('访问-金额差');
     expect(serialized).toContain('缺数据链接');
+    expect(serialized).toContain('全盘贡献窗口对比');
+    expect(serialized).toContain('#2BA471');
+    expect(serialized).toContain('#245BDB');
+    expect(serialized).toContain('#F59A23');
+    expect(serialized).toContain('分周期明细');
     expect(serialized).toContain('这些指标反映的是同款组经营快照');
     expect(serialized).toContain('主力链接');
+    expect(charts).toHaveLength(1);
+    expect(panels).toHaveLength(2);
   });
 
   it('renders missing metrics as dashes without turning true zero into missing data', () => {
@@ -298,6 +311,10 @@ describe('inventoryStatusCard', () => {
     expect(serialized).toContain('金额来自公域曝光侧');
     expect(serialized).toContain('商品级创建/发货来自访问页后链路');
     expect(serialized).toContain('本次未抓到商品级后链路数据');
+    expect(serialized).toContain('后链路缺失');
+    expect(serialized).toContain('缺失周期的创建、发货和转化率按不可用处理');
+    expect(serialized).toContain('`-` 表示未采集/不可用，不是 0');
+    expect(serialized.indexOf('后链路缺失')).toBeLessThan(serialized.indexOf('全盘贡献窗口对比'));
   });
 
   it('formats ambiguous and fallback text in Chinese', () => {
