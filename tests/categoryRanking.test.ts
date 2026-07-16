@@ -43,6 +43,7 @@ function row(productName: string, internalId: string, platformProductId: string,
 function context(): PublicTrafficDataReportContext {
   return {
     date: '2026-07-02',
+    generationId: 'category-ranking-2026-07-02',
     summary: { '1d': { ...metric }, '7d': { ...metric }, '30d': { ...metric } },
     conclusions: [],
     rows: [row('A 相机', '101', 'p101', 2, 200, 1000), row('B 相机', '102', 'p102', 5, 150, 800), row('C 手机', '201', 'p201', 8, 300, 1200)],
