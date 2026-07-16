@@ -1,20 +1,23 @@
 import type { PeriodKey } from '../domain/types.js';
+import type { LinkListingState } from '../linkRegistry/types.js';
+
+export const INVENTORY_STATUS_SNAPSHOT_SCHEMA_VERSION = 1 as const;
 
 export interface InventoryStatusPeriodMetrics {
-  exposure: number;
-  publicVisits: number;
-  amount: number;
-  createdOrders: number;
-  signedOrders: number;
-  reviewedOrders: number;
-  shippedOrders: number;
-  createdOrderAmount: number;
-  signedOrderAmount: number;
-  reviewedOrderAmount: number;
-  shippedOrderAmount: number;
-  exposureVisitRate: number;
-  visitCreatedOrderRate: number;
-  visitShipmentRate: number;
+  exposure: number | null;
+  publicVisits: number | null;
+  amount: number | null;
+  createdOrders: number | null;
+  signedOrders: number | null;
+  reviewedOrders: number | null;
+  shippedOrders: number | null;
+  createdOrderAmount: number | null;
+  signedOrderAmount: number | null;
+  reviewedOrderAmount: number | null;
+  shippedOrderAmount: number | null;
+  exposureVisitRate: number | null;
+  visitCreatedOrderRate: number | null;
+  visitShipmentRate: number | null;
 }
 
 export interface InventoryStatusTopLink {
@@ -22,10 +25,10 @@ export interface InventoryStatusTopLink {
   platformProductId?: string;
   productName: string;
   shortName?: string;
-  status: 'active' | 'removed' | 'unknown';
-  oneDayExposure: number;
-  oneDayPublicVisits: number;
-  oneDayAmount: number;
+  listingState: LinkListingState;
+  oneDayExposure: number | null;
+  oneDayPublicVisits: number | null;
+  oneDayAmount: number | null;
 }
 
 export interface InventoryStatusGroupSnapshot {
@@ -52,16 +55,20 @@ export interface InventoryStatusCoverageSummary {
 
 export interface InventoryStatusRegistryAuditSummary {
   totalLinks: number;
-  activeLinks: number;
-  removedLinks: number;
+  onSaleLinks: number;
+  delistedLinks: number;
+  goneLinks: number;
   unknownLinks: number;
   overrideRiskCount: number;
 }
 
 export interface InventoryStatusSnapshot {
+  schemaVersion: typeof INVENTORY_STATUS_SNAPSHOT_SCHEMA_VERSION;
+  generationId: string;
   date: string;
   sourceReportDate: string;
   generatedAt: string;
+  warnings: string[];
   summary: {
     sameSkuGroupCount: number;
     activeLinkCount: number;

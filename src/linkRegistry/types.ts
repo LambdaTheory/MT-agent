@@ -27,9 +27,15 @@ export type LinkRegistrySource = 'product_id_mapping' | 'product_name_map' | 'go
 
 export type LinkRegistryClassificationSource = 'manual_override' | 'short_name_rule' | 'existing_field' | 'unknown';
 
+export interface PlatformProductIdConflict {
+  platformProductIds: string[];
+  internalProductIds: string[];
+}
+
 export interface LinkRegistryEntry {
   internalProductId: string;
   platformProductId?: string;
+  platformProductIdConflict?: PlatformProductIdConflict;
   productName?: string;
   categoryId?: string;
   categoryName?: string;

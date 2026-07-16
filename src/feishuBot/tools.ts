@@ -561,7 +561,7 @@ async function handleInventoryStatusIntent(
   options: HandleBotIntentOptions,
 ): Promise<BotResponse> {
   const latest = await findLatestReportContext(outputDir);
-  if (!latest) return { text: formatInventoryStatusMissingText({ status: 'snapshot_missing' }) };
+  if (!latest) return { text: formatInventoryStatusMissingText({ status: 'snapshot_missing', reason: 'missing' }) };
 
   const runDate = basename(dirname(latest.path));
   const snapshotPath = buildPublicTrafficPaths(outputDir, runDate).sameSkuSnapshot;
@@ -573,6 +573,9 @@ async function handleInventoryStatusIntent(
     snapshot,
     registryStore: createLinkRegistry(registryContext.registry, registryContext.overrideRisks),
     query: intent.type === 'inventory_status_query' ? intent.query : '',
+    reportGenerationId: latest.context.generationId,
+    reportDate: latest.context.date,
+    snapshotDate: runDate,
   });
 
   if (result.status === 'overview') {

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import { loadClosedOrderRegistryContext, type ClosedOrderRegistryPathsInput } from '../closedOrderFeedback/runtime.js';
 import type { PeriodKey, RawTableData } from '../domain/types.js';
@@ -77,6 +78,7 @@ async function writeInventorySameSkuSnapshotSafely(input: {
       referenceDate: input.date,
     }, process.cwd());
     const sameSkuSnapshot = buildInventorySameSkuSnapshot({
+      generationId: input.context.generationId,
       date: input.date,
       reportDate: input.reportDate,
       context: input.context,
@@ -125,17 +127,21 @@ export async function rebuildPublicTrafficReport(input: RebuildPublicTrafficRepo
     mapping,
   });
 
-  const context = analyzePublicTrafficData({
-    date: priorContext.date,
-    rows: merged.rows,
-    overview,
-    dataQualityNotes: [...filterRecoveredDashboardNotes(priorContext.dataQualityNotes), rebuildNote(input.refreshedAt)],
-    dailyDelta,
-    sevenDaySummary,
-    thirtyDaySummary,
-    cumulativeProducts,
-    orderAnalysis,
-  });
+  const generationId = randomUUID();
+  const context: PublicTrafficDataReportContext = {
+    ...analyzePublicTrafficData({
+      date: priorContext.date,
+      rows: merged.rows,
+      overview,
+      dataQualityNotes: [...filterRecoveredDashboardNotes(priorContext.dataQualityNotes), rebuildNote(input.refreshedAt)],
+      dailyDelta,
+      sevenDaySummary,
+      thirtyDaySummary,
+      cumulativeProducts,
+      orderAnalysis,
+    }),
+    generationId,
+  };
 
   context.newProductPoolItems = priorContext.newProductPoolItems;
   context.newProductPoolIds = priorContext.newProductPoolIds;

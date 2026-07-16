@@ -37,6 +37,7 @@ function row(id: string, productName: string, sevenDay: Partial<PublicTrafficPer
 
 const reportContext: PublicTrafficDataReportContext = {
   date: '2026-06-22',
+  generationId: 'report-query-2026-06-22',
   summary: {
     '1d': { exposure: 1000, publicVisits: 50, dashboardVisits: 45, createdOrders: 3, shippedOrders: 1, amount: 88, exposureVisitRate: 0.05, visitCreatedOrderRate: 0.06, visitShipmentRate: 0.02 },
     '7d': { exposure: 7000, publicVisits: 300, dashboardVisits: 280, createdOrders: 20, shippedOrders: 8, amount: 500, exposureVisitRate: 0.04, visitCreatedOrderRate: 0.07, visitShipmentRate: 0.026 },

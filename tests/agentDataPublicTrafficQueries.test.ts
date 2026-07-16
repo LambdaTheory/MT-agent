@@ -9,6 +9,7 @@ type ExtendedContext = Omit<PublicTrafficDataReportContext, 'newProductPoolItems
 
 const context: ExtendedContext = {
   date: '2026-06-12',
+  generationId: 'agent-public-traffic-queries-2026-06-12',
   summary: {
     '1d': { exposure: 100, publicVisits: 10, dashboardVisits: 8, createdOrders: 2, shippedOrders: 1, amount: 99, exposureVisitRate: 0.1, visitCreatedOrderRate: 0.2, visitShipmentRate: 0.1 },
     '7d': { exposure: 700, publicVisits: 70, dashboardVisits: 60, createdOrders: 8, shippedOrders: 4, amount: 399, exposureVisitRate: 0.1, visitCreatedOrderRate: 0.11, visitShipmentRate: 0.06 },

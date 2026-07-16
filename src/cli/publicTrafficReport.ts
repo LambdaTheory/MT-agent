@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -685,18 +686,22 @@ export async function runPublicTrafficReportCli(): Promise<PublicTrafficReportCl
       mapping,
     });
     const previousSummary = await loadPreviousReportSummary(config.outputDir, runDate, log);
-    const context = analyzePublicTrafficData({
-      date: dataDate,
-      rows: merged.rows,
-      overview: exposureOverview,
-      previousSummary,
-      dataQualityNotes,
-      dailyDelta,
-      sevenDaySummary,
-      thirtyDaySummary,
-      cumulativeProducts: crawlResult.products,
-      orderAnalysis,
-    });
+    const generationId = randomUUID();
+    const context: PublicTrafficDataReportContext = {
+      ...analyzePublicTrafficData({
+        date: dataDate,
+        rows: merged.rows,
+        overview: exposureOverview,
+        previousSummary,
+        dataQualityNotes,
+        dailyDelta,
+        sevenDaySummary,
+        thirtyDaySummary,
+        cumulativeProducts: crawlResult.products,
+        orderAnalysis,
+      }),
+      generationId,
+    };
     const rawNewProductPoolItems = await loadGoodsManagerNewProductPool(runDate, log);
     const newProductPoolItems = filterNewLinkPoolByFirstSeen(rawNewProductPoolItems, currentGoodsSnapshot, firstSeenState, runDate);
     if (rawNewProductPoolItems.length > 0) {
@@ -823,6 +828,7 @@ async function writeInventorySameSkuSnapshotSafely(
   try {
     const registryContext = await loadClosedOrderRegistryContext({ artifactsDir: input.outputDir, suppressDelistAttribution: input.suppressDelistAttribution, referenceDate: input.runDate }, process.cwd());
     const sameSkuSnapshot = buildInventorySameSkuSnapshot({
+      generationId: input.context.generationId,
       date: input.runDate,
       reportDate: input.context.date,
       context: input.context,

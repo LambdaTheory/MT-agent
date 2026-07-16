@@ -34,6 +34,7 @@ function toDataContext(context: PublicTrafficDataReportContext | PublicTrafficRe
   };
   return {
     date: context.date,
+    generationId: `legacy-report-context:${context.date}`,
     summary,
     conclusions: [{ label: '基准', text: `暂无昨日公域数据上下文，今日仅展示基准值：曝光 ${summary['1d'].exposure}。` }],
     dataQualityNotes: [],

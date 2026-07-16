@@ -101,7 +101,9 @@ function statusCounts(entries: LinkRegistryEntry[]): { total: number; active: nu
 }
 
 function topLinkStatus(topLink: InventoryStatusTopLink): LinkRegistryEntry['status'] {
-  return topLink.status;
+  if (topLink.listingState === 'on_sale') return 'active';
+  if (topLink.listingState === 'delisted' || topLink.listingState === 'gone') return 'removed';
+  return 'unknown';
 }
 
 function registryCoverage(audit: LinkRegistryAudit, snapshot: InventoryStatusSnapshot | null | undefined): boolean {
@@ -130,26 +132,11 @@ function mergeRiskTexts(groupAudit: LinkRegistrySameSkuGroupAudit | null, snapsh
   ]);
 }
 
-function overlapCount(groupAudit: LinkRegistrySameSkuGroupAudit, snapshotGroup: InventoryStatusGroupSnapshot): number {
-  const internalIds = new Set(groupAudit.entries.map((entry) => entry.internalProductId));
-  return snapshotGroup.topLinks.reduce((count, link) => count + Number(internalIds.has(link.internalProductId)), 0);
-}
-
 function matchedSnapshotGroup(
-  groupAudit: LinkRegistrySameSkuGroupAudit | null,
   sameSkuGroupId: string,
-  snapshotGroups: InventoryStatusGroupSnapshot[],
   snapshotGroupById: Map<string, InventoryStatusGroupSnapshot>,
 ): InventoryStatusGroupSnapshot | null {
-  const exact = snapshotGroupById.get(sameSkuGroupId);
-  if (exact) return exact;
-  if (!groupAudit) return null;
-
-  const ranked = snapshotGroups
-    .map((group) => ({ group, overlap: overlapCount(groupAudit, group) }))
-    .filter((item) => item.overlap > 0)
-    .sort((left, right) => right.overlap - left.overlap || right.group.activeLinkCount - left.group.activeLinkCount);
-  return ranked[0]?.group ?? null;
+  return snapshotGroupById.get(sameSkuGroupId) ?? null;
 }
 
 function reviewSort(left: LinkRegistryGroupReviewItem, right: LinkRegistryGroupReviewItem): number {
@@ -518,7 +505,7 @@ export function buildLinkRegistryGroupReviewReport(input: {
   const groups = groupIds
     .map((sameSkuGroupId) => {
       const groupAudit = auditGroupById.get(sameSkuGroupId) ?? null;
-      const snapshotGroup = matchedSnapshotGroup(groupAudit, sameSkuGroupId, snapshotGroups, snapshotGroupById);
+      const snapshotGroup = matchedSnapshotGroup(sameSkuGroupId, snapshotGroupById);
       const displayName = displayNameOf(groupAudit, snapshotGroup, sameSkuGroupId);
       const shortNames = groupShortNames(groupAudit, snapshotGroup);
       const aliases = groupAliases(groupAudit, snapshotGroup, aliasRulesByGroupId.get(sameSkuGroupId) ?? []);

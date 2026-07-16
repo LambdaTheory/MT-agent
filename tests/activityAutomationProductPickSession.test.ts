@@ -43,6 +43,7 @@ describe('activity automation product pick session', () => {
       ],
       {
         date: '2026-06-23',
+        generationId: 'activity-product-pick-session-2026-06-23',
         summary: { '1d': period, '7d': period, '30d': period },
         conclusions: [],
         rows: [

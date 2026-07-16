@@ -12,6 +12,8 @@ export interface InventoryStatusCandidate {
 
 export type InventoryStatusOverviewResult = { status: 'overview'; snapshot: InventoryStatusSnapshot };
 
+export type InventoryStatusSnapshotMissingReason = 'missing' | 'report_generation_missing' | 'mismatched_generation' | 'mismatched_report_date' | 'mismatched_snapshot_date';
+
 export type InventoryStatusDetailResult = {
   status: 'detail';
   query: string;
@@ -32,12 +34,15 @@ export type InventoryStatusQueryResult =
   | InventoryStatusDetailResult
   | InventoryStatusAmbiguousResult
   | { status: 'not_found'; query: string }
-  | { status: 'snapshot_missing'; query?: string };
+  | { status: 'snapshot_missing'; reason: InventoryStatusSnapshotMissingReason; query?: string };
 
 interface QueryInventoryStatusInput {
   snapshot: InventoryStatusSnapshot | null;
   registryStore: LinkRegistryStore;
   query: string;
+  reportGenerationId: string | undefined;
+  reportDate: string | undefined;
+  snapshotDate: string | undefined;
 }
 
 interface ResolvedGroup {
@@ -57,7 +62,7 @@ function candidateFromAlias(candidate: LinkRegistryAliasResolutionCandidate): In
 
 function resolveGroup(registryStore: LinkRegistryStore, rawQuery: string): ResolvedGroup | InventoryStatusQueryResult {
   const query = rawQuery.trim();
-  if (!query) return { status: 'snapshot_missing', query: rawQuery };
+  if (!query) return { status: 'snapshot_missing', reason: 'missing' };
 
   if (/^\d+$/.test(query)) {
     const entry = registryStore.getByInternalId(query);
@@ -82,9 +87,18 @@ function findGroup(snapshot: InventoryStatusSnapshot, sameSkuGroupId: string): I
   return snapshot.groups.find((group) => group.sameSkuGroupId === sameSkuGroupId) ?? null;
 }
 
+function snapshotMissingResult(reason: InventoryStatusSnapshotMissingReason, rawQuery: string): InventoryStatusQueryResult {
+  const query = rawQuery.trim();
+  return query ? { status: 'snapshot_missing', reason, query: rawQuery } : { status: 'snapshot_missing', reason };
+}
+
 export function queryInventoryStatus(input: QueryInventoryStatusInput): InventoryStatusQueryResult {
   const query = input.query.trim();
-  if (!input.snapshot) return query ? { status: 'snapshot_missing', query: input.query } : { status: 'snapshot_missing' };
+  if (!input.snapshot) return snapshotMissingResult('missing', input.query);
+  if (!input.reportGenerationId?.trim()) return snapshotMissingResult('report_generation_missing', input.query);
+  if (input.snapshot.generationId !== input.reportGenerationId) return snapshotMissingResult('mismatched_generation', input.query);
+  if (input.snapshot.sourceReportDate !== input.reportDate) return snapshotMissingResult('mismatched_report_date', input.query);
+  if (input.snapshot.date !== input.snapshotDate) return snapshotMissingResult('mismatched_snapshot_date', input.query);
   if (!query) return { status: 'overview', snapshot: input.snapshot };
 
   const resolved = resolveGroup(input.registryStore, input.query);

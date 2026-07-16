@@ -4,7 +4,7 @@ import type { GoodsLinkLifecycleState, GoodsRemovedLinkItem } from '../publicTra
 import type { GoodsFirstSeenIndex } from '../publicTraffic/goodsSnapshot.js';
 import type { ExposureCumulativeProduct, GoodsSnapshotItem, PlatformRestrictionObservation } from '../publicTraffic/types.js';
 import { canonicalProductShortName, type ProductNameMap } from '../publicTraffic/productDisplayName.js';
-import type { LinkListingState, LinkRegistryEntry, LinkRegistrySource, LinkRegistryStatus } from './types.js';
+import type { LinkListingState, LinkRegistryEntry, LinkRegistrySource, LinkRegistryStatus, PlatformProductIdConflict } from './types.js';
 import { arbitrateListingState, listingStateToStatus, parseListingStateFromText, type ListingStateObservation } from './listingState.js';
 import { sameSkuGroupRules } from './overrides.js';
 import { attributeDelist, type PlatformRestrictionAttributionObservation } from './delistAttribution.js';
@@ -29,6 +29,7 @@ interface DraftEntry {
   internalProductId: string;
   platformProductId?: string;
   productName?: string;
+  platformProductIdConflict?: PlatformProductIdConflict;
   productNamePriority?: number;
   categoryId?: string;
   categoryName?: string;
@@ -209,6 +210,108 @@ function addGoodsSnapshot(drafts: Map<string, DraftEntry>, goodsSnapshot: GoodsS
     }
     addNameHint(draft, item.productName);
     draft.sources.add('goods_snapshot');
+  }
+}
+
+interface CurrentAuthoritativeProductIdPair {
+  platformProductId: string;
+  internalProductId: string;
+}
+
+function addCurrentAuthoritativePair(
+  pairs: CurrentAuthoritativeProductIdPair[],
+  platformProductIdValue: string | undefined,
+  internalProductIdValue: string | undefined,
+): void {
+  const platformProductId = platformProductIdValue?.trim();
+  const internalProductId = validInternalId(internalProductIdValue ?? '');
+  if (!platformProductId || !internalProductId) return;
+  pairs.push({ platformProductId, internalProductId });
+}
+
+function collectCurrentAuthoritativeProductIdPairs(input: BuildLinkRegistryInput): CurrentAuthoritativeProductIdPair[] {
+  const pairs: CurrentAuthoritativeProductIdPair[] = [];
+  const mappingPairs = Object.entries(input.productIdMapping ?? {}).sort(([leftPlatform], [rightPlatform]) => leftPlatform.localeCompare(rightPlatform));
+  for (const [platformProductId, internalProductId] of mappingPairs) addCurrentAuthoritativePair(pairs, platformProductId, internalProductId);
+  for (const item of input.goodsSnapshot ?? []) addCurrentAuthoritativePair(pairs, item.platformProductId, item.internalProductId);
+  return pairs;
+}
+
+function addProductIdEdge(
+  internalToPlatforms: Map<string, Set<string>>,
+  platformToInternals: Map<string, Set<string>>,
+  pair: CurrentAuthoritativeProductIdPair,
+): void {
+  const platforms = internalToPlatforms.get(pair.internalProductId) ?? new Set<string>();
+  platforms.add(pair.platformProductId);
+  internalToPlatforms.set(pair.internalProductId, platforms);
+
+  const internals = platformToInternals.get(pair.platformProductId) ?? new Set<string>();
+  internals.add(pair.internalProductId);
+  platformToInternals.set(pair.platformProductId, internals);
+}
+
+function compareInternalProductIdValue(left: string, right: string): number {
+  return Number(left) - Number(right) || left.localeCompare(right);
+}
+
+function buildPlatformProductIdConflicts(input: BuildLinkRegistryInput): Map<string, PlatformProductIdConflict> {
+  const internalToPlatforms = new Map<string, Set<string>>();
+  const platformToInternals = new Map<string, Set<string>>();
+  for (const pair of collectCurrentAuthoritativeProductIdPairs(input)) addProductIdEdge(internalToPlatforms, platformToInternals, pair);
+
+  const seedInternalProductIds = new Set<string>();
+  for (const [internalProductId, platformProductIds] of internalToPlatforms) {
+    if (platformProductIds.size > 1) seedInternalProductIds.add(internalProductId);
+  }
+  for (const internalProductIds of platformToInternals.values()) {
+    if (internalProductIds.size > 1) {
+      for (const internalProductId of internalProductIds) seedInternalProductIds.add(internalProductId);
+    }
+  }
+
+  const conflicts = new Map<string, PlatformProductIdConflict>();
+  const visitedInternalProductIds = new Set<string>();
+  for (const seedInternalProductId of [...seedInternalProductIds].sort(compareInternalProductIdValue)) {
+    if (visitedInternalProductIds.has(seedInternalProductId)) continue;
+
+    const componentInternalProductIds = new Set<string>();
+    const componentPlatformProductIds = new Set<string>();
+    const internalStack = [seedInternalProductId];
+    const platformStack: string[] = [];
+    const visitedPlatformProductIds = new Set<string>();
+
+    while (internalStack.length > 0 || platformStack.length > 0) {
+      const internalProductId = internalStack.pop();
+      if (internalProductId) {
+        if (visitedInternalProductIds.has(internalProductId)) continue;
+        visitedInternalProductIds.add(internalProductId);
+        componentInternalProductIds.add(internalProductId);
+        for (const platformProductId of internalToPlatforms.get(internalProductId) ?? []) platformStack.push(platformProductId);
+        continue;
+      }
+
+      const platformProductId = platformStack.pop();
+      if (!platformProductId || visitedPlatformProductIds.has(platformProductId)) continue;
+      visitedPlatformProductIds.add(platformProductId);
+      componentPlatformProductIds.add(platformProductId);
+      for (const nextInternalProductId of platformToInternals.get(platformProductId) ?? []) internalStack.push(nextInternalProductId);
+    }
+
+    const conflict = {
+      platformProductIds: [...componentPlatformProductIds].sort((left, right) => left.localeCompare(right)),
+      internalProductIds: [...componentInternalProductIds].sort(compareInternalProductIdValue),
+    };
+    for (const internalProductId of conflict.internalProductIds) conflicts.set(internalProductId, conflict);
+  }
+
+  return conflicts;
+}
+
+function applyPlatformProductIdConflicts(drafts: Map<string, DraftEntry>, conflicts: Map<string, PlatformProductIdConflict>): void {
+  for (const [internalProductId, conflict] of conflicts) {
+    const draft = drafts.get(internalProductId);
+    if (draft) draft.platformProductIdConflict = conflict;
   }
 }
 
@@ -660,7 +763,8 @@ function finalizeEntry(
     .sort();
   return {
     internalProductId: draft.internalProductId,
-    ...(draft.platformProductId ? { platformProductId: draft.platformProductId } : {}),
+    ...(draft.platformProductId && !draft.platformProductIdConflict ? { platformProductId: draft.platformProductId } : {}),
+    ...(draft.platformProductIdConflict ? { platformProductIdConflict: draft.platformProductIdConflict } : {}),
     ...(draft.productName ? { productName: draft.productName } : {}),
     ...(draft.categoryId ? { categoryId: draft.categoryId } : {}),
     ...(draft.categoryName ? { categoryName: draft.categoryName } : {}),
@@ -707,6 +811,7 @@ export function buildLinkRegistry(input: BuildLinkRegistryInput): LinkRegistryEn
   inferDraftMetadata(drafts);
   applyGroupLevelClassification(drafts);
   inferDraftMetadata(drafts);
+  applyPlatformProductIdConflicts(drafts, buildPlatformProductIdConflicts(input));
 
   return [...drafts.values()]
     .map((draft) => finalizeEntry(draft, input.agentDelistEvents ?? [], input.suppressDelistAttribution))

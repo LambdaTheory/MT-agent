@@ -44,6 +44,7 @@ describe('rebuildPublicTrafficReport', () => {
     try {
       const priorContext = {
         date: '2026-06-14',
+        generationId: 'prior-generation-id',
         summary: {},
         conclusions: [],
         dataQualityNotes: ['今日访问数据支付宝暂未更新，本期访问量板块指标缺失。'],
@@ -97,10 +98,16 @@ describe('rebuildPublicTrafficReport', () => {
 
       expect(result.sent).toBe(false);
       expect(result.inventorySnapshotWarning).toBeUndefined();
+      expect(typeof result.context.generationId).toBe('string');
+      expect(result.context.generationId).not.toBe('');
+      expect(result.context.generationId).not.toBe(priorContext.generationId);
+      expect(context.generationId).toBe(result.context.generationId);
       expect(context.dataQualityNotes).toContain('访问页数据已于 12:00 补抓更新，本报告为重建版。');
       expect(context.dataQualityNotes.some((note: string) => note.includes('暂未更新'))).toBe(false);
       expect(context.newProductPoolItems[0].productId).toBe('101');
       expect(context.agentData.removedLinks[0].productId).toBe('900');
+      expect(sameSkuSnapshot.schemaVersion).toBe(1);
+      expect(sameSkuSnapshot.generationId).toBe(context.generationId);
       expect(sameSkuSnapshot.date).toBe(runDate);
       expect(Array.isArray(sameSkuSnapshot.groups)).toBe(true);
       await expect(readFile(paths.markdown, 'utf8')).resolves.toContain('公域数据日报');
@@ -203,8 +210,12 @@ describe('rebuildPublicTrafficReport', () => {
         expect(entry).toMatchObject({ shortName: '保留覆盖名' });
         expect(entry).not.toHaveProperty('delistCause');
         const sameSkuSnapshot = JSON.parse(await readFile(paths.sameSkuSnapshot, 'utf8'));
-        expect(sameSkuSnapshot.registryAuditSummary.removedLinks).toBe(1);
-        expect(sameSkuSnapshot.registryAuditSummary.activeLinks).toBe(0);
+        expect(sameSkuSnapshot.registryAuditSummary).toMatchObject({
+          onSaleLinks: 0,
+          delistedLinks: 1,
+          goneLinks: 0,
+          unknownLinks: 0,
+        });
       } finally {
         vi.useRealTimers();
       }
@@ -259,7 +270,10 @@ describe('rebuildPublicTrafficReport', () => {
 
       expect(result.sent).toBe(false);
       expect(result.inventorySnapshotWarning).toContain('Invalid sameSkuGroupId: bad/group');
-      await expect(readFile(paths.reportContext, 'utf8')).resolves.toContain('访问页数据已于 12:00 补抓更新');
+      const context = JSON.parse(await readFile(paths.reportContext, 'utf8'));
+      expect(typeof context.generationId).toBe('string');
+      expect(context.generationId).not.toBe('');
+      expect(context.dataQualityNotes).toContain('访问页数据已于 12:00 补抓更新，本报告为重建版。');
       await expect(readFile(paths.markdown, 'utf8')).resolves.toContain('公域数据日报');
       await expect(readFile(paths.workbook)).resolves.toBeInstanceOf(Buffer);
       await expect(readFile(paths.sameSkuSnapshot, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });

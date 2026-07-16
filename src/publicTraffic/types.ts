@@ -194,6 +194,7 @@ export interface PublicTrafficEmptySectionNotes {
 }
 
 export interface PublicTrafficDataReportContext {
+  generationId: string;
   date: string;
   summary: Record<PeriodKey, PublicTrafficDataSummary>;
   conclusions: PublicTrafficConclusion[];
@@ -214,6 +215,8 @@ export interface PublicTrafficDataReportContext {
   orderAnalysis?: OrderAnalysisResult;
   previousSummary?: PublicTrafficDataSummary;
 }
+
+export type PublicTrafficDataReportDraftContext = Omit<PublicTrafficDataReportContext, 'generationId'>;
 
 export interface PublicTrafficDataAnalysisInput extends PublicTrafficDataContext {
   date: string;

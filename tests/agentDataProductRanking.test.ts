@@ -55,6 +55,7 @@ function row(
 function context(): PublicTrafficDataReportContext {
   return {
     date: '2026-06-22',
+    generationId: 'agent-product-ranking-2026-06-22',
     summary: { '1d': baseMetric, '7d': baseMetric, '30d': baseMetric },
     conclusions: [],
     dataQualityNotes: [],

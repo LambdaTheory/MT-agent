@@ -48,6 +48,7 @@ const emptySectionNotes = {
 function context(): PublicTrafficDataReportContext {
   return {
     date: '2026-06-11',
+    generationId: 'feishu-bot-id-lookup-2026-06-11',
     summary: { '1d': summary, '7d': summary, '30d': summary },
     conclusions: [],
     rows: [

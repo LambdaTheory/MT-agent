@@ -35,6 +35,7 @@ function row(internalProductId: string, productName: string, metrics: Partial<Re
 
 const context: PublicTrafficDataReportContext = {
   date: '2026-07-06',
+  generationId: 'safe-source-2026-07-06',
   summary: { '1d': baseMetric, '7d': baseMetric, '30d': baseMetric },
   conclusions: [],
   rows: [
