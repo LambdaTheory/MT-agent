@@ -1,6 +1,6 @@
-import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { buildAgentToolConfirmCard } from '../src/agentRuntime/approvalCard.js';
 import { createFeishuSdkBot } from '../src/feishuBot/sdkClient.js';
@@ -621,6 +621,7 @@ describe('rental price card action', () => {
 
   it('removes a specific spec item with refresh, submit, verify, and an audit file', async () => {
     const rootDir = await mkdtemp(join(tmpdir(), 'mt-agent-rental-spec-remove-'));
+    const dataRoot = join(dirname(rootDir), `.${basename(rootDir)}-data`);
     const commands: Array<Record<string, unknown>> = [];
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async (_input, init) => {
@@ -654,9 +655,12 @@ describe('rental price card action', () => {
       expect(commands.find((command) => command.action === 'submit')).toMatchObject({ action: 'submit', expectedProductId: '761', _negotiation: { actionClass: 'mutation' } });
       expect(result.lines).toContain('item: removed');
       expect(result.audit?.resultFile).toContain('spec-remove-761-');
+      expect(result.audit?.resultFile).toContain(join(dataRoot, 'tasks'));
       expect(await readFile(result.audit!.resultFile!, 'utf8')).toContain('"itemTitle": "含手柄"');
     } finally {
       globalThis.fetch = originalFetch;
+      await rm(rootDir, { recursive: true, force: true });
+      await rm(dataRoot, { recursive: true, force: true });
     }
   });
 

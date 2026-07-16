@@ -1,6 +1,6 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { loadOperationLedgerJsonlEntries } from '../src/agentRuntime/operationLedger.js';
 import { findAgentTool } from '../src/agentRuntime/toolRegistry.js';
@@ -9,15 +9,17 @@ import { executeAgentToolRequest } from '../src/feishuBot/agentToolExecutor.js';
 describe('rental batch runner tools', () => {
   let outputDir: string;
   let rentalRoot: string;
+  let dataRoot: string;
   let previousRoot: string | undefined;
 
   beforeEach(async () => {
     outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-batch-output-'));
     rentalRoot = await mkdtemp(join(tmpdir(), 'rental-batch-root-'));
+    dataRoot = join(dirname(rentalRoot), `.${basename(rentalRoot)}-data`);
     previousRoot = process.env.RENTAL_PRICE_AGENT_DIR;
     process.env.RENTAL_PRICE_AGENT_DIR = rentalRoot;
     await mkdir(join(rentalRoot, 'scripts'), { recursive: true });
-    await mkdir(join(rentalRoot, 'tasks', 'batches'), { recursive: true });
+    await mkdir(join(dataRoot, 'tasks', 'batches'), { recursive: true });
     await writeFile(join(rentalRoot, 'scripts', 'batch-runner.js'), [
       'const fs = require("node:fs");',
       'const args = process.argv.slice(2);',
@@ -33,6 +35,7 @@ describe('rental batch runner tools', () => {
     else process.env.RENTAL_PRICE_AGENT_DIR = previousRoot;
     await rm(outputDir, { recursive: true, force: true });
     await rm(rentalRoot, { recursive: true, force: true });
+    await rm(dataRoot, { recursive: true, force: true });
   });
 
   it('registers batch runner control tools', () => {
@@ -42,8 +45,8 @@ describe('rental batch runner tools', () => {
   });
 
   it('dispatches preview, execute, status, resume, report, rollback, and delayed-verify to batch-runner', async () => {
-    const specFile = join(rentalRoot, 'tasks', 'batches', 'spec.json');
-    const stateFile = join(rentalRoot, 'tasks', 'batches', 'state.json');
+    const specFile = join(dataRoot, 'tasks', 'batches', 'spec.json');
+    const stateFile = join(dataRoot, 'tasks', 'batches', 'state.json');
     await writeFile(specFile, JSON.stringify({ items: [{ productId: '648', fields: { rent1day: '88.00' } }] }), 'utf8');
     await writeFile(stateFile, JSON.stringify({
       batchId: 'batch-1',
@@ -88,7 +91,7 @@ describe('rental batch runner tools', () => {
   });
 
   it('injects confirmImageWithoutPreview only when rental.batchExecute explicitly sets it', async () => {
-    const specFile = join(rentalRoot, 'tasks', 'batches', 'spec.json');
+    const specFile = join(dataRoot, 'tasks', 'batches', 'spec.json');
     await writeFile(specFile, JSON.stringify({ items: [{ productId: '648', images: { pick: ['a.jpg'] } }] }), 'utf8');
 
     const withoutImageConfirm = await executeAgentToolRequest({ toolName: 'rental.batchExecute', arguments: { specFile }, reason: 'execute without image confirmation' }, outputDir);

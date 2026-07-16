@@ -1,6 +1,6 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { findAgentTool } from '../src/agentRuntime/toolRegistry.js';
 import { executeAgentToolRequest } from '../src/feishuBot/agentToolExecutor.js';
@@ -8,15 +8,17 @@ import { executeAgentToolRequest } from '../src/feishuBot/agentToolExecutor.js';
 describe('rental mirror read-side tools', () => {
   let outputDir: string;
   let rentalRoot: string;
+  let dataRoot: string;
   let previousRoot: string | undefined;
 
   beforeEach(async () => {
     outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-mirror-output-'));
     rentalRoot = await mkdtemp(join(tmpdir(), 'rental-mirror-root-'));
+    dataRoot = join(dirname(rentalRoot), `.${basename(rentalRoot)}-data`);
     previousRoot = process.env.RENTAL_PRICE_AGENT_DIR;
     process.env.RENTAL_PRICE_AGENT_DIR = rentalRoot;
     await mkdir(join(rentalRoot, 'scripts'), { recursive: true });
-    await mkdir(join(rentalRoot, 'tasks', 'batches'), { recursive: true });
+    await mkdir(join(dataRoot, 'tasks', 'batches'), { recursive: true });
     await writeFile(join(rentalRoot, 'scripts', 'mirror-search.js'), [
       'const args = process.argv.slice(2);',
       'console.log(JSON.stringify({ status: "ok", args, keyword: args[1], stateFile: args[1], rows: [{ id: "648", name: args[1] }] }));',
@@ -28,6 +30,7 @@ describe('rental mirror read-side tools', () => {
     else process.env.RENTAL_PRICE_AGENT_DIR = previousRoot;
     await rm(outputDir, { recursive: true, force: true });
     await rm(rentalRoot, { recursive: true, force: true });
+    await rm(dataRoot, { recursive: true, force: true });
   });
 
   it('registers only mirror search and batch-spec read-side tools', () => {
@@ -49,7 +52,7 @@ describe('rental mirror read-side tools', () => {
   });
 
   it('dispatches hidden confirmed writeback-state only for safe batch state paths', async () => {
-    const stateFile = join(rentalRoot, 'tasks', 'batches', 'state.json');
+    const stateFile = join(dataRoot, 'tasks', 'batches', 'state.json');
     await writeFile(stateFile, JSON.stringify({ batchId: 'batch-1' }), 'utf8');
 
     const writeback = await executeAgentToolRequest({ toolName: 'rental.mirrorWritebackState', arguments: { stateFile, confirm: true }, reason: 'confirmed mirror writeback' }, outputDir);

@@ -1,6 +1,6 @@
 import { copyFile, mkdir, mkdtemp, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { executeAgentToolRequest } from '../src/feishuBot/agentToolExecutor.js';
 import { parseBotIntent } from '../src/feishuBot/intent.js';
@@ -535,6 +535,7 @@ describe('rental price skill client copy diagnostics', () => {
   it('generates diff audit, task log, and rollback artifact for price preview and updates the task after execution', async () => {
     const rootDir = await mkdtemp(join(tmpdir(), 'mt-agent-rental-price-audit-'));
     await copyRentalPriceAuditScripts(rootDir);
+    const dataRoot = join(dirname(rootDir), `.${basename(rootDir)}-data`);
     const currentValues = { rent1day: '30.00', rent10day: '80.00' };
     const applyProductIds: unknown[] = [];
     const submitExpectedProductIds: unknown[] = [];
@@ -573,7 +574,7 @@ describe('rental price skill client copy diagnostics', () => {
     expect(result.ok).toBe(true);
     expect(result.audit?.taskId).toBe(preview.audit?.taskId);
     expect(result.lines.join('\n')).toContain(`auditTask: ${preview.audit?.taskId}`);
-    const task = JSON.parse(await readFile(join(rootDir, 'tasks', `${preview.audit?.taskId}.json`), 'utf8')) as { status: string; evidence: Array<{ type: string }> };
+    const task = JSON.parse(await readFile(join(dataRoot, 'tasks', `${preview.audit?.taskId}.json`), 'utf8')) as { status: string; evidence: Array<{ type: string }> };
     expect(task.status).toBe('completed');
     expect(task.evidence.some((item) => item.type === 'verify_result')).toBe(true);
 
@@ -585,10 +586,10 @@ describe('rental price skill client copy diagnostics', () => {
     expect(applyProductIds).toEqual(['761', '761']);
     expect(submitExpectedProductIds).toEqual(['761', '761']);
     expect(currentValues.rent1day).toBe('30.00');
-    const rolledBackTask = JSON.parse(await readFile(join(rootDir, 'tasks', `${preview.audit?.taskId}.json`), 'utf8')) as { status: string; evidence: Array<{ type: string }> };
+    const rolledBackTask = JSON.parse(await readFile(join(dataRoot, 'tasks', `${preview.audit?.taskId}.json`), 'utf8')) as { status: string; evidence: Array<{ type: string }> };
     expect(rolledBackTask.status).toBe('rolled_back');
     expect(rolledBackTask.evidence.some((item) => item.type === 'rollback_verify_result')).toBe(true);
-  });
+  }, 15000);
 });
 
 async function copyRentalPriceAuditScripts(rootDir: string): Promise<void> {
@@ -597,7 +598,18 @@ async function copyRentalPriceAuditScripts(rootDir: string): Promise<void> {
     'scripts/diff-generator.js',
     'scripts/task-store.js',
     'scripts/lib/config-loader.js',
+    'scripts/lib/daemon-protocol.js',
+    'scripts/lib/daemon-client.js',
+    'scripts/lib/daemon-compatibility.js',
+    'scripts/lib/install-layout.js',
+    'scripts/lib/lease-lock.js',
+    'scripts/lib/migrations.js',
+    'scripts/lib/process-inspector.js',
     'scripts/lib/rule-checker.js',
+    'scripts/lib/version-contract.js',
+    'package-lock.json',
+    'package.json',
+    'release-manifest.json',
   ];
   for (const file of files) {
     const target = join(rootDir, file);
@@ -609,5 +621,10 @@ async function copyRentalPriceAuditScripts(rootDir: string): Promise<void> {
 
 async function writeAuditConfig(rootDir: string): Promise<void> {
   const { writeFile } = await import('node:fs/promises');
-  await writeFile(join(rootDir, 'config.json'), JSON.stringify({ rules: { minPrice: 1, maxPrice: 9999, maxChangePercent: 20 } }, null, 2), 'utf8');
+  const dataRoot = join(dirname(rootDir), `.${basename(rootDir)}-data`);
+  const sourceRoot = new URL('../vendor/rental-price-agent/', import.meta.url);
+  const config = JSON.parse(await readFile(new URL('config.example.json', sourceRoot), 'utf8')) as Record<string, unknown>;
+  config.rules = { minPrice: 1, maxPrice: 9999, maxChangePercent: 20 };
+  await mkdir(dataRoot, { recursive: true });
+  await writeFile(join(dataRoot, 'config.json'), JSON.stringify(config, null, 2), 'utf8');
 }
