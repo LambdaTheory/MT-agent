@@ -1,7 +1,7 @@
 const { join } = require('node:path');
 
 const rootDir = __dirname;
-const rentalPriceAgentDir = join(rootDir, 'vendor', 'rental-price-agent');
+const rentalPriceAgentDir = process.env.RENTAL_PRICE_AGENT_DIR || join(rootDir, 'vendor', 'rental-price-agent');
 
 module.exports = {
   apps: [
@@ -20,6 +20,7 @@ module.exports = {
       time: true,
       env: {
         NODE_ENV: 'production',
+        RENTAL_PRICE_AGENT_DIR: rentalPriceAgentDir,
       },
     },
     {
@@ -37,6 +38,7 @@ module.exports = {
       time: true,
       env: {
         NODE_ENV: 'production',
+        RENTAL_PRICE_AGENT_DIR: rentalPriceAgentDir,
       },
     },
   ],
