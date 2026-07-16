@@ -2,6 +2,7 @@ import type { PeriodKey } from '../domain/types.js';
 import type {
   ExposureCumulativeProduct,
   ExposureOverviewMetric,
+  ExposureProductSummary,
   PublicTrafficDataAnalysisInput,
   PublicTrafficDataReportDraftContext,
   PublicTrafficDataSummary,
@@ -10,10 +11,11 @@ import type {
   PublicTrafficProductDataRow,
   PublicTrafficReportSectionItem,
 } from './types.js';
-import { isRemovedExposureProduct } from './exposureStatus.js';
+import { DEFAULT_PUBLIC_TRAFFIC_RULES_CONFIG, type PublicTrafficRulesConfig } from './rulesConfig.js';
 
 const PERIODS: PeriodKey[] = ['1d', '7d', '30d'];
 const PRIORITY_RANK: Record<NonNullable<PublicTrafficReportSectionItem['priority']>, number> = { high: 0, medium: 1, low: 2 };
+type AmountKillStatus = 'killed' | 'alive' | 'unknown';
 
 function emptySummary(): PublicTrafficDataSummary {
   return {
@@ -175,6 +177,55 @@ function custodyStatusText(product: ExposureCumulativeProduct): string {
   return '';
 }
 
+function rawValuesByKey(product: ExposureCumulativeProduct, keyPattern: RegExp): string[] {
+  return Object.entries(product.raw ?? {})
+    .filter(([key]) => keyPattern.test(normalizeRawText(key)))
+    .map(([, value]) => normalizeRawText(value))
+    .filter(Boolean);
+}
+
+function rawText(product: ExposureCumulativeProduct): string {
+  return Object.entries(product.raw ?? {})
+    .map(([key, value]) => `${normalizeRawText(key)}:${normalizeRawText(value)}`)
+    .join(' ');
+}
+
+function statusSignal(product: ExposureCumulativeProduct): string {
+  return rawValuesByKey(product, /商品状态|上架状态|售卖状态|上下架状态/u).join(' ');
+}
+
+function hasCustodyActiveSignal(status: string): boolean {
+  return /托管中/u.test(status);
+}
+
+function hasListedSignal(status: string): boolean {
+  return /上架|出售中|可售卖|已同步/u.test(status);
+}
+
+function hasDelistedSignal(status: string): boolean {
+  return /已下架|下架|停售/u.test(status);
+}
+
+function hasFailureSignal(product: ExposureCumulativeProduct): boolean {
+  return /失败|不通过|未同步|拒绝|驳回/u.test(rawText(product));
+}
+
+function custodyAbnormalCase(product: ExposureCumulativeProduct): 'listed_failed_custody' | 'delisted_custody' | null {
+  const custodyStatus = custodyStatusText(product);
+  if (!hasCustodyActiveSignal(custodyStatus)) return null;
+  const listingStatus = statusSignal(product);
+  if (hasDelistedSignal(listingStatus)) return 'delisted_custody';
+  if (hasListedSignal(listingStatus) && hasFailureSignal(product)) return 'listed_failed_custody';
+  return null;
+}
+
+function custodyAbnormalReason(productName: string, product: ExposureCumulativeProduct, abnormalCase: NonNullable<ReturnType<typeof custodyAbnormalCase>>): string {
+  const listingStatus = statusSignal(product) || '未知';
+  const custodyStatus = custodyStatusText(product);
+  const caseText = abnormalCase === 'listed_failed_custody' ? '上架失败但仍托管中' : '已下架但仍托管中';
+  return `${productName}｜${caseText}｜商品状态：${listingStatus}｜托管状态：${custodyStatus}`;
+}
+
 function rowForCumulativeProduct(product: ExposureCumulativeProduct, rowsById: Map<string, PublicTrafficProductDataRow>): PublicTrafficProductDataRow | undefined {
   const platformProductId = normalizeRawText(product.platformProductId);
   return rowsById.get(platformProductId) ?? rowsById.get(platformProductId.slice(0, -1));
@@ -183,16 +234,15 @@ function rowForCumulativeProduct(product: ExposureCumulativeProduct, rowsById: M
 function buildCustodyAbnormalItems(input: PublicTrafficDataAnalysisInput, rowsById: Map<string, PublicTrafficProductDataRow>): PublicTrafficReportSectionItem[] {
   const seen = new Set<string>();
   return (input.cumulativeProducts ?? [])
-    .filter((product) => !isRemovedExposureProduct(product))
-    .map((product) => ({ product, status: custodyStatusText(product), row: rowForCumulativeProduct(product, rowsById) }))
-    .filter(({ status }) => status.includes('托管异常'))
-    .map(({ product, status, row }) => {
+    .map((product) => ({ product, abnormalCase: custodyAbnormalCase(product), row: rowForCumulativeProduct(product, rowsById) }))
+    .filter((entry): entry is { product: ExposureCumulativeProduct; abnormalCase: NonNullable<ReturnType<typeof custodyAbnormalCase>>; row: PublicTrafficProductDataRow | undefined } => entry.abnormalCase !== null)
+    .map(({ product, abnormalCase, row }) => {
       const identifier = row?.displayProductId ?? `平台商品ID ${product.platformProductId}`;
       const productName = product.productName || row?.productName || identifier;
       return {
         identifier,
         action: '检查托管异常',
-        reason: `${productName}｜托管状态：${status}`,
+        reason: custodyAbnormalReason(productName, product, abnormalCase),
         priority: 'high' as const,
       };
     })
@@ -235,42 +285,66 @@ function buildRecommendedActions(sections: {
     .sort((a, b) => PRIORITY_RANK[a.priority ?? 'low'] - PRIORITY_RANK[b.priority ?? 'low']);
 }
 
-function isHealthy(row: PublicTrafficProductDataRow): boolean {
-  const one = row.periods['1d'];
-  const seven = row.periods['7d'];
-  return one.amount > 0 || seven.amount > 0;
+function dailyAverage(metrics: Pick<PublicTrafficPeriodMetrics, 'exposure'>, days: number): number {
+  return metrics.exposure / days;
 }
 
-function matchesLowExposure(row: PublicTrafficProductDataRow): boolean {
+function reliableSummary(summary: ExposureProductSummary | undefined, requiredDays: number): summary is ExposureProductSummary {
+  return Boolean(summary && summary.days >= requiredDays && !summary.flags.includes('missing') && !summary.flags.includes('counter_reset_or_data_error'));
+}
+
+function healthAmountSummary(input: PublicTrafficDataAnalysisInput): Map<string, ExposureProductSummary> {
+  return new Map((input.healthAmountSummary ?? []).map((entry) => [entry.platformProductId, entry]));
+}
+
+function amountKillStatus(row: PublicTrafficProductDataRow, rules: PublicTrafficRulesConfig, summaries: Map<string, ExposureProductSummary>): AmountKillStatus {
+  const summary = summaries.get(row.platformProductId);
+  if (!reliableSummary(summary, rules.health.amountKill.windowDays)) {
+    return row.periods['1d'].amount > rules.health.amountKill.threshold || row.periods['7d'].amount > rules.health.amountKill.threshold ? 'alive' : 'unknown';
+  }
+  return summary.amount <= rules.health.amountKill.threshold ? 'killed' : 'alive';
+}
+
+function matchesLowExposure(row: PublicTrafficProductDataRow, rules: PublicTrafficRulesConfig, amountStatus: AmountKillStatus): boolean {
   const one = row.periods['1d'];
   const seven = row.periods['7d'];
   const thirty = row.periods['30d'];
-  const custodyLowExposure = typeof row.custodyDays === 'number' && row.custodyDays > 5 && one.hasExposureData && one.exposure < 100;
-  const exposureHistoryLow = one.hasExposureData && seven.hasExposureData && one.exposure <= 50 && seven.exposure <= 300;
+  const failExposure = rules.health.exposureDailyAverage.failBelow;
+  const custodyLowExposure = typeof row.custodyDays === 'number' && row.custodyDays > 5 && one.hasExposureData && dailyAverage(one, 1) < failExposure;
+  const exposureHistoryLow = one.hasExposureData && seven.hasExposureData && dailyAverage(one, 1) < failExposure && dailyAverage(seven, 7) < failExposure;
   const hasVisitEvidence = one.publicVisits > 0 || seven.publicVisits > 0 || thirty.publicVisits > 0;
   const visitEvidenceLow = (seven.hasExposureData || seven.hasDashboardData || thirty.hasDashboardData) && hasVisitEvidence && seven.publicVisits <= 3 && thirty.publicVisits <= 10;
-  return (custodyLowExposure || exposureHistoryLow || visitEvidenceLow) && one.amount <= 0 && seven.amount <= 0;
+  return (custodyLowExposure || exposureHistoryLow || visitEvidenceLow) && amountStatus !== 'alive';
 }
 
-function matchesWeakClick(row: PublicTrafficProductDataRow): boolean {
+function matchesWeakClick(row: PublicTrafficProductDataRow, rules: PublicTrafficRulesConfig): boolean {
   const one = row.periods['1d'];
   const seven = row.periods['7d'];
-  return (one.hasExposureData || seven.hasExposureData) && (one.exposure >= 1000 || seven.exposure >= 3000) && ((one.exposure >= 1000 && one.exposureVisitRate < 0.01) || (seven.exposure >= 3000 && seven.exposureVisitRate < 0.015));
+  const normalExposure = rules.health.exposureDailyAverage.normalBelow;
+  const badVisitRate = rules.health.visitRate.badBelow;
+  return (
+    (one.hasExposureData || seven.hasExposureData) &&
+    (dailyAverage(one, 1) >= normalExposure || dailyAverage(seven, 7) >= normalExposure) &&
+    ((one.hasExposureData && dailyAverage(one, 1) >= normalExposure && one.exposureVisitRate < badVisitRate) ||
+      (seven.hasExposureData && dailyAverage(seven, 7) >= normalExposure && seven.exposureVisitRate < badVisitRate))
+  );
 }
 
-function matchesWeakConversion(row: PublicTrafficProductDataRow): boolean {
+function matchesWeakConversion(row: PublicTrafficProductDataRow, rules: PublicTrafficRulesConfig, amountStatus: AmountKillStatus): boolean {
   const one = row.periods['1d'];
-  return one.hasExposureData && one.amount <= 0 && one.publicVisits >= 100;
+  return one.hasExposureData && amountStatus !== 'alive' && one.publicVisits >= 100 && one.exposureVisitRate >= rules.health.visitRate.normalBelow;
 }
 
-function matchesLifecycleGovernance(row: PublicTrafficProductDataRow, input: PublicTrafficDataAnalysisInput): boolean {
+function matchesLifecycleGovernance(row: PublicTrafficProductDataRow, input: PublicTrafficDataAnalysisInput, rules: PublicTrafficRulesConfig, amountStatus: AmountKillStatus): boolean {
   const thirty = row.periods['30d'];
-  return typeof row.custodyDays === 'number' && row.custodyDays >= 30 && thirty.hasExposureData && hasReliableThirtyDaySummary(input.thirtyDaySummary, row.platformProductId) && thirty.exposure <= 100 && thirty.publicVisits <= 3 && thirty.amount <= 1;
+  const weakExposure = thirty.hasExposureData && dailyAverage(thirty, 30) < rules.health.exposureDailyAverage.failBelow;
+  const weakVisitRate = thirty.hasExposureData && thirty.exposure > 0 && thirty.exposureVisitRate < rules.health.visitRate.badBelow;
+  return typeof row.custodyDays === 'number' && row.custodyDays >= rules.lifecycleGovernance.minCustodyDays && hasReliableThirtyDaySummary(input.thirtyDaySummary, row.platformProductId) && amountStatus === 'killed' && (weakExposure || weakVisitRate);
 }
 
-function matchesHighPotential(row: PublicTrafficProductDataRow): boolean {
+function matchesHighPotential(row: PublicTrafficProductDataRow, rules: PublicTrafficRulesConfig, amountStatus: AmountKillStatus): boolean {
   const one = row.periods['1d'];
-  return one.hasExposureData && one.amount > 0 && (one.publicVisits >= 10 || one.exposure >= 100);
+  return one.hasExposureData && amountStatus !== 'killed' && one.amount > rules.health.amountKill.threshold && (one.publicVisits >= 10 || dailyAverage(one, 1) >= rules.health.exposureDailyAverage.failBelow);
 }
 
 function lifecyclePriority(row: PublicTrafficProductDataRow): PublicTrafficReportSectionItem['priority'] {
@@ -278,6 +352,7 @@ function lifecyclePriority(row: PublicTrafficProductDataRow): PublicTrafficRepor
 }
 
 export function analyzePublicTrafficData(input: PublicTrafficDataAnalysisInput): PublicTrafficDataReportDraftContext {
+  const rulesConfig = input.rulesConfig ?? DEFAULT_PUBLIC_TRAFFIC_RULES_CONFIG;
   const rows = input.rows;
   const one = (row: PublicTrafficProductDataRow) => row.periods['1d'];
   const seven = (row: PublicTrafficProductDataRow) => row.periods['7d'];
@@ -288,6 +363,7 @@ export function analyzePublicTrafficData(input: PublicTrafficDataAnalysisInput):
   >;
   const rowsById = byPlatformId(rows);
   const dailyDelta = input.dailyDelta ?? [];
+  const amountSummaries = healthAmountSummary(input);
 
   const newProductIds = new Set(dailyDelta.filter((row) => row.flags.includes('new_product')).map((row) => row.platformProductId));
   const lowExposureRows: PublicTrafficProductDataRow[] = [];
@@ -298,19 +374,16 @@ export function analyzePublicTrafficData(input: PublicTrafficDataAnalysisInput):
   const lifecycleGovernanceRows: PublicTrafficProductDataRow[] = [];
 
   for (const row of rows) {
-    if (isHealthy(row)) {
-      if (matchesHighPotential(row)) highPotentialRows.push(row);
-      continue;
-    }
-    if (matchesWeakConversion(row)) {
+    const amountStatus = amountKillStatus(row, rulesConfig, amountSummaries);
+    if (matchesWeakConversion(row, rulesConfig, amountStatus)) {
       weakConversionRows.push(row);
-    } else if (matchesWeakClick(row)) {
+    } else if (matchesWeakClick(row, rulesConfig)) {
       weakClickRows.push(row);
-    } else if (matchesLifecycleGovernance(row, input)) {
+    } else if (matchesLifecycleGovernance(row, input, rulesConfig, amountStatus)) {
       lifecycleGovernanceRows.push(row);
-    } else if (matchesLowExposure(row)) {
+    } else if (matchesLowExposure(row, rulesConfig, amountStatus)) {
       lowExposureRows.push(row);
-    } else if (matchesHighPotential(row)) {
+    } else if (matchesHighPotential(row, rulesConfig, amountStatus)) {
       highPotentialRows.push(row);
     } else if (newProductIds.has(row.platformProductId)) {
       newProductObservationRows.push(row);
@@ -342,7 +415,7 @@ export function analyzePublicTrafficData(input: PublicTrafficDataAnalysisInput):
     .map((delta) => ({ delta, row: rowsById.get(delta.platformProductId) }))
     .filter((entry): entry is { delta: (typeof dailyDelta)[number]; row: PublicTrafficProductDataRow } => {
       if (!entry.row) return false;
-      return !isHealthy(entry.row);
+      return amountKillStatus(entry.row, rulesConfig, amountSummaries) !== 'alive';
     })
     .filter((entry) => !weakConversionRows.includes(entry.row) && !weakClickRows.includes(entry.row) && !lifecycleGovernanceRows.includes(entry.row) && !lowExposureRows.includes(entry.row) && !highPotentialRows.includes(entry.row))
     .sort((a, b) => a.delta.exposure - b.delta.exposure || a.delta.visits - b.delta.visits)

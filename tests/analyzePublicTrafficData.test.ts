@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { analyzePublicTrafficData } from '../src/publicTraffic/analyzePublicTrafficData.js';
-import type { ExposureOverviewMetric, PublicTrafficPeriodMetrics, PublicTrafficProductDataRow } from '../src/publicTraffic/types.js';
+import { DEFAULT_PUBLIC_TRAFFIC_RULES_CONFIG } from '../src/publicTraffic/rulesConfig.js';
+import type { ExposureOverviewMetric, ExposureProductSummary, PublicTrafficPeriodMetrics, PublicTrafficProductDataRow } from '../src/publicTraffic/types.js';
 
 function metric(
   exposure: number,
@@ -40,6 +41,20 @@ function row(
     displayProductId,
     custodyDays,
     periods: { '1d': oneDay, '7d': sevenDay, '30d': thirtyDay },
+  };
+}
+
+function summary(platformProductId: string, overrides: Partial<ExposureProductSummary>): ExposureProductSummary {
+  return {
+    productName: platformProductId,
+    platformProductId,
+    exposure: 0,
+    visits: 0,
+    amount: 0,
+    visitRate: 0,
+    days: 14,
+    flags: [],
+    ...overrides,
   };
 }
 
@@ -183,7 +198,7 @@ describe('analyzePublicTrafficData', () => {
       rows: [
         row('端内ID missing-low', metric(0, 0, 0, 0, false, false)),
         row('端内ID missing-click', metric(2000, 5, 4, 0, false, true)),
-        row('端内ID missing-conversion', metric(1500, 20, 100, 0, true, false)),
+        row('端内ID missing-conversion', metric(1500, 40, 100, 0, true, false)),
         row('端内ID missing-potential', metric(1500, 180, 160, 8, false, true)),
       ],
     });
@@ -314,6 +329,7 @@ describe('analyzePublicTrafficData', () => {
     const report = analyzePublicTrafficData({
       date: '2026-06-10',
       rows: [row('端内ID old', metric(0, 0, 0, 0), metric(5, 0, 0, 0), metric(60, 1, 1, 0), 45)],
+      healthAmountSummary: [summary('端内ID old', { amount: 0, days: 14 })],
     });
 
     expect(report.lifecycleGovernance[0]).toMatchObject({
@@ -322,12 +338,13 @@ describe('analyzePublicTrafficData', () => {
     });
   });
 
-  it('summarizes abnormal custody status from exposure cumulative rows', () => {
+  it('summarizes only listed-failed-custody and delisted-custody rows as custody abnormal', () => {
     const report = analyzePublicTrafficData({
       date: '2026-06-10',
       rows: [
         row('端内ID 733', metric(100, 5, 5, 0), metric(500, 20, 20, 0), metric(1000, 60, 60, 0), 3),
         row('端内ID 848', metric(80, 2, 2, 0), metric(300, 8, 8, 0), metric(900, 20, 20, 0), 2),
+        row('端内ID 900', metric(80, 2, 2, 0), metric(300, 8, 8, 0), metric(900, 20, 20, 0), 2),
       ],
       cumulativeProducts: [
         {
@@ -337,7 +354,7 @@ describe('analyzePublicTrafficData', () => {
           visits: 5,
           amount: 0,
           custodyDays: 3,
-          raw: { 托管状态: '托管异常' },
+          raw: { 商品状态: '上架 展示', 审核状态: '审核失败', 托管状态: '托管中 2天' },
         },
         {
           productName: '佳能 G12',
@@ -346,20 +363,56 @@ describe('analyzePublicTrafficData', () => {
           visits: 2,
           amount: 0,
           custodyDays: 2,
-          raw: { 托管状态: '托管中 2天' },
+          listingStatus: 'removed',
+          raw: { 商品状态: '已下架', 托管状态: '托管中 3天' },
+        },
+        {
+          productName: '普通托管异常文本',
+          platformProductId: '端内ID 900',
+          exposure: 80,
+          visits: 2,
+          amount: 0,
+          custodyDays: 2,
+          raw: { 托管状态: '托管异常' },
+        },
+        {
+          productName: '上架托管无失败',
+          platformProductId: '端内ID 901',
+          exposure: 80,
+          visits: 2,
+          amount: 0,
+          custodyDays: 2,
+          raw: { 商品状态: '上架 展示', 托管状态: '托管中' },
+        },
+        {
+          productName: '上架失败未托管',
+          platformProductId: '端内ID 902',
+          exposure: 80,
+          visits: 2,
+          amount: 0,
+          custodyDays: 2,
+          raw: { 商品状态: '上架 展示', 审核状态: '审核失败' },
         },
       ],
     });
 
-    expect(report.custodyAbnormal).toHaveLength(1);
+    expect(report.custodyAbnormal).toHaveLength(2);
     expect(report.custodyAbnormal?.[0]).toMatchObject({
       identifier: '端内ID 733',
       action: '检查托管异常',
       priority: 'high',
     });
     expect(report.custodyAbnormal?.[0]?.reason).toContain('大疆 Pocket3');
-    expect(report.custodyAbnormal?.[0]?.reason).toContain('托管异常');
-    expect(report.recommendedActions.map((item) => item.identifier)).not.toContain('端内ID 733');
+    expect(report.custodyAbnormal?.[0]?.reason).toContain('上架失败但仍托管中');
+    expect(report.custodyAbnormal?.[1]).toMatchObject({
+      identifier: '端内ID 848',
+      action: '检查托管异常',
+      priority: 'high',
+    });
+    expect(report.custodyAbnormal?.[1]?.reason).toContain('已下架但仍托管中');
+    expect(report.custodyAbnormal?.map((item) => item.identifier)).not.toContain('端内ID 900');
+    expect(report.custodyAbnormal?.map((item) => item.reason).join('\n')).not.toContain('上架托管无失败');
+    expect(report.custodyAbnormal?.map((item) => item.reason).join('\n')).not.toContain('上架失败未托管');
   });
 
   it('builds prioritized recommended actions with executable action text', () => {
@@ -392,5 +445,53 @@ describe('analyzePublicTrafficData', () => {
     expect(report.emptySectionNotes.newProductObservation).toBe('暂无可识别的新进入公域商品，或今日缺少上一日快照。');
     expect(report.emptySectionNotes.lifecycleGovernance).toBe('暂无达到长期弱表现阈值的托管商品。');
     expect(report.emptySectionNotes.recommendedActions).toBe('暂无需要立即处理的建议操作。');
+  });
+
+  it('uses default health thresholds for exposure, visit rate, and 14-day amount kill', () => {
+    const report = analyzePublicTrafficData({
+      date: '2026-06-10',
+      rows: [
+        row('端内ID exposure-fail', metric(299, 0, 0, 0), metric(2093, 0, 0, 0), metric(9000, 0, 0, 0), 6),
+        row('端内ID exposure-normal', metric(300, 0, 0, 0), metric(2100, 0, 0, 0), metric(9000, 0, 0, 0), 6),
+        row('端内ID click-bad', metric(1000, 19, 19, 0), metric(7000, 140, 140, 0), metric(30000, 600, 600, 0)),
+        row('端内ID lifecycle-kill', metric(0, 0, 0, 0), metric(0, 0, 0, 0), metric(8999, 100, 100, 0), 45),
+        row('端内ID amount-missing', metric(0, 0, 0, 0), metric(0, 0, 0, 0), metric(8999, 100, 100, 0), 45),
+      ],
+      thirtyDaySummary: [
+        summary('端内ID lifecycle-kill', { exposure: 8999, visits: 100, amount: 0, visitRate: 100 / 8999, days: 30 }),
+        summary('端内ID amount-missing', { exposure: 8999, visits: 100, amount: 0, visitRate: 100 / 8999, days: 30 }),
+      ],
+      healthAmountSummary: [
+        summary('端内ID exposure-fail', { amount: 0, days: 14 }),
+        summary('端内ID exposure-normal', { amount: 0, days: 14 }),
+        summary('端内ID click-bad', { amount: 0, days: 14 }),
+        summary('端内ID lifecycle-kill', { amount: 0, days: 14 }),
+        summary('端内ID amount-missing', { amount: 0, days: 13 }),
+      ],
+    });
+
+    expect(report.lowExposure.map((item) => item.identifier)).toContain('端内ID exposure-fail');
+    expect(report.lowExposure.map((item) => item.identifier)).not.toContain('端内ID exposure-normal');
+    expect(report.weakClick.map((item) => item.identifier)).toContain('端内ID click-bad');
+    expect(report.lifecycleGovernance.map((item) => item.identifier)).toContain('端内ID lifecycle-kill');
+    expect(report.lifecycleGovernance.map((item) => item.identifier)).not.toContain('端内ID amount-missing');
+  });
+
+  it('honors custom health rule overrides passed into analysis input', () => {
+    const report = analyzePublicTrafficData({
+      date: '2026-06-10',
+      rows: [row('端内ID custom-exposure', metric(400, 0, 0, 0), metric(2800, 0, 0, 0), metric(12000, 0, 0, 0), 6)],
+      healthAmountSummary: [summary('端内ID custom-exposure', { amount: 0, days: 3 })],
+      rulesConfig: {
+        ...DEFAULT_PUBLIC_TRAFFIC_RULES_CONFIG,
+        health: {
+          ...DEFAULT_PUBLIC_TRAFFIC_RULES_CONFIG.health,
+          exposureDailyAverage: { failBelow: 500, normalBelow: 1000 },
+          amountKill: { windowDays: 3, threshold: 0 },
+        },
+      },
+    });
+
+    expect(report.lowExposure.map((item) => item.identifier)).toContain('端内ID custom-exposure');
   });
 });
