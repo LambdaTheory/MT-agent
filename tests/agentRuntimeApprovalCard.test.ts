@@ -19,6 +19,7 @@ describe('agent runtime approval card', () => {
 
     expect(JSON.stringify(card)).toContain('Agent 操作确认');
     expect(JSON.stringify(card)).toContain('agent_tool_confirm');
+    expect(JSON.stringify(card)).toContain('操作：复制商品（rental.copy）');
     expect(JSON.stringify(card)).toContain('rental.copy');
     expect(JSON.stringify(card)).toContain('875');
   });

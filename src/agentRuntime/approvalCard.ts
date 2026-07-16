@@ -112,6 +112,28 @@ function compactJson(value: Record<string, unknown>): string {
   return text.length > 240 ? `${text.slice(0, 237)}...` : text;
 }
 
+const TOOL_DISPLAY_NAMES: Record<string, string> = {
+  'rental.copy': '复制商品',
+  'rental.delist': '下架商品',
+  'rental.delistBatch': '批量下架商品',
+  'rental.tenancySet': '设置租期',
+  'rental.specAddAndRefresh': '添加规格并刷新',
+  'rental.pricePreview': '改价预览',
+  'rental.priceChange': '改价确认',
+  'rental.bulkPricePlan': '批量改价计划',
+  'rental.bulkPriceApply': '执行批量改价',
+  'rental.newLinkBatchPlan': '新链批量复制计划',
+  'rental.priceRollback': '改价回滚',
+  'publicTraffic.refreshDashboard': '补抓访问页',
+  'operations.refreshActivityPlan': '活跃度刷新计划',
+  'operations.refreshActivityExecute': '执行活跃度刷新',
+};
+
+function displayToolName(toolName: string): string {
+  const displayName = TOOL_DISPLAY_NAMES[toolName];
+  return displayName ? `${displayName}（${toolName}）` : toolName;
+}
+
 function confirmationKey(request: AgentToolConfirmRequest): string {
   return createHash('sha256').update(JSON.stringify(request)).digest('hex').slice(0, 24);
 }
@@ -167,7 +189,7 @@ export function buildAgentToolConfirmCard(request: AgentToolConfirmRequest, opti
           content: [
             `**是否要执行：${title}？**`,
             '',
-            `工具：${request.toolName}`,
+            `操作：${displayToolName(request.toolName)}`,
             `参数：${compactJson(request.arguments)}`,
             `LLM 理解原因：${request.reason}`,
             ...(options.summaryLines?.length ? ['', ...options.summaryLines] : []),
