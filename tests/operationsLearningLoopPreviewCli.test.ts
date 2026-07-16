@@ -34,6 +34,7 @@ const rows = Array.from({ length: 10 }, (_, index) => ({
 
 const context: PublicTrafficDataReportContext = {
   date: '2026-06-15',
+  generationId: 'operations-learning-preview-2026-06-15',
   summary: { '1d': metric(), '7d': metric(), '30d': metric() },
   conclusions: [],
   dataQualityNotes: [],

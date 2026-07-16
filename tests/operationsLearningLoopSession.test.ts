@@ -31,6 +31,7 @@ function context(): PublicTrafficDataReportContext {
   }));
   return {
     date: '2026-06-16',
+    generationId: 'operations-learning-session-2026-06-16',
     summary: { '1d': metric, '7d': metric, '30d': metric },
     conclusions: [],
     dataQualityNotes: [],
