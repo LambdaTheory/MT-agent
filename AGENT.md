@@ -225,6 +225,8 @@ MT-agent/
 - `agentToolExecutor.ts`：中央工具执行引擎；处理工具结果、审批、continuation，是当前最大的实现文件。
 - `tools.ts`、`readOnlyToolRegistry.ts`：工具定义、只读工具注册。
 - `reportQuery.ts`：报告查询、过滤、排序、汇总。
+- `productLinkQuery.ts`：统一商品/链接/问题池查询入口；面向用户的商品列表、商品详情、问题池、问题池数量、来源覆盖、链接状态查询应优先走这里。
+- `queryCards.ts`：查询结果卡片；商品详情和问题池使用专用卡片，指标/解释类查询使用轻量文本卡，同时保留 BotResponse.text 作为 fallback。
 - `rentalPrice.ts`：租赁价相关读写操作协调。
 - `dispatcher.ts`、`intent.ts`：消息分发与旧式命令意图识别。
 - `agentToolContinuation.ts`、`agentSpecializedContinuation.ts`：多步骤与专用卡片 continuation。
@@ -239,7 +241,9 @@ MT-agent/
 
 - SDK 与 HTTP 两条入口的行为必须保持一致；涉及卡片回调时应同时核对 `sdkClient.ts` 和 `server.ts`。
 - `reason` 只能用于展示，不能反解析为结构化价格/范围参数。
+- `productLink.query` 是普通商品/链接/问题池/来源覆盖的用户可见查询入口；`publicTraffic.reportQuery` 只面向日报汇总、对比、聚合、订单、数据质量和结论等报表类问题。
 - `reportQuery` 不支持的 filter、sort 或 metric 必须显式报错，不能静默返回空结果或「声称排序却未排序」。
+- 查询结果默认卡片优先：对象列表/问题池使用专用或普通列表卡，指标解释类使用轻量结果卡；直接 legacy `publicTraffic.reportQuery target=section` 保持 text-only，避免绕过 `productLink.query` 重新产问题池卡片。
 - 交互卡片会暂停后续步骤；LLM 计划要把打开交互卡的工具放在最后，或先进行澄清。
 
 ### 4.6 `src/agentRuntime/`：Agent 运行时、审批与 Daily Mission
@@ -411,7 +415,7 @@ npm run public-traffic-report / npm run rebuild-latest
 
 外部但随仓库提供的 Playwright 技能，通过独立 daemon（默认端口 9223）向 MT-agent 暴露租赁 SaaS 操作。
 
-主要能力：商品实时读取、改价、改库存、规格增删、租期设置、复制、下架、平台搜索、批量预览/执行/验证/回滚。
+主要能力：商品实时读取、改价、改库存、规格增删、租期设置、复制、下架、平台搜索、批量预览/执行/验证/回滚。当前 MT-agent 的商品修改模块已完成租赁改价主线：自然语言预览、确认卡、真实执行、审计产物、readback verify 和批量预览优化。
 
 核心原则：**Mirror 用于定位，SaaS 商品详情页才是当前值的可信来源。**
 
@@ -421,6 +425,8 @@ npm run public-traffic-report / npm run rebuild-latest
 实时 read → 生成 diff / 规则校验 → 向用户展示 → 等待确认
   → apply + submit → readback verify → 记录任务/审计
 ```
+
+执行边界：确认前只允许 read/preview/audit；确认后的 `rental.priceApply` 仍按商品串行执行，不做并发写入。PM2 重启会中断正在执行的真实 apply，不会自动续跑；恢复时必须依据 `verify-*.json` 产物核对已完成商品，只补执行缺口，禁止对完整批次重复确认。
 
 规格和租期为未保存页面的表单级变更，必须使用原子操作（如 `spec-add-and-refresh`、`tenancy-set`）；表单改变后不可随意重新导航/重新 read，否则可能丢失未保存变更。
 
@@ -438,7 +444,7 @@ npm run public-traffic-report / npm run rebuild-latest
 
 MT-agent 当前的 rental 解耦边界：
 
-- `src/feishuBot/rentalPrice.ts` 的 `RentalPriceSkillClient` 是主要适配层，负责 daemon HTTP JSON action、单品预览、执行、回滚、当前页操作和审计文件；所有 MT 侧生成的 mutable artifact 必须写入 stable sibling data root（例如 `vendor/.rental-price-agent-data/tasks`），不得写入 release-owned `vendor/rental-price-agent/`。
+- `src/feishuBot/rentalPrice.ts` 的 `RentalPriceSkillClient` 是主要适配层，负责 daemon HTTP JSON action、单品预览、执行、回滚、当前页操作和审计文件；所有 MT 侧生成的 mutable artifact 必须写入 stable sibling data root，不得写入 release-owned `vendor/rental-price-agent/`。改价审计、执行校验、回滚和 fallback 产物写入 `vendor/.rental-price-agent-data/artifacts/mt-agent-audit`，不得污染 lifecycle `tasks` 状态目录。
 - `src/agentRuntime/toolRegistry.ts` 暴露 planner 可见/隐藏的 `rental.*` 工具 schema、风险等级和确认要求。
 - `rental.bulkPricePlan` 是当前唯一 planner-visible 的业务级批量租赁改价入口；`rental.bulkPriceApply` 是 hidden runtime 工具，只能通过持久化 `planId` 和确认卡触发。
 - `src/feishuBot/rentalBulkPriceHandlers.ts` 负责批量计划持久化、候选预览、执行报告和 ledger 记录；测试基线在 `tests/rentalBulkPrice.test.ts`。
@@ -470,6 +476,13 @@ MT-agent 当前的 rental 解耦边界：
 - executor adapter 应独立于业务 planner：负责稳定版 skill 路径、sibling data root、daemon token/port、hello negotiation、`expectedProductId`、batch CLI 参数、错误码归一化和 no-real-op 测试替身。
 - 不同业务域可共享计划对象、审批、执行、状态机和报告规范，但不要合并成一个万能工具。批量改价、日报驱动下架/补链、新链复制、规格清理、图片/VAS 应保留各自的 plan/apply 工具。
 - 图片/VAS、规格/租期结构变更、release lifecycle 暂不作为第一阶段 LLM planner-visible 写工具；等字段批量改价 plan/apply 跑通并补齐回归后，再按同一计划框架逐项开放。
+
+2026-07-16 商品修改模块当前状态：
+
+- `rental.pricePreview` 已支持多商品 `batchRead` 快速预览；MT 侧对 `auditPreviewFromRead` 做有界并发并保持商品顺序，vendored daemon 的 `batch-read` 默认并发为 6，可用 `RENTAL_PRICE_AGENT_BATCH_READ_CONCURRENCY` 调整。
+- `rental.priceApply` 仍保持串行真实写入；这是安全约束，不是性能缺口。
+- “价格8”这类裸数字不得被 planner 静默解释成 `8折`；必须要求用户明确 `8折`、`0.8倍`、`+8元`、`-8元` 或绝对价格表达。
+- 当前已提交的租赁相关回归覆盖：`tests/agentPricePreviewMultiplier.test.ts` 和 `tests/feishuBotRentalPrice.test.ts`；变更后至少运行这两组测试、`npm run build` 和 `node --check vendor/rental-price-agent/scripts/playwright-runner.js`。
 
 ---
 
