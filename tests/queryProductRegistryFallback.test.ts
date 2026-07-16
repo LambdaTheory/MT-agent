@@ -62,6 +62,7 @@ async function writeLatestReportWithoutProduct(productId: string): Promise<{
   await mkdir(stateDir, { recursive: true });
   const reportContext: PublicTrafficDataReportContext = {
     date: '2026-06-11',
+    generationId: 'query-product-registry-fallback-2026-06-11',
     summary: { '1d': summary, '7d': summary, '30d': summary },
     conclusions: [],
     rows: [

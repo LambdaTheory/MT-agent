@@ -13,6 +13,7 @@ describe('agent runtime tool registry', () => {
       'publicTraffic.latestSummary',
       'publicTraffic.conversionSummary',
       'publicTraffic.reportQuery',
+      'productLink.query',
       'product.query',
       'product.rankBestSameSku',
       'product.rankByCategory',
@@ -62,10 +63,22 @@ describe('agent runtime tool registry', () => {
       'rental.batchResume',
       'rental.batchReport',
       'rental.batchRollback',
+      'rental.batchDelayedVerify',
       'rental.mirrorSearch',
+      'rental.mirrorWritebackState',
       'rental.mirrorBatchSpec',
       'rental.specDiscoverFull',
       'rental.readRaw',
+      'rental.imageRead',
+      'rental.imageUpload',
+      'rental.imagePick',
+      'rental.imageOrder',
+      'rental.whiteImageSet',
+      'rental.imageVerify',
+      'rental.vasRead',
+      'rental.vasCatalogRead',
+      'rental.vasApply',
+      'rental.vasVerify',
       'rental.copy',
       'rental.delist',
       'rental.delistBatch',
@@ -101,8 +114,9 @@ describe('agent runtime tool registry', () => {
     expect(findAgentTool('missing.tool')).toBeUndefined();
 
     const tools = listAgentTools();
+    const toolCount = tools.length;
     tools.pop();
-    expect(listAgentTools()).toHaveLength(81);
+    expect(listAgentTools()).toHaveLength(toolCount);
   });
 
   it('returns defensive copies of tool metadata', () => {
@@ -168,6 +182,7 @@ describe('agent runtime tool registry', () => {
     expect(findAgentTool('publicTraffic.latestSummary')).toMatchObject({ risk: 'read', requiresConfirmation: false });
     expect(findAgentTool('publicTraffic.conversionSummary')).toMatchObject({ risk: 'read', requiresConfirmation: false });
     expect(findAgentTool('publicTraffic.reportQuery')).toMatchObject({ risk: 'read', requiresConfirmation: false });
+    expect(findAgentTool('productLink.query')).toMatchObject({ risk: 'read', requiresConfirmation: false });
     expect(findAgentTool('product.rankBestSameSku')).toMatchObject({ risk: 'read', requiresConfirmation: false });
     expect(findAgentTool('productId.lookupCard')).toMatchObject({ risk: 'read', requiresConfirmation: false });
     expect(findAgentTool('inventory.statusOverview')).toMatchObject({ risk: 'read', requiresConfirmation: false });
@@ -202,6 +217,16 @@ describe('agent runtime tool registry', () => {
     expect(findAgentTool('rental.daemonStatus')).toMatchObject({ risk: 'read', requiresConfirmation: false });
     expect(findAgentTool('rental.platformSearch')).toMatchObject({ risk: 'read', requiresConfirmation: false });
     expect(findAgentTool('rental.batchRead')).toMatchObject({ risk: 'read', requiresConfirmation: false });
+    expect(findAgentTool('rental.imageRead')).toMatchObject({ risk: 'read', requiresConfirmation: false, plannerVisible: false });
+    expect(findAgentTool('rental.imageUpload')).toMatchObject({ risk: 'high', requiresConfirmation: true, plannerVisible: false });
+    expect(findAgentTool('rental.imagePick')).toMatchObject({ risk: 'high', requiresConfirmation: true, plannerVisible: false });
+    expect(findAgentTool('rental.imageOrder')).toMatchObject({ risk: 'high', requiresConfirmation: true, plannerVisible: false });
+    expect(findAgentTool('rental.whiteImageSet')).toMatchObject({ risk: 'high', requiresConfirmation: true, plannerVisible: false });
+    expect(findAgentTool('rental.imageVerify')).toMatchObject({ risk: 'read', requiresConfirmation: false, plannerVisible: false });
+    expect(findAgentTool('rental.vasRead')).toMatchObject({ risk: 'read', requiresConfirmation: false, plannerVisible: false });
+    expect(findAgentTool('rental.vasCatalogRead')).toMatchObject({ risk: 'read', requiresConfirmation: false, plannerVisible: false });
+    expect(findAgentTool('rental.vasApply')).toMatchObject({ risk: 'high', requiresConfirmation: true, plannerVisible: false });
+    expect(findAgentTool('rental.vasVerify')).toMatchObject({ risk: 'read', requiresConfirmation: false, plannerVisible: false });
     expect(findAgentTool('rental.copy')).toMatchObject({ risk: 'high', requiresConfirmation: true });
     expect(findAgentTool('rental.delist')).toMatchObject({ risk: 'high', requiresConfirmation: true });
     expect(findAgentTool('rental.delistBatch')).toMatchObject({ risk: 'high', requiresConfirmation: true });
@@ -233,7 +258,7 @@ describe('agent runtime tool registry', () => {
     });
     expect(findAgentTool('publicTraffic.reportQuery')?.inputSchema).toMatchObject({
       properties: {
-        target: { enum: ['summary', 'comparison', 'dateComparison', 'products', 'productDetail', 'productAggregation', 'sourceCoverage', 'section', 'sectionCounts', 'orders', 'orderDerived', 'dataQuality', 'conclusions'] },
+        target: { enum: ['summary', 'comparison', 'dateComparison', 'productAggregation', 'orders', 'orderDerived', 'dataQuality', 'conclusions'] },
         date: { type: 'string', pattern: expect.any(String) },
         period: { enum: ['1d', '7d', '30d'] },
         metrics: { type: 'array' },
@@ -244,6 +269,18 @@ describe('agent runtime tool registry', () => {
         filters: { type: 'array' },
       },
       required: ['target'],
+      additionalProperties: false,
+    });
+    expect(findAgentTool('productLink.query')?.inputSchema).toMatchObject({
+      properties: {
+        queryType: { enum: ['productDetail', 'productList', 'problemPool', 'problemPoolCounts', 'sourceCoverage', 'linkStatus'] },
+        productQuery: { type: 'string' },
+        section: { enum: expect.arrayContaining(['custodyAbnormal', 'recommendedActions', 'removedLinks']) },
+        filters: { type: 'array' },
+        sortBy: { type: 'string' },
+        limit: { type: ['integer', 'string'] },
+      },
+      required: ['queryType'],
       additionalProperties: false,
     });
     expect(findAgentTool('product.query')?.inputSchema).toMatchObject({
@@ -292,6 +329,7 @@ describe('agent runtime tool registry', () => {
       'publicTraffic.latestSummary',
       'publicTraffic.conversionSummary',
       'publicTraffic.reportQuery',
+      'productLink.query',
       'product.query',
       'product.rankBestSameSku',
       'product.rankByCategory',
@@ -340,6 +378,7 @@ describe('agent runtime tool registry', () => {
       'rental.batchResume',
       'rental.batchReport',
       'rental.batchRollback',
+      'rental.batchDelayedVerify',
       'rental.mirrorSearch',
       'rental.mirrorBatchSpec',
       'rental.specDiscoverFull',
@@ -367,6 +406,9 @@ describe('agent runtime tool registry', () => {
     expect(plannerToolNames).not.toContain('rental.operationConfirmRequest');
     expect(plannerToolNames).not.toContain('rental.priceApply');
     expect(plannerToolNames).not.toContain('rental.bulkPriceApply');
+    expect(plannerToolNames).not.toContain('rental.mirrorWritebackState');
+    expect(plannerToolNames.some((name) => /image/i.test(name))).toBe(false);
+    expect(plannerToolNames.some((name) => /vas/i.test(name))).toBe(false);
     expect(plannerToolNames).not.toContain('rental.perSpecPriceApply');
     expect(plannerToolNames).not.toContain('rental.specDimApply');
     expect(plannerToolNames).not.toContain('operations.refreshActivityExecute');
@@ -378,6 +420,13 @@ describe('agent runtime tool registry', () => {
       properties: {
         bestProductId: { type: 'string' },
         ranking: { type: 'array' },
+      },
+    });
+    expect(plannerTools.find((tool) => tool.name === 'productLink.query')?.resultMetadataSchema).toMatchObject({
+      properties: {
+        queryType: { type: 'string' },
+        productIds: { type: 'array' },
+        queryRef: { type: 'string' },
       },
     });
     expect(plannerTools.find((tool) => tool.name === 'linkRegistry.resolveProducts')?.resultMetadataSchema).toMatchObject({
@@ -594,13 +643,16 @@ describe('agent runtime tool registry', () => {
     expect(findAgentTool('rental.pricePreview')?.inputSchema).toMatchObject({
       not: { required: ['discount', 'adjustmentAmount'] },
       properties: {
-        productIds: { type: 'array' },
+        productIds: { type: 'array', minItems: 1, maxItems: 60 },
         discount: { type: ['number', 'string'] },
         scope: { type: 'string', enum: ['rent_fields', 'all_price_fields'] },
       },
       required: ['productIds'],
       additionalProperties: false,
     });
+    const productIds = Array.from({ length: 28 }, (_, index) => String(900 + index));
+    expect(validateAgentToolArguments('rental.pricePreview', { productIds, adjustmentAmount: -10, scope: 'rent_fields' })).toBe(true);
+    expect(validateAgentToolArguments('rental.priceApply', { items: productIds.map((productId) => ({ productId, fields: { rent1day: '88.00' } })) })).toBe(true);
     expect(findAgentTool('rental.priceSnapshot')?.inputSchema).toMatchObject({
       properties: {
         query: { type: 'string' },
@@ -614,6 +666,21 @@ describe('agent runtime tool registry', () => {
       },
       required: ['productIds'],
       additionalProperties: false,
+    });
+    expect(findAgentTool('rental.batchDelayedVerify')?.inputSchema).toMatchObject({
+      properties: { stateFile: { type: 'string' } },
+      required: ['stateFile'],
+      additionalProperties: false,
+    });
+    expect(findAgentTool('rental.mirrorWritebackState')).toMatchObject({
+      risk: 'high',
+      requiresConfirmation: true,
+      plannerVisible: false,
+      inputSchema: {
+        properties: { stateFile: { type: 'string' }, confirm: { type: 'boolean' } },
+        required: ['stateFile', 'confirm'],
+        additionalProperties: false,
+      },
     });
     expect(findAgentTool('rental.newLinkBatchPlan')?.inputSchema).toMatchObject({
       properties: {

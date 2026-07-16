@@ -13,9 +13,12 @@ import type {
 import type { InventoryStatusSnapshot } from '../src/inventoryStatus/types.js';
 
 const snapshot: InventoryStatusSnapshot = {
+  schemaVersion: 1,
+  generationId: 'generation-card-test',
   date: '2026-06-24',
   sourceReportDate: '2026-06-23',
   generatedAt: '2026-06-24T00:00:00.000Z',
+  warnings: [],
   summary: {
     sameSkuGroupCount: 2,
     activeLinkCount: 3,
@@ -29,8 +32,9 @@ const snapshot: InventoryStatusSnapshot = {
   },
   registryAuditSummary: {
     totalLinks: 4,
-    activeLinks: 3,
-    removedLinks: 1,
+    onSaleLinks: 2,
+    delistedLinks: 1,
+    goneLinks: 1,
     unknownLinks: 0,
     overrideRiskCount: 1,
   },
@@ -100,7 +104,7 @@ const snapshot: InventoryStatusSnapshot = {
           platformProductId: 'p701',
           productName: 'DJI Pocket 3 创作者套装',
           shortName: 'Pocket 3',
-          status: 'active',
+          listingState: 'on_sale',
           oneDayExposure: 200,
           oneDayPublicVisits: 20,
           oneDayAmount: 80,
@@ -187,6 +191,10 @@ describe('inventoryStatusCard', () => {
     expect(serialized).toContain('缺数据链接');
     expect(serialized).toContain('有数据同款组是什么意思');
     expect(serialized).toContain('Pocket 3');
+    expect(serialized).toContain('链接不存在');
+    expect(serialized).toContain('待确认链接');
+    expect(serialized).toContain('覆盖规则风险 1');
+    expect(serialized).not.toContain('未知状态链接');
     expect(serialized).not.toContain('7日总金额');
     expect(serialized).not.toContain('7日总访问');
     expect(serialized).not.toContain('active 占比');
@@ -204,13 +212,109 @@ describe('inventoryStatusCard', () => {
     };
     const card = buildInventoryStatusDetailCard(result);
     const serialized = JSON.stringify(card);
+    const elements = (card.body as { elements: Array<Record<string, unknown>> }).elements;
+    const charts = elements.filter((element) => element.tag === 'chart');
+    const panels = elements.filter((element) => element.tag === 'collapsible_panel');
 
     expect(serialized).toContain('Pocket 3');
-    expect(serialized).toContain('近7日金额占比');
-    expect(serialized).toContain('近7日访问占比');
+    expect(serialized).toContain('最新全盘位置');
+    expect(serialized).toContain('曝光贡献');
+    expect(serialized).toContain('访问贡献');
+    expect(serialized).toContain('金额贡献');
+    expect(serialized).toContain('访问-金额差');
     expect(serialized).toContain('缺数据链接');
+    expect(serialized).toContain('全盘贡献窗口对比');
+    expect(serialized).toContain('#2BA471');
+    expect(serialized).toContain('#245BDB');
+    expect(serialized).toContain('#F59A23');
+    expect(serialized).toContain('分周期明细');
     expect(serialized).toContain('这些指标反映的是同款组经营快照');
     expect(serialized).toContain('主力链接');
+    expect(charts).toHaveLength(1);
+    expect(panels).toHaveLength(2);
+  });
+
+  it('renders missing metrics as dashes without turning true zero into missing data', () => {
+    const baseGroup = snapshot.groups[0]!;
+    const group = {
+      ...baseGroup,
+      periods: {
+        ...baseGroup.periods,
+        '1d': {
+          ...baseGroup.periods['1d'],
+          exposure: null,
+          publicVisits: 0,
+          amount: null,
+          createdOrders: 0,
+          shippedOrders: null,
+          exposureVisitRate: null,
+          visitCreatedOrderRate: 0,
+          visitShipmentRate: null,
+        },
+      },
+      topLinks: baseGroup.topLinks.map((link) => ({
+        ...link,
+        oneDayPublicVisits: 0,
+        oneDayAmount: null,
+      })),
+    };
+    const result: InventoryStatusDetailResult = {
+      status: 'detail',
+      query: 'pocket3',
+      matchedBy: 'alias',
+      sameSkuGroupId: group.sameSkuGroupId,
+      snapshot: { ...snapshot, groups: [group, snapshot.groups[1]!] },
+      group,
+    };
+
+    const serialized = JSON.stringify(buildInventoryStatusDetailCard(result));
+
+    expect(serialized).toContain('曝光 - | 访问 0 | 金额 -');
+    expect(serialized).toContain('创建 0 | 发货 -');
+    expect(serialized).toContain('1日金额 - | 访问 0');
+    expect(serialized).not.toContain('null');
+  });
+
+  it('explains that amount can exist while sku-level order metrics are unavailable', () => {
+    const baseGroup = snapshot.groups[1]!;
+    const group = {
+      ...baseGroup,
+      periods: {
+        ...baseGroup.periods,
+        '7d': {
+          ...baseGroup.periods['7d'],
+          amount: 205,
+          createdOrders: null,
+          signedOrders: null,
+          reviewedOrders: null,
+          shippedOrders: null,
+          createdOrderAmount: null,
+          signedOrderAmount: null,
+          reviewedOrderAmount: null,
+          shippedOrderAmount: null,
+          visitCreatedOrderRate: null,
+          visitShipmentRate: null,
+        },
+      },
+    };
+    const result: InventoryStatusDetailResult = {
+      status: 'detail',
+      query: 'sx70',
+      matchedBy: 'alias',
+      sameSkuGroupId: group.sameSkuGroupId,
+      snapshot: { ...snapshot, groups: [snapshot.groups[0]!, group] },
+      group,
+    };
+
+    const serialized = JSON.stringify(buildInventoryStatusDetailCard(result));
+
+    expect(serialized).toContain('金额来自公域曝光侧');
+    expect(serialized).toContain('商品级创建/发货来自访问页后链路');
+    expect(serialized).toContain('本次未抓到商品级后链路数据');
+    expect(serialized).toContain('后链路缺失');
+    expect(serialized).toContain('缺失周期的创建、发货和转化率按不可用处理');
+    expect(serialized).toContain('`-` 表示未采集/不可用，不是 0');
+    expect(serialized.indexOf('后链路缺失')).toBeLessThan(serialized.indexOf('全盘贡献窗口对比'));
   });
 
   it('formats ambiguous and fallback text in Chinese', () => {
@@ -225,6 +329,6 @@ describe('inventoryStatusCard', () => {
 
     expect(formatInventoryStatusAmbiguousText(ambiguous)).toContain('需要你澄清');
     expect(formatInventoryStatusMissingText({ status: 'not_found', query: 'unknown' })).toContain('没有找到');
-    expect(formatInventoryStatusMissingText({ status: 'snapshot_missing' })).toContain('还没有可用的库存情况快照');
+    expect(formatInventoryStatusMissingText({ status: 'snapshot_missing', reason: 'missing' })).toContain('还没有可用的库存情况快照');
   });
 });

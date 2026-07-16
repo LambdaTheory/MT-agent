@@ -32,6 +32,7 @@ const rows = Array.from({ length: 12 }, (_, index) => row(701 + index));
 
 const context: PublicTrafficDataReportContext = {
   date: '2026-06-15',
+  generationId: 'operations-learning-quiz-2026-06-15',
   summary: {
     '1d': { exposure: 1000, publicVisits: 50, dashboardVisits: 40, createdOrders: 4, shippedOrders: 2, amount: 300, exposureVisitRate: 0.05, visitCreatedOrderRate: 0.1, visitShipmentRate: 0.05 },
     '7d': { exposure: 7000, publicVisits: 350, dashboardVisits: 280, createdOrders: 20, shippedOrders: 10, amount: 1500, exposureVisitRate: 0.05, visitCreatedOrderRate: 0.0714, visitShipmentRate: 0.0357 },

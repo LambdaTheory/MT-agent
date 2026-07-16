@@ -63,6 +63,10 @@ function shouldStopAfterConfirmedResponse(response: BotResponse): boolean {
   return response.metadata?.ok === false;
 }
 
+function isBlockingCardResponse(response: BotResponse): boolean {
+  return response.metadata?.cardMode !== 'nonBlocking';
+}
+
 export function completePricePreviewArguments(
   toolName: string,
   args: Record<string, unknown>,
@@ -221,6 +225,49 @@ async function buildPriceSemanticsClarification(
   };
 }
 
+function mentionsSpecKeywordPriceTarget(text: string): boolean {
+  const compact = text.replace(/\s+/g, '');
+  return /(规格|sku|SKU|套餐|租期)/u.test(compact)
+    && /(含有|包含|带有|字样|关键词|关键字|名称)/u.test(compact)
+    && /(改价|价格|租金|加价|降价|上调|下调|增加|减少|\+|-)/u.test(compact);
+}
+
+async function buildSpecKeywordPriceClarification(
+  sourceText: string,
+  outputDir: string,
+  priorDepth: number,
+): Promise<BotResponse> {
+  if (isClarifyDepthExceeded(priorDepth)) return declineClarificationLoop(priorDepth);
+  const request = {
+    originalMessage: sourceText,
+    question: '这个改价条件命中了“规格名称关键词”，不能按整链接所有租期直接改价。请补充精确规格或改用整链接改价。',
+    reason: '当前只支持整链接租金字段批量改价，或已知 productId/specId/绝对价格的按规格改价；不支持“规格名称包含某词 + 相对加减金额”的自动执行。为了避免误改全部租期，已阻断本次操作。',
+    options: [
+      {
+        label: '补充规格明细',
+        message: `${sourceText}\n补充说明：请提供端内ID、具体 specId 或规格名称，以及每个租期要改成的绝对价格。`,
+        description: '用于按规格精确改价',
+      },
+      {
+        label: '改整链接租期',
+        message: `${sourceText}\n补充说明：我确认不是按规格筛选，而是这些链接的所有租期字段统一改价。`,
+        description: '仅在确认要改全部租期时使用',
+      },
+    ],
+  };
+  const candidates = request.options.map((option) => ({
+    toolName: 'agent.clarifiedMessage',
+    arguments: { message: option.message },
+    label: option.label,
+    description: option.description,
+  }));
+  return {
+    text: request.question,
+    card: await buildSavedClarificationCard(outputDir, request, candidates, 0.35, priorDepth),
+    metadata: { toolName: 'rental.pricePreview', ok: false, needsClarification: true },
+  };
+}
+
 export async function pricePreviewSemanticClarification(
   toolName: string,
   args: Record<string, unknown>,
@@ -230,6 +277,9 @@ export async function pricePreviewSemanticClarification(
   priorDepth = 0,
 ): Promise<BotResponse | null> {
   if (toolName !== 'rental.pricePreview' || args.fields !== undefined) return null;
+  if (mentionsSpecKeywordPriceTarget([contextText, sourceText].join('\n'))) {
+    return buildSpecKeywordPriceClarification(sourceText, outputDir, priorDepth);
+  }
   const directional = extractDirectionalPriceNumber(contextText);
   if (!directional) return null;
 
@@ -530,7 +580,7 @@ export async function continueAgentPlannerSteps(input: ContinuePlannerStepsInput
         ...(response.metadata ? { metadata: response.metadata } : {}),
       };
     }
-    if (response.card) {
+    if (response.card && isBlockingCardResponse(response)) {
       if (remainingSteps.length > 0) {
         input.textParts.push('');
         input.textParts.push('当前步骤返回了卡片，后续步骤已暂停，避免覆盖卡片结果。');
@@ -572,7 +622,7 @@ export async function continueAgentPlannerStepsAfterResponse(
     };
   }
 
-  if (response.card) {
+  if (response.card && isBlockingCardResponse(response)) {
     textParts.push('');
     textParts.push('当前步骤返回了卡片，后续步骤已暂停，避免覆盖卡片结果。');
     return { text: textParts.join('\n'), card: response.card };

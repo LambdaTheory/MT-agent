@@ -16,12 +16,14 @@ describe('link registry build', () => {
       removedLinks: [],
     };
 
-    expect(buildLinkRegistry({
+    const registry = buildLinkRegistry({
       productIdMapping: { 'platform-701-map': '701' },
       productNameMap: { '701': 'Canon SX70' },
       firstSeen,
       lifecycle,
-    })).toMatchObject([
+    });
+
+    expect(registry).toMatchObject([
       {
         internalProductId: '701',
         platformProductId: 'platform-701-map',
@@ -34,6 +36,68 @@ describe('link registry build', () => {
         source: ['goods_first_seen', 'goods_link_lifecycle', 'product_id_mapping', 'product_name_map'],
       },
     ]);
+    expect(registry[0]).not.toHaveProperty('platformProductIdConflict');
+  });
+
+  it('records a platform-product mapping conflict when multiple platform IDs map to one internal ID', () => {
+    const registry = buildLinkRegistry({
+      productIdMapping: {
+        'platform-1801-a': '1801',
+        'platform-1801-b': '1801',
+      },
+    });
+
+    expect(registry).toHaveLength(1);
+    expect(registry[0]).toMatchObject({
+      internalProductId: '1801',
+      platformProductIdConflict: {
+        platformProductIds: ['platform-1801-a', 'platform-1801-b'],
+        internalProductIds: ['1801'],
+      },
+      status: 'unknown',
+    });
+    expect(registry[0]).not.toHaveProperty('platformProductId');
+  });
+
+  it('records a platform-to-internal conflict when one platform ID maps to multiple current internal IDs', () => {
+    const registry = buildLinkRegistry({
+      productIdMapping: {
+        'platform-1802-shared': '1802',
+      },
+      goodsSnapshot: [
+        { platformProductId: 'platform-1802-shared', internalProductId: '1802', productName: 'Snapshot-1802' },
+        { platformProductId: 'platform-1802-shared', internalProductId: '1803', productName: 'Snapshot-1803' },
+      ],
+    });
+
+    expect(registry).toHaveLength(2);
+
+    for (const entry of registry) {
+      expect(entry).toMatchObject({
+        platformProductIdConflict: {
+          platformProductIds: ['platform-1802-shared'],
+          internalProductIds: ['1802', '1803'],
+        },
+      });
+      expect(entry).not.toHaveProperty('platformProductId');
+    }
+
+    expect(registry).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        internalProductId: '1802',
+        platformProductIdConflict: {
+          platformProductIds: ['platform-1802-shared'],
+          internalProductIds: ['1802', '1803'],
+        },
+      }),
+      expect.objectContaining({
+        internalProductId: '1803',
+        platformProductIdConflict: {
+          platformProductIds: ['platform-1802-shared'],
+          internalProductIds: ['1802', '1803'],
+        },
+      }),
+    ]));
   });
 
   it('marks lifecycle-only removed links and keeps the latest removal date', () => {

@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { resolveQueryFullListText } from '../src/feishuBot/queryFullListAction.js';
+import { buildQueryFullListRef, resolveQueryFullListText } from '../src/feishuBot/queryFullListAction.js';
 
 const metric = {
   exposure: 10,
@@ -51,5 +51,12 @@ describe('query full-list card action', () => {
 
   it('rejects uncontrolled query references', async () => {
     await expect(resolveQueryFullListText('output', '../secret:custodyAbnormal')).resolves.toContain('完整清单引用无效或已过期');
+  });
+
+  it('round-trips structured query references with controlled filters', async () => {
+    const ref = buildQueryFullListRef({ date: '2026-06-11', section: 'custodyAbnormal', filters: [{ field: 'priority', operator: 'eq', value: 'high' }] });
+
+    expect(ref).toMatch(/^q2:/);
+    expect(ref).not.toContain('priority');
   });
 });

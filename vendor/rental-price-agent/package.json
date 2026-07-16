@@ -1,5 +1,18 @@
 {
+  "name": "rental-price-agent",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Playwright automation skill for controlled rental product operations.",
+  "engines": {
+    "node": ">=18.0.0 <25.0.0"
+  },
+  "scripts": {
+    "metadata": "node scripts/lib/version-contract.js --json",
+    "release:build": "node scripts/build-release.js",
+    "test:lifecycle": "node scripts/run-lifecycle-tests.js --offline --forbid-saas",
+    "test:unit": "node scripts/run-unit-tests.js"
+  },
   "dependencies": {
-    "playwright": "^1.60.0"
+    "playwright": "1.60.0"
   }
 }

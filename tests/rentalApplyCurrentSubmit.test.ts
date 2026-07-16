@@ -1,6 +1,6 @@
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { findAgentTool } from '../src/agentRuntime/toolRegistry.js';
 import { executeAgentToolRequest } from '../src/feishuBot/agentToolExecutor.js';
@@ -31,16 +31,19 @@ function clientWith(overrides: Partial<RentalApplyCurrentClient>): RentalApplyCu
 describe('rental apply-current and submitCurrent tools', () => {
   let outputDir: string;
   let rootDir: string;
+  let dataRoot: string;
 
   beforeEach(async () => {
     outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-apply-current-'));
     rootDir = await mkdtemp(join(tmpdir(), 'rental-skill-root-'));
+    dataRoot = join(dirname(rootDir), `.${basename(rootDir)}-data`);
   });
 
   afterEach(async () => {
     vi.unstubAllGlobals();
     await rm(outputDir, { recursive: true, force: true });
     await rm(rootDir, { recursive: true, force: true });
+    await rm(dataRoot, { recursive: true, force: true });
   });
 
   it('registers applyCurrent and submitCurrent as confirmed advanced form-state tools', () => {
@@ -71,14 +74,17 @@ describe('rental apply-current and submitCurrent tools', () => {
     const apply = await client.applyCurrent('648', changes);
     await client.submitCurrent('648');
 
-    const applyBody = JSON.parse(String((fetch.mock.calls[0]?.[1] as RequestInit | undefined)?.body)) as Record<string, unknown>;
+    const bodies = fetch.mock.calls.map((call) => JSON.parse(String((call[1] as RequestInit | undefined)?.body)) as Record<string, unknown>);
+    const applyBody = bodies.find((body) => body.action === 'apply-current');
+    const submitBody = bodies.find((body) => body.action === 'submit');
+    expect(bodies.filter((body) => body.action === 'hello')).toHaveLength(2);
     expect(applyBody).toMatchObject({ action: 'apply-current', allowCurrentPage: true, expectedProductId: '648' });
-    expect(typeof applyBody.changesFile).toBe('string');
-    expect(JSON.parse(await readFile(String(applyBody.changesFile), 'utf8'))).toEqual(changes);
-    expect(apply.changesFile).toBe(applyBody.changesFile);
-    expect(fetch).toHaveBeenNthCalledWith(2, 'http://127.0.0.1:9223', expect.objectContaining({
-      body: JSON.stringify({ action: 'submit', expectedProductId: '648' }),
-    }));
+    expect(applyBody?._negotiation).toMatchObject({ actionClass: 'mutation', client: { skillVersion: '1.0.0' } });
+    expect(typeof applyBody?.changesFile).toBe('string');
+    expect(String(applyBody?.changesFile)).toContain(join(dataRoot, 'tasks'));
+    expect(JSON.parse(await readFile(String(applyBody?.changesFile), 'utf8'))).toEqual(changes);
+    expect(apply.changesFile).toBe(applyBody?.changesFile);
+    expect(submitBody).toMatchObject({ action: 'submit', expectedProductId: '648', _negotiation: { actionClass: 'mutation' } });
   });
 
   it('dispatches confirmed applyCurrent and submitCurrent to the rental client', async () => {

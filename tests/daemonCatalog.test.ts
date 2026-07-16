@@ -1,7 +1,62 @@
-import { describe, expect, it } from 'vitest';
-import { mergeGoodsSnapshotWithDaemon, parseDaemonCatalogSnapshot } from '../src/linkRegistry/daemonCatalog.js';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { fetchDaemonCatalogSnapshot, mergeGoodsSnapshotWithDaemon, parseDaemonCatalogSnapshot } from '../src/linkRegistry/daemonCatalog.js';
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe('daemonCatalog parsing', () => {
+  it('fetches catalog through stable daemon negotiation and sibling data-root files', async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), 'mt-agent-rental-catalog-'));
+    const rootName = rootDir.split(/[\\/]/).at(-1);
+    if (!rootName) throw new Error('temporary root missing basename');
+    const stableDataRoot = join(tmpdir(), `.${rootName}-data`);
+    await mkdir(join(stableDataRoot, 'daemon'), { recursive: true });
+    await writeFile(join(stableDataRoot, 'daemon', 'daemon.port'), '9555\n', 'utf8');
+    await writeFile(join(stableDataRoot, 'daemon', 'daemon.token'), 'stable-token\n', 'utf8');
+
+    const bodies: Array<Record<string, unknown>> = [];
+    vi.stubGlobal('fetch', vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      bodies.push(body);
+      if (body.action === 'hello') {
+        return new Response(JSON.stringify({
+          status: 'ok',
+          manifest: {
+            skillVersion: '1.0.0',
+            daemonVersion: '1.0.0',
+            daemonProtocolVersion: '1.0.0',
+            configSchemaVersion: '1.0.0',
+            stateSchemaVersion: '1.0.0',
+            instanceId: 'stable-catalog',
+            persistedStateDigest: 'b'.repeat(64),
+            persistedStateReady: true,
+          },
+        }));
+      }
+      return new Response(JSON.stringify({
+        status: 'ok',
+        products: [{ id: '929', name: '索尼RX10M4长焦相机', cells: ['929', '0', '索尼RX10M4长焦相机', '¥29.37', '¥13800.00', '70'] }],
+        excludedCount: 1,
+        pagesScraped: 2,
+      }));
+    }));
+
+    try {
+      const snapshot = await fetchDaemonCatalogSnapshot({ rootDir });
+
+      expect(bodies.map((body) => body.action)).toEqual(['hello', 'platform-search']);
+      expect(bodies[1]).toMatchObject({ keyword: '', _negotiation: { expectedInstanceId: 'stable-catalog', expectedStateDigest: 'b'.repeat(64), actionClass: 'safe-read' } });
+      expect(snapshot).toMatchObject({ count: 1, excludedCount: 1, pagesScraped: 2, entries: [{ internalProductId: '929', productName: '索尼RX10M4长焦相机' }] });
+    } finally {
+      await rm(rootDir, { recursive: true, force: true });
+      await rm(stableDataRoot, { recursive: true, force: true });
+    }
+  });
+
   it('parses platform rows with explicit sync status', () => {
     const snapshot = parseDaemonCatalogSnapshot({
       generatedAt: '2026-06-27T08:00:00.000Z',

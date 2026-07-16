@@ -131,7 +131,7 @@ const reportQuerySortFieldSchema = {
 const publicTrafficReportQueryArgumentsSchema = {
   type: 'object',
   properties: {
-    target: { type: 'string', enum: ['summary', 'comparison', 'dateComparison', 'products', 'productDetail', 'productAggregation', 'sourceCoverage', 'section', 'sectionCounts', 'orders', 'orderDerived', 'dataQuality', 'conclusions'] },
+    target: { type: 'string', enum: ['summary', 'comparison', 'dateComparison', 'productAggregation', 'orders', 'orderDerived', 'dataQuality', 'conclusions'] },
     date: reportDateSchema,
     compareDate: reportDateSchema,
     compareWith: { type: 'string', enum: ['previousDay', 'previousPeriod'] },
@@ -199,6 +199,41 @@ const publicTrafficWindowQueryArgumentsSchema = {
   additionalProperties: false,
 };
 const keywordArgumentsSchema = { type: 'object', properties: { keyword: { type: 'string' }, date: reportDateSchema }, required: ['keyword'], additionalProperties: false };
+const productLinkQueryArgumentsSchema = {
+  type: 'object',
+  properties: {
+    queryType: { type: 'string', enum: ['productDetail', 'productList', 'problemPool', 'problemPoolCounts', 'sourceCoverage', 'linkStatus'] },
+    date: reportDateSchema,
+    productQuery: { type: 'string' },
+    section: reportSectionSchema,
+    period: reportPeriodSchema,
+    periods: { type: 'array', minItems: 1, maxItems: 3, items: reportPeriodSchema },
+    metrics: { type: 'array', minItems: 1, maxItems: 16, items: reportMetricSchema },
+    filters: publicTrafficReportQueryArgumentsSchema.properties.filters,
+    sortBy: reportQuerySortFieldSchema,
+    sortDirection: { type: 'string', enum: ['asc', 'desc'] },
+    limit: { type: ['integer', 'string'], pattern: '^[1-9]\\d*$', minimum: 1 },
+    source: reportSourceSchema,
+    coverageStatus: reportCoverageStatusSchema,
+    display: { type: 'string', enum: ['auto', 'card', 'text', 'fullText'] },
+  },
+  required: ['queryType'],
+  additionalProperties: false,
+};
+const productLinkQueryResultMetadataSchema = {
+  type: 'object',
+  description: 'Metadata available after unified product/link/report-section query execution.',
+  properties: {
+    status: { type: 'string' },
+    queryType: { type: 'string' },
+    date: { type: 'string' },
+    section: { type: 'string' },
+    productIds: { type: 'array', items: { type: 'string' } },
+    count: { type: 'integer' },
+    shownCount: { type: 'integer' },
+    queryRef: { type: 'string' },
+  },
+};
 const productRankingArgumentsSchema = {
   type: 'object',
   properties: {
@@ -606,7 +641,7 @@ const rentalBatchSpecFileArgumentsSchema = {
 };
 const rentalBatchExecuteArgumentsSchema = {
   type: 'object',
-  properties: { specFile: { type: 'string' }, confirmFormSetupWithoutPreview: { type: 'boolean' } },
+  properties: { specFile: { type: 'string' }, confirmFormSetupWithoutPreview: { type: 'boolean' }, confirmImageWithoutPreview: { type: 'boolean' } },
   required: ['specFile'],
   additionalProperties: false,
 };
@@ -622,10 +657,17 @@ const rentalBatchRollbackArgumentsSchema = {
   required: ['stateFile'],
   additionalProperties: false,
 };
+const rentalBatchDelayedVerifyArgumentsSchema = rentalBatchStateFileArgumentsSchema;
 const rentalMirrorKeywordArgumentsSchema = {
   type: 'object',
   properties: { keyword: { type: 'string' } },
   required: ['keyword'],
+  additionalProperties: false,
+};
+const rentalMirrorWritebackStateArgumentsSchema = {
+  type: 'object',
+  properties: { stateFile: { type: 'string' }, confirm: { type: 'boolean' } },
+  required: ['stateFile', 'confirm'],
   additionalProperties: false,
 };
 const rentalReadRawArgumentsSchema = {
@@ -635,6 +677,99 @@ const rentalReadRawArgumentsSchema = {
     fields: { type: 'array', maxItems: 32, items: { type: 'string' } },
   },
   required: ['productId'],
+  additionalProperties: false,
+};
+const stringArraySchema = { type: 'array', minItems: 1, items: { type: 'string' } };
+const rentalImageReadArgumentsSchema = productIdArgumentsSchema;
+const rentalImageUploadArgumentsSchema = {
+  type: 'object',
+  properties: {
+    productId: internalProductIdSchema,
+    sectionType: { type: 'string' },
+    categoryName: { type: 'string' },
+    uploadFile: { type: 'string' },
+    confirmSelection: { type: 'boolean' },
+    allowDuplicateFileName: { type: 'boolean' },
+  },
+  required: ['productId', 'sectionType', 'categoryName', 'uploadFile'],
+  additionalProperties: false,
+};
+const rentalImagePickArgumentsSchema = {
+  type: 'object',
+  properties: {
+    productId: internalProductIdSchema,
+    categoryName: { type: 'string' },
+    fileNames: stringArraySchema,
+    skipIfAlreadyPresent: { type: 'boolean' },
+  },
+  required: ['productId', 'categoryName', 'fileNames'],
+  additionalProperties: false,
+};
+const rentalImageOrderArgumentsSchema = {
+  type: 'object',
+  properties: { productId: internalProductIdSchema, orderedUrls: stringArraySchema },
+  required: ['productId', 'orderedUrls'],
+  additionalProperties: false,
+};
+const rentalWhiteImageSetArgumentsSchema = {
+  type: 'object',
+  properties: {
+    productId: internalProductIdSchema,
+    categoryName: { type: 'string' },
+    fileName: { type: 'string' },
+    skipIfWhiteImageMatched: { type: 'boolean' },
+  },
+  required: ['productId', 'categoryName', 'fileName'],
+  additionalProperties: false,
+};
+const rentalImageVerifyArgumentsSchema = {
+  type: 'object',
+  properties: { productId: internalProductIdSchema, expectedImages: { type: 'object', additionalProperties: true } },
+  required: ['productId', 'expectedImages'],
+  additionalProperties: false,
+};
+const rentalVasCurrentPageReadArgumentsSchema = {
+  type: 'object',
+  oneOf: [
+    { required: ['productId'] },
+    { required: ['allowCurrentPage', 'expectedProductId'] },
+  ],
+  properties: {
+    productId: internalProductIdSchema,
+    allowCurrentPage: { type: 'boolean' },
+    expectedProductId: internalProductIdSchema,
+  },
+  additionalProperties: false,
+};
+const rentalVasCatalogReadArgumentsSchema = {
+  type: 'object',
+  oneOf: [
+    { required: ['productId'] },
+    { required: ['allowCurrentPage', 'expectedProductId'] },
+  ],
+  properties: {
+    productId: internalProductIdSchema,
+    allowCurrentPage: { type: 'boolean' },
+    expectedProductId: internalProductIdSchema,
+    ids: { type: 'array', items: { type: 'string' } },
+    keyword: { type: 'string' },
+  },
+  additionalProperties: false,
+};
+const rentalVasApplyArgumentsSchema = {
+  type: 'object',
+  properties: {
+    allowCurrentPage: { type: 'boolean' },
+    expectedProductId: internalProductIdSchema,
+    expectedVAS: { type: 'object', additionalProperties: true },
+  },
+  required: ['allowCurrentPage', 'expectedProductId', 'expectedVAS'],
+  additionalProperties: false,
+};
+const rentalVasVerifyArgumentsSchema = {
+  type: 'object',
+  properties: { productId: internalProductIdSchema, expectedVAS: { type: 'object', additionalProperties: true } },
+  required: ['productId', 'expectedVAS'],
   additionalProperties: false,
 };
 const refreshActivityPlanArgumentsSchema = {
@@ -693,7 +828,7 @@ const rentalPricePreviewArgumentsSchema = {
   type: 'object',
   not: { required: ['discount', 'adjustmentAmount'] },
   properties: {
-    productIds: { type: 'array', minItems: 1, maxItems: 24, items: internalProductIdSchema },
+    productIds: { type: 'array', minItems: 1, maxItems: 60, items: internalProductIdSchema },
     fields: { type: 'object' },
     discount: { type: ['number', 'string'], description: 'Explicit multiplier only. Use 0.8 for 8-fold, 1.8 for 180%; never use bare fold numbers such as 8.' },
     adjustmentAmount: { type: ['number', 'string'], description: 'Absolute amount to add to every rental price field. Use negative values such as -1 to subtract 1 yuan.' },
@@ -717,7 +852,7 @@ const rentalPriceApplyArgumentsSchema = {
     items: {
       type: 'array',
       minItems: 1,
-      maxItems: 12,
+      maxItems: 60,
       items: {
         type: 'object',
         properties: {
@@ -859,10 +994,18 @@ const agentTools: AgentToolDefinition[] = [
   },
   {
     name: 'publicTraffic.reportQuery',
-    description: '通用只读日报查询工具：查询已保存公域日报中的汇总、商品明细、问题池、订单分析、数据源状态和结论。适合“访问最高前20”“各问题池多少条”“托管异常有哪些”“失活/生命周期治理候选有哪些”“订单签约发货率多少”等自然语言问题。不用于“某商品有多少条链接/有哪些端内ID”这类链接档案总数问题。',
+    description: '通用只读日报查询工具：查询已保存公域日报中的汇总、订单分析、数据源状态和结论。普通商品、链接列表、问题池、托管异常、筛选条件查询优先使用 productLink.query。',
     risk: 'read',
     requiresConfirmation: false,
     inputSchema: publicTrafficReportQueryArgumentsSchema,
+  },
+  {
+    name: 'productLink.query',
+    description: '统一商品/链接/问题池只读查询入口：用于正常“查商品/查链接/托管异常/问题池/筛选条件/链接状态/数据源缺失”等查询。LLM 只提供结构化参数；工具负责确定性查询、筛选、双ID展示、卡片和完整清单引用。不要用于明确“映射/转换/互查/对应平台ID”的 ID 转换需求。',
+    risk: 'read',
+    requiresConfirmation: false,
+    inputSchema: productLinkQueryArgumentsSchema,
+    resultMetadataSchema: productLinkQueryResultMetadataSchema,
   },
   {
     name: 'product.query',
@@ -1023,7 +1166,7 @@ const agentTools: AgentToolDefinition[] = [
   },
   {
     name: 'publicTraffic.removedLinks',
-    description: '查询最近已下架、已移除、已消失的链接。不要用于疑似失活/低活跃/生命周期治理候选，后者应使用 publicTraffic.inactiveLinks 或 publicTraffic.reportQuery section=lifecycleGovernance。',
+    description: '查询最近已下架、已移除、已消失的链接。不要用于疑似失活/低活跃/生命周期治理候选，后者应使用 publicTraffic.inactiveLinks 或 productLink.query。',
     risk: 'read',
     requiresConfirmation: false,
     inputSchema: noArgumentsSchema,
@@ -1219,11 +1362,26 @@ const agentTools: AgentToolDefinition[] = [
     inputSchema: rentalBatchRollbackArgumentsSchema,
   },
   {
+    name: 'rental.batchDelayedVerify',
+    description: '租赁 batch runner delayed-verify 控制面；stateFile 必须位于 rental tasks/batches。',
+    risk: 'high',
+    requiresConfirmation: true,
+    inputSchema: rentalBatchDelayedVerifyArgumentsSchema,
+  },
+  {
     name: 'rental.mirrorSearch',
     description: '只读调用 rental mirror search，按关键词返回镜像候选商品；不执行 writeback。',
     risk: 'read',
     requiresConfirmation: false,
     inputSchema: rentalMirrorKeywordArgumentsSchema,
+  },
+  {
+    name: 'rental.mirrorWritebackState',
+    description: '隐藏高风险工具：确认后调用 rental mirror writeback-state 写回批处理 stateFile；stateFile 必须位于 rental tasks/batches。',
+    risk: 'high',
+    requiresConfirmation: true,
+    plannerVisible: false,
+    inputSchema: rentalMirrorWritebackStateArgumentsSchema,
   },
   {
     name: 'rental.mirrorBatchSpec',
@@ -1245,6 +1403,86 @@ const agentTools: AgentToolDefinition[] = [
     risk: 'read',
     requiresConfirmation: false,
     inputSchema: rentalReadRawArgumentsSchema,
+  },
+  {
+    name: 'rental.imageRead',
+    description: '隐藏只读工具：读取租赁商品当前图片、首图和白底图状态；不执行图片修改。',
+    risk: 'read',
+    requiresConfirmation: false,
+    plannerVisible: false,
+    inputSchema: rentalImageReadArgumentsSchema,
+  },
+  {
+    name: 'rental.imageUpload',
+    description: '隐藏高风险工具：确认后上传图片素材，并可选择回填到当前商品图片表单。',
+    risk: 'high',
+    requiresConfirmation: true,
+    plannerVisible: false,
+    inputSchema: rentalImageUploadArgumentsSchema,
+  },
+  {
+    name: 'rental.imagePick',
+    description: '隐藏高风险工具：确认后从素材库精确选择图片并回填商品图片。',
+    risk: 'high',
+    requiresConfirmation: true,
+    plannerVisible: false,
+    inputSchema: rentalImagePickArgumentsSchema,
+  },
+  {
+    name: 'rental.imageOrder',
+    description: '隐藏高风险工具：确认后按完整 URL 列表重排商品图片。',
+    risk: 'high',
+    requiresConfirmation: true,
+    plannerVisible: false,
+    inputSchema: rentalImageOrderArgumentsSchema,
+  },
+  {
+    name: 'rental.whiteImageSet',
+    description: '隐藏高风险工具：确认后从素材库设置商品白底图。',
+    risk: 'high',
+    requiresConfirmation: true,
+    plannerVisible: false,
+    inputSchema: rentalWhiteImageSetArgumentsSchema,
+  },
+  {
+    name: 'rental.imageVerify',
+    description: '隐藏只读工具：按 expectedImages 验证已保存的商品图片状态。',
+    risk: 'read',
+    requiresConfirmation: false,
+    plannerVisible: false,
+    inputSchema: rentalImageVerifyArgumentsSchema,
+  },
+  {
+    name: 'rental.vasRead',
+    description: '隐藏只读工具：读取商品当前 VAS 绑定状态，不修改服务。',
+    risk: 'read',
+    requiresConfirmation: false,
+    plannerVisible: false,
+    inputSchema: rentalVasCurrentPageReadArgumentsSchema,
+  },
+  {
+    name: 'rental.vasCatalogRead',
+    description: '隐藏只读工具：读取现有 VAS 服务目录，可按 id 或关键词过滤；不创建、不修改、不删除服务。',
+    risk: 'read',
+    requiresConfirmation: false,
+    plannerVisible: false,
+    inputSchema: rentalVasCatalogReadArgumentsSchema,
+  },
+  {
+    name: 'rental.vasApply',
+    description: '隐藏高风险工具：确认后在当前商品表单应用完整 expectedVAS 绑定状态；不暴露给 planner。',
+    risk: 'high',
+    requiresConfirmation: true,
+    plannerVisible: false,
+    inputSchema: rentalVasApplyArgumentsSchema,
+  },
+  {
+    name: 'rental.vasVerify',
+    description: '隐藏只读工具：按 expectedVAS 验证已保存的商品 VAS 绑定状态。',
+    risk: 'read',
+    requiresConfirmation: false,
+    plannerVisible: false,
+    inputSchema: rentalVasVerifyArgumentsSchema,
   },
   {
     name: 'rental.copy',

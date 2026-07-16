@@ -1,0 +1,8 @@
+config.json
+.env
+.browser-data/
+.daemon.*
+tasks/
+.omo/
+node_modules/
+*.log

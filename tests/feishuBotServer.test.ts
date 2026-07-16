@@ -719,6 +719,104 @@ describe('startFeishuBotServer', () => {
     }
   });
 
+  it('handles HTTP query full-list callbacks by replying with read-only text', async () => {
+    const replies: Array<{ messageId: string; text: string }> = [];
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-bot-http-query-full-list-'));
+    await mkdir(join(outputDir, '2026-06-11'), { recursive: true });
+    await writeFile(join(outputDir, '2026-06-11', 'report-context.json'), JSON.stringify({
+      date: '2026-06-11',
+      summary: { '1d': metric, '7d': metric, '30d': metric },
+      conclusions: [],
+      rows: [
+        { productName: '托管异常商品', platformProductId: 'platform-565', displayProductId: '端内ID 565', custodyDays: 10, periods: { '1d': metric, '7d': metric, '30d': metric } },
+      ],
+      recommendedActions: [],
+      lowExposure: [],
+      weakClick: [],
+      weakConversion: [],
+      highPotential: [],
+      newProductObservation: [],
+      lifecycleGovernance: [],
+      custodyAbnormal: [{ identifier: '端内ID 565', action: '检查托管', reason: '托管异常', priority: 'high' }],
+      agentData: { removedLinks: [] },
+      emptySectionNotes: {},
+    }), 'utf8');
+    const server = startFeishuBotServer({
+      port: 0,
+      appId: 'app',
+      appSecret: 'secret',
+      outputDir,
+      callbackSignatureSecret: 'signature-secret',
+      replyText: async ({ messageId }, text) => {
+        replies.push({ messageId, text });
+        return { sent: true, channel: 'app' };
+      },
+    });
+    try {
+      await new Promise<void>((resolve) => server.once('listening', resolve));
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+      const body = JSON.stringify({
+        header: { event_type: 'card.action.trigger' },
+        event: {
+          context: { open_message_id: 'mid-http-query-full-list' },
+          action: { name: 'query_full_list_submit', behaviors: [{ type: 'callback', value: { action: 'query_full_list', queryRef: '2026-06-11:custodyAbnormal' } }] },
+        },
+      });
+      const timestamp = '1710000000';
+      const nonce = 'nonce';
+
+      const response = await fetch(`http://127.0.0.1:${address.port}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Lark-Request-Timestamp': timestamp,
+          'X-Lark-Request-Nonce': nonce,
+          'X-Lark-Signature': buildFeishuSignature(timestamp, nonce, body, 'signature-secret'),
+        },
+        body,
+      });
+
+      expect(response.status).toBe(200);
+      expect(replies).toHaveLength(1);
+      expect(replies[0]).toEqual(expect.objectContaining({ messageId: 'mid-http-query-full-list' }));
+      expect(replies[0]?.text).toContain('托管异常完整清单 2026-06-11');
+      expect(replies[0]?.text).toContain('端内ID 565｜商品ID platform-565');
+      const card = await response.json();
+      const cardText = JSON.stringify(card);
+      expect(cardText).toContain('完整清单已发送');
+      expect(cardText).not.toContain('端内ID 565｜商品ID platform-565');
+    } finally {
+      server.close();
+    }
+  });
+
+  it('rejects unsigned HTTP query full-list callbacks when no callback signature secret is configured', async () => {
+    const server = startFeishuBotServer({ port: 0, appId: 'app', appSecret: 'secret' });
+    try {
+      await new Promise<void>((resolve) => server.once('listening', resolve));
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+
+      const response = await fetch(`http://127.0.0.1:${address.port}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          header: { event_type: 'card.action.trigger' },
+          event: {
+            context: { open_message_id: 'mid-http-query-full-list-unsigned' },
+            action: { name: 'query_full_list_submit', behaviors: [{ type: 'callback', value: { action: 'query_full_list', queryRef: '2026-06-11:custodyAbnormal' } }] },
+          },
+        }),
+      });
+
+      expect(response.status).toBe(401);
+      await expect(response.json()).resolves.toEqual({ error: 'missing callback signature secret' });
+    } finally {
+      server.close();
+    }
+  });
+
   it('returns a replacement card for malformed HTTP new-link confirmations without text replies', async () => {
     const replies: Array<{ messageId: string; text: string }> = [];
     const server = startFeishuBotServer({

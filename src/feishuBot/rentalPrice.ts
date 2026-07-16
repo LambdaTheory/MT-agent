@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
-import { dirname, resolve, sep, join, isAbsolute } from 'node:path';
+import { basename, dirname, resolve, sep, join, isAbsolute } from 'node:path';
 import { promisify } from 'node:util';
 import { parseAgentToolConfirmContinuation, type AgentToolConfirmContinuation } from '../agentRuntime/approvalCard.js';
 import { validateAgentToolArguments } from '../agentRuntime/planner.js';
@@ -192,6 +192,111 @@ export interface RentalRawReadResult extends RentalPriceReadResult {
   readCount?: number;
 }
 
+export interface RentalImageStateResult {
+  productId: string;
+  ok: boolean;
+  status: string;
+  thumbs: string[];
+  whiteImage?: string;
+  firstThumbnail?: string;
+  lines: string[];
+}
+
+export interface RentalImageMutationResult {
+  productId: string;
+  ok: boolean;
+  status: string;
+  lines: string[];
+  result: Record<string, unknown>;
+}
+
+export interface RentalImageVerifyResult extends RentalImageMutationResult {}
+
+export interface RentalImageUploadRequest {
+  productId: string;
+  sectionType: string;
+  categoryName: string;
+  uploadFile: string;
+  confirmSelection?: boolean;
+  allowDuplicateFileName?: boolean;
+}
+
+export interface RentalImagePickRequest {
+  productId: string;
+  categoryName: string;
+  fileNames: string[];
+  skipIfAlreadyPresent?: boolean;
+}
+
+export interface RentalImageOrderRequest {
+  productId: string;
+  orderedUrls: string[];
+}
+
+export interface RentalWhiteImageSetRequest {
+  productId: string;
+  categoryName: string;
+  fileName: string;
+  skipIfWhiteImageMatched?: boolean;
+}
+
+export interface RentalImageVerifyRequest {
+  productId: string;
+  expectedImages: Record<string, unknown>;
+}
+
+export interface RentalVasStateResult {
+  productId?: string;
+  ok: boolean;
+  status: string;
+  enabled?: boolean;
+  platforms: string[];
+  services: unknown[];
+  lines: string[];
+  result: Record<string, unknown>;
+}
+
+export interface RentalVasCatalogResult {
+  ok: boolean;
+  status: string;
+  count: number;
+  services: unknown[];
+  lines: string[];
+  result: Record<string, unknown>;
+}
+
+export interface RentalVasMutationResult {
+  ok: boolean;
+  status: string;
+  lines: string[];
+  result: Record<string, unknown>;
+}
+
+export interface RentalVasReadRequest {
+  productId?: string;
+  allowCurrentPage?: boolean;
+  expectedProductId?: string;
+}
+
+export interface RentalVasCatalogReadRequest {
+  productId?: string;
+  allowCurrentPage?: boolean;
+  expectedProductId?: string;
+  ids?: string[];
+  keyword?: string;
+}
+
+export interface RentalVasApplyRequest {
+  allowCurrentPage: boolean;
+  expectedProductId: string;
+  expectedVAS: Record<string, unknown>;
+}
+
+export interface RentalVasVerifyRequest {
+  productId: string;
+  expectedVAS: Record<string, unknown>;
+}
+
 export interface RentalSpecDiscoverFullResult extends RentalPriceSpecDiscoverResult {
   status: string;
 }
@@ -217,6 +322,7 @@ export interface RentalPriceSkillClient {
   specDiscoverFull?(productId: string): Promise<RentalSpecDiscoverFullResult>;
   readRaw?(productId: string, fields?: string[]): Promise<RentalRawReadResult>;
   preview(request: RentalPriceChangeRequest): Promise<RentalPricePreview>;
+  auditPreviewFromRead?(productId: string, current: Record<string, unknown>, fields: Record<string, string>): Promise<RentalPriceAuditReference | null>;
   execute(request: Extract<RentalPriceChangeRequest, { mode: 'explicit_fields' }>): Promise<RentalPriceExecutionResult>;
   applyPerSpec?(productId: string, specFields: Record<string, Record<string, string>>): Promise<RentalPriceExecutionResult>;
   rollback?(request: RentalPriceRollbackRequest): Promise<RentalPriceRollbackResult>;
@@ -233,6 +339,16 @@ export interface RentalPriceSkillClient {
   specAddDim?(productId: string, title: string): Promise<RentalPriceSpecAddResult>;
   specRemoveDim?(request: { productId: string; specDimId: string }): Promise<RentalPriceSpecRemoveResult>;
   specRemoveItem?(request: { productId: string; specDimId: string; itemId?: string; itemTitle: string }): Promise<RentalPriceSpecRemoveResult>;
+  imageRead?(productId: string): Promise<RentalImageStateResult>;
+  imageUpload?(request: RentalImageUploadRequest): Promise<RentalImageMutationResult>;
+  imagePick?(request: RentalImagePickRequest): Promise<RentalImageMutationResult>;
+  imageOrder?(request: RentalImageOrderRequest): Promise<RentalImageMutationResult>;
+  whiteImageSet?(request: RentalWhiteImageSetRequest): Promise<RentalImageMutationResult>;
+  imageVerify?(request: RentalImageVerifyRequest): Promise<RentalImageVerifyResult>;
+  vasRead?(request: RentalVasReadRequest): Promise<RentalVasStateResult>;
+  vasCatalogRead?(request: RentalVasCatalogReadRequest): Promise<RentalVasCatalogResult>;
+  vasApply?(request: RentalVasApplyRequest): Promise<RentalVasMutationResult>;
+  vasVerify?(request: RentalVasVerifyRequest): Promise<RentalVasMutationResult>;
 }
 
 export interface RentalSpecRemoveItemConfirmRequest {
@@ -271,6 +387,35 @@ const SPEC_REMOVE_CONFIRM_MAX_ITEMS = 50;
 const SPEC_REMOVE_BULK_WARNING_ITEMS = 12;
 const PLATFORM_SEARCH_ALL_DEFAULT_LIMIT = 100;
 const PLATFORM_SEARCH_ALL_MAX_LIMIT = 200;
+const STABLE_RENTAL_SKILL_VERSION = '1.0.0';
+
+type RentalDaemonActionClass = 'diagnostic' | 'safe-read' | 'mutation' | 'lifecycle-control';
+
+interface RentalDaemonNegotiation {
+  nonce: string;
+  expectedInstanceId: string;
+  expectedStateDigest: string;
+  actionClass: RentalDaemonActionClass;
+  client: {
+    skillVersion: string;
+    protocolVersion: string;
+    configSchemaVersion: string;
+    stateSchemaVersion: string;
+    compatibility: {
+      skill: { min: string; max: string };
+      daemon: { min: string; max: string };
+      protocol: { min: string; max: string };
+      configSchema: { min: string; max: string };
+      stateSchema: { min: string; max: string };
+    };
+  };
+}
+
+interface RentalDaemonHelloMetadata {
+  instanceId: string;
+  persistedStateDigest: string;
+  persistedStateReady?: boolean;
+}
 
 function money(value: string | number): string {
   return Number(value).toFixed(2);
@@ -562,6 +707,92 @@ function summarizeBatchReadResults(results: Record<string, unknown>): string[] {
   });
 }
 
+function readStringArrayField(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+}
+
+function normalizeImageState(productId: string, result: Record<string, unknown>): RentalImageStateResult {
+  const status = commandStatus(result);
+  const thumbs = readStringArrayField(result.thumbs ?? result.images ?? result.orderedUrls);
+  const whiteImage = optionalString(result, 'whiteImage') ?? optionalString(result, 'whiteImageUrl') ?? optionalString(result, 'white_ground_image');
+  const firstThumbnail = optionalString(result, 'firstThumbnail') ?? optionalString(result, 'thumbnail') ?? thumbs[0];
+  return {
+    productId,
+    ok: status === 'ok' || status === 'partial',
+    status,
+    thumbs,
+    ...(whiteImage ? { whiteImage } : {}),
+    ...(firstThumbnail ? { firstThumbnail } : {}),
+    lines: [`image-read: ${status}`, `thumbs: ${thumbs.length}`, ...(whiteImage ? [`whiteImage: ${whiteImage}`] : []), ...(firstThumbnail ? [`firstThumbnail: ${firstThumbnail}`] : [])],
+  };
+}
+
+function normalizeImageMutation(productId: string, action: string, result: Record<string, unknown>): RentalImageMutationResult {
+  const status = commandStatus(result);
+  const message = optionalString(result, 'message');
+  return { productId, ok: status === 'ok', status, lines: [`${action}: ${status}`, ...(message ? [message] : [])], result };
+}
+
+function normalizeVasState(result: Record<string, unknown>, fallbackProductId?: string): RentalVasStateResult {
+  const status = commandStatus(result);
+  const productId = optionalString(result, 'productId') ?? fallbackProductId;
+  const services = Array.isArray(result.services) ? result.services : [];
+  const platforms = readStringArrayField(result.platforms);
+  const enabled = optionalBoolean(result, 'enabled');
+  return {
+    ...(productId ? { productId } : {}),
+    ok: status === 'ok' || status === 'partial',
+    status,
+    ...(enabled !== undefined ? { enabled } : {}),
+    platforms,
+    services,
+    lines: [`vas-read: ${status}`, `platforms: ${platforms.length}`, `services: ${services.length}`, ...(enabled !== undefined ? [`enabled: ${enabled}`] : [])],
+    result,
+  };
+}
+
+function normalizeVasCatalog(result: Record<string, unknown>): RentalVasCatalogResult {
+  const status = commandStatus(result);
+  const services = Array.isArray(result.services) ? result.services : Array.isArray(result.items) ? result.items : [];
+  const count = optionalNumber(result, 'count') ?? services.length;
+  return { ok: status === 'ok' || status === 'partial', status, count, services, lines: [`vas-catalog-read: ${status}`, `services: ${count}`], result };
+}
+
+function normalizeVasMutation(action: string, result: Record<string, unknown>): RentalVasMutationResult {
+  const status = commandStatus(result);
+  const message = optionalString(result, 'message');
+  return { ok: status === 'ok', status, lines: [`${action}: ${status}`, ...(message ? [message] : [])], result };
+}
+
+function assertStringArrayField(value: unknown, fieldName: string): void {
+  if (!Array.isArray(value) || value.some((item) => typeof item !== 'string' || !item.trim())) {
+    throw new Error(`${fieldName} must be an array of non-empty strings`);
+  }
+}
+
+function assertArrayField(value: unknown, fieldName: string): void {
+  if (!Array.isArray(value)) throw new Error(`${fieldName} must be an array`);
+}
+
+function assertSafeExpectedVas(expectedVAS: Record<string, unknown>): void {
+  for (const forbidden of ['incrementAdd', 'incrementDel', 'serviceCreate', 'serviceUpdate', 'serviceDelete', 'createServices', 'updateServices', 'deleteServices']) {
+    if (forbidden in expectedVAS) throw new Error(`expectedVAS cannot include service-library mutation field: ${forbidden}`);
+  }
+  if ('enabled' in expectedVAS && typeof expectedVAS.enabled !== 'boolean') throw new Error('expectedVAS.enabled must be a boolean');
+  if ('platforms' in expectedVAS) assertStringArrayField(expectedVAS.platforms, 'expectedVAS.platforms');
+  const services = isRecord(expectedVAS.services) ? expectedVAS.services : undefined;
+  if (services) {
+    for (const forbidden of ['incrementAdd', 'incrementDel', 'create', 'update', 'delete']) {
+      if (forbidden in services) throw new Error(`expectedVAS.services cannot include service-library mutation field: ${forbidden}`);
+    }
+    for (const key of ['set', 'upsert', 'remove']) {
+      if (key in services) assertArrayField(services[key], `expectedVAS.services.${key}`);
+    }
+  } else if ('services' in expectedVAS) {
+    throw new Error('expectedVAS.services must be an object');
+  }
+}
+
 function readableValues(response: Record<string, unknown>): Record<string, unknown> {
   const values = isRecord(response.values) ? response.values : {};
   const firstSpec = Object.values(values).find(isRecord) as Record<string, unknown> | undefined;
@@ -613,7 +844,8 @@ function isPathInside(rootDir: string, targetPath: string): boolean {
 function safeAuditPath(rootDir: string, path: unknown): string | undefined {
   if (typeof path !== 'string' || !path.trim() || path.includes('\0')) return undefined;
   const resolved = resolve(isAbsolute(path) ? path : join(rootDir, path));
-  return isPathInside(rootDir, resolved) ? resolved : undefined;
+  const dataRoot = stableSiblingDataRoot(rootDir);
+  return isPathInside(rootDir, resolved) || isPathInside(dataRoot, resolved) ? resolved : undefined;
 }
 
 async function fileExists(path: string): Promise<boolean> {
@@ -701,17 +933,20 @@ function timestampToken(): string {
 async function createAuditPreview(rootDir: string, productId: string, current: Record<string, unknown>, fields: Record<string, string>): Promise<RentalPriceAuditReference | null> {
   const diffScript = join(rootDir, 'scripts', 'diff-generator.js');
   const taskStoreScript = join(rootDir, 'scripts', 'task-store.js');
-  const configPath = join(rootDir, 'config.json');
+  const dataRoot = stableSiblingDataRoot(rootDir);
+  const configPath = join(dataRoot, 'config.json');
   const scriptsReady = await Promise.all([fileExists(diffScript), fileExists(taskStoreScript), fileExists(configPath)]);
   if (!scriptsReady.every(Boolean)) return null;
 
-  const tasksDir = join(rootDir, 'tasks');
+  const tasksDir = join(dataRoot, 'tasks');
+  const artifactDir = mtAgentAuditArtifactDir(rootDir);
   await mkdir(tasksDir, { recursive: true });
+  await mkdir(artifactDir, { recursive: true });
   const token = timestampToken();
-  const currentValuesFile = join(tasksDir, `mt-agent-current-${productId}-${token}.json`);
-  const intentFile = join(tasksDir, `mt-agent-intent-${productId}-${token}.json`);
-  const diffFile = join(tasksDir, `mt-agent-diff-${productId}-${token}.json`);
-  const rollbackFile = join(tasksDir, `rollback_${productId}-${token}.json`);
+  const currentValuesFile = join(artifactDir, `mt-agent-current-${productId}-${token}.json`);
+  const intentFile = join(artifactDir, `mt-agent-intent-${productId}-${token}.json`);
+  const diffFile = join(artifactDir, `mt-agent-diff-${productId}-${token}.json`);
+  const rollbackFile = join(artifactDir, `rollback_${productId}-${token}.json`);
   const currentSnapshot = {
     ...current,
     productId,
@@ -794,8 +1029,8 @@ async function updateAuditTask(rootDir: string, audit: RentalPriceAuditReference
   if (!audit?.taskId || !AUDIT_TASK_ID_PATTERN.test(audit.taskId)) return;
   const taskStoreScript = join(rootDir, 'scripts', 'task-store.js');
   if (!(await fileExists(taskStoreScript))) return;
-  await runNodeJson(taskStoreScript, ['update', audit.taskId, 'status', status]).catch(() => ({}));
   if (resultFile) await runNodeJson(taskStoreScript, ['add-evidence', audit.taskId, evidenceType, resultFile]).catch(() => ({}));
+  await runNodeJson(taskStoreScript, ['update', audit.taskId, 'status', status]).catch(() => ({}));
 }
 
 async function readJsonRecord(path: string): Promise<Record<string, unknown>> {
@@ -823,7 +1058,7 @@ async function resolveRollbackReference(rootDir: string, request: RentalPriceRol
   let productId = request.productId;
   let rollbackFile = safeAuditPath(rootDir, request.rollbackFile);
   if (!rollbackFile && audit.taskId) {
-    const taskFile = join(rootDir, 'tasks', `${audit.taskId}.json`);
+    const taskFile = join(stableSiblingDataRoot(rootDir), 'tasks', `${audit.taskId}.json`);
     if (!(await fileExists(taskFile))) throw new Error(`审计任务不存在：${audit.taskId}`);
     const task = await readJsonRecord(taskFile);
     productId = productId ?? productIdFromTaskRecord(task);
@@ -854,6 +1089,101 @@ async function readOptionalText(path: string): Promise<string | null> {
   }
 }
 
+function stableSiblingDataRoot(rootDir: string): string {
+  const resolvedRoot = resolve(rootDir);
+  return join(dirname(resolvedRoot), `.${basename(resolvedRoot)}-data`);
+}
+
+function stableTasksDir(rootDir: string): string {
+  return join(stableSiblingDataRoot(rootDir), 'tasks');
+}
+
+function mtAgentAuditArtifactDir(rootDir: string): string {
+  return join(stableSiblingDataRoot(rootDir), 'artifacts', 'mt-agent-audit');
+}
+
+function actionClassForDaemonCommand(action: string | undefined): RentalDaemonActionClass {
+  switch (action) {
+    case 'ping':
+    case 'hello':
+      return 'diagnostic';
+    case 'platform-search':
+    case 'platform-search-all':
+    case 'batch-read':
+    case 'read':
+    case 'spec-discover':
+    case 'image-read':
+    case 'image-verify':
+    case 'vas-read':
+    case 'vas-catalog-read':
+    case 'vas-verify':
+      return 'safe-read';
+    case 'status':
+      return 'lifecycle-control';
+    default:
+      return 'mutation';
+  }
+}
+
+function stableClientMetadata(): RentalDaemonNegotiation['client'] {
+  const exactRange = { min: STABLE_RENTAL_SKILL_VERSION, max: STABLE_RENTAL_SKILL_VERSION };
+  return {
+    skillVersion: STABLE_RENTAL_SKILL_VERSION,
+    protocolVersion: STABLE_RENTAL_SKILL_VERSION,
+    configSchemaVersion: STABLE_RENTAL_SKILL_VERSION,
+    stateSchemaVersion: STABLE_RENTAL_SKILL_VERSION,
+    compatibility: {
+      skill: exactRange,
+      daemon: exactRange,
+      protocol: exactRange,
+      configSchema: exactRange,
+      stateSchema: exactRange,
+    },
+  };
+}
+
+function readManifestRecord(value: Record<string, unknown>): Record<string, unknown> {
+  if (isRecord(value.manifest)) return value.manifest;
+  if (isRecord(value.daemon)) return value.daemon;
+  return value;
+}
+
+function readStableVersion(value: Record<string, unknown>, keys: string[]): string | undefined {
+  for (const key of keys) {
+    const raw = value[key];
+    if (typeof raw === 'string' && raw.trim()) return raw.trim();
+  }
+  return undefined;
+}
+
+function assertStableVersion(label: string, version: string | undefined): void {
+  if (version !== undefined && version !== STABLE_RENTAL_SKILL_VERSION) {
+    throw new Error(`rental-price-agent ${label} version mismatch: expected ${STABLE_RENTAL_SKILL_VERSION}, got ${version}`);
+  }
+}
+
+function readHelloMetadata(response: Record<string, unknown>): RentalDaemonHelloMetadata {
+  const manifest = readManifestRecord(response);
+  assertStableVersion('skill', readStableVersion(manifest, ['skillVersion', 'skillSchemaVersion', 'version']));
+  assertStableVersion('daemon', readStableVersion(manifest, ['daemonVersion']));
+  assertStableVersion('daemon protocol', readStableVersion(manifest, ['daemonProtocolVersion', 'protocolVersion']));
+  assertStableVersion('config schema', readStableVersion(manifest, ['configSchemaVersion']));
+  assertStableVersion('state schema', readStableVersion(manifest, ['stateSchemaVersion']));
+
+  const instanceId = readStableVersion(manifest, ['instanceId']);
+  const persistedStateDigest = readStableVersion(manifest, ['persistedStateDigest', 'stateDigest', 'currentStateDigest']);
+  const persistedStateReady = typeof manifest.persistedStateReady === 'boolean'
+    ? manifest.persistedStateReady
+    : typeof response.persistedStateReady === 'boolean'
+      ? response.persistedStateReady
+      : undefined;
+  return {
+    instanceId: instanceId ?? 'legacy-daemon',
+    persistedStateDigest: persistedStateDigest ?? '0'.repeat(64),
+    ...(persistedStateReady !== undefined ? { persistedStateReady } : {}),
+  };
+}
+
 function compactErrorMessage(error: unknown): string {
   if (error instanceof Error) {
     const cause = (error as Error & { cause?: unknown }).cause;
@@ -877,19 +1207,22 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
   const configuredDaemonToken = options.daemonToken ?? process.env.RENTAL_PRICE_AGENT_DAEMON_TOKEN;
 
   async function resolveDaemonConfig(): Promise<{ daemonUrl: string; daemonToken: string | null }> {
-    const [port, fileToken] = await Promise.all([
+    const stableDataRoot = stableSiblingDataRoot(rootDir);
+    const [stablePort, legacyPort, stableToken, legacyToken] = await Promise.all([
+      configuredDaemonUrl ? Promise.resolve<string | null>(null) : readOptionalText(join(stableDataRoot, 'daemon', 'daemon.port')),
       configuredDaemonUrl ? Promise.resolve<string | null>(null) : readOptionalText(join(rootDir, '.daemon.port')),
+      configuredDaemonToken ? Promise.resolve<string | null>(null) : readOptionalText(join(stableDataRoot, 'daemon', 'daemon.token')),
       configuredDaemonToken ? Promise.resolve<string | null>(null) : readOptionalText(join(rootDir, '.daemon.token')),
     ]);
 
+    const port = stablePort ?? legacyPort;
     return {
       daemonUrl: configuredDaemonUrl ?? (port ? `http://127.0.0.1:${port}` : 'http://127.0.0.1:9223'),
-      daemonToken: configuredDaemonToken ?? fileToken,
+      daemonToken: configuredDaemonToken ?? stableToken ?? legacyToken,
     };
   }
 
-  async function send(command: Record<string, unknown>): Promise<Record<string, unknown>> {
-    const { daemonUrl, daemonToken } = await resolveDaemonConfig();
+  async function postDaemon(daemonUrl: string, daemonToken: string | null, command: Record<string, unknown>): Promise<Record<string, unknown>> {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (daemonToken) headers['x-rental-agent-token'] = daemonToken;
     let response: Response;
@@ -899,6 +1232,34 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
       throw daemonUnavailableError(daemonUrl, error);
     }
     return (await response.json()) as Record<string, unknown>;
+  }
+
+  async function negotiate(daemonUrl: string, daemonToken: string | null, actionClass: RentalDaemonActionClass, nonce: string): Promise<RentalDaemonNegotiation> {
+    const hello = await postDaemon(daemonUrl, daemonToken, {
+      action: 'hello',
+      negotiationNonce: nonce,
+      client: stableClientMetadata(),
+    });
+    const metadata = readHelloMetadata(hello);
+    if (actionClass === 'mutation' && metadata.persistedStateReady === false) {
+      throw new Error('rental-price-agent stable state is not ready for mutation commands');
+    }
+    return {
+      nonce,
+      expectedInstanceId: metadata.instanceId,
+      expectedStateDigest: metadata.persistedStateDigest,
+      actionClass,
+      client: stableClientMetadata(),
+    };
+  }
+
+  async function send(command: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const { daemonUrl, daemonToken } = await resolveDaemonConfig();
+    const action = typeof command.action === 'string' ? command.action : undefined;
+    if (action === 'ping' || action === 'hello') return postDaemon(daemonUrl, daemonToken, command);
+    const nonce = randomUUID();
+    const negotiation = await negotiate(daemonUrl, daemonToken, actionClassForDaemonCommand(action), nonce);
+    return postDaemon(daemonUrl, daemonToken, { ...command, _negotiation: negotiation });
   }
 
   return {
@@ -939,7 +1300,7 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
     },
     async platformSearchAll(limit = PLATFORM_SEARCH_ALL_DEFAULT_LIMIT) {
       const cappedLimit = Math.max(1, Math.min(Math.trunc(limit), PLATFORM_SEARCH_ALL_MAX_LIMIT));
-      const result = await send({ action: 'platform-search-all' });
+      const result = await send({ action: 'platform-search', keyword: '' });
       const status = commandStatus(result);
       const allRows = Array.isArray(result.products)
         ? result.products
@@ -1030,6 +1391,103 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
         ...(missingFields ? { missingFields } : {}),
       };
     },
+    async imageRead(productId) {
+      const safeProductId = readProductId(productId);
+      if (!safeProductId) throw new Error('productId must be a numeric string');
+      return normalizeImageState(safeProductId, await send({ action: 'image-read', productId: safeProductId }));
+    },
+    async imageUpload(request) {
+      const safeProductId = readProductId(request.productId);
+      if (!safeProductId) throw new Error('productId must be a numeric string');
+      const result = await send({
+        action: 'image-upload',
+        productId: safeProductId,
+        sectionType: request.sectionType,
+        categoryName: request.categoryName,
+        uploadFile: request.uploadFile,
+        ...(request.confirmSelection !== undefined ? { confirmSelection: request.confirmSelection } : {}),
+        ...(request.allowDuplicateFileName !== undefined ? { allowDuplicateFileName: request.allowDuplicateFileName } : {}),
+      });
+      return normalizeImageMutation(safeProductId, 'image-upload', result);
+    },
+    async imagePick(request) {
+      const safeProductId = readProductId(request.productId);
+      if (!safeProductId) throw new Error('productId must be a numeric string');
+      const result = await send({
+        action: 'image-pick',
+        productId: safeProductId,
+        categoryName: request.categoryName,
+        fileNames: request.fileNames,
+        ...(request.skipIfAlreadyPresent !== undefined ? { skipIfAlreadyPresent: request.skipIfAlreadyPresent } : {}),
+      });
+      return normalizeImageMutation(safeProductId, 'image-pick', result);
+    },
+    async imageOrder(request) {
+      const safeProductId = readProductId(request.productId);
+      if (!safeProductId) throw new Error('productId must be a numeric string');
+      const result = await send({ action: 'image-order', productId: safeProductId, orderedUrls: request.orderedUrls });
+      return normalizeImageMutation(safeProductId, 'image-order', result);
+    },
+    async whiteImageSet(request) {
+      const safeProductId = readProductId(request.productId);
+      if (!safeProductId) throw new Error('productId must be a numeric string');
+      const result = await send({
+        action: 'white-image-set',
+        productId: safeProductId,
+        categoryName: request.categoryName,
+        fileName: request.fileName,
+        ...(request.skipIfWhiteImageMatched !== undefined ? { skipIfWhiteImageMatched: request.skipIfWhiteImageMatched } : {}),
+      });
+      return normalizeImageMutation(safeProductId, 'white-image-set', result);
+    },
+    async imageVerify(request) {
+      const safeProductId = readProductId(request.productId);
+      if (!safeProductId) throw new Error('productId must be a numeric string');
+      const result = await send({ action: 'image-verify', productId: safeProductId, expectedImages: request.expectedImages });
+      return normalizeImageMutation(safeProductId, 'image-verify', result);
+    },
+    async vasRead(request) {
+      const safeProductId = request.productId === undefined ? undefined : readProductId(request.productId);
+      const expectedProductId = request.expectedProductId === undefined ? undefined : readProductId(request.expectedProductId);
+      if (request.productId !== undefined && !safeProductId) throw new Error('productId must be a numeric string');
+      if (request.expectedProductId !== undefined && !expectedProductId) throw new Error('expectedProductId must be a numeric string');
+      const result = await send({
+        action: 'vas-read',
+        ...(safeProductId ? { productId: safeProductId } : {}),
+        ...(request.allowCurrentPage !== undefined ? { allowCurrentPage: request.allowCurrentPage } : {}),
+        ...(expectedProductId ? { expectedProductId } : {}),
+      });
+      return normalizeVasState(result, safeProductId ?? expectedProductId ?? undefined);
+    },
+    async vasCatalogRead(request) {
+      const safeProductId = request.productId === undefined ? undefined : readProductId(request.productId);
+      const expectedProductId = request.expectedProductId === undefined ? undefined : readProductId(request.expectedProductId);
+      if (request.productId !== undefined && !safeProductId) throw new Error('productId must be a numeric string');
+      if (request.expectedProductId !== undefined && !expectedProductId) throw new Error('expectedProductId must be a numeric string');
+      const result = await send({
+        action: 'vas-catalog-read',
+        ...(safeProductId ? { productId: safeProductId } : {}),
+        ...(request.allowCurrentPage !== undefined ? { allowCurrentPage: request.allowCurrentPage } : {}),
+        ...(expectedProductId ? { expectedProductId } : {}),
+        ...(request.ids && request.ids.length > 0 ? { ids: request.ids } : {}),
+        ...(request.keyword ? { keyword: request.keyword } : {}),
+      });
+      return normalizeVasCatalog(result);
+    },
+    async vasApply(request) {
+      const safeProductId = readProductId(request.expectedProductId);
+      if (!safeProductId) throw new Error('expectedProductId must be a numeric string');
+      assertSafeExpectedVas(request.expectedVAS);
+      const result = await send({ action: 'vas-apply', allowCurrentPage: request.allowCurrentPage, expectedProductId: safeProductId, expectedVAS: request.expectedVAS });
+      return normalizeVasMutation('vas-apply', result);
+    },
+    async vasVerify(request) {
+      const safeProductId = readProductId(request.productId);
+      if (!safeProductId) throw new Error('productId must be a numeric string');
+      assertSafeExpectedVas(request.expectedVAS);
+      const result = await send({ action: 'vas-verify', productId: safeProductId, expectedVAS: request.expectedVAS });
+      return normalizeVasMutation('vas-verify', result);
+    },
     async preview(request) {
       const current = await send({ action: 'read', productId: request.productId });
       const readStatus = commandStatus(current);
@@ -1057,9 +1515,14 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
       }
       return { productId: request.productId, fields, lines, warnings, ...(audit ? { audit } : {}) };
     },
+    async auditPreviewFromRead(productId, current, fields) {
+      return createAuditPreview(rootDir, productId, current, fields);
+    },
     async execute(request) {
-      const tasksDir = join(rootDir, 'tasks');
+      const tasksDir = stableTasksDir(rootDir);
+      const artifactDir = mtAgentAuditArtifactDir(rootDir);
       await mkdir(tasksDir, { recursive: true });
+      await mkdir(artifactDir, { recursive: true });
       if (request.audit?.hasErrors) {
         return {
           productId: request.productId,
@@ -1071,7 +1534,7 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
       const audit = safeAuditForExecution(rootDir, request.audit);
       let changesFile = audit?.changesFile;
       if (!changesFile || !(await fileExists(changesFile))) {
-        changesFile = join(tasksDir, `mt-agent-changes-${Date.now()}.json`);
+        changesFile = join(artifactDir, `mt-agent-changes-${Date.now()}.json`);
         await writeFile(changesFile, JSON.stringify({ __broadcast: true, ...request.fields }, null, 2), 'utf8');
       }
       const auditLines = [
@@ -1107,7 +1570,7 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
       const fieldsMatch = verifiedFields(verified, request.fields);
       const ok = verifyStatus !== 'error' && fieldsMatch;
       const auditStatus: 'completed' | 'verify_failed' = ok ? 'completed' : 'verify_failed';
-      const resultFile = join(tasksDir, `verify-${request.productId}-${timestampToken()}.json`);
+      const resultFile = join(artifactDir, `verify-${request.productId}-${timestampToken()}.json`);
       await writeJsonFile(resultFile, {
         productId: request.productId,
         ok,
@@ -1132,13 +1595,13 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
     async applyPerSpec(productId, specFields) {
       const safeProductId = readProductId(productId);
       if (!safeProductId) throw new Error('productId must be a numeric string');
-      const tasksDir = join(rootDir, 'tasks');
-      await mkdir(tasksDir, { recursive: true });
+      const artifactDir = mtAgentAuditArtifactDir(rootDir);
+      await mkdir(artifactDir, { recursive: true });
       const normalized = normalizePerSpecPriceFields(specFields);
       if (!Object.keys(normalized).length) {
         return { productId: safeProductId, ok: false, lines: ['apply: skipped', 'submit: skipped', 'verify: skipped', 'fields: empty'] };
       }
-      const changesFile = join(tasksDir, `mt-agent-per-spec-changes-${safeProductId}-${timestampToken()}.json`);
+      const changesFile = join(artifactDir, `mt-agent-per-spec-changes-${safeProductId}-${timestampToken()}.json`);
       await writeJsonFile(changesFile, normalized);
 
       const apply = await send({ action: 'apply', productId: safeProductId, changesFile });
@@ -1157,7 +1620,7 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
       const verifyStatus = commandStatus(verified);
       const fieldsMatch = verifiedPerSpecFields(verified, normalized);
       const ok = verifyStatus !== 'error' && fieldsMatch;
-      const resultFile = join(tasksDir, `per-spec-verify-${safeProductId}-${timestampToken()}.json`);
+      const resultFile = join(artifactDir, `per-spec-verify-${safeProductId}-${timestampToken()}.json`);
       await writeJsonFile(resultFile, {
         productId: safeProductId,
         ok,
@@ -1178,8 +1641,8 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
       };
     },
     async rollback(request) {
-      const tasksDir = join(rootDir, 'tasks');
-      await mkdir(tasksDir, { recursive: true });
+      const artifactDir = mtAgentAuditArtifactDir(rootDir);
+      await mkdir(artifactDir, { recursive: true });
       const { productId, audit, fields } = await resolveRollbackReference(rootDir, request);
       const auditLines = [
         ...(audit.taskId ? [`auditTask: ${audit.taskId}`] : []),
@@ -1214,7 +1677,7 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
       const fieldsMatch = verifiedFields(verified, fields);
       const ok = verifyStatus !== 'error' && fieldsMatch;
       const auditStatus: 'rolled_back' | 'rollback_verify_failed' = ok ? 'rolled_back' : 'rollback_verify_failed';
-      const resultFile = join(tasksDir, `rollback-verify-${productId}-${timestampToken()}.json`);
+      const resultFile = join(artifactDir, `rollback-verify-${productId}-${timestampToken()}.json`);
       await writeJsonFile(resultFile, {
         productId,
         ok,
@@ -1299,9 +1762,9 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
     async applyCurrent(expectedProductId, changes) {
       const safeProductId = readProductId(expectedProductId);
       if (!safeProductId) throw new Error('expectedProductId must be a numeric string');
-      const tasksDir = join(rootDir, 'tasks');
-      await mkdir(tasksDir, { recursive: true });
-      const changesFile = join(tasksDir, `mt-agent-apply-current-${safeProductId}-${timestampToken()}.json`);
+      const artifactDir = mtAgentAuditArtifactDir(rootDir);
+      await mkdir(artifactDir, { recursive: true });
+      const changesFile = join(artifactDir, `mt-agent-apply-current-${safeProductId}-${timestampToken()}.json`);
       await writeJsonFile(changesFile, changes);
       const result = await send({ action: 'apply-current', changesFile, allowCurrentPage: true, expectedProductId: safeProductId });
       const status = commandStatus(result);
@@ -1429,7 +1892,9 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
         item.title.replace(/\s+/g, ' ').trim() === request.itemTitle.replace(/\s+/g, ' ').trim(),
       ));
       const ok = afterStatus === 'ok' && !stillExists;
-      const resultFile = join(rootDir, 'tasks', `spec-remove-${request.productId}-${timestampToken()}.json`);
+      const artifactDir = mtAgentAuditArtifactDir(rootDir);
+      await mkdir(artifactDir, { recursive: true });
+      const resultFile = join(artifactDir, `spec-remove-${request.productId}-${timestampToken()}.json`);
       await writeJsonFile(resultFile, {
         productId: request.productId,
         specDimId: request.specDimId,

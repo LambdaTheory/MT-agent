@@ -1,0 +1,18 @@
+{
+  "contractVersion": 2,
+  "sources": {
+    "configSchema": [
+      {
+        "min": "1.0.0",
+        "max": "1.0.0"
+      }
+    ],
+    "stateSchema": [
+      {
+        "min": "1.0.0",
+        "max": "1.0.0"
+      }
+    ]
+  },
+  "steps": []
+}

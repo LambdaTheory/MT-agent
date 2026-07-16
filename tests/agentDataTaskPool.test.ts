@@ -6,6 +6,7 @@ type ExtendedContext = Omit<PublicTrafficDataReportContext, 'newProductPoolIds'>
 
 const baseContext: ExtendedContext = {
   date: '2026-06-12',
+  generationId: 'agent-task-pool-2026-06-12',
   summary: { '1d': { exposure: 0, publicVisits: 0, dashboardVisits: 0, createdOrders: 0, shippedOrders: 0, amount: 0, exposureVisitRate: 0, visitCreatedOrderRate: 0, visitShipmentRate: 0 }, '7d': { exposure: 0, publicVisits: 0, dashboardVisits: 0, createdOrders: 0, shippedOrders: 0, amount: 0, exposureVisitRate: 0, visitCreatedOrderRate: 0, visitShipmentRate: 0 }, '30d': { exposure: 0, publicVisits: 0, dashboardVisits: 0, createdOrders: 0, shippedOrders: 0, amount: 0, exposureVisitRate: 0, visitCreatedOrderRate: 0, visitShipmentRate: 0 } },
   conclusions: [], rows: [], lowExposure: [{ identifier: '251', action: '补曝光', reason: '曝光不足' }], weakClick: [], weakConversion: [{ identifier: '252', action: '提转化', reason: '访问多成交少' }], highPotential: [{ identifier: '253', action: '继续放量', reason: '高潜力' }], newProductObservation: [], lifecycleGovernance: [], recommendedActions: [{ identifier: '253', action: '继续放量', reason: '推荐动作同步' }, { identifier: '254', action: '综合治理', reason: '建议跟进' }], newProductPoolIds: ['701'], emptySectionNotes: { lowExposure: '', weakClick: '', weakConversion: '', highPotential: '', newProductObservation: '', lifecycleGovernance: '', recommendedActions: '' },
 };

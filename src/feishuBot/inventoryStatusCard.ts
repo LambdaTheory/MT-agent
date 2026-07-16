@@ -12,11 +12,18 @@ type CardElement = Record<string, unknown>;
 interface SnapshotTotals {
   reviewGroupCount: number;
   missingMetricLinkCount: number;
+  totalExposure1d: number;
+  totalExposure7d: number;
+  totalExposure30d: number;
+  totalVisits1d: number;
   totalVisits7d: number;
+  totalVisits30d: number;
   totalAmount1d: number;
   totalAmount7d: number;
   totalAmount30d: number;
 }
+
+type InventoryPeriodKey = '1d' | '7d' | '30d';
 
 const ZH = {
   inventory: '\u5e93\u5b58\u60c5\u51b5',
@@ -60,6 +67,18 @@ function metricColumn(label: string, value: string, note?: string): CardElement 
   };
 }
 
+function emphasisMetricColumn(label: string, value: string, note: string, color: 'red' | 'orange' | 'green' | 'blue'): CardElement {
+  return {
+    tag: 'column',
+    width: 'weighted',
+    weight: 1,
+    vertical_align: 'top',
+    background_style: 'grey',
+    padding: '10px',
+    elements: [{ tag: 'markdown', content: `${label}\n<font color=${color}>**${value}**</font>\n${note}`, text_align: 'center' }],
+  };
+}
+
 function metricRow(metrics: Array<{ label: string; value: string; note?: string }>, elementId: string): CardElement {
   return {
     tag: 'column_set',
@@ -70,12 +89,47 @@ function metricRow(metrics: Array<{ label: string; value: string; note?: string 
   };
 }
 
-function percent(value: number, digits = 1): string {
+function emphasisMetricRow(metrics: Array<{ label: string; value: string; note: string; color: 'red' | 'orange' | 'green' | 'blue' }>, elementId: string): CardElement {
+  return {
+    tag: 'column_set',
+    element_id: elementId,
+    flex_mode: 'bisect',
+    horizontal_spacing: '8px',
+    columns: metrics.map((metric) => emphasisMetricColumn(metric.label, metric.value, metric.note, metric.color)),
+  };
+}
+
+function collapsiblePanel(elementId: string, title: string, elements: CardElement[]): CardElement {
+  return {
+    tag: 'collapsible_panel',
+    element_id: elementId,
+    expanded: false,
+    header: {
+      title: { tag: 'plain_text', content: title },
+      vertical_align: 'center',
+      icon: { tag: 'standard_icon', token: 'down-small-ccm_outlined', size: '16px 16px' },
+      icon_position: 'right',
+      icon_expanded_angle: -180,
+    },
+    border: { color: 'grey', corner_radius: '5px' },
+    padding: '8px 8px 8px 8px',
+    elements,
+  };
+}
+
+function percent(value: number | null, digits = 1): string {
+  if (value === null || !Number.isFinite(value)) return '-';
   return `${(value * 100).toFixed(digits)}%`;
 }
 
-function amount(value: number): string {
+function amount(value: number | null): string {
+  if (value === null || !Number.isFinite(value)) return '-';
   return value.toFixed(0);
+}
+
+function numberText(value: number | null): string {
+  if (value === null || !Number.isFinite(value)) return '-';
+  return String(value);
 }
 
 function ratio(numerator: number, denominator: number): number {
@@ -83,23 +137,73 @@ function ratio(numerator: number, denominator: number): number {
   return numerator / denominator;
 }
 
-function contributionText(value: number, total: number): string {
+function contributionText(value: number | null, total: number): string {
+  if (value === null || !Number.isFinite(value)) return '-';
   return percent(ratio(value, total));
 }
 
-function sumGroups(snapshot: InventoryStatusSnapshot, pick: (group: InventoryStatusGroupSnapshot) => number): number {
-  return snapshot.groups.reduce((sum, group) => sum + pick(group), 0);
+function contributionValue(value: number | null, total: number): number {
+  if (value === null || !Number.isFinite(value) || total <= 0) return 0;
+  return Number((ratio(value, total) * 100).toFixed(1));
+}
+
+function sumGroups(snapshot: InventoryStatusSnapshot, pick: (group: InventoryStatusGroupSnapshot) => number | null): number {
+  return snapshot.groups.reduce((sum, group) => {
+    const value = pick(group);
+    return value === null || !Number.isFinite(value) ? sum : sum + value;
+  }, 0);
+}
+
+function compareNullableDesc(left: number | null, right: number | null): number {
+  if (left === null && right === null) return 0;
+  if (left === null) return 1;
+  if (right === null) return -1;
+  return right - left;
 }
 
 function snapshotTotals(snapshot: InventoryStatusSnapshot): SnapshotTotals {
   return {
     reviewGroupCount: snapshot.groups.filter((group) => group.risks.length > 0 || group.missingMetricLinkCount > 0).length,
     missingMetricLinkCount: sumGroups(snapshot, (group) => group.missingMetricLinkCount),
+    totalExposure1d: sumGroups(snapshot, (group) => group.periods['1d'].exposure),
+    totalExposure7d: sumGroups(snapshot, (group) => group.periods['7d'].exposure),
+    totalExposure30d: sumGroups(snapshot, (group) => group.periods['30d'].exposure),
+    totalVisits1d: sumGroups(snapshot, (group) => group.periods['1d'].publicVisits),
     totalVisits7d: sumGroups(snapshot, (group) => group.periods['7d'].publicVisits),
+    totalVisits30d: sumGroups(snapshot, (group) => group.periods['30d'].publicVisits),
     totalAmount1d: sumGroups(snapshot, (group) => group.periods['1d'].amount),
     totalAmount7d: sumGroups(snapshot, (group) => group.periods['7d'].amount),
     totalAmount30d: sumGroups(snapshot, (group) => group.periods['30d'].amount),
   };
+}
+
+function totalForPeriod(totals: SnapshotTotals, period: InventoryPeriodKey, metric: 'exposure' | 'visits' | 'amount'): number {
+  if (metric === 'exposure') {
+    if (period === '1d') return totals.totalExposure1d;
+    if (period === '7d') return totals.totalExposure7d;
+    return totals.totalExposure30d;
+  }
+  if (metric === 'visits') {
+    if (period === '1d') return totals.totalVisits1d;
+    if (period === '7d') return totals.totalVisits7d;
+    return totals.totalVisits30d;
+  }
+  if (period === '1d') return totals.totalAmount1d;
+  if (period === '7d') return totals.totalAmount7d;
+  return totals.totalAmount30d;
+}
+
+function contributionPoints(group: InventoryStatusGroupSnapshot, totals: SnapshotTotals): Array<{ period: string; metric: string; value: number }> {
+  const periods: Array<{ key: InventoryPeriodKey; label: string }> = [
+    { key: '1d', label: '1日' },
+    { key: '7d', label: '7日' },
+    { key: '30d', label: '30日' },
+  ];
+  return periods.flatMap(({ key, label }) => [
+    { period: label, metric: '曝光贡献', value: contributionValue(group.periods[key].exposure, totalForPeriod(totals, key, 'exposure')) },
+    { period: label, metric: '访问贡献', value: contributionValue(group.periods[key].publicVisits, totalForPeriod(totals, key, 'visits')) },
+    { period: label, metric: '金额贡献', value: contributionValue(group.periods[key].amount, totalForPeriod(totals, key, 'amount')) },
+  ]);
 }
 
 function structureChart(snapshot: InventoryStatusSnapshot): CardElement {
@@ -113,8 +217,9 @@ function structureChart(snapshot: InventoryStatusSnapshot): CardElement {
       title: { text: '\u94fe\u63a5\u6863\u6848\u72b6\u6001\u5206\u5e03' },
       data: {
         values: [
-          { label: '\u542f\u7528\u4e2d', value: snapshot.registryAuditSummary.activeLinks },
-          { label: '\u5df2\u4e0b\u67b6', value: snapshot.registryAuditSummary.removedLinks },
+          { label: '\u5728\u552e', value: snapshot.registryAuditSummary.onSaleLinks },
+          { label: '\u5df2\u4e0b\u67b6', value: snapshot.registryAuditSummary.delistedLinks },
+          { label: '\u94fe\u63a5\u4e0d\u5b58\u5728', value: snapshot.registryAuditSummary.goneLinks },
           { label: '\u5f85\u786e\u8ba4', value: snapshot.registryAuditSummary.unknownLinks },
         ],
       },
@@ -128,18 +233,72 @@ function structureChart(snapshot: InventoryStatusSnapshot): CardElement {
   };
 }
 
+function contributionChart(group: InventoryStatusGroupSnapshot, totals: SnapshotTotals): CardElement {
+  return {
+    tag: 'chart',
+    element_id: 'inventory_status_detail_contribution_chart',
+    aspect_ratio: '16:9',
+    color_theme: 'primary',
+    preview: true,
+    height: '230px',
+    chart_spec: {
+      type: 'line',
+      title: { text: '全盘贡献窗口对比：曝光 / 访问 / 金额' },
+      data: { values: contributionPoints(group, totals) },
+      xField: 'period',
+      yField: 'value',
+      seriesField: 'metric',
+      point: { visible: true },
+      label: { visible: false },
+      legends: { visible: true, orient: 'bottom' },
+      axes: [
+        { orient: 'bottom', label: { visible: true } },
+        { orient: 'left', label: { visible: true }, title: { visible: true, text: '贡献占比 %' } },
+      ],
+      color: ['#2BA471', '#245BDB', '#F59A23'],
+      media: [],
+    },
+  };
+}
+
 function periodBlock(label: string, period: InventoryStatusPeriodMetrics): string {
   return [
     `**${label}**`,
-    `\u66dd\u5149 ${period.exposure} | \u8bbf\u95ee ${period.publicVisits} | \u91d1\u989d ${amount(period.amount)}`,
-    `\u521b\u5efa ${period.createdOrders} | \u53d1\u8d27 ${period.shippedOrders} | \u66dd\u5149-\u8bbf\u95ee\u7387 ${percent(period.exposureVisitRate)} | \u8bbf\u95ee-\u4e0b\u5355\u7387 ${percent(period.visitCreatedOrderRate)} | \u8bbf\u95ee-\u53d1\u8d27\u7387 ${percent(period.visitShipmentRate)}`,
+    `\u66dd\u5149 ${numberText(period.exposure)} | \u8bbf\u95ee ${numberText(period.publicVisits)} | \u91d1\u989d ${amount(period.amount)}`,
+    `\u521b\u5efa ${numberText(period.createdOrders)} | \u53d1\u8d27 ${numberText(period.shippedOrders)} | \u66dd\u5149-\u8bbf\u95ee\u7387 ${percent(period.exposureVisitRate)} | \u8bbf\u95ee-\u4e0b\u5355\u7387 ${percent(period.visitCreatedOrderRate)} | \u8bbf\u95ee-\u53d1\u8d27\u7387 ${percent(period.visitShipmentRate)}`,
   ].join('\n');
+}
+
+function hasMissingOrderMetrics(period: InventoryStatusPeriodMetrics): boolean {
+  return period.createdOrders === null || period.shippedOrders === null || period.visitCreatedOrderRate === null || period.visitShipmentRate === null;
+}
+
+function sourceExplanation(group: InventoryStatusGroupSnapshot): string | null {
+  const hasAmount = Object.values(group.periods).some((period) => period.amount !== null && Number.isFinite(period.amount));
+  const missingOrderMetrics = Object.values(group.periods).some(hasMissingOrderMetrics);
+  if (!hasAmount || !missingOrderMetrics) return null;
+  return '**数据口径：后链路缺失**\n金额来自公域曝光侧；商品级创建/发货来自访问页后链路。本次未抓到商品级后链路数据的周期会显示 `-`，不能按 0 单理解。';
+}
+
+function detailJudgement(group: InventoryStatusGroupSnapshot, sourceNote: string | null): string {
+  const identity = [
+    group.categoryName ? `${ZH.category} ${group.categoryName}` : null,
+    group.productType ? `${ZH.productType} ${group.productType}` : null,
+    `active ${group.activeLinkCount}/${group.totalLinkCount}`,
+  ].filter(Boolean).join(' | ');
+  if (sourceNote) return `${identity}\n后链路缺失：金额、曝光、访问可看；缺失周期的创建、发货和转化率按不可用处理。`;
+  if (group.missingMetricLinkCount > 0) return `${identity}\n需核对日报映射：当前还有 ${group.missingMetricLinkCount} 条链接未匹配到经营数据。`;
+  if (group.risks.length > 0) return `${identity}\n需关注风险提示：先看风险与主力链接，再判断是否维护同款组。`;
+  return `${identity}\n数据链路完整：可直接阅读金额、访问、创建和发货表现。`;
 }
 
 function focusGroupLines(result: InventoryStatusOverviewResult): string {
   const lines = result.snapshot.groups
     .slice()
-    .sort((left, right) => right.missingMetricLinkCount - left.missingMetricLinkCount || right.periods['7d'].amount - left.periods['7d'].amount)
+    .sort((left, right) =>
+      right.missingMetricLinkCount - left.missingMetricLinkCount
+      || compareNullableDesc(left.periods['7d'].amount, right.periods['7d'].amount),
+    )
     .slice(0, 5)
     .map((group, index) => `${index + 1}. ${group.groupName} | active ${group.activeLinkCount}/${group.totalLinkCount} | ${ZH.missingLinks} ${group.missingMetricLinkCount}`);
   return lines.join('\n') || '\u6682\u65e0\u9700\u8981\u5173\u6ce8\u7684\u540c\u6b3e\u7ec4\u3002';
@@ -147,7 +306,7 @@ function focusGroupLines(result: InventoryStatusOverviewResult): string {
 
 function topLinkLines(group: InventoryStatusGroupSnapshot): string {
   const lines = group.topLinks.map((link, index) =>
-    `${index + 1}. ${link.internalProductId} ${link.productName} | 1\u65e5\u91d1\u989d ${amount(link.oneDayAmount)} | \u8bbf\u95ee ${link.oneDayPublicVisits}`,
+    `${index + 1}. ${link.internalProductId} ${link.productName} | 1\u65e5\u91d1\u989d ${amount(link.oneDayAmount)} | \u8bbf\u95ee ${numberText(link.oneDayPublicVisits)}`,
   );
   return lines.join('\n') || '\u6682\u65e0\u4e3b\u529b\u94fe\u63a5\u3002';
 }
@@ -214,24 +373,24 @@ export function buildInventoryStatusOverviewCard(result: InventoryStatusOverview
         ], 'inventory_status_overview_maintenance'),
         metricRow([
           {
-            label: 'active \u94fe\u63a5',
-            value: String(snapshot.registryAuditSummary.activeLinks),
+            label: '\u5728\u552e\u94fe\u63a5',
+            value: String(snapshot.registryAuditSummary.onSaleLinks),
             note: `\u603b\u94fe\u63a5 ${snapshot.registryAuditSummary.totalLinks}`,
           },
           {
-            label: 'removed \u94fe\u63a5',
-            value: String(snapshot.registryAuditSummary.removedLinks),
-            note: '\u9ed8\u8ba4\u4e0d\u53c2\u4e0e active \u67e5\u8be2',
+            label: '\u5df2\u4e0b\u67b6\u94fe\u63a5',
+            value: String(snapshot.registryAuditSummary.delistedLinks),
+            note: '\u4e0a\u67b6\u540e\u53ef\u6062\u590d\u64cd\u4f5c',
           },
           {
-            label: 'unknown \u94fe\u63a5',
+            label: '\u94fe\u63a5\u4e0d\u5b58\u5728',
+            value: String(snapshot.registryAuditSummary.goneLinks),
+            note: '\u5546\u54c1\u603b\u8868\u5df2\u7f3a\u5931',
+          },
+          {
+            label: '\u5f85\u786e\u8ba4\u94fe\u63a5',
             value: String(snapshot.registryAuditSummary.unknownLinks),
-            note: '\u5efa\u8bae\u5c3d\u5feb\u786e\u8ba4\u72b6\u6001',
-          },
-          {
-            label: 'override \u98ce\u9669',
-            value: String(snapshot.registryAuditSummary.overrideRiskCount),
-            note: '\u9700\u8981\u4eba\u5de5\u590d\u6838',
+            note: `\u9700\u786e\u8ba4\uff0c\u8986\u76d6\u89c4\u5219\u98ce\u9669 ${snapshot.registryAuditSummary.overrideRiskCount}`,
           },
         ], 'inventory_status_overview_registry'),
         structureChart(snapshot),
@@ -246,69 +405,42 @@ export function buildInventoryStatusOverviewCard(result: InventoryStatusOverview
 export function buildInventoryStatusDetailCard(result: InventoryStatusDetailResult): FeishuCardPayload {
   const group = result.group;
   const totals = snapshotTotals(result.snapshot);
+  const sourceNote = sourceExplanation(group);
+  const exposureShare7d = contributionText(group.periods['7d'].exposure, totals.totalExposure7d);
+  const visitShare7d = contributionText(group.periods['7d'].publicVisits, totals.totalVisits7d);
+  const amountShare7d = contributionText(group.periods['7d'].amount, totals.totalAmount7d);
+  const visitAmountGap = contributionValue(group.periods['7d'].publicVisits, totals.totalVisits7d) - contributionValue(group.periods['7d'].amount, totals.totalAmount7d);
+  const exposureAmountGap = contributionValue(group.periods['7d'].exposure, totals.totalExposure7d) - contributionValue(group.periods['7d'].amount, totals.totalAmount7d);
+  const downstreamTag = sourceNote ? '<text_tag color="red">后链路缺失</text_tag> ' : '';
   return {
     schema: '2.0',
+    config: { wide_screen_mode: true },
     header: {
-      title: { tag: 'plain_text', content: `${ZH.inventory} ? ${group.groupName}` },
+      title: { tag: 'plain_text', content: `${ZH.inventory}｜${group.groupName}` },
       template: group.risks.length > 0 || group.missingMetricLinkCount > 0 ? 'orange' : 'blue',
     },
     body: {
       elements: [
-        markdown(`${matchedByLabel(result)} | ${ZH.sameSkuGroup} ${result.sameSkuGroupId}`),
-        markdown([
-          group.categoryName ? `${ZH.category} ${group.categoryName}` : null,
-          group.productType ? `${ZH.productType} ${group.productType}` : null,
-          `active ${group.activeLinkCount}/${group.totalLinkCount}`,
-        ].filter(Boolean).join(' | ')),
-        metricRow([
-          {
-            label: ZH.amountShare7d,
-            value: contributionText(group.periods['7d'].amount, totals.totalAmount7d),
-            note: `${amount(group.periods['7d'].amount)} / ${amount(totals.totalAmount7d)}`,
-          },
-          {
-            label: ZH.visitShare7d,
-            value: contributionText(group.periods['7d'].publicVisits, totals.totalVisits7d),
-            note: `${group.periods['7d'].publicVisits} / ${totals.totalVisits7d}`,
-          },
-          {
-            label: ZH.missingLinks,
-            value: String(group.missingMetricLinkCount),
-            note: group.missingMetricLinkCount > 0 ? '\u5efa\u8bae\u6838\u5bf9\u65e5\u62a5\u6620\u5c04' : '\u672c\u6b21\u5df2\u5339\u914d\u9f50',
-          },
-          {
-            label: ZH.activeLinks,
-            value: `${group.activeLinkCount}/${group.totalLinkCount}`,
-            note: ZH.periodNote,
-          },
-        ], 'inventory_status_detail_summary'),
-        metricRow([
-          {
-            label: '1\u65e5\u91d1\u989d',
-            value: amount(group.periods['1d'].amount),
-            note: `\u8d21\u732e ${contributionText(group.periods['1d'].amount, totals.totalAmount1d)}`,
-          },
-          {
-            label: '7\u65e5\u91d1\u989d',
-            value: amount(group.periods['7d'].amount),
-            note: `\u8bbf\u95ee-\u4e0b\u5355\u7387 ${percent(group.periods['7d'].visitCreatedOrderRate)}`,
-          },
-          {
-            label: '30\u65e5\u91d1\u989d',
-            value: amount(group.periods['30d'].amount),
-            note: `\u8d21\u732e ${contributionText(group.periods['30d'].amount, totals.totalAmount30d)}`,
-          },
-          {
-            label: '7\u65e5\u8bbf\u95ee-\u53d1\u8d27\u7387',
-            value: percent(group.periods['7d'].visitShipmentRate),
-            note: `\u53d1\u8d27 ${group.periods['7d'].shippedOrders}`,
-          },
-        ], 'inventory_status_detail_periods'),
-        markdown(`**\u8bf4\u660e**\n${ZH.explanation}\uff0c\u4e0d\u662f\u5355\u6761\u94fe\u63a5\u7ed3\u8bba\uff1b\u5b83\u66f4\u9002\u5408\u5e2e\u52a9\u6211\u4eec\u5224\u65ad\u8fd9\u4e2a\u7ec4\u5f53\u524d\u6709\u6ca1\u6709\u7f3a\u6863\u3001\u7f3a\u6570\u6216\u9700\u8981\u7ee7\u7eed\u62c6\u5206\u7ef4\u62a4\u3002`),
-        markdown(`${periodBlock('1\u65e5', group.periods['1d'])}\n\n${periodBlock('7\u65e5', group.periods['7d'])}\n\n${periodBlock('30\u65e5', group.periods['30d'])}`),
-        markdown(`**${ZH.missingExplainTitle}**\n${missingReportExplanation(group.missingMetricLinkCount)}`),
-        markdown(`**${ZH.topLinks}**\n${topLinkLines(group)}`),
-        markdown(`**${ZH.riskTips}**\n${riskLines(group)}`),
+        markdown(`**最新全盘位置**\n曝光贡献 <font color=green>**${exposureShare7d}**</font>｜访问贡献 <font color=blue>**${visitShare7d}**</font>｜金额贡献 <font color=orange>**${amountShare7d}**</font>\n${downstreamTag}${sourceNote ? '缺失周期的创建、发货和转化率按不可用处理；`-` 表示未采集/不可用，不是 0。' : '数据链路完整，可继续看创建/发货表现。'}`),
+        emphasisMetricRow([
+          { label: '访问-金额差', value: `${visitAmountGap >= 0 ? '+' : ''}${visitAmountGap.toFixed(1)}pct`, note: visitAmountGap >= 0 ? '流量高于结果' : '结果高于流量', color: visitAmountGap > 0 ? 'orange' : 'green' },
+          { label: '曝光-金额差', value: `${exposureAmountGap >= 0 ? '+' : ''}${exposureAmountGap.toFixed(1)}pct`, note: exposureAmountGap >= 0 ? '资源高于结果' : '结果高于资源', color: exposureAmountGap > 0 ? 'orange' : 'green' },
+          { label: ZH.missingLinks, value: String(group.missingMetricLinkCount), note: group.missingMetricLinkCount > 0 ? '需核对映射' : '已匹配齐', color: group.missingMetricLinkCount > 0 ? 'red' : 'green' },
+          { label: ZH.activeLinks, value: `${group.activeLinkCount}/${group.totalLinkCount}`, note: ZH.periodNote, color: 'green' },
+        ], 'inventory_status_detail_position_gap'),
+        contributionChart(group, totals),
+        markdown(`**看法**\n绿色看资源占位，蓝色看访问承接，橙色看成交结果。当前访问贡献 ${visitShare7d}、金额贡献 ${amountShare7d}；若蓝线长期高于橙线，说明流量位置高于结果位置，优先看价格、标题、主图和主力链接承接。`),
+        collapsiblePanel('inventory_status_detail_period_panel', '展开：周期数据与主力链接', [
+          markdown(`**分周期明细**\n${periodBlock('1日', group.periods['1d'])}\n\n${periodBlock('7日', group.periods['7d'])}\n\n${periodBlock('30日', group.periods['30d'])}`),
+          markdown(`**${ZH.missingExplainTitle}**\n${missingReportExplanation(group.missingMetricLinkCount)}`),
+          markdown(`**${ZH.topLinks}**\n${topLinkLines(group)}`),
+        ]),
+        collapsiblePanel('inventory_status_detail_audit_panel', '展开：风险、口径与审计', [
+          markdown(`**${ZH.riskTips}**\n${riskLines(group)}`),
+          markdown(`**数据口径**\n${sourceNote ? sourceNote.replace('**数据口径：后链路缺失**\n', '') : '当前未发现商品级创建/发货后链路缺失。'}\n贡献窗口口径：当前同款组指标 / 当前快照全盘同周期指标。`),
+          markdown(`**审计信息**\n${matchedByLabel(result)} | ${ZH.sameSkuGroup} ${result.sameSkuGroupId}\n快照日期 ${result.snapshot.date} | 日报口径 ${result.snapshot.sourceReportDate} | generationId ${result.snapshot.generationId}`),
+          markdown(`**说明**\n${ZH.explanation}，不是单条链接结论；它更适合帮助判断这个组在全盘中的资源、流量和结果位置。`),
+        ]),
       ],
     },
   };

@@ -1,9 +1,12 @@
 {
+  "configSchemaVersion": "1.0.0",
   "saas": {
-    "baseUrl": "<YOUR_SAAS_URL>",
-    "loginUrl": "<YOUR_SAAS_URL>/web/index.php?c=user&a=login",
-    "productDetailUrl": "<YOUR_SAAS_URL>/web/index.php?...&id={productId}",
-    "productListUrl": "<YOUR_SAAS_URL>/web/index.php?...&r=goods",
+    "baseUrl": "https://saas.example.invalid",
+    "loginUrl": "https://saas.example.invalid/web/index.php?c=user&a=login",
+    "productDetailUrl": "https://saas.example.invalid/web/index.php?c=site&a=entry&m=ewei_shopv2&do=web&r=goods.edit&id={productId}",
+    "productListUrl": "https://saas.example.invalid/web/index.php?c=site&a=entry&m=ewei_shopv2&do=web&r=goods",
+    "productOutListUrl": "https://saas.example.invalid/web/index.php?c=site&a=entry&m=ewei_shopv2&do=web&r=goods.out",
+    "productStockListUrl": "https://saas.example.invalid/web/index.php?c=site&a=entry&m=ewei_shopv2&do=web&r=goods.stock",
     "credentials": {
       "username": "${SAAS_USERNAME}",
       "password": "${SAAS_PASSWORD}"
@@ -20,18 +23,6 @@
       "_note": "Selectors use spec item ID (e.g. 3862). Read dynamically from the spec table #options.",
       "goodsName": "input#goodsname",
       "stock": "input.option_stock_{specId}",
-      "rent1day": "input.option_rent1day_{specId}",
-      "rent2day": "input.option_rent2day_{specId}",
-      "rent3day": "input.option_rent3day_{specId}",
-      "rent4day": "input.option_rent4day_{specId}",
-      "rent5day": "input.option_rent5day_{specId}",
-      "rent7day": "input.option_rent7day_{specId}",
-      "rent10day": "input.option_rent10day_{specId}",
-      "rent15day": "input.option_rent15day_{specId}",
-      "rent30day": "input.option_rent30day_{specId}",
-      "rent60day": "input.option_rent60day_{specId}",
-      "rent90day": "input.option_rent90day_{specId}",
-      "rent180day": "input.option_rent180day_{specId}",
       "marketPrice": "input.option_market_price_{specId}",
       "deposit": "input.option_depositprice_{specId}",
       "purchasePrice": "input.option_purchase_price_{specId}",
@@ -39,7 +30,16 @@
       "finalPayment": "input.option_final_payment_{specId}",
       "saveButton": "input.btn.btn-primary[value='保存商品']",
       "saveSuccessToast": null,
-      "specTable": "#options table tbody tr"
+      "specTable": "#options table tbody tr",
+      "_dynamicFields": {
+        "rentDays": {
+          "scanSelector": "input[class*='option_rent'][class*='day']",
+          "extractDaysRegex": "option_rent(\\d+)day",
+          "selectorTemplate": "input.option_rent{days}day_{specId}",
+          "fieldTemplate": "rent{days}day",
+          "labelTemplate": "{days}天租金"
+        }
+      }
     },
     "spec": {
       "addSpecBtn": "#add-spec",
@@ -52,29 +52,61 @@
       "specItemTitle": ".spec_item_title",
       "specItemId": ".spec_item_id",
       "specDimTitle": ".spec_title"
+    },
+    "image": {
+      "thumbsButton": "button.BOX_IMG_UPLOAD[box_name='thumbs']",
+      "whiteButton": "button.BOX_IMG_UPLOAD[box_name='white_ground_image']",
+      "thumbsInput": "input[name='thumbs[]']",
+      "whiteInput": "input[name='white_ground_image']",
+      "multiItem": ".multi-item",
+      "deleteButton": ".BOX_IMG_UPLOAD_DELL",
+      "materialCard": "li.box_main_right_img",
+      "materialCardName": ".box_name",
+      "materialCardSelectedClass": "on",
+      "materialCategory": ".box_main_left_title_main",
+      "modalConfirmButton": "span.btn.btn-primary.save",
+      "modalCancelButton": "span.btn.btn-default.cancel",
+      "modalUploadButton": "span.box_uploading_img",
+      "modalFileInput": "input.box_uploading_img_file",
+      "modalSelectAll": "div.box_checkbox",
+      "modalSearchInput": ".box_search input[type='text'], input[name='keywords']",
+      "modalSearchButton": ".box_search .btn, .box_search button, .box_search span",
+      "emptyPlaceholderSrcKeyword": "default-pic.jpg"
+    },
+    "vas": {
+      "enabledRadio": "input[name='is_value_added_services']",
+      "infoSection": ".value_added_services_info",
+      "platformCheckbox": "input[name='appn_arr[]']",
+      "selectButton": "a.select_increment",
+      "list": "#increment_list",
+      "item": "#increment_list .increment_box",
+      "popupCheckbox": ".popupcheck",
+      "defaultCheckbox": ".defaultcheck",
+      "forceCheckbox": "input[onchange*='selectIncrementForce']"
     }
+  },
+  "vas": {
+    "catalogEndpoint": "/web/index.php?c=site&a=entry&m=ewei_shopv2&do=web&r=goods.increment.get_increment"
   },
   "rules": {
     "minPrice": 0,
     "maxPrice": 999999,
     "maxChangePercent": 50,
     "minStock": 0,
-    "confirmOnMultipleMatch": true,
-    "immediateVerify": true,
-    "delayedVerifyMinutes": 5,
     "maxBatchSize": 20
   },
   "taskStorage": {
     "directory": "./tasks"
   },
   "browser": {
-    "channel": "chrome",
+    "source": "chrome",
+    "allowFallback": false,
     "headless": true,
     "viewport": { "width": 1440, "height": 900 },
     "slowMo": 100
   },
   "mirror": {
-    "baseUrl": "<MIRROR_API_URL>",
+    "baseUrl": "https://mirror.example.invalid",
     "apiKey": "${MIRROR_API_KEY}"
   }
 }

@@ -88,6 +88,7 @@ function stringifyNumbers(value: unknown): unknown {
 function context(): PublicTrafficDataReportContext {
   return {
     date: '2026-06-22',
+    generationId: 'new-link-workflow-batch-2026-06-22',
     summary: { '1d': emptySummary, '7d': emptySummary, '30d': emptySummary },
     conclusions: [],
     rows: [

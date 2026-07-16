@@ -1,13 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { queryInventoryStatus } from '../src/inventoryStatus/query.js';
-import type { InventoryStatusSnapshot } from '../src/inventoryStatus/types.js';
+import { INVENTORY_STATUS_SNAPSHOT_SCHEMA_VERSION, type InventoryStatusSnapshot } from '../src/inventoryStatus/types.js';
 import { createLinkRegistry } from '../src/linkRegistry/store.js';
 import type { LinkRegistryEntry } from '../src/linkRegistry/types.js';
 
 const snapshot: InventoryStatusSnapshot = {
+  schemaVersion: INVENTORY_STATUS_SNAPSHOT_SCHEMA_VERSION,
+  generationId: 'inventory-generation-2026-06-24',
   date: '2026-06-24',
   sourceReportDate: '2026-06-23',
   generatedAt: '2026-06-24T00:00:00.000Z',
+  warnings: ['组内 1 条链接无日报数据'],
   summary: {
     sameSkuGroupCount: 2,
     activeLinkCount: 3,
@@ -21,8 +24,9 @@ const snapshot: InventoryStatusSnapshot = {
   },
   registryAuditSummary: {
     totalLinks: 4,
-    activeLinks: 3,
-    removedLinks: 1,
+    onSaleLinks: 3,
+    delistedLinks: 1,
+    goneLinks: 0,
     unknownLinks: 0,
     overrideRiskCount: 0,
   },
@@ -92,7 +96,7 @@ const snapshot: InventoryStatusSnapshot = {
           platformProductId: 'p842',
           productName: 'Insta360 Ace Pro 2 续航套装',
           shortName: 'Ace Pro 2',
-          status: 'active',
+          listingState: 'on_sale',
           oneDayExposure: 600,
           oneDayPublicVisits: 60,
           oneDayAmount: 499,
@@ -165,7 +169,7 @@ const snapshot: InventoryStatusSnapshot = {
           platformProductId: 'p851',
           productName: 'Insta360 Ace Pro',
           shortName: 'Ace Pro',
-          status: 'active',
+          listingState: 'on_sale',
           oneDayExposure: 200,
           oneDayPublicVisits: 18,
           oneDayAmount: 199,
@@ -185,6 +189,7 @@ const registryEntries: LinkRegistryEntry[] = [
     aliases: ['Ace pro 2', 'AcePro2', 'ace pro'],
     sameSkuGroupId: 'insta360-ace-pro-2',
     status: 'active',
+    listingState: 'on_sale',
     source: ['product_name_map'],
   },
   {
@@ -195,6 +200,7 @@ const registryEntries: LinkRegistryEntry[] = [
     aliases: ['Ace pro 2'],
     sameSkuGroupId: 'insta360-ace-pro-2',
     status: 'active',
+    listingState: 'on_sale',
     source: ['product_name_map'],
   },
   {
@@ -205,6 +211,7 @@ const registryEntries: LinkRegistryEntry[] = [
     aliases: ['Ace pro 2'],
     sameSkuGroupId: 'insta360-ace-pro-2',
     status: 'removed',
+    listingState: 'delisted',
     source: ['product_name_map'],
   },
   {
@@ -215,43 +222,121 @@ const registryEntries: LinkRegistryEntry[] = [
     aliases: ['Ace pro'],
     sameSkuGroupId: 'insta360-ace-pro',
     status: 'active',
+    listingState: 'on_sale',
     source: ['product_name_map'],
   },
 ];
 
+function queryCurrentInventoryStatus(query: string, currentSnapshot: InventoryStatusSnapshot | null = snapshot) {
+  const args = {
+    snapshot: currentSnapshot,
+    registryStore: createLinkRegistry(registryEntries),
+    query,
+    reportGenerationId: snapshot.generationId,
+    reportDate: snapshot.sourceReportDate,
+    snapshotDate: snapshot.date,
+  };
+  return queryInventoryStatus(args);
+}
+
 describe('queryInventoryStatus', () => {
   it('returns overview mode when no query is provided', () => {
-    const result = queryInventoryStatus({ snapshot, registryStore: createLinkRegistry(registryEntries), query: '' });
+    const result = queryCurrentInventoryStatus('');
     expect(result.status).toBe('overview');
   });
 
   it('returns detail mode for unique alias matches', () => {
-    const result = queryInventoryStatus({ snapshot, registryStore: createLinkRegistry(registryEntries), query: 'AcePro2' });
+    const result = queryCurrentInventoryStatus('AcePro2');
     expect(result).toMatchObject({ status: 'detail', sameSkuGroupId: 'insta360-ace-pro-2', matchedBy: 'alias' });
   });
 
   it('returns detail mode for explicit internal ids by same-sku group', () => {
-    const result = queryInventoryStatus({ snapshot, registryStore: createLinkRegistry(registryEntries), query: '841' });
+    const result = queryCurrentInventoryStatus('841');
     expect(result).toMatchObject({ status: 'detail', sameSkuGroupId: 'insta360-ace-pro-2', matchedBy: 'internal_id' });
   });
 
   it('returns ambiguous mode for multiple alias matches', () => {
-    const result = queryInventoryStatus({ snapshot, registryStore: createLinkRegistry(registryEntries), query: 'Ace Pro' });
+    const result = queryCurrentInventoryStatus('Ace Pro');
     expect(result.status).toBe('ambiguous');
     if (result.status !== 'ambiguous') return;
     expect(result.candidates.map((candidate) => candidate.sameSkuGroupId).sort()).toEqual(['insta360-ace-pro', 'insta360-ace-pro-2']);
   });
 
   it('returns not_found when registry cannot resolve the query', () => {
-    expect(queryInventoryStatus({ snapshot, registryStore: createLinkRegistry(registryEntries), query: 'totally unknown' })).toEqual({
+    expect(queryCurrentInventoryStatus('totally unknown')).toEqual({
       status: 'not_found',
       query: 'totally unknown',
     });
   });
 
   it('returns snapshot_missing when no persisted snapshot is available', () => {
-    expect(queryInventoryStatus({ snapshot: null, registryStore: createLinkRegistry(registryEntries), query: '' })).toEqual({
+    expect(queryCurrentInventoryStatus('', null)).toEqual({
       status: 'snapshot_missing',
+      reason: 'missing',
+    });
+  });
+
+  it('returns snapshot_missing when report generation id is missing', () => {
+    const args = {
+      snapshot,
+      registryStore: createLinkRegistry(registryEntries),
+      query: '',
+      reportGenerationId: '',
+      reportDate: snapshot.sourceReportDate,
+      snapshotDate: snapshot.date,
+    };
+
+    expect(queryInventoryStatus(args)).toEqual({
+      status: 'snapshot_missing',
+      reason: 'report_generation_missing',
+    });
+  });
+
+  it('returns snapshot_missing when report generation id does not match the snapshot', () => {
+    const args = {
+      snapshot,
+      registryStore: createLinkRegistry(registryEntries),
+      query: '',
+      reportGenerationId: 'different-generation',
+      reportDate: snapshot.sourceReportDate,
+      snapshotDate: snapshot.date,
+    };
+
+    expect(queryInventoryStatus(args)).toEqual({
+      status: 'snapshot_missing',
+      reason: 'mismatched_generation',
+    });
+  });
+
+  it('returns snapshot_missing when report data date does not match the snapshot source report date', () => {
+    const args = {
+      snapshot,
+      registryStore: createLinkRegistry(registryEntries),
+      query: '',
+      reportGenerationId: snapshot.generationId,
+      reportDate: '2026-06-22',
+      snapshotDate: snapshot.date,
+    };
+
+    expect(queryInventoryStatus(args)).toEqual({
+      status: 'snapshot_missing',
+      reason: 'mismatched_report_date',
+    });
+  });
+
+  it('returns snapshot_missing when run date does not match the snapshot date', () => {
+    const args = {
+      snapshot,
+      registryStore: createLinkRegistry(registryEntries),
+      query: '',
+      reportGenerationId: snapshot.generationId,
+      reportDate: snapshot.sourceReportDate,
+      snapshotDate: '2026-06-25',
+    };
+
+    expect(queryInventoryStatus(args)).toEqual({
+      status: 'snapshot_missing',
+      reason: 'mismatched_snapshot_date',
     });
   });
 });

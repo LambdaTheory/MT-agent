@@ -68,6 +68,7 @@ import {
   formatInventoryStatusOverviewText,
 } from './inventoryStatusCard.js';
 import { buildLinkRegistryOverviewCard, formatLinkRegistryOverviewText } from './linkRegistryOverviewCard.js';
+import { buildQueryTextCard } from './queryCards.js';
 import {
   buildRentalOperationConfirmCard,
   buildRentalPricePreviewCard,
@@ -92,7 +93,9 @@ import {
   RENTAL_DELIST_MAX_AUDIT_WARNINGS,
 } from './rentalWriteOperationHandlers.js';
 import { executeRentalBatchTool } from './rentalBatchHandlers.js';
+import { executeRentalImageTool } from './rentalImageHandlers.js';
 import { executeRentalMirrorTool } from './rentalMirrorHandlers.js';
+import { executeRentalVasTool } from './rentalVasHandlers.js';
 import { findReadOnlyTool } from './readOnlyToolRegistry.js';
 import { inferPriceAdjustmentAmountFromText, readPriceAdjustmentAmountArgument } from './priceAdjustment.js';
 import {
@@ -101,9 +104,9 @@ import {
   PRICE_ADJUSTMENT_CONFLICT_MESSAGE,
 } from './priceChangeContract.js';
 import { inferPriceMultiplierFromText, readPriceMultiplierArgument } from './priceMultiplier.js';
-import { buildReportSectionCardData, runPublicTrafficReportDateComparison, runPublicTrafficReportQuery, type PublicTrafficReportQueryArguments } from './reportQuery.js';
-import { buildProblemSectionCard, buildProductDetailCard } from './queryCards.js';
-import { findLatestReportContext, findReportContextByDate, formatConversionSummary, formatLatestSummary, formatProductQueryResult, formatProductRows, parseNumericProductIdList, queryProductResult } from './reportStore.js';
+import { runPublicTrafficReportDateComparison, runPublicTrafficReportQuery, type PublicTrafficReportQueryArguments } from './reportQuery.js';
+import { runProductLinkQuery, type ProductLinkQueryArguments } from './productLinkQuery.js';
+import { findLatestReportContext, findReportContextByDate, formatConversionSummary, formatLatestSummary, formatProductRows, parseNumericProductIdList } from './reportStore.js';
 import { saveAgentToolConfirmRequest } from './agentToolConfirmStore.js';
 import { refreshActivityPlanConfirmationKey, saveRefreshActivityPlan, type RefreshActivityPlan } from './refreshActivityPlanStore.js';
 import type { RentalWriteLedgerContext } from './rentalWriteOperationHandlers.js';
@@ -124,7 +127,7 @@ type AgentToolWriteEvent = 'execution_started' | 'execution_succeeded' | 'execut
 let publicTrafficReportRunning = false;
 
 const RENTAL_PRICE_SNAPSHOT_MAX_PRODUCTS = 60;
-const RENTAL_PRICE_PREVIEW_MAX_PRODUCTS = 24;
+const RENTAL_PRICE_PREVIEW_MAX_PRODUCTS = 60;
 const RENTAL_SPEC_REMOVE_PLAN_BULK_WARNING_PRODUCTS = 12;
 const RENTAL_SPEC_REMOVE_PLAN_MAX_PRODUCTS = 60;
 const RENTAL_SPEC_REMOVE_PLAN_MAX_ITEMS = 50;
@@ -235,7 +238,7 @@ async function inventoryStatusToolResponse(
   options: AgentToolExecutionOptions,
 ): Promise<BotResponse> {
   const latest = await findLatestReportContext(outputDir);
-  if (!latest) return { text: formatInventoryStatusMissingText({ status: 'snapshot_missing' }) };
+  if (!latest) return { text: formatInventoryStatusMissingText({ status: 'snapshot_missing', reason: 'missing' }) };
 
   const runDate = basename(dirname(latest.path));
   const snapshotPath = buildPublicTrafficPaths(outputDir, runDate).sameSkuSnapshot;
@@ -247,6 +250,9 @@ async function inventoryStatusToolResponse(
     snapshot,
     registryStore: createLinkRegistry(registryContext.registry, registryContext.overrideRisks),
     query: query ?? '',
+    reportGenerationId: latest.context.generationId,
+    reportDate: latest.context.date,
+    snapshotDate: runDate,
   });
 
   if (result.status === 'overview') {
@@ -899,6 +905,12 @@ function formatAdjustmentAmountText(adjustmentAmount: number): string {
   return `${prefix}${adjustmentAmount.toFixed(2)}`;
 }
 
+function hasAmbiguousBarePriceNumber(text: string): boolean {
+  const compact = text.replace(/\s+/g, '');
+  if (/[折倍xX%％元块+-]/u.test(compact)) return false;
+  return /(?:价格|租金)(?:为|到|成)?\d+(?:\.\d+)?$/u.test(compact);
+}
+
 function compactPreviewLine(productId: string, fields: Record<string, string>): string {
   const fieldCount = Object.keys(fields).length;
   const samples = Object.entries(fields)
@@ -917,6 +929,12 @@ function formatPricePreviewText(input: {
   blocked: string[];
 }): string {
   const readyLines = input.readyItems.slice(0, 12).map((item, index) => `${index + 1}. ${compactPreviewLine(item.productId, item.fields)}${item.audit?.taskId ? `；审计 ${item.audit.taskId}` : ''}`);
+  const auditCount = input.readyItems.filter((item) => item.audit?.taskId).length;
+  const safetyLine = auditCount === input.readyItems.length && input.readyItems.length > 0
+    ? '安全边界：确认前不会改价；确认后按上面每个商品的审计预览逐个执行，并保留各自回滚文件。'
+    : auditCount > 0
+      ? `安全边界：确认前不会改价；确认后按上面字段逐个串行执行；其中 ${auditCount} 个商品带审计引用。`
+      : '安全边界：确认前不会改价；确认后按上面字段逐个串行执行。';
   return [
     `改价预览：${input.productIds.length} 个端内ID`,
     input.discount !== undefined ? `折扣：${formatDiscountText(input.discount)}` : undefined,
@@ -927,9 +945,97 @@ function formatPricePreviewText(input: {
     ...readyLines,
     input.readyItems.length > readyLines.length ? `还有 ${input.readyItems.length - readyLines.length} 个商品未展示。` : undefined,
     '',
-    '安全边界：确认前不会改价；确认后按上面每个商品的审计预览逐个执行，并保留各自回滚文件。',
+    safetyLine,
     ...(input.blocked.length ? ['', '已阻断，未生成执行确认卡：', ...input.blocked.slice(0, 12)] : []),
   ].filter((line): line is string => Boolean(line)).join('\n');
+}
+
+function moneyFixed(value: number): string {
+  return value.toFixed(2);
+}
+
+function batchReadPricePreviewFields(
+  values: unknown,
+  input: { discount?: number; adjustmentAmount?: number },
+): Record<string, string> {
+  if (!isRecord(values)) return {};
+  const firstSpec = Object.values(values).find(isRecord) as Record<string, unknown> | undefined;
+  const source = firstSpec ?? values;
+  const fields: Record<string, string> = {};
+  for (const [field, raw] of Object.entries(source)) {
+    if (!isRentPriceField(field)) continue;
+    const current = Number(raw);
+    if (!Number.isFinite(current)) continue;
+    fields[field] = moneyFixed(input.discount !== undefined
+      ? current * input.discount
+      : current + (input.adjustmentAmount ?? 0));
+  }
+  return fields;
+}
+
+const BATCH_READ_AUDIT_CONCURRENCY = 12;
+
+async function mapConcurrent<T, R>(items: T[], concurrency: number, worker: (item: T, index: number) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(Math.max(1, concurrency), items.length);
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await worker(items[index], index);
+    }
+  }));
+  return results;
+}
+
+type BatchReadPricePreviewOutcome =
+  | { status: 'ready'; item: { productId: string; fields: Record<string, string>; audit?: RentalPriceAuditReference } }
+  | { status: 'blocked'; message: string };
+
+async function batchReadPricePreviewItems(
+  productIds: string[],
+  client: RentalPriceSkillClient,
+  input: { discount?: number; adjustmentAmount?: number },
+): Promise<{ readyItems: Array<{ productId: string; fields: Record<string, string>; audit?: RentalPriceAuditReference }>; blocked: string[] } | null> {
+  if (!client.batchRead || !client.auditPreviewFromRead || productIds.length < 2) return null;
+  const auditPreviewFromRead = client.auditPreviewFromRead;
+  let batchRead;
+  try {
+    batchRead = await client.batchRead(productIds);
+  } catch {
+    return null;
+  }
+  const results = isRecord(batchRead.results) ? batchRead.results : {};
+  const readyItems: Array<{ productId: string; fields: Record<string, string>; audit?: RentalPriceAuditReference }> = [];
+  const blocked: string[] = [];
+  const outcomes = await mapConcurrent(productIds, BATCH_READ_AUDIT_CONCURRENCY, async (productId): Promise<BatchReadPricePreviewOutcome> => {
+    const result = results[productId];
+    if (!isRecord(result)) {
+      return { status: 'blocked', message: `商品 ${productId}：批量读取失败` };
+    }
+    const status = readString(result.status);
+    const fields = batchReadPricePreviewFields(result.values, input);
+    if (Object.keys(fields).length === 0) {
+      return { status: 'blocked', message: `商品 ${productId}：批量读取${status ? ` ${status}` : ''}，没有可改租金字段` };
+    }
+    let audit: RentalPriceAuditReference | undefined;
+    try {
+      const auditPreview = await auditPreviewFromRead(productId, result, fields);
+      audit = compactAuditReference(auditPreview ?? undefined);
+    } catch (error) {
+      return { status: 'blocked', message: `商品 ${productId}：审计预览失败（${error instanceof Error ? error.message : String(error)}）` };
+    }
+    if (audit?.hasErrors) {
+      return { status: 'blocked', message: `商品 ${productId}：审计错误，已阻断` };
+    }
+    return { status: 'ready', item: { productId, fields, ...(audit ? { audit } : {}) } };
+  });
+  for (const outcome of outcomes) {
+    if (outcome.status === 'ready') readyItems.push(outcome.item);
+    else blocked.push(outcome.message);
+  }
+  return { readyItems, blocked };
 }
 
 function readProductIdArray(value: unknown, maxItems: number): string[] | null {
@@ -978,6 +1084,12 @@ async function rentalPricePreviewResponse(
       metadata: { toolName: 'rental.pricePreview', ok: false, productIds },
     };
   }
+  if (!hasExplicitFields && explicitDiscount && parsedDiscount !== null && hasAmbiguousBarePriceNumber(reason)) {
+    return {
+      text: `${INVALID_DISCOUNT_ARGUMENT_MESSAGE}\n请明确写成“8折 / 0.8倍 / +8元 / -8元 / 价格改为8元”。`,
+      metadata: { toolName: 'rental.pricePreview', ok: false, productIds },
+    };
+  }
   const adjustmentAmount = hasExplicitFields
     ? undefined
     : (readPriceAdjustmentAmountArgument(priceArgs.adjustmentAmount) ?? inferPriceAdjustmentAmountFromText(reason));
@@ -991,7 +1103,19 @@ async function rentalPricePreviewResponse(
 
   const blocked: string[] = [];
   const readyItems: Array<{ productId: string; fields: Record<string, string>; audit?: RentalPriceAuditReference }> = [];
-  for (const productId of productIds) {
+  const batchReadInput: { discount?: number; adjustmentAmount?: number } = {
+    ...(discount !== undefined && discount !== null ? { discount } : {}),
+    ...(adjustmentAmount !== undefined && adjustmentAmount !== null ? { adjustmentAmount } : {}),
+  };
+  const batchReadItems = !hasExplicitFields && (batchReadInput.discount !== undefined || batchReadInput.adjustmentAmount !== undefined)
+    ? await batchReadPricePreviewItems(productIds, client, batchReadInput)
+    : null;
+  if (batchReadItems) {
+    readyItems.push(...batchReadItems.readyItems);
+    blocked.push(...batchReadItems.blocked);
+  }
+
+  for (const productId of batchReadItems ? [] : productIds) {
     const requestArgs: Record<string, unknown> = hasExplicitFields
       ? { productId, fields: priceArgs.fields }
       : adjustmentAmount !== null
@@ -2313,12 +2437,16 @@ export async function executeAgentToolRequest(
     case 'publicTraffic.latestSummary': {
       const date = readOptionalDate(request.arguments.date);
       const report = await findReportContextForTool(outputDir, date);
-      return { text: report ? formatLatestSummary(report.context) : missingReportContextText(date) };
+      if (!report) return { text: missingReportContextText(date) };
+      const text = formatLatestSummary(report.context);
+      return { text, card: buildQueryTextCard(report.context, text, { template: 'blue' }), metadata: { cardMode: 'nonBlocking' } };
     }
     case 'publicTraffic.conversionSummary': {
       const date = readOptionalDate(request.arguments.date);
       const report = await findReportContextForTool(outputDir, date);
-      return { text: report ? formatConversionSummary(report.context) : missingReportContextText(date) };
+      if (!report) return { text: missingReportContextText(date) };
+      const text = formatConversionSummary(report.context);
+      return { text, card: buildQueryTextCard(report.context, text, { template: 'blue' }), metadata: { cardMode: 'nonBlocking' } };
     }
     case 'publicTraffic.reportQuery': {
       const date = readOptionalDate(request.arguments.date);
@@ -2327,51 +2455,40 @@ export async function executeAgentToolRequest(
         if (!report) return { text: missingReportContextText(date) };
         const compareDate = comparisonReportDate(report.context.date, request.arguments);
         const compareReport = await findReportContextForTool(outputDir, compareDate);
+        if (compareReport) {
+          const text = runPublicTrafficReportDateComparison(report.context, compareReport.context, { ...request.arguments, ...(date ? { date } : {}), compareDate } as PublicTrafficReportQueryArguments);
+          return { text, card: buildQueryTextCard(report.context, text, { template: 'blue' }), metadata: { cardMode: 'nonBlocking' } };
+        }
         return {
-          text: compareReport
-            ? runPublicTrafficReportDateComparison(report.context, compareReport.context, { ...request.arguments, ...(date ? { date } : {}), compareDate } as PublicTrafficReportQueryArguments)
-            : missingReportContextText(compareDate),
+          text: missingReportContextText(compareDate),
         };
       }
       const text = report
         ? runPublicTrafficReportQuery(report.context, { ...request.arguments, ...(date ? { date } : {}) } as PublicTrafficReportQueryArguments)
         : missingReportContextText(date);
-      if (report && request.arguments.target === 'section') {
-        const args = { ...request.arguments, ...(date ? { date } : {}) } as PublicTrafficReportQueryArguments;
-        const sectionData = buildReportSectionCardData(report.context, args);
-        if (sectionData) {
-          const productIds = sectionData.rows.map((row) => row.id.replace(/^端内ID\s*/i, ''));
-          const result = queryProductResult(report.context, productIds.join(','));
-          return {
-            text,
-            card: buildProblemSectionCard({
-              title: sectionData.label,
-              context: report.context,
-              result,
-              actionRows: sectionData.rows.map((row, index) => ({ ...row, id: productIds[index] ?? row.id })),
-              total: sectionData.total,
-              queryRef: `${report.context.date}:${args.section ?? 'recommendedActions'}`,
-            }),
-          };
-        }
-      }
-      return { text };
+      const cardTargets = new Set(['summary', 'comparison', 'productAggregation', 'orders', 'orderDerived', 'dataQuality', 'conclusions']);
+      return report && cardTargets.has(String(request.arguments.target)) ? { text, card: buildQueryTextCard(report.context, text, { template: 'blue' }), metadata: { cardMode: 'nonBlocking' } } : { text };
+    }
+    case 'productLink.query': {
+      const date = readOptionalDate(request.arguments.date);
+      const report = await findReportContextForTool(outputDir, date);
+      if (!report) return { text: missingReportContextText(date) };
+      return runProductLinkQuery(report.context, { ...request.arguments, ...(date ? { date } : {}) } as ProductLinkQueryArguments).response;
     }
     case 'product.query': {
       const date = readOptionalDate(request.arguments.date);
       const report = await findReportContextForTool(outputDir, date);
       const keyword = requireString(request.arguments.keyword, 'keyword');
-      const productIds = parseNumericProductIdList(keyword);
       if (report) {
-        const result = queryProductResult(report.context, keyword);
-        if (result.matches.length > 0 || result.ambiguous.length > 0) {
-          return {
-            text: formatProductQueryResult(result),
-            ...(result.matches.length === 1 ? { card: buildProductDetailCard(report.context, result) } : {}),
-          };
-        }
+        const unified = runProductLinkQuery(report.context, {
+          queryType: parseNumericProductIdList(keyword).length > 1 ? 'productList' : 'productDetail',
+          productQuery: keyword,
+          ...(date ? { date } : {}),
+        });
+        if (unified.result && (unified.result.matches.length > 0 || unified.result.ambiguous.length > 0)) return unified.response;
       }
       if (!report && date) return { text: missingReportContextText(date) };
+      const productIds = parseNumericProductIdList(keyword);
       if (productIds.length > 0) {
         const registryContext = await loadClosedOrderRegistryContext(options.closedOrderRegistryPaths);
         return { text: formatRegistryProductRows(productIds, registryContext.registry) };
@@ -2613,6 +2730,18 @@ export async function executeAgentToolRequest(
     case 'rental.specDiscoverFull':
     case 'rental.readRaw':
       return executeRentalReadOnlyOperationHandler(request, options.rentalPriceClient ?? createRentalPriceSkillClient());
+    case 'rental.imageRead':
+    case 'rental.imageUpload':
+    case 'rental.imagePick':
+    case 'rental.imageOrder':
+    case 'rental.whiteImageSet':
+    case 'rental.imageVerify':
+      return executeRentalImageTool(request, options.rentalPriceClient);
+    case 'rental.vasRead':
+    case 'rental.vasCatalogRead':
+    case 'rental.vasApply':
+    case 'rental.vasVerify':
+      return executeRentalVasTool(request, options.rentalPriceClient);
     case 'rental.copy':
     case 'rental.tenancySet':
     case 'rental.specDiscover':
@@ -2729,9 +2858,11 @@ export async function executeAgentToolRequest(
     case 'rental.batchResume':
     case 'rental.batchReport':
     case 'rental.batchRollback':
+    case 'rental.batchDelayedVerify':
       return executeRentalBatchTool(request.toolName, request.arguments, options.ledgerContext);
     case 'rental.mirrorSearch':
     case 'rental.mirrorBatchSpec':
+    case 'rental.mirrorWritebackState':
       return executeRentalMirrorTool(request.toolName, request.arguments);
     case 'closedOrder.syncFeedback': {
       const result = await syncClosedOrderFeedbackFromApi(

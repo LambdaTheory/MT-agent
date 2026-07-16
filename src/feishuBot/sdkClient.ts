@@ -1308,7 +1308,8 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
 
         if (actionName === 'query_full_list') {
           const text = await resolveQueryFullListText(outputDir, value?.queryRef);
-          return cardActionUpdateResponse(statusCard('完整清单', text, 'blue'));
+          await replyText(client, messageId, text);
+          return cardActionUpdateResponse(statusCard('完整清单已发送', '完整清单已通过纯文本消息发送，请在当前会话查看。', 'blue'));
         }
 
         if (actionName === 'id_lookup') {

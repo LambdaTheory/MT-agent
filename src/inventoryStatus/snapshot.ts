@@ -2,13 +2,15 @@ import type { PeriodKey } from '../domain/types.js';
 import type { LinkRegistryOverrideRisk } from '../linkRegistry/overrides.js';
 import type { LinkRegistryEntry } from '../linkRegistry/types.js';
 import type { PublicTrafficDataReportContext, PublicTrafficPeriodMetrics, PublicTrafficProductDataRow } from '../publicTraffic/types.js';
-import type { InventoryStatusGroupSnapshot, InventoryStatusPeriodMetrics, InventoryStatusSnapshot, InventoryStatusTopLink } from './types.js';
+import { INVENTORY_STATUS_SNAPSHOT_SCHEMA_VERSION, type InventoryStatusGroupSnapshot, type InventoryStatusPeriodMetrics, type InventoryStatusSnapshot, type InventoryStatusTopLink } from './types.js';
 
 const PERIODS: PeriodKey[] = ['1d', '7d', '30d'];
 
 export interface BuildInventorySameSkuSnapshotInput {
   date: string;
   reportDate: string;
+  generationId: string;
+  generatedAt?: string;
   context: PublicTrafficDataReportContext;
   registry: LinkRegistryEntry[];
   overrideRisks: LinkRegistryOverrideRisk[];
@@ -17,6 +19,7 @@ export interface BuildInventorySameSkuSnapshotInput {
 interface GroupAccumulator {
   seed: LinkRegistryEntry;
   entries: LinkRegistryEntry[];
+  conflictEntries: LinkRegistryEntry[];
   rows: Array<{ entry: LinkRegistryEntry; row: PublicTrafficProductDataRow }>;
   missingMetricEntries: LinkRegistryEntry[];
   periods: Record<PeriodKey, InventoryStatusPeriodMetrics>;
@@ -24,20 +27,20 @@ interface GroupAccumulator {
 
 function emptyPeriodMetrics(): InventoryStatusPeriodMetrics {
   return {
-    exposure: 0,
-    publicVisits: 0,
-    amount: 0,
-    createdOrders: 0,
-    signedOrders: 0,
-    reviewedOrders: 0,
-    shippedOrders: 0,
-    createdOrderAmount: 0,
-    signedOrderAmount: 0,
-    reviewedOrderAmount: 0,
-    shippedOrderAmount: 0,
-    exposureVisitRate: 0,
-    visitCreatedOrderRate: 0,
-    visitShipmentRate: 0,
+    exposure: null,
+    publicVisits: null,
+    amount: null,
+    createdOrders: null,
+    signedOrders: null,
+    reviewedOrders: null,
+    shippedOrders: null,
+    createdOrderAmount: null,
+    signedOrderAmount: null,
+    reviewedOrderAmount: null,
+    shippedOrderAmount: null,
+    exposureVisitRate: null,
+    visitCreatedOrderRate: null,
+    visitShipmentRate: null,
   };
 }
 
@@ -45,6 +48,7 @@ function createAccumulator(seed: LinkRegistryEntry): GroupAccumulator {
   return {
     seed,
     entries: [],
+    conflictEntries: [],
     rows: [],
     missingMetricEntries: [],
     periods: {
@@ -66,26 +70,38 @@ function findRow(context: PublicTrafficDataReportContext, entry: LinkRegistryEnt
   });
 }
 
+function listingState(entry: LinkRegistryEntry): NonNullable<LinkRegistryEntry['listingState']> {
+  return entry.listingState ?? 'unknown';
+}
+
+function addKnown(current: number | null, value: number): number {
+  return (current ?? 0) + value;
+}
+
 function mergePeriodMetric(target: InventoryStatusPeriodMetrics, source: PublicTrafficPeriodMetrics): void {
-  target.exposure += source.exposure;
-  target.publicVisits += source.publicVisits;
-  target.amount += source.amount;
-  target.createdOrders += source.createdOrders;
-  target.signedOrders += source.signedOrders;
-  target.reviewedOrders += source.reviewedOrders;
-  target.shippedOrders += source.shippedOrders;
-  target.createdOrderAmount += source.createdOrderAmount ?? 0;
-  target.signedOrderAmount += source.signedOrderAmount ?? 0;
-  target.reviewedOrderAmount += source.reviewedOrderAmount ?? 0;
-  target.shippedOrderAmount += source.shippedOrderAmount ?? 0;
+  if (source.hasExposureData) {
+    target.exposure = addKnown(target.exposure, source.exposure);
+    target.publicVisits = addKnown(target.publicVisits, source.publicVisits);
+    target.amount = addKnown(target.amount, source.amount);
+  }
+  if (source.hasDashboardData) {
+    target.createdOrders = addKnown(target.createdOrders, source.createdOrders);
+    target.signedOrders = addKnown(target.signedOrders, source.signedOrders);
+    target.reviewedOrders = addKnown(target.reviewedOrders, source.reviewedOrders);
+    target.shippedOrders = addKnown(target.shippedOrders, source.shippedOrders);
+    if (typeof source.createdOrderAmount === 'number') target.createdOrderAmount = addKnown(target.createdOrderAmount, source.createdOrderAmount);
+    if (typeof source.signedOrderAmount === 'number') target.signedOrderAmount = addKnown(target.signedOrderAmount, source.signedOrderAmount);
+    if (typeof source.reviewedOrderAmount === 'number') target.reviewedOrderAmount = addKnown(target.reviewedOrderAmount, source.reviewedOrderAmount);
+    if (typeof source.shippedOrderAmount === 'number') target.shippedOrderAmount = addKnown(target.shippedOrderAmount, source.shippedOrderAmount);
+  }
 }
 
 function recomputeRates(metric: InventoryStatusPeriodMetrics): InventoryStatusPeriodMetrics {
   return {
     ...metric,
-    exposureVisitRate: metric.exposure > 0 ? metric.publicVisits / metric.exposure : 0,
-    visitCreatedOrderRate: metric.publicVisits > 0 ? metric.createdOrders / metric.publicVisits : 0,
-    visitShipmentRate: metric.publicVisits > 0 ? metric.shippedOrders / metric.publicVisits : 0,
+    exposureVisitRate: metric.exposure !== null && metric.publicVisits !== null && metric.exposure > 0 ? metric.publicVisits / metric.exposure : null,
+    visitCreatedOrderRate: metric.publicVisits !== null && metric.createdOrders !== null && metric.publicVisits > 0 ? metric.createdOrders / metric.publicVisits : null,
+    visitShipmentRate: metric.publicVisits !== null && metric.shippedOrders !== null && metric.publicVisits > 0 ? metric.shippedOrders / metric.publicVisits : null,
   };
 }
 
@@ -98,6 +114,23 @@ function groupName(entry: LinkRegistryEntry): string {
   return entry.shortName?.trim() || entry.productName?.trim() || entry.sameSkuGroupId?.trim() || entry.internalProductId;
 }
 
+function oneDayExposureMetric(row: PublicTrafficProductDataRow): Pick<InventoryStatusTopLink, 'oneDayExposure' | 'oneDayPublicVisits' | 'oneDayAmount'> {
+  const oneDay = row.periods['1d'];
+  if (!oneDay.hasExposureData) return { oneDayExposure: null, oneDayPublicVisits: null, oneDayAmount: null };
+  return {
+    oneDayExposure: oneDay.exposure,
+    oneDayPublicVisits: oneDay.publicVisits,
+    oneDayAmount: oneDay.amount,
+  };
+}
+
+function compareNullableDesc(left: number | null, right: number | null): number {
+  if (left === null && right === null) return 0;
+  if (left === null) return 1;
+  if (right === null) return -1;
+  return right - left;
+}
+
 function topLinks(rows: Array<{ entry: LinkRegistryEntry; row: PublicTrafficProductDataRow }>): InventoryStatusTopLink[] {
   return rows
     .map(({ entry, row }) => ({
@@ -105,15 +138,13 @@ function topLinks(rows: Array<{ entry: LinkRegistryEntry; row: PublicTrafficProd
       ...(entry.platformProductId ? { platformProductId: entry.platformProductId } : {}),
       productName: row.productName || entry.productName || entry.shortName || entry.internalProductId,
       ...(entry.shortName ? { shortName: entry.shortName } : {}),
-      status: entry.status,
-      oneDayExposure: row.periods['1d'].exposure,
-      oneDayPublicVisits: row.periods['1d'].publicVisits,
-      oneDayAmount: row.periods['1d'].amount,
+      listingState: listingState(entry),
+      ...oneDayExposureMetric(row),
     }))
     .sort((left, right) =>
-      right.oneDayAmount - left.oneDayAmount
-      || right.oneDayPublicVisits - left.oneDayPublicVisits
-      || right.oneDayExposure - left.oneDayExposure
+      compareNullableDesc(left.oneDayAmount, right.oneDayAmount)
+      || compareNullableDesc(left.oneDayPublicVisits, right.oneDayPublicVisits)
+      || compareNullableDesc(left.oneDayExposure, right.oneDayExposure)
       || Number(left.internalProductId) - Number(right.internalProductId)
       || left.internalProductId.localeCompare(right.internalProductId))
     .slice(0, 5);
@@ -121,14 +152,16 @@ function topLinks(rows: Array<{ entry: LinkRegistryEntry; row: PublicTrafficProd
 
 function risks(group: GroupAccumulator, activeLinkCount: number): string[] {
   const items: string[] = [];
-  if (activeLinkCount <= 1) items.push('仅 1 条 active 链接');
-  if (group.entries.some((entry) => entry.status !== 'active')) items.push('组内存在 removed/unknown 链接');
+  if (activeLinkCount === 0) items.push('无在售链接');
+  else if (activeLinkCount === 1) items.push('仅 1 条在售链接');
+  if (group.entries.some((entry) => listingState(entry) !== 'on_sale')) items.push('组内存在 delisted/gone/unknown 链接');
+  if (group.conflictEntries.length > 0) items.push(`${group.conflictEntries.length} 条映射冲突链接`);
   if (group.missingMetricEntries.length > 0) items.push(`组内 ${group.missingMetricEntries.length} 条链接无日报数据`);
   return items;
 }
 
 function finalizeGroup(sameSkuGroupId: string, group: GroupAccumulator): InventoryStatusGroupSnapshot {
-  const activeLinkCount = group.entries.filter((entry) => entry.status === 'active').length;
+  const activeLinkCount = group.entries.filter((entry) => listingState(entry) === 'on_sale').length;
   return {
     sameSkuGroupId,
     groupName: groupName(group.seed),
@@ -152,32 +185,41 @@ function finalizeGroup(sameSkuGroupId: string, group: GroupAccumulator): Invento
 export function buildInventorySameSkuSnapshot(input: BuildInventorySameSkuSnapshotInput): InventoryStatusSnapshot {
   const groupedLinkCount = input.registry.filter((entry) => entry.sameSkuGroupId?.trim()).length;
   const groups = new Map<string, GroupAccumulator>();
+  const warnings: string[] = [];
 
   for (const entry of input.registry) {
     const sameSkuGroupId = entry.sameSkuGroupId?.trim();
     if (!sameSkuGroupId) continue;
     const current = groups.get(sameSkuGroupId) ?? createAccumulator(entry);
     current.entries.push(entry);
-    const row = findRow(input.context, entry);
-    if (row) mergeRow(current, row, entry);
-    else current.missingMetricEntries.push(entry);
+    if (entry.platformProductIdConflict) {
+      current.conflictEntries.push(entry);
+      warnings.push(`跳过映射冲突链接 ${entry.internalProductId}: ${entry.platformProductIdConflict.platformProductIds.join(', ')}`);
+    } else {
+      const row = findRow(input.context, entry);
+      if (row) mergeRow(current, row, entry);
+      else current.missingMetricEntries.push(entry);
+    }
     groups.set(sameSkuGroupId, current);
   }
 
   const snapshots = [...groups.entries()]
     .map(([sameSkuGroupId, group]) => finalizeGroup(sameSkuGroupId, group))
     .sort((left, right) =>
-      right.periods['1d'].amount - left.periods['1d'].amount
-      || right.periods['1d'].publicVisits - left.periods['1d'].publicVisits
+      compareNullableDesc(left.periods['1d'].amount, right.periods['1d'].amount)
+      || compareNullableDesc(left.periods['1d'].publicVisits, right.periods['1d'].publicVisits)
       || left.sameSkuGroupId.localeCompare(right.sameSkuGroupId));
 
   return {
+    schemaVersion: INVENTORY_STATUS_SNAPSHOT_SCHEMA_VERSION,
+    generationId: input.generationId,
     date: input.date,
     sourceReportDate: input.reportDate,
-    generatedAt: `${input.date}T00:00:00.000Z`,
+    generatedAt: input.generatedAt ?? new Date().toISOString(),
+    warnings,
     summary: {
       sameSkuGroupCount: snapshots.length,
-      activeLinkCount: input.registry.filter((entry) => entry.status === 'active').length,
+      activeLinkCount: input.registry.filter((entry) => listingState(entry) === 'on_sale').length,
       totalLinkCount: input.registry.length,
     },
     coverage: {
@@ -188,9 +230,10 @@ export function buildInventorySameSkuSnapshot(input: BuildInventorySameSkuSnapsh
     },
     registryAuditSummary: {
       totalLinks: input.registry.length,
-      activeLinks: input.registry.filter((entry) => entry.status === 'active').length,
-      removedLinks: input.registry.filter((entry) => entry.status === 'removed').length,
-      unknownLinks: input.registry.filter((entry) => entry.status === 'unknown').length,
+      onSaleLinks: input.registry.filter((entry) => listingState(entry) === 'on_sale').length,
+      delistedLinks: input.registry.filter((entry) => listingState(entry) === 'delisted').length,
+      goneLinks: input.registry.filter((entry) => listingState(entry) === 'gone').length,
+      unknownLinks: input.registry.filter((entry) => listingState(entry) === 'unknown').length,
       overrideRiskCount: input.overrideRisks.length,
     },
     groups: snapshots,

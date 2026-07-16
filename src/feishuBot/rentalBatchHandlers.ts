@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { basename, join, resolve, sep } from 'node:path';
+import { basename, dirname, join, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 import { recordOperationEvent } from '../agentRuntime/operationLedger.js';
 import type { RentalWriteLedgerContext } from './rentalWriteOperationHandlers.js';
@@ -8,13 +8,14 @@ import type { BotResponse } from './types.js';
 
 const execFileAsync = promisify(execFile);
 
-type BatchCommand = 'preview' | 'execute' | 'status' | 'resume' | 'report' | 'rollback';
+type BatchCommand = 'preview' | 'execute' | 'status' | 'resume' | 'report' | 'rollback' | 'delayed-verify';
 
 interface BatchToolRequest {
   command: BatchCommand;
   fileArg?: string;
   confirm?: boolean;
   confirmFormSetupWithoutPreview?: boolean;
+  confirmImageWithoutPreview?: boolean;
 }
 
 interface ResumeSpec {
@@ -46,12 +47,20 @@ function rentalRoot(): string {
   return process.env.RENTAL_PRICE_AGENT_DIR ?? resolve(process.cwd(), 'vendor', 'rental-price-agent');
 }
 
+function stableSiblingDataRoot(rootDir: string): string {
+  return resolve(dirname(rootDir), `.${basename(rootDir)}-data`);
+}
+
+function batchesDir(rootDir: string): string {
+  return resolve(stableSiblingDataRoot(rootDir), 'tasks', 'batches');
+}
+
 function safeBatchPath(rootDir: string, value: unknown, fieldName: string): string {
   const raw = readString(value);
   if (!raw || raw.includes('\0')) throw new Error(`${fieldName} is required`);
-  const batchesDir = resolve(rootDir, 'tasks', 'batches');
+  const batchRoot = batchesDir(rootDir);
   const resolved = resolve(raw);
-  if (!isPathInside(batchesDir, resolved)) throw new Error(`${fieldName} must be inside rental tasks/batches`);
+  if (!isPathInside(batchRoot, resolved)) throw new Error(`${fieldName} must be inside rental tasks/batches`);
   return resolved;
 }
 
@@ -60,7 +69,7 @@ function requestFromTool(toolName: string, args: Record<string, unknown>, rootDi
     case 'rental.batchPreview':
       return { command: 'preview', fileArg: safeBatchPath(rootDir, args.specFile, 'specFile') };
     case 'rental.batchExecute':
-      return { command: 'execute', fileArg: safeBatchPath(rootDir, args.specFile, 'specFile'), confirmFormSetupWithoutPreview: args.confirmFormSetupWithoutPreview === true };
+      return { command: 'execute', fileArg: safeBatchPath(rootDir, args.specFile, 'specFile'), confirmFormSetupWithoutPreview: args.confirmFormSetupWithoutPreview === true, confirmImageWithoutPreview: args.confirmImageWithoutPreview === true };
     case 'rental.batchStatus':
       return { command: 'status', fileArg: safeBatchPath(rootDir, args.stateFile, 'stateFile') };
     case 'rental.batchResume':
@@ -69,20 +78,29 @@ function requestFromTool(toolName: string, args: Record<string, unknown>, rootDi
       return { command: 'report', fileArg: safeBatchPath(rootDir, args.stateFile, 'stateFile') };
     case 'rental.batchRollback':
       return { command: 'rollback', fileArg: safeBatchPath(rootDir, args.stateFile, 'stateFile'), confirm: args.confirm === true };
+    case 'rental.batchDelayedVerify':
+      return { command: 'delayed-verify', fileArg: safeBatchPath(rootDir, args.stateFile, 'stateFile') };
     default:
       return null;
   }
 }
 
-async function executionSpecFile(rootDir: string, specFile: string, confirmFormSetupWithoutPreview: boolean): Promise<string> {
-  if (!confirmFormSetupWithoutPreview) return specFile;
+async function executionSpecFile(rootDir: string, specFile: string, options: { confirmFormSetupWithoutPreview: boolean; confirmImageWithoutPreview: boolean }): Promise<string> {
+  if (!options.confirmFormSetupWithoutPreview && !options.confirmImageWithoutPreview) return specFile;
   const parsed = JSON.parse(await readFile(specFile, 'utf8')) as unknown;
   if (!isRecord(parsed)) throw new Error('specFile must contain an object');
-  const options = isRecord(parsed.options) ? parsed.options : {};
-  const batchesDir = resolve(rootDir, 'tasks', 'batches');
-  await mkdir(batchesDir, { recursive: true });
-  const file = join(batchesDir, `mt-agent-batch-execute-${Date.now()}.json`);
-  await writeFile(file, `${JSON.stringify({ ...parsed, options: { ...options, confirmFormSetupWithoutPreview: true } }, null, 2)}\n`, 'utf8');
+  const existingOptions = isRecord(parsed.options) ? parsed.options : {};
+  const batchRoot = batchesDir(rootDir);
+  await mkdir(batchRoot, { recursive: true });
+  const file = join(batchRoot, `mt-agent-batch-execute-${Date.now()}.json`);
+  await writeFile(file, `${JSON.stringify({
+    ...parsed,
+    options: {
+      ...existingOptions,
+      ...(options.confirmFormSetupWithoutPreview ? { confirmFormSetupWithoutPreview: true } : {}),
+      ...(options.confirmImageWithoutPreview ? { confirmImageWithoutPreview: true } : {}),
+    },
+  }, null, 2)}\n`, 'utf8');
   return file;
 }
 
@@ -108,11 +126,11 @@ async function resumeSpecFile(rootDir: string, stateFile: string): Promise<Resum
     return productId !== null && !doneIds.has(productId);
   });
   if (!remaining.length) throw new Error('stateFile has no remaining batch items');
-  const batchesDir = resolve(rootDir, 'tasks', 'batches');
-  await mkdir(batchesDir, { recursive: true });
+  const batchRoot = batchesDir(rootDir);
+  await mkdir(batchRoot, { recursive: true });
   const batchId = readString(state.batchId) ?? 'unknown';
   const resumedAt = new Date().toISOString();
-  const file = join(batchesDir, `mt-agent-batch-resume-${batchId}-${Date.now()}.json`);
+  const file = join(batchRoot, `mt-agent-batch-resume-${batchId}-${Date.now()}.json`);
   await writeFile(file, `${JSON.stringify({
     items: remaining,
     ...(spec && spec.shared !== undefined ? { shared: spec.shared } : {}),
@@ -158,7 +176,7 @@ async function runBatchRunner(rootDir: string, request: BatchToolRequest): Promi
   const script = join(rootDir, 'scripts', 'batch-runner.js');
   let resume: ResumeSpec | undefined;
   const fileArg = request.command === 'execute' && request.fileArg
-    ? await executionSpecFile(rootDir, request.fileArg, request.confirmFormSetupWithoutPreview === true)
+    ? await executionSpecFile(rootDir, request.fileArg, { confirmFormSetupWithoutPreview: request.confirmFormSetupWithoutPreview === true, confirmImageWithoutPreview: request.confirmImageWithoutPreview === true })
     : request.command === 'resume' && request.fileArg
       ? (resume = await resumeSpecFile(rootDir, request.fileArg)).file
       : request.fileArg;

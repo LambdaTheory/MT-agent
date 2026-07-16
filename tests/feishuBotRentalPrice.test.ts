@@ -1,6 +1,6 @@
-import { copyFile, mkdir, mkdtemp, readFile } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readdir, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { executeAgentToolRequest } from '../src/feishuBot/agentToolExecutor.js';
 import { parseBotIntent } from '../src/feishuBot/intent.js';
@@ -285,7 +285,7 @@ describe('rental price skill client copy diagnostics', () => {
 
     const result = await client.platformSearch!('x200u');
 
-    expect(calls).toEqual([{ action: 'platform-search', keyword: 'x200u' }]);
+    expect(calls).toEqual([{ action: 'hello', negotiationNonce: expect.any(String), client: expect.any(Object) }, { action: 'platform-search', keyword: 'x200u', _negotiation: expect.any(Object) }]);
     expect(result.ok).toBe(true);
     expect(result.keyword).toBe('x200u');
     expect(result.count).toBe(1);
@@ -294,7 +294,7 @@ describe('rental price skill client copy diagnostics', () => {
     expect(result.lines.join('\n')).toContain('761');
   });
 
-  it('exposes full platform search through a read-only platform-search-all action with local truncation', async () => {
+  it('exposes full platform search through stable platform-search with local truncation', async () => {
     const calls: unknown[] = [];
     vi.stubGlobal('fetch', vi.fn(async (_input, init) => {
       calls.push(JSON.parse(String(init?.body ?? '{}')));
@@ -315,7 +315,7 @@ describe('rental price skill client copy diagnostics', () => {
 
     const result = await client.platformSearchAll!(2);
 
-    expect(calls).toEqual([{ action: 'platform-search-all' }]);
+    expect(calls).toEqual([{ action: 'hello', negotiationNonce: expect.any(String), client: expect.any(Object) }, { action: 'platform-search', keyword: '', _negotiation: expect.any(Object) }]);
     expect(result.ok).toBe(true);
     expect(result.count).toBe(3);
     expect(result.rows).toHaveLength(2);
@@ -345,7 +345,7 @@ describe('rental price skill client copy diagnostics', () => {
 
     const result = await client.batchRead!(['761', '762']);
 
-    expect(calls).toEqual([{ action: 'batch-read', productIds: ['761', '762'] }]);
+    expect(calls).toEqual([{ action: 'hello', negotiationNonce: expect.any(String), client: expect.any(Object) }, { action: 'batch-read', productIds: ['761', '762'], _negotiation: expect.any(Object) }]);
     expect(result.ok).toBe(true);
     expect(result.count).toBe(2);
     expect(result.results).toMatchObject({
@@ -369,7 +369,7 @@ describe('rental price skill client copy diagnostics', () => {
 
     const result = await client.specDiscoverFull!('761');
 
-    expect(calls).toEqual([{ action: 'spec-discover', productId: '761' }]);
+    expect(calls).toEqual([{ action: 'hello', negotiationNonce: expect.any(String), client: expect.any(Object) }, { action: 'spec-discover', productId: '761', _negotiation: expect.any(Object) }]);
     expect(result.ok).toBe(true);
     expect(result.productId).toBe('761');
     expect(result.dimensions).toEqual([{ specId: '1355', title: '颜色', items: [{ id: '1', title: '黑色' }] }]);
@@ -395,7 +395,7 @@ describe('rental price skill client copy diagnostics', () => {
 
     const result = await client.readRaw!('761', ['rent1day']);
 
-    expect(calls).toEqual([{ action: 'read', productId: '761', fields: ['rent1day'] }]);
+    expect(calls).toEqual([{ action: 'hello', negotiationNonce: expect.any(String), client: expect.any(Object) }, { action: 'read', productId: '761', fields: ['rent1day'], _negotiation: expect.any(Object) }]);
     expect(result.ok).toBe(true);
     expect(result.status).toBe('partial');
     expect(result.productId).toBe('761');
@@ -535,6 +535,7 @@ describe('rental price skill client copy diagnostics', () => {
   it('generates diff audit, task log, and rollback artifact for price preview and updates the task after execution', async () => {
     const rootDir = await mkdtemp(join(tmpdir(), 'mt-agent-rental-price-audit-'));
     await copyRentalPriceAuditScripts(rootDir);
+    const dataRoot = join(dirname(rootDir), `.${basename(rootDir)}-data`);
     const currentValues = { rent1day: '30.00', rent10day: '80.00' };
     const applyProductIds: unknown[] = [];
     const submitExpectedProductIds: unknown[] = [];
@@ -564,16 +565,18 @@ describe('rental price skill client copy diagnostics', () => {
     expect(preview.audit?.taskId).toMatch(/^task_/);
     expect(preview.audit?.changesFile).toContain('changes_');
     expect(preview.audit?.rollbackFile).toContain('rollback_');
+    expect(preview.audit?.rollbackFile).toContain(join('artifacts', 'mt-agent-audit'));
     expect(preview.audit!.diff![0]).toMatchObject({ field: 'rent1day', old: '30.00', new: '22.00' });
     expect(preview.lines.join('\n')).toContain('审计任务');
     expect(await readFile(preview.audit!.rollbackFile!, 'utf8')).toContain('"rent1day": "30.00"');
+    expect(await readdir(join(dataRoot, 'tasks'))).not.toContainEqual(expect.stringMatching(/^mt-agent-|^rollback_|^preview_/));
 
     const result = await client.execute({ mode: 'explicit_fields', productId: '761', fields: preview.fields, audit: preview.audit });
 
     expect(result.ok).toBe(true);
     expect(result.audit?.taskId).toBe(preview.audit?.taskId);
     expect(result.lines.join('\n')).toContain(`auditTask: ${preview.audit?.taskId}`);
-    const task = JSON.parse(await readFile(join(rootDir, 'tasks', `${preview.audit?.taskId}.json`), 'utf8')) as { status: string; evidence: Array<{ type: string }> };
+    const task = JSON.parse(await readFile(join(dataRoot, 'tasks', `${preview.audit?.taskId}.json`), 'utf8')) as { status: string; evidence: Array<{ type: string }> };
     expect(task.status).toBe('completed');
     expect(task.evidence.some((item) => item.type === 'verify_result')).toBe(true);
 
@@ -585,9 +588,31 @@ describe('rental price skill client copy diagnostics', () => {
     expect(applyProductIds).toEqual(['761', '761']);
     expect(submitExpectedProductIds).toEqual(['761', '761']);
     expect(currentValues.rent1day).toBe('30.00');
-    const rolledBackTask = JSON.parse(await readFile(join(rootDir, 'tasks', `${preview.audit?.taskId}.json`), 'utf8')) as { status: string; evidence: Array<{ type: string }> };
+    const rolledBackTask = JSON.parse(await readFile(join(dataRoot, 'tasks', `${preview.audit?.taskId}.json`), 'utf8')) as { status: string; evidence: Array<{ type: string }> };
     expect(rolledBackTask.status).toBe('rolled_back');
     expect(rolledBackTask.evidence.some((item) => item.type === 'rollback_verify_result')).toBe(true);
+  }, 30000);
+
+  it('keeps fallback price execution artifacts outside lifecycle tasks state', async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), 'mt-agent-rental-price-fallback-artifacts-'));
+    const dataRoot = join(dirname(rootDir), `.${basename(rootDir)}-data`);
+    const applyChangesFiles: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (_input, init) => {
+      const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+      if (body.action === 'hello') return new Response(JSON.stringify({ status: 'ok', hello: true }));
+      if (body.action === 'apply' && typeof body.changesFile === 'string') {
+        applyChangesFiles.push(body.changesFile);
+        return new Response(JSON.stringify({ status: 'error' }));
+      }
+      return new Response(JSON.stringify({ status: 'ok' }));
+    }));
+    const client = createRentalPriceSkillClient({ rootDir, daemonUrl: 'http://127.0.0.1:9223' });
+
+    const result = await client.execute({ mode: 'explicit_fields', productId: '761', fields: { rent1day: '22.00' } });
+
+    expect(result.ok).toBe(false);
+    expect(applyChangesFiles[0]).toContain(join('artifacts', 'mt-agent-audit'));
+    expect(await readdir(join(dataRoot, 'tasks'))).not.toContainEqual(expect.stringMatching(/^mt-agent-|^verify-|^rollback-verify/));
   });
 });
 
@@ -597,7 +622,18 @@ async function copyRentalPriceAuditScripts(rootDir: string): Promise<void> {
     'scripts/diff-generator.js',
     'scripts/task-store.js',
     'scripts/lib/config-loader.js',
+    'scripts/lib/daemon-protocol.js',
+    'scripts/lib/daemon-client.js',
+    'scripts/lib/daemon-compatibility.js',
+    'scripts/lib/install-layout.js',
+    'scripts/lib/lease-lock.js',
+    'scripts/lib/migrations.js',
+    'scripts/lib/process-inspector.js',
     'scripts/lib/rule-checker.js',
+    'scripts/lib/version-contract.js',
+    'package-lock.json',
+    'package.json',
+    'release-manifest.json',
   ];
   for (const file of files) {
     const target = join(rootDir, file);
@@ -609,5 +645,10 @@ async function copyRentalPriceAuditScripts(rootDir: string): Promise<void> {
 
 async function writeAuditConfig(rootDir: string): Promise<void> {
   const { writeFile } = await import('node:fs/promises');
-  await writeFile(join(rootDir, 'config.json'), JSON.stringify({ rules: { minPrice: 1, maxPrice: 9999, maxChangePercent: 20 } }, null, 2), 'utf8');
+  const dataRoot = join(dirname(rootDir), `.${basename(rootDir)}-data`);
+  const sourceRoot = new URL('../vendor/rental-price-agent/', import.meta.url);
+  const config = JSON.parse(await readFile(new URL('config.example.json', sourceRoot), 'utf8')) as Record<string, unknown>;
+  config.rules = { minPrice: 1, maxPrice: 9999, maxChangePercent: 20 };
+  await mkdir(dataRoot, { recursive: true });
+  await writeFile(join(dataRoot, 'config.json'), JSON.stringify(config, null, 2), 'utf8');
 }

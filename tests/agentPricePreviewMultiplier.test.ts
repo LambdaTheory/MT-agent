@@ -53,6 +53,25 @@ describe('agent rental price preview multiplier handling', () => {
     expect(response.text).toContain('discount');
   });
 
+  it('rejects planner-inferred discounts when the original wording is a bare price number', async () => {
+    const { client, preview } = fakeRentalPriceClient();
+
+    const response = await executeAgentToolRequest(
+      {
+        toolName: 'rental.pricePreview',
+        arguments: { productIds: ['914'], discount: 0.8, scope: 'rent_fields' },
+        reason: '改价,914所有租期价格8',
+      },
+      'output',
+      { rentalPriceClient: client },
+    );
+
+    expect(preview).not.toHaveBeenCalled();
+    expect(response.metadata).toMatchObject({ toolName: 'rental.pricePreview', ok: false });
+    expect(response.text).toContain('8折');
+    expect(response.card).toBeUndefined();
+  });
+
   it('still infers an 8-fold discount from explicit fold wording', async () => {
     const { client, preview } = fakeRentalPriceClient();
 
@@ -194,6 +213,183 @@ describe('agent rental price preview multiplier handling', () => {
     expect(preview).toHaveBeenCalledWith({ mode: 'global_adjustment', productId: '851', adjustmentAmount: -1, scope: 'rent_fields' });
     expect(preview).toHaveBeenCalledWith({ mode: 'global_adjustment', productId: '929', adjustmentAmount: -1, scope: 'rent_fields' });
     expect(response?.card).toBeDefined();
+  });
+
+  it('accepts a 28-link same-model amount adjustment preview', async () => {
+    const { client, preview } = fakeRentalPriceClient();
+    const productIds = Array.from({ length: 28 }, (_, index) => String(900 + index));
+
+    const response = await executeAgentToolRequest(
+      {
+        toolName: 'rental.pricePreview',
+        arguments: { productIds, adjustmentAmount: -10, scope: 'rent_fields' },
+        reason: '改价,所有x300u链接所有租期价格-10元',
+      },
+      'output',
+      { rentalPriceClient: client },
+    );
+
+    expect(preview).toHaveBeenCalledTimes(28);
+    expect(preview).toHaveBeenCalledWith({ mode: 'global_adjustment', productId: '900', adjustmentAmount: -10, scope: 'rent_fields' });
+    expect(response.metadata).toMatchObject({ toolName: 'rental.pricePreview', ok: true, previewCount: 28 });
+    expect(response.card).toBeDefined();
+  });
+
+  it('uses batchRead for multi-product global amount previews when available', async () => {
+    const preview = vi.fn(async () => {
+      throw new Error('preview should not run when batchRead can build the preview');
+    });
+    const batchRead = vi.fn(async (productIds: string[]) => ({
+      ok: true,
+      status: 'ok',
+      count: productIds.length,
+      results: Object.fromEntries(productIds.map((productId, index) => [productId, {
+        status: 'ok',
+        productId,
+        specs: [{ specId: 's1', title: '默认' }],
+        values: { s1: { rent1day: String(100 + index), rent2day: String(120 + index), marketPrice: '9999' } },
+      }])),
+      errors: [],
+      warnings: [],
+      lines: ['batch-read: ok'],
+    }));
+    const auditPreviewFromRead = vi.fn(async (productId: string) => ({
+      taskId: `task_${productId}`,
+      rollbackFile: `rollback-${productId}.json`,
+      changesFile: `changes-${productId}.json`,
+      hasErrors: false,
+    }));
+    const productIds = ['900', '901', '902', '903'];
+
+    const response = await executeAgentToolRequest(
+      {
+        toolName: 'rental.pricePreview',
+        arguments: { productIds, adjustmentAmount: -10, scope: 'rent_fields' },
+        reason: '改价,所有x300u链接所有租期价格-10元',
+      },
+      'output',
+      { rentalPriceClient: { preview, batchRead, auditPreviewFromRead } as unknown as RentalPriceSkillClient },
+    );
+
+    expect(batchRead).toHaveBeenCalledWith(productIds);
+    expect(auditPreviewFromRead).toHaveBeenCalledTimes(4);
+    expect(preview).not.toHaveBeenCalled();
+    expect(response.metadata).toMatchObject({ toolName: 'rental.pricePreview', ok: true, previewCount: 4 });
+    expect(response.text).toContain('rent1day=90.00');
+    expect(response.text).toContain('rent2day=110.00');
+    expect(response.text).toContain('审计 task_900');
+    expect(response.text).not.toContain('marketPrice');
+    expect(response.card).toBeDefined();
+  });
+
+  it('runs batchRead audit previews concurrently while preserving preview order', async () => {
+    const preview = vi.fn(async () => {
+      throw new Error('preview should not run when batchRead can build the preview');
+    });
+    const productIds = ['900', '901', '902', '903', '904', '905'];
+    const batchRead = vi.fn(async (ids: string[]) => ({
+      ok: true,
+      status: 'ok',
+      count: ids.length,
+      results: Object.fromEntries(ids.map((productId, index) => [productId, {
+        status: 'ok',
+        productId,
+        values: { s1: { rent1day: String(100 + index) } },
+      }])),
+      errors: [],
+      warnings: [],
+      lines: ['batch-read: ok'],
+    }));
+    let activeAudits = 0;
+    let maxActiveAudits = 0;
+    const auditPreviewFromRead = vi.fn(async (productId: string) => {
+      activeAudits += 1;
+      maxActiveAudits = Math.max(maxActiveAudits, activeAudits);
+      await new Promise((resolve) => setTimeout(resolve, productId === '900' ? 35 : 5));
+      activeAudits -= 1;
+      return {
+        taskId: `task_${productId}`,
+        rollbackFile: `rollback-${productId}.json`,
+        changesFile: `changes-${productId}.json`,
+        hasErrors: false,
+      };
+    });
+
+    const response = await executeAgentToolRequest(
+      {
+        toolName: 'rental.pricePreview',
+        arguments: { productIds, adjustmentAmount: -10, scope: 'rent_fields' },
+        reason: '改价,所有x300u链接所有租期价格-10元',
+      },
+      'output',
+      { rentalPriceClient: { preview, batchRead, auditPreviewFromRead } as unknown as RentalPriceSkillClient },
+    );
+
+    expect(maxActiveAudits).toBeGreaterThan(1);
+    expect(preview).not.toHaveBeenCalled();
+    expect(response.metadata).toMatchObject({ toolName: 'rental.pricePreview', ok: true, previewCount: productIds.length });
+    expect(response.text.indexOf('900')).toBeLessThan(response.text.indexOf('901'));
+    expect(response.text.indexOf('901')).toBeLessThan(response.text.indexOf('902'));
+  });
+
+  it('blocks batchRead previews when generated audit has errors', async () => {
+    const preview = vi.fn(async () => {
+      throw new Error('preview should not run when batchRead returns an audit error');
+    });
+    const batchRead = vi.fn(async (productIds: string[]) => ({
+      ok: true,
+      status: 'ok',
+      count: productIds.length,
+      results: Object.fromEntries(productIds.map((productId) => [productId, {
+        status: 'ok',
+        productId,
+        specs: [{ specId: 's1', title: '默认' }],
+        values: { s1: { rent1day: '100', rent2day: '120' } },
+      }])),
+      errors: [],
+      warnings: [],
+      lines: ['batch-read: ok'],
+    }));
+    const auditPreviewFromRead = vi.fn(async (productId: string) => ({
+      taskId: `task_${productId}`,
+      rollbackFile: `rollback-${productId}.json`,
+      changesFile: `changes-${productId}.json`,
+      hasErrors: productId === '901',
+    }));
+
+    const response = await executeAgentToolRequest(
+      {
+        toolName: 'rental.pricePreview',
+        arguments: { productIds: ['900', '901'], adjustmentAmount: -10, scope: 'rent_fields' },
+        reason: '改价,所有x300u链接所有租期价格-10元',
+      },
+      'output',
+      { rentalPriceClient: { preview, batchRead, auditPreviewFromRead } as unknown as RentalPriceSkillClient },
+    );
+
+    expect(batchRead).toHaveBeenCalledTimes(1);
+    expect(preview).not.toHaveBeenCalled();
+    expect(response.metadata).toMatchObject({ toolName: 'rental.pricePreview', ok: false, previewCount: 1 });
+    expect(response.text).toContain('审计错误，已阻断');
+    expect(response.card).toBeUndefined();
+  });
+
+  it('falls back to serial preview when batchRead is unavailable', async () => {
+    const { client, preview } = fakeRentalPriceClient();
+    const productIds = ['900', '901'];
+
+    const response = await executeAgentToolRequest(
+      {
+        toolName: 'rental.pricePreview',
+        arguments: { productIds, adjustmentAmount: -10, scope: 'rent_fields' },
+        reason: '改价,所有x300u链接所有租期价格-10元',
+      },
+      'output',
+      { rentalPriceClient: client },
+    );
+
+    expect(preview).toHaveBeenCalledTimes(2);
+    expect(response.metadata).toMatchObject({ toolName: 'rental.pricePreview', ok: true, previewCount: 2 });
   });
 
   it('fills missing pricePreview discount from a multi-step goal with an explicit multiplier', async () => {

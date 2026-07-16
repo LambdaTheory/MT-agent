@@ -54,8 +54,7 @@ import {
   type RentalPriceSkillClient,
 } from './rentalPrice.js';
 import type { ReadOnlyToolRunOptions } from './readOnlyToolRegistry.js';
-import { buildProductDetailCard } from './queryCards.js';
-import { findLatestReportContext, findReportContextByDate, formatConversionSummary, formatLatestSummary, formatProductQueryResult, formatProductRows, parseNumericProductIdList, queryProductResult } from './reportStore.js';
+import { findLatestReportContext, findReportContextByDate, formatConversionSummary, formatLatestSummary, parseNumericProductIdList } from './reportStore.js';
 import type { BotIntent, BotResponse } from './types.js';
 import type { ResolutionCandidate } from '../agentRuntime/intentResolution.js';
 
@@ -562,7 +561,7 @@ async function handleInventoryStatusIntent(
   options: HandleBotIntentOptions,
 ): Promise<BotResponse> {
   const latest = await findLatestReportContext(outputDir);
-  if (!latest) return { text: formatInventoryStatusMissingText({ status: 'snapshot_missing' }) };
+  if (!latest) return { text: formatInventoryStatusMissingText({ status: 'snapshot_missing', reason: 'missing' }) };
 
   const runDate = basename(dirname(latest.path));
   const snapshotPath = buildPublicTrafficPaths(outputDir, runDate).sameSkuSnapshot;
@@ -574,6 +573,9 @@ async function handleInventoryStatusIntent(
     snapshot,
     registryStore: createLinkRegistry(registryContext.registry, registryContext.overrideRisks),
     query: intent.type === 'inventory_status_query' ? intent.query : '',
+    reportGenerationId: latest.context.generationId,
+    reportDate: latest.context.date,
+    snapshotDate: runDate,
   });
 
   if (result.status === 'overview') {
@@ -728,24 +730,19 @@ export async function handleBotIntent(intent: BotIntent, outputDir = 'output', o
 
   if (intent.type === 'query_product') {
     const productIds = parseNumericProductIdList(intent.keyword);
-    const latest = await findReportContextForIntent(outputDir, intent.date);
-    if (latest) {
-      const result = queryProductResult(latest.context, intent.keyword);
-      if (result.matches.length > 0 || result.ambiguous.length > 0) {
-        return {
-          text: formatProductQueryResult(result),
-          ...(result.matches.length === 1 ? { card: buildProductDetailCard(latest.context, result) } : {}),
-        };
-      }
-    }
-    if (!latest && intent.date) return { text: missingReportContextText(intent.date) };
+    const response = await executeDirectAgentToolResponse('productLink.query', {
+      queryType: productIds.length > 1 ? 'productList' : 'productDetail',
+      productQuery: intent.keyword,
+      ...(intent.date ? { date: intent.date } : {}),
+    }, '本地精确商品查询统一委托商品/链接查询入口。', outputDir, options);
+    if (response.metadata && typeof response.metadata === 'object' && 'count' in response.metadata && response.metadata.count !== 0) return response;
+
+    if (intent.date) return response;
     if (productIds.length > 0) {
       const registryContext = await loadClosedOrderRegistryContext(options.closedOrderRegistryPaths);
       return { text: formatRegistryProductRows(productIds, registryContext.registry) };
     }
-    if (!latest) return { text: missingReportContextText() };
-
-    return { text: formatProductRows([]) };
+    return response;
   }
 
   if (intent.type === 'lookup_product_id') {

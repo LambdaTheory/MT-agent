@@ -821,12 +821,14 @@ async function writeInventoryStatusFixtures(rootDir: string): Promise<{
   const configDir = join(rootDir, 'config');
   const stateDir = join(outputDir, 'state');
   const runDate = '2026-06-24';
+  const generationId = 'inventory-status-generation-2026-06-24';
   const reportDir = join(outputDir, runDate);
   await mkdir(reportDir, { recursive: true });
   await mkdir(stateDir, { recursive: true });
   await mkdir(configDir, { recursive: true });
 
   await writeFile(join(reportDir, 'report-context.json'), JSON.stringify({
+    generationId,
     date: '2026-06-23',
     summary: { '1d': summary, '7d': summary, '30d': summary },
     conclusions: [],
@@ -842,12 +844,15 @@ async function writeInventoryStatusFixtures(rootDir: string): Promise<{
   }), 'utf8');
 
   await writeFile(join(reportDir, '同款组经营快照_2026-06-24.json'), JSON.stringify({
+    schemaVersion: 1,
+    generationId,
     date: '2026-06-24',
     sourceReportDate: '2026-06-23',
     generatedAt: '2026-06-24T00:00:00.000Z',
+    warnings: ['组内 1 条链接无日报数据'],
     summary: { sameSkuGroupCount: 2, activeLinkCount: 3, totalLinkCount: 4 },
     coverage: { groupedLinkCount: 4, ungroupedLinkCount: 0, groupsWithMetrics: 2, groupsWithoutMetrics: 0 },
-    registryAuditSummary: { totalLinks: 4, activeLinks: 3, removedLinks: 1, unknownLinks: 0, overrideRiskCount: 0 },
+    registryAuditSummary: { totalLinks: 4, onSaleLinks: 3, delistedLinks: 1, goneLinks: 0, unknownLinks: 0, overrideRiskCount: 0 },
     groups: [
       {
         sameSkuGroupId: 'dji-pocket-3',
@@ -864,7 +869,7 @@ async function writeInventoryStatusFixtures(rootDir: string): Promise<{
           '30d': { exposure: 9000, publicVisits: 720, amount: 3600, createdOrders: 35, signedOrders: 32, reviewedOrders: 30, shippedOrders: 28, createdOrderAmount: 3900, signedOrderAmount: 3720, reviewedOrderAmount: 3600, shippedOrderAmount: 3450, exposureVisitRate: 0.08, visitCreatedOrderRate: 35 / 720, visitShipmentRate: 28 / 720 },
         },
         topLinks: [
-          { internalProductId: '560', platformProductId: 'platform-560', productName: 'DJI Pocket 3 创作者套装', shortName: 'DJI Pocket 3', status: 'active', oneDayExposure: 200, oneDayPublicVisits: 20, oneDayAmount: 80 },
+          { internalProductId: '560', platformProductId: 'platform-560', productName: 'DJI Pocket 3 创作者套装', shortName: 'DJI Pocket 3', listingState: 'on_sale', oneDayExposure: 200, oneDayPublicVisits: 20, oneDayAmount: 80 },
         ],
         risks: ['组内 1 条链接无日报数据'],
       },
@@ -928,6 +933,26 @@ async function writeInventoryStatusFixtures(rootDir: string): Promise<{
       artifactsDir: outputDir,
     },
   };
+}
+
+async function rewriteInventoryStatusReportContext(
+  outputDir: string,
+  rewrite: (context: Record<string, unknown>) => void,
+): Promise<void> {
+  const path = join(outputDir, '2026-06-24', 'report-context.json');
+  const context = JSON.parse(await readFile(path, 'utf8')) as Record<string, unknown>;
+  rewrite(context);
+  await writeFile(path, JSON.stringify(context), 'utf8');
+}
+
+async function rewriteInventoryStatusSnapshot(
+  outputDir: string,
+  rewrite: (snapshot: Record<string, unknown>) => void,
+): Promise<void> {
+  const path = join(outputDir, '2026-06-24', '同款组经营快照_2026-06-24.json');
+  const snapshot = JSON.parse(await readFile(path, 'utf8')) as Record<string, unknown>;
+  rewrite(snapshot);
+  await writeFile(path, JSON.stringify(snapshot), 'utf8');
 }
 
 async function writeNewLinkWorkflowContext(): Promise<{
@@ -1229,6 +1254,60 @@ describe('handleBotIntent', () => {
     expect(cardText).toContain('1日');
   });
 
+  it('returns missing text and no card when the inventory status snapshot generation is stale', async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), 'mt-agent-inventory-status-stale-generation-'));
+    const fixtures = await writeInventoryStatusFixtures(rootDir);
+    await rewriteInventoryStatusSnapshot(fixtures.outputDir, (snapshot) => {
+      snapshot.generationId = 'stale-inventory-status-generation';
+    });
+
+    const response = await handleBotIntent(
+      { type: 'inventory_status_overview' },
+      fixtures.outputDir,
+      { closedOrderRegistryPaths: fixtures.registryPaths },
+    );
+
+    expect(response.text).toContain('还没有可用的库存情况快照');
+    expect(response.text).toContain('生成最新日报/快照');
+    expect(response.card).toBeUndefined();
+  });
+
+  it('returns missing text and no card when the report generation id is absent', async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), 'mt-agent-inventory-status-missing-report-generation-'));
+    const fixtures = await writeInventoryStatusFixtures(rootDir);
+    await rewriteInventoryStatusReportContext(fixtures.outputDir, (context) => {
+      delete context.generationId;
+    });
+
+    const response = await handleBotIntent(
+      { type: 'inventory_status_overview' },
+      fixtures.outputDir,
+      { closedOrderRegistryPaths: fixtures.registryPaths },
+    );
+
+    expect(response.text).toContain('还没有可用的库存情况快照');
+    expect(response.text).toContain('生成最新日报/快照');
+    expect(response.card).toBeUndefined();
+  });
+
+  it('returns missing text and no card for report generation mismatch through the Agent inventory status tool', async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), 'mt-agent-inventory-status-agent-stale-generation-'));
+    const fixtures = await writeInventoryStatusFixtures(rootDir);
+    await rewriteInventoryStatusSnapshot(fixtures.outputDir, (snapshot) => {
+      snapshot.generationId = 'stale-inventory-status-generation';
+    });
+
+    const response = await executeAgentToolRequest(
+      { toolName: 'inventory.statusOverview', arguments: {}, reason: 'open inventory status overview' },
+      fixtures.outputDir,
+      { closedOrderRegistryPaths: fixtures.registryPaths },
+    );
+
+    expect(response.text).toContain('还没有可用的库存情况快照');
+    expect(response.text).toContain('生成最新日报/快照');
+    expect(response.card).toBeUndefined();
+  });
+
   it('answers latest summary from report context', async () => {
     const outputDir = await writeContext();
     const response = await handleBotIntent({ type: 'latest_summary' }, outputDir);
@@ -1343,7 +1422,7 @@ describe('handleBotIntent', () => {
     expect(response.text).not.toContain('没有找到匹配商品');
   });
 
-  it('returns a bounded issue-pool card for report section queries', async () => {
+  it('keeps legacy report section queries text-only so productLink.query owns issue-pool cards', async () => {
     const outputDir = await writeContext();
     const response = await executeAgentToolRequest(
       { toolName: 'publicTraffic.reportQuery', arguments: { target: 'section', section: 'custodyAbnormal' }, reason: '查询托管异常问题池' },
@@ -1351,13 +1430,9 @@ describe('handleBotIntent', () => {
     );
 
     expect(response.text).toContain('公域日报托管异常 2026-06-11');
-    expect(response.card).toBeDefined();
-    const cardText = JSON.stringify(response.card);
-    expect(cardText).toContain('托管异常 · 6 条');
-    expect(cardText).toContain('端内ID 565｜商品ID 2000000000000000000001');
-    expect(cardText).toContain('查看完整清单');
-    expect(cardText).toContain('query_full_list');
-    expect(cardText).not.toContain('端内ID 733｜商品ID p-733-target');
+    expect(response.card).toBeUndefined();
+    expect(JSON.stringify(response)).not.toContain('query_full_list');
+    expect(JSON.stringify(response)).not.toContain('2026-06-11:custodyAbnormal');
   });
 
   it('keeps gone links out of resolved operation candidates', async () => {
@@ -1640,19 +1715,19 @@ describe('handleBotIntent', () => {
     expect(response.text).toContain('iPhone 15');
   });
 
-  it('lets the Agent planner answer natural report data questions through publicTraffic.reportQuery', async () => {
+  it('lets the Agent planner answer product list questions through productLink.query', async () => {
     const outputDir = await writeContext();
     let plannerCalled = false;
     const planner: AgentPlannerProvider = {
       async proposePlan(request) {
         plannerCalled = true;
         expect(request.message).toBe('2026-06-11 7日访问最高的1个商品是谁');
-        expect(request.tools.map((tool) => tool.name)).toContain('publicTraffic.reportQuery');
+        expect(request.tools.map((tool) => tool.name)).toContain('productLink.query');
         return JSON.stringify({
           goal: '查询指定日期7日访问最高商品',
-          selectedTool: 'publicTraffic.reportQuery',
+          selectedTool: 'productLink.query',
           arguments: {
-            target: 'products',
+            queryType: 'productList',
             date: '2026-06-11',
             period: '7d',
             sortBy: 'publicVisits',
@@ -1671,7 +1746,7 @@ describe('handleBotIntent', () => {
     expect(response.text).toContain('公域日报商品查询 2026-06-11');
     expect(response.text).toContain('端内ID 702');
     expect(response.text).toContain('7d 公域访问量 80');
-    expect(response.card).toBeUndefined();
+    expect(JSON.stringify(response.card)).toContain('公域日报商品查询 2026-06-11');
   });
 
   it('lets the Agent planner answer aggregate report row questions through publicTraffic.reportQuery', async () => {
@@ -1705,7 +1780,7 @@ describe('handleBotIntent', () => {
     expect(response.text).toContain('公域日报商品聚合统计 2026-06-11');
     expect(response.text).toContain('匹配 2 条商品');
     expect(response.text).toContain('公域访问量总和 = 82');
-    expect(response.card).toBeUndefined();
+    expect(JSON.stringify(response.card)).toContain('公域日报商品聚合统计 2026-06-11');
   });
 
   it('lets the Agent planner answer link count questions through link registry instead of report aggregation', async () => {
@@ -1801,19 +1876,19 @@ describe('handleBotIntent', () => {
     expect(sameSkuGroup.metadata).toMatchObject({ productIds: ['914', '915', '916'], count: 3, resolutionMode: 'sameSkuGroup' });
   });
 
-  it('lets the Agent planner answer report source coverage questions through publicTraffic.reportQuery', async () => {
+  it('lets the Agent planner answer source coverage questions through productLink.query', async () => {
     const outputDir = await writeContext();
     let plannerCalled = false;
     const planner: AgentPlannerProvider = {
       async proposePlan(request) {
         plannerCalled = true;
         expect(request.message).toBe('7日访问页覆盖情况怎么样');
-        expect(request.tools.map((tool) => tool.name)).toContain('publicTraffic.reportQuery');
+        expect(request.tools.map((tool) => tool.name)).toContain('productLink.query');
         return JSON.stringify({
           goal: '查询7日访问页覆盖情况',
-          selectedTool: 'publicTraffic.reportQuery',
+          selectedTool: 'productLink.query',
           arguments: {
-            target: 'sourceCoverage',
+            queryType: 'sourceCoverage',
             date: '2026-06-11',
             period: '7d',
             source: 'dashboard',
@@ -1832,7 +1907,7 @@ describe('handleBotIntent', () => {
     expect(response.text).toContain('数据源：访问页，状态：全部');
     expect(response.text).toContain('7d：商品 6 条');
     expect(response.text).toContain('访问页已抓取 6 条/未更新 0 条');
-    expect(response.card).toBeUndefined();
+    expect(JSON.stringify(response.card)).toContain('日报数据源覆盖 2026-06-11');
   });
 
   it('lets the Agent planner answer derived order metric questions through publicTraffic.reportQuery', async () => {
@@ -1863,7 +1938,7 @@ describe('handleBotIntent', () => {
     expect(response.text).toContain('订单经营指标 2026-06-11');
     expect(response.text).toContain('关单率状态：达标（目标<=35%）');
     expect(response.text).not.toContain('客单价');
-    expect(response.card).toBeUndefined();
+    expect(JSON.stringify(response.card)).toContain('订单经营指标 2026-06-11');
   });
 
   it('does not fall back to deterministic exact routing when the Agent planner is configured but invalid', async () => {

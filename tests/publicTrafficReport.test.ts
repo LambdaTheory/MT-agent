@@ -29,6 +29,7 @@ function metrics(overrides: Partial<PublicTrafficPeriodMetrics>): PublicTrafficP
 
 const context: PublicTrafficDataReportContext = {
   date: '2026-06-10',
+  generationId: 'public-traffic-report-2026-06-10',
   summary: {
     '1d': { exposure: 1000, publicVisits: 50, dashboardVisits: 40, createdOrders: 4, shippedOrders: 2, amount: 300, exposureVisitRate: 0.05, visitCreatedOrderRate: 0.1, visitShipmentRate: 0.05 },
     '7d': { exposure: 7000, publicVisits: 350, dashboardVisits: 280, createdOrders: 20, shippedOrders: 10, amount: 1500, exposureVisitRate: 0.05, visitCreatedOrderRate: 0.0714, visitShipmentRate: 0.0357 },

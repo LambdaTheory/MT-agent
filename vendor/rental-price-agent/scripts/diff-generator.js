@@ -14,10 +14,11 @@
  */
 
 const fs = require("fs");
-const { loadConfig, SKILL_DIR } = require("./lib/config-loader");
+const path = require("path");
+const { loadConfig, LAYOUT } = require("./lib/config-loader");
 const { checkRules } = require("./lib/rule-checker");
 
-const TASKS_DIR = SKILL_DIR + "/tasks";
+const TASKS_DIR = LAYOUT.tasksDir;
 
 function ensureDir(dir) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
@@ -31,17 +32,8 @@ function die(msg) {
 const FIELD_META = {
   stock:          { label: "库存",         unit: "",    isPrice: false, isInteger: true  },
   rent1day:       { label: "1天租金",      unit: "元",  isPrice: true,  isInteger: false },
-  rent2day:       { label: "2天租金",      unit: "元",  isPrice: true,  isInteger: false },
-  rent3day:       { label: "3天租金",      unit: "元",  isPrice: true,  isInteger: false },
-  rent4day:       { label: "4天租金",      unit: "元",  isPrice: true,  isInteger: false },
-  rent5day:       { label: "5天租金",      unit: "元",  isPrice: true,  isInteger: false },
-  rent7day:       { label: "7天租金",      unit: "元",  isPrice: true,  isInteger: false },
   rent10day:      { label: "10天租金",     unit: "元",  isPrice: true,  isInteger: false },
-  rent15day:      { label: "15天租金",     unit: "元",  isPrice: true,  isInteger: false },
   rent30day:      { label: "30天租金",     unit: "元",  isPrice: true,  isInteger: false },
-  rent60day:      { label: "60天租金",     unit: "元",  isPrice: true,  isInteger: false },
-  rent90day:      { label: "90天租金",     unit: "元",  isPrice: true,  isInteger: false },
-  rent180day:     { label: "180天租金",    unit: "元",  isPrice: true,  isInteger: false },
   marketPrice:    { label: "市场价",       unit: "元",  isPrice: true,  isInteger: false },
   deposit:        { label: "押金",         unit: "元",  isPrice: true,  isInteger: false },
   purchasePrice:  { label: "采购价",       unit: "元",  isPrice: true,  isInteger: false },
@@ -117,10 +109,12 @@ function main() {
     changes[field] = newVal;
   }
 
-  // Save changes.json
-  ensureDir(TASKS_DIR);
+  // Save generated preview artifacts next to the user intent file. MT-agent
+  // stores its audit inputs outside tasks/ so lifecycle state scanning remains clean.
+  const outputDir = path.dirname(userChangesFile) || TASKS_DIR;
+  ensureDir(outputDir);
   const timestamp = Date.now();
-  const changesPath = TASKS_DIR + "/changes_" + timestamp + ".json";
+  const changesPath = path.join(outputDir, "changes_" + timestamp + ".json");
   fs.writeFileSync(changesPath, JSON.stringify(changes, null, 2), "utf-8");
 
   // Markdown table → stderr
@@ -158,7 +152,7 @@ function main() {
   // HTML preview (optional)
   let htmlPath = null;
   if (wantHtml) {
-    htmlPath = TASKS_DIR + "/preview_" + timestamp + ".html";
+    htmlPath = path.join(outputDir, "preview_" + timestamp + ".html");
     const productName = currentValues.productName || ("商品 " + currentValues.productId);
     const rows = diff.map(d => {
       const n = parseFloat(d.change);
