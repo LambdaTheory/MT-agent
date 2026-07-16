@@ -40,4 +40,24 @@ describe('agent tool confirm request store', () => {
     await expect(loadAgentToolConfirmRequestFromValue(outputDir, value)).resolves.toEqual(request);
     await expect(loadAgentToolConfirmRequestFromValue(outputDir, { ...(value as Record<string, unknown>), confirmationKey: '000000000000000000000000' })).resolves.toBeNull();
   });
+
+  it('loads referenced rental price apply requests for 28 previewed products', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-confirm-store-bulk-'));
+    const request = {
+      toolName: 'rental.priceApply',
+      arguments: {
+        items: Array.from({ length: 28 }, (_, index) => ({
+          productId: String(900 + index),
+          fields: { rent1day: '88.00', rent2day: '99.00' },
+          audit: { taskId: `task_${900 + index}`, rollbackFile: `rollback-${900 + index}.json` },
+        })),
+      },
+      reason: 'confirmed 28-product price preview',
+    };
+
+    const requestRef = await saveAgentToolConfirmRequest(outputDir, request);
+    const value = readAgentToolConfirmValue(buildAgentToolConfirmCard(request, { requestRef }));
+
+    await expect(loadAgentToolConfirmRequestFromValue(outputDir, value)).resolves.toEqual(request);
+  });
 });

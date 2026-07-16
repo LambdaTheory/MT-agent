@@ -828,7 +828,7 @@ const rentalPricePreviewArgumentsSchema = {
   type: 'object',
   not: { required: ['discount', 'adjustmentAmount'] },
   properties: {
-    productIds: { type: 'array', minItems: 1, maxItems: 24, items: internalProductIdSchema },
+    productIds: { type: 'array', minItems: 1, maxItems: 60, items: internalProductIdSchema },
     fields: { type: 'object' },
     discount: { type: ['number', 'string'], description: 'Explicit multiplier only. Use 0.8 for 8-fold, 1.8 for 180%; never use bare fold numbers such as 8.' },
     adjustmentAmount: { type: ['number', 'string'], description: 'Absolute amount to add to every rental price field. Use negative values such as -1 to subtract 1 yuan.' },
@@ -852,7 +852,7 @@ const rentalPriceApplyArgumentsSchema = {
     items: {
       type: 'array',
       minItems: 1,
-      maxItems: 12,
+      maxItems: 60,
       items: {
         type: 'object',
         properties: {

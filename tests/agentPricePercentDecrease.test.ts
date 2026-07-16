@@ -196,4 +196,32 @@ describe('agent price percent decrease handling', () => {
     expect(JSON.stringify(response.card)).toContain('rental.newLinkBatchPlan');
     expect(JSON.stringify(response.card)).not.toContain('agent_tool_confirm');
   });
+
+  it('blocks spec-keyword relative price changes from whole-product price preview', async () => {
+    const preview = vi.fn();
+
+    const response = await continueAgentPlannerSteps({
+      goal: '对 sx70 同款组中规格含有日常或者平日的规格价格加 30 元',
+      reason: '用户要求按规格名称关键词筛选后改价',
+      steps: [
+        {
+          toolName: 'rental.pricePreview',
+          arguments: { productIds: ['820', '821'], adjustmentAmount: 30, scope: 'rent_fields' },
+          reason: '对解析出的商品生成租金字段改价预览',
+        },
+      ],
+      baseIndex: 0,
+      totalSteps: 1,
+      metadataStore: {},
+      textParts: ['Agent 多步骤计划：对 sx70 规格关键词改价'],
+      sourceText: '改价,所有sx70商品中所有规格含有日常或者平日的字样的,价格+30元',
+      outputDir: 'output',
+      options: { rentalPriceClient: { preview } as unknown as RentalPriceSkillClient },
+    });
+
+    expect(preview).not.toHaveBeenCalled();
+    expect(response?.text).toContain('规格名称关键词');
+    expect(JSON.stringify(response?.card)).toContain('agent_clarification_form');
+    expect(JSON.stringify(response?.card)).not.toContain('agent_tool_confirm');
+  });
 });

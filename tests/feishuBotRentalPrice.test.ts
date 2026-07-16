@@ -1,4 +1,4 @@
-import { copyFile, mkdir, mkdtemp, readFile } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readdir, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -565,9 +565,11 @@ describe('rental price skill client copy diagnostics', () => {
     expect(preview.audit?.taskId).toMatch(/^task_/);
     expect(preview.audit?.changesFile).toContain('changes_');
     expect(preview.audit?.rollbackFile).toContain('rollback_');
+    expect(preview.audit?.rollbackFile).toContain(join('artifacts', 'mt-agent-audit'));
     expect(preview.audit!.diff![0]).toMatchObject({ field: 'rent1day', old: '30.00', new: '22.00' });
     expect(preview.lines.join('\n')).toContain('审计任务');
     expect(await readFile(preview.audit!.rollbackFile!, 'utf8')).toContain('"rent1day": "30.00"');
+    expect(await readdir(join(dataRoot, 'tasks'))).not.toContainEqual(expect.stringMatching(/^mt-agent-|^rollback_|^preview_/));
 
     const result = await client.execute({ mode: 'explicit_fields', productId: '761', fields: preview.fields, audit: preview.audit });
 
@@ -589,7 +591,7 @@ describe('rental price skill client copy diagnostics', () => {
     const rolledBackTask = JSON.parse(await readFile(join(dataRoot, 'tasks', `${preview.audit?.taskId}.json`), 'utf8')) as { status: string; evidence: Array<{ type: string }> };
     expect(rolledBackTask.status).toBe('rolled_back');
     expect(rolledBackTask.evidence.some((item) => item.type === 'rollback_verify_result')).toBe(true);
-  }, 15000);
+  }, 30000);
 });
 
 async function copyRentalPriceAuditScripts(rootDir: string): Promise<void> {

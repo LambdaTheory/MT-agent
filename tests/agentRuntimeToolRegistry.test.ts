@@ -643,13 +643,16 @@ describe('agent runtime tool registry', () => {
     expect(findAgentTool('rental.pricePreview')?.inputSchema).toMatchObject({
       not: { required: ['discount', 'adjustmentAmount'] },
       properties: {
-        productIds: { type: 'array' },
+        productIds: { type: 'array', minItems: 1, maxItems: 60 },
         discount: { type: ['number', 'string'] },
         scope: { type: 'string', enum: ['rent_fields', 'all_price_fields'] },
       },
       required: ['productIds'],
       additionalProperties: false,
     });
+    const productIds = Array.from({ length: 28 }, (_, index) => String(900 + index));
+    expect(validateAgentToolArguments('rental.pricePreview', { productIds, adjustmentAmount: -10, scope: 'rent_fields' })).toBe(true);
+    expect(validateAgentToolArguments('rental.priceApply', { items: productIds.map((productId) => ({ productId, fields: { rent1day: '88.00' } })) })).toBe(true);
     expect(findAgentTool('rental.priceSnapshot')?.inputSchema).toMatchObject({
       properties: {
         query: { type: 'string' },

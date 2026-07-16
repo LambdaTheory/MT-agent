@@ -127,7 +127,7 @@ type AgentToolWriteEvent = 'execution_started' | 'execution_succeeded' | 'execut
 let publicTrafficReportRunning = false;
 
 const RENTAL_PRICE_SNAPSHOT_MAX_PRODUCTS = 60;
-const RENTAL_PRICE_PREVIEW_MAX_PRODUCTS = 24;
+const RENTAL_PRICE_PREVIEW_MAX_PRODUCTS = 60;
 const RENTAL_SPEC_REMOVE_PLAN_BULK_WARNING_PRODUCTS = 12;
 const RENTAL_SPEC_REMOVE_PLAN_MAX_PRODUCTS = 60;
 const RENTAL_SPEC_REMOVE_PLAN_MAX_ITEMS = 50;
@@ -923,6 +923,12 @@ function formatPricePreviewText(input: {
   blocked: string[];
 }): string {
   const readyLines = input.readyItems.slice(0, 12).map((item, index) => `${index + 1}. ${compactPreviewLine(item.productId, item.fields)}${item.audit?.taskId ? `；审计 ${item.audit.taskId}` : ''}`);
+  const auditCount = input.readyItems.filter((item) => item.audit?.taskId).length;
+  const safetyLine = auditCount === input.readyItems.length && input.readyItems.length > 0
+    ? '安全边界：确认前不会改价；确认后按上面每个商品的审计预览逐个执行，并保留各自回滚文件。'
+    : auditCount > 0
+      ? `安全边界：确认前不会改价；确认后按上面字段逐个串行执行；其中 ${auditCount} 个商品带审计引用。`
+      : '安全边界：确认前不会改价；确认后按上面字段逐个串行执行。';
   return [
     `改价预览：${input.productIds.length} 个端内ID`,
     input.discount !== undefined ? `折扣：${formatDiscountText(input.discount)}` : undefined,
@@ -933,9 +939,76 @@ function formatPricePreviewText(input: {
     ...readyLines,
     input.readyItems.length > readyLines.length ? `还有 ${input.readyItems.length - readyLines.length} 个商品未展示。` : undefined,
     '',
-    '安全边界：确认前不会改价；确认后按上面每个商品的审计预览逐个执行，并保留各自回滚文件。',
+    safetyLine,
     ...(input.blocked.length ? ['', '已阻断，未生成执行确认卡：', ...input.blocked.slice(0, 12)] : []),
   ].filter((line): line is string => Boolean(line)).join('\n');
+}
+
+function moneyFixed(value: number): string {
+  return value.toFixed(2);
+}
+
+function batchReadPricePreviewFields(
+  values: unknown,
+  input: { discount?: number; adjustmentAmount?: number },
+): Record<string, string> {
+  if (!isRecord(values)) return {};
+  const firstSpec = Object.values(values).find(isRecord) as Record<string, unknown> | undefined;
+  const source = firstSpec ?? values;
+  const fields: Record<string, string> = {};
+  for (const [field, raw] of Object.entries(source)) {
+    if (!isRentPriceField(field)) continue;
+    const current = Number(raw);
+    if (!Number.isFinite(current)) continue;
+    fields[field] = moneyFixed(input.discount !== undefined
+      ? current * input.discount
+      : current + (input.adjustmentAmount ?? 0));
+  }
+  return fields;
+}
+
+async function batchReadPricePreviewItems(
+  productIds: string[],
+  client: RentalPriceSkillClient,
+  input: { discount?: number; adjustmentAmount?: number },
+): Promise<{ readyItems: Array<{ productId: string; fields: Record<string, string>; audit?: RentalPriceAuditReference }>; blocked: string[] } | null> {
+  if (!client.batchRead || !client.auditPreviewFromRead || productIds.length < 2) return null;
+  let batchRead;
+  try {
+    batchRead = await client.batchRead(productIds);
+  } catch {
+    return null;
+  }
+  const results = isRecord(batchRead.results) ? batchRead.results : {};
+  const readyItems: Array<{ productId: string; fields: Record<string, string>; audit?: RentalPriceAuditReference }> = [];
+  const blocked: string[] = [];
+  for (const productId of productIds) {
+    const result = results[productId];
+    if (!isRecord(result)) {
+      blocked.push(`商品 ${productId}：批量读取失败`);
+      continue;
+    }
+    const status = readString(result.status);
+    const fields = batchReadPricePreviewFields(result.values, input);
+    if (Object.keys(fields).length === 0) {
+      blocked.push(`商品 ${productId}：批量读取${status ? ` ${status}` : ''}，没有可改租金字段`);
+      continue;
+    }
+    let audit: RentalPriceAuditReference | undefined;
+    try {
+      const auditPreview = await client.auditPreviewFromRead(productId, result, fields);
+      audit = compactAuditReference(auditPreview ?? undefined);
+    } catch (error) {
+      blocked.push(`商品 ${productId}：审计预览失败（${error instanceof Error ? error.message : String(error)}）`);
+      continue;
+    }
+    if (audit?.hasErrors) {
+      blocked.push(`商品 ${productId}：审计错误，已阻断`);
+      continue;
+    }
+    readyItems.push({ productId, fields, ...(audit ? { audit } : {}) });
+  }
+  return { readyItems, blocked };
 }
 
 function readProductIdArray(value: unknown, maxItems: number): string[] | null {
@@ -997,7 +1070,19 @@ async function rentalPricePreviewResponse(
 
   const blocked: string[] = [];
   const readyItems: Array<{ productId: string; fields: Record<string, string>; audit?: RentalPriceAuditReference }> = [];
-  for (const productId of productIds) {
+  const batchReadInput: { discount?: number; adjustmentAmount?: number } = {
+    ...(discount !== undefined && discount !== null ? { discount } : {}),
+    ...(adjustmentAmount !== undefined && adjustmentAmount !== null ? { adjustmentAmount } : {}),
+  };
+  const batchReadItems = !hasExplicitFields && (batchReadInput.discount !== undefined || batchReadInput.adjustmentAmount !== undefined)
+    ? await batchReadPricePreviewItems(productIds, client, batchReadInput)
+    : null;
+  if (batchReadItems) {
+    readyItems.push(...batchReadItems.readyItems);
+    blocked.push(...batchReadItems.blocked);
+  }
+
+  for (const productId of batchReadItems ? [] : productIds) {
     const requestArgs: Record<string, unknown> = hasExplicitFields
       ? { productId, fields: priceArgs.fields }
       : adjustmentAmount !== null

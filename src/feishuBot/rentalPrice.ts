@@ -322,6 +322,7 @@ export interface RentalPriceSkillClient {
   specDiscoverFull?(productId: string): Promise<RentalSpecDiscoverFullResult>;
   readRaw?(productId: string, fields?: string[]): Promise<RentalRawReadResult>;
   preview(request: RentalPriceChangeRequest): Promise<RentalPricePreview>;
+  auditPreviewFromRead?(productId: string, current: Record<string, unknown>, fields: Record<string, string>): Promise<RentalPriceAuditReference | null>;
   execute(request: Extract<RentalPriceChangeRequest, { mode: 'explicit_fields' }>): Promise<RentalPriceExecutionResult>;
   applyPerSpec?(productId: string, specFields: Record<string, Record<string, string>>): Promise<RentalPriceExecutionResult>;
   rollback?(request: RentalPriceRollbackRequest): Promise<RentalPriceRollbackResult>;
@@ -938,12 +939,14 @@ async function createAuditPreview(rootDir: string, productId: string, current: R
   if (!scriptsReady.every(Boolean)) return null;
 
   const tasksDir = join(dataRoot, 'tasks');
+  const artifactDir = join(dataRoot, 'artifacts', 'mt-agent-audit');
   await mkdir(tasksDir, { recursive: true });
+  await mkdir(artifactDir, { recursive: true });
   const token = timestampToken();
-  const currentValuesFile = join(tasksDir, `mt-agent-current-${productId}-${token}.json`);
-  const intentFile = join(tasksDir, `mt-agent-intent-${productId}-${token}.json`);
-  const diffFile = join(tasksDir, `mt-agent-diff-${productId}-${token}.json`);
-  const rollbackFile = join(tasksDir, `rollback_${productId}-${token}.json`);
+  const currentValuesFile = join(artifactDir, `mt-agent-current-${productId}-${token}.json`);
+  const intentFile = join(artifactDir, `mt-agent-intent-${productId}-${token}.json`);
+  const diffFile = join(artifactDir, `mt-agent-diff-${productId}-${token}.json`);
+  const rollbackFile = join(artifactDir, `rollback_${productId}-${token}.json`);
   const currentSnapshot = {
     ...current,
     productId,
@@ -1507,6 +1510,9 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
         }
       }
       return { productId: request.productId, fields, lines, warnings, ...(audit ? { audit } : {}) };
+    },
+    async auditPreviewFromRead(productId, current, fields) {
+      return createAuditPreview(rootDir, productId, current, fields);
     },
     async execute(request) {
       const tasksDir = stableTasksDir(rootDir);

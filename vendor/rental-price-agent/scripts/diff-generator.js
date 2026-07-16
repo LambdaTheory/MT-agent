@@ -14,6 +14,7 @@
  */
 
 const fs = require("fs");
+const path = require("path");
 const { loadConfig, LAYOUT } = require("./lib/config-loader");
 const { checkRules } = require("./lib/rule-checker");
 
@@ -108,10 +109,12 @@ function main() {
     changes[field] = newVal;
   }
 
-  // Save changes.json
-  ensureDir(TASKS_DIR);
+  // Save generated preview artifacts next to the user intent file. MT-agent
+  // stores its audit inputs outside tasks/ so lifecycle state scanning remains clean.
+  const outputDir = path.dirname(userChangesFile) || TASKS_DIR;
+  ensureDir(outputDir);
   const timestamp = Date.now();
-  const changesPath = TASKS_DIR + "/changes_" + timestamp + ".json";
+  const changesPath = path.join(outputDir, "changes_" + timestamp + ".json");
   fs.writeFileSync(changesPath, JSON.stringify(changes, null, 2), "utf-8");
 
   // Markdown table → stderr
@@ -149,7 +152,7 @@ function main() {
   // HTML preview (optional)
   let htmlPath = null;
   if (wantHtml) {
-    htmlPath = TASKS_DIR + "/preview_" + timestamp + ".html";
+    htmlPath = path.join(outputDir, "preview_" + timestamp + ".html");
     const productName = currentValues.productName || ("商品 " + currentValues.productId);
     const rows = diff.map(d => {
       const n = parseFloat(d.change);
