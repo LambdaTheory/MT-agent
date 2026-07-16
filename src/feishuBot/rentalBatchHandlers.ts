@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { basename, join, resolve, sep } from 'node:path';
+import { basename, dirname, join, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 import { recordOperationEvent } from '../agentRuntime/operationLedger.js';
 import type { RentalWriteLedgerContext } from './rentalWriteOperationHandlers.js';
@@ -47,12 +47,20 @@ function rentalRoot(): string {
   return process.env.RENTAL_PRICE_AGENT_DIR ?? resolve(process.cwd(), 'vendor', 'rental-price-agent');
 }
 
+function stableSiblingDataRoot(rootDir: string): string {
+  return resolve(dirname(rootDir), `.${basename(rootDir)}-data`);
+}
+
+function batchesDir(rootDir: string): string {
+  return resolve(stableSiblingDataRoot(rootDir), 'tasks', 'batches');
+}
+
 function safeBatchPath(rootDir: string, value: unknown, fieldName: string): string {
   const raw = readString(value);
   if (!raw || raw.includes('\0')) throw new Error(`${fieldName} is required`);
-  const batchesDir = resolve(rootDir, 'tasks', 'batches');
+  const batchRoot = batchesDir(rootDir);
   const resolved = resolve(raw);
-  if (!isPathInside(batchesDir, resolved)) throw new Error(`${fieldName} must be inside rental tasks/batches`);
+  if (!isPathInside(batchRoot, resolved)) throw new Error(`${fieldName} must be inside rental tasks/batches`);
   return resolved;
 }
 
@@ -82,9 +90,9 @@ async function executionSpecFile(rootDir: string, specFile: string, options: { c
   const parsed = JSON.parse(await readFile(specFile, 'utf8')) as unknown;
   if (!isRecord(parsed)) throw new Error('specFile must contain an object');
   const existingOptions = isRecord(parsed.options) ? parsed.options : {};
-  const batchesDir = resolve(rootDir, 'tasks', 'batches');
-  await mkdir(batchesDir, { recursive: true });
-  const file = join(batchesDir, `mt-agent-batch-execute-${Date.now()}.json`);
+  const batchRoot = batchesDir(rootDir);
+  await mkdir(batchRoot, { recursive: true });
+  const file = join(batchRoot, `mt-agent-batch-execute-${Date.now()}.json`);
   await writeFile(file, `${JSON.stringify({
     ...parsed,
     options: {
@@ -118,11 +126,11 @@ async function resumeSpecFile(rootDir: string, stateFile: string): Promise<Resum
     return productId !== null && !doneIds.has(productId);
   });
   if (!remaining.length) throw new Error('stateFile has no remaining batch items');
-  const batchesDir = resolve(rootDir, 'tasks', 'batches');
-  await mkdir(batchesDir, { recursive: true });
+  const batchRoot = batchesDir(rootDir);
+  await mkdir(batchRoot, { recursive: true });
   const batchId = readString(state.batchId) ?? 'unknown';
   const resumedAt = new Date().toISOString();
-  const file = join(batchesDir, `mt-agent-batch-resume-${batchId}-${Date.now()}.json`);
+  const file = join(batchRoot, `mt-agent-batch-resume-${batchId}-${Date.now()}.json`);
   await writeFile(file, `${JSON.stringify({
     items: remaining,
     ...(spec && spec.shared !== undefined ? { shared: spec.shared } : {}),

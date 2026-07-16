@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { join, resolve, sep } from 'node:path';
+import { basename, dirname, join, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 import type { BotResponse } from './types.js';
 
@@ -31,10 +31,14 @@ function isPathInside(rootDir: string, targetPath: string): boolean {
   return target === root || target.startsWith(rootWithSep);
 }
 
+function stableSiblingDataRoot(rootDir: string): string {
+  return resolve(dirname(rootDir), `.${basename(rootDir)}-data`);
+}
+
 function safeBatchStatePath(rootDir: string, value: unknown): string {
   if (typeof value !== 'string' || !value.trim() || value.includes('\0')) throw new Error('stateFile is required');
   const resolved = resolve(value.trim());
-  if (!isPathInside(resolve(rootDir, 'tasks', 'batches'), resolved)) throw new Error('stateFile must be inside rental tasks/batches');
+  if (!isPathInside(resolve(stableSiblingDataRoot(rootDir), 'tasks', 'batches'), resolved)) throw new Error('stateFile must be inside rental tasks/batches');
   return resolved;
 }
 

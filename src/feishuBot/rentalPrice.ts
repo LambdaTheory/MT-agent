@@ -843,7 +843,8 @@ function isPathInside(rootDir: string, targetPath: string): boolean {
 function safeAuditPath(rootDir: string, path: unknown): string | undefined {
   if (typeof path !== 'string' || !path.trim() || path.includes('\0')) return undefined;
   const resolved = resolve(isAbsolute(path) ? path : join(rootDir, path));
-  return isPathInside(rootDir, resolved) ? resolved : undefined;
+  const dataRoot = stableSiblingDataRoot(rootDir);
+  return isPathInside(rootDir, resolved) || isPathInside(dataRoot, resolved) ? resolved : undefined;
 }
 
 async function fileExists(path: string): Promise<boolean> {
@@ -931,11 +932,12 @@ function timestampToken(): string {
 async function createAuditPreview(rootDir: string, productId: string, current: Record<string, unknown>, fields: Record<string, string>): Promise<RentalPriceAuditReference | null> {
   const diffScript = join(rootDir, 'scripts', 'diff-generator.js');
   const taskStoreScript = join(rootDir, 'scripts', 'task-store.js');
-  const configPath = join(rootDir, 'config.json');
+  const dataRoot = stableSiblingDataRoot(rootDir);
+  const configPath = join(dataRoot, 'config.json');
   const scriptsReady = await Promise.all([fileExists(diffScript), fileExists(taskStoreScript), fileExists(configPath)]);
   if (!scriptsReady.every(Boolean)) return null;
 
-  const tasksDir = join(rootDir, 'tasks');
+  const tasksDir = join(dataRoot, 'tasks');
   await mkdir(tasksDir, { recursive: true });
   const token = timestampToken();
   const currentValuesFile = join(tasksDir, `mt-agent-current-${productId}-${token}.json`);
@@ -1024,8 +1026,8 @@ async function updateAuditTask(rootDir: string, audit: RentalPriceAuditReference
   if (!audit?.taskId || !AUDIT_TASK_ID_PATTERN.test(audit.taskId)) return;
   const taskStoreScript = join(rootDir, 'scripts', 'task-store.js');
   if (!(await fileExists(taskStoreScript))) return;
-  await runNodeJson(taskStoreScript, ['update', audit.taskId, 'status', status]).catch(() => ({}));
   if (resultFile) await runNodeJson(taskStoreScript, ['add-evidence', audit.taskId, evidenceType, resultFile]).catch(() => ({}));
+  await runNodeJson(taskStoreScript, ['update', audit.taskId, 'status', status]).catch(() => ({}));
 }
 
 async function readJsonRecord(path: string): Promise<Record<string, unknown>> {
@@ -1053,7 +1055,7 @@ async function resolveRollbackReference(rootDir: string, request: RentalPriceRol
   let productId = request.productId;
   let rollbackFile = safeAuditPath(rootDir, request.rollbackFile);
   if (!rollbackFile && audit.taskId) {
-    const taskFile = join(rootDir, 'tasks', `${audit.taskId}.json`);
+    const taskFile = join(stableSiblingDataRoot(rootDir), 'tasks', `${audit.taskId}.json`);
     if (!(await fileExists(taskFile))) throw new Error(`审计任务不存在：${audit.taskId}`);
     const task = await readJsonRecord(taskFile);
     productId = productId ?? productIdFromTaskRecord(task);
@@ -1087,6 +1089,10 @@ async function readOptionalText(path: string): Promise<string | null> {
 function stableSiblingDataRoot(rootDir: string): string {
   const resolvedRoot = resolve(rootDir);
   return join(dirname(resolvedRoot), `.${basename(resolvedRoot)}-data`);
+}
+
+function stableTasksDir(rootDir: string): string {
+  return join(stableSiblingDataRoot(rootDir), 'tasks');
 }
 
 function actionClassForDaemonCommand(action: string | undefined): RentalDaemonActionClass {
@@ -1503,7 +1509,7 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
       return { productId: request.productId, fields, lines, warnings, ...(audit ? { audit } : {}) };
     },
     async execute(request) {
-      const tasksDir = join(rootDir, 'tasks');
+      const tasksDir = stableTasksDir(rootDir);
       await mkdir(tasksDir, { recursive: true });
       if (request.audit?.hasErrors) {
         return {
@@ -1577,7 +1583,7 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
     async applyPerSpec(productId, specFields) {
       const safeProductId = readProductId(productId);
       if (!safeProductId) throw new Error('productId must be a numeric string');
-      const tasksDir = join(rootDir, 'tasks');
+      const tasksDir = stableTasksDir(rootDir);
       await mkdir(tasksDir, { recursive: true });
       const normalized = normalizePerSpecPriceFields(specFields);
       if (!Object.keys(normalized).length) {
@@ -1623,7 +1629,7 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
       };
     },
     async rollback(request) {
-      const tasksDir = join(rootDir, 'tasks');
+      const tasksDir = stableTasksDir(rootDir);
       await mkdir(tasksDir, { recursive: true });
       const { productId, audit, fields } = await resolveRollbackReference(rootDir, request);
       const auditLines = [
@@ -1744,7 +1750,7 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
     async applyCurrent(expectedProductId, changes) {
       const safeProductId = readProductId(expectedProductId);
       if (!safeProductId) throw new Error('expectedProductId must be a numeric string');
-      const tasksDir = join(rootDir, 'tasks');
+      const tasksDir = stableTasksDir(rootDir);
       await mkdir(tasksDir, { recursive: true });
       const changesFile = join(tasksDir, `mt-agent-apply-current-${safeProductId}-${timestampToken()}.json`);
       await writeJsonFile(changesFile, changes);
@@ -1874,7 +1880,7 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
         item.title.replace(/\s+/g, ' ').trim() === request.itemTitle.replace(/\s+/g, ' ').trim(),
       ));
       const ok = afterStatus === 'ok' && !stillExists;
-      const resultFile = join(rootDir, 'tasks', `spec-remove-${request.productId}-${timestampToken()}.json`);
+      const resultFile = join(stableTasksDir(rootDir), `spec-remove-${request.productId}-${timestampToken()}.json`);
       await writeJsonFile(resultFile, {
         productId: request.productId,
         specDimId: request.specDimId,
