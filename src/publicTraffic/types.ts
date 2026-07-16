@@ -1,5 +1,6 @@
 import type { PeriodKey } from '../domain/types.js';
 import type { LinkListingState } from '../linkRegistry/types.js';
+import type { PublicTrafficRulesConfig } from './rulesConfig.js';
 import type { GoodsManagerNewProductPoolItem } from './goodsManagerNewProducts.js';
 import type { OrderAnalysisResult } from './orderAnalysis.js';
 
@@ -226,6 +227,8 @@ export interface PublicTrafficDataAnalysisInput extends PublicTrafficDataContext
   dailyDelta?: ExposureDailyDelta[];
   sevenDaySummary?: ExposureProductSummary[];
   thirtyDaySummary?: ExposureProductSummary[];
+  healthAmountSummary?: ExposureProductSummary[];
   cumulativeProducts?: ExposureCumulativeProduct[];
   orderAnalysis?: OrderAnalysisResult;
+  rulesConfig?: PublicTrafficRulesConfig;
 }

@@ -24,6 +24,20 @@ export interface PublicTrafficRulesConfig {
     weak30dVisits: number;
     weak30dAmount: number;
   };
+  health: {
+    exposureDailyAverage: {
+      failBelow: number;
+      normalBelow: number;
+    };
+    visitRate: {
+      badBelow: number;
+      normalBelow: number;
+    };
+    amountKill: {
+      windowDays: number;
+      threshold: number;
+    };
+  };
 }
 
 export const DEFAULT_PUBLIC_TRAFFIC_RULES_CONFIG: PublicTrafficRulesConfig = {
@@ -49,6 +63,20 @@ export const DEFAULT_PUBLIC_TRAFFIC_RULES_CONFIG: PublicTrafficRulesConfig = {
     weak30dExposure: 100,
     weak30dVisits: 3,
     weak30dAmount: 1,
+  },
+  health: {
+    exposureDailyAverage: {
+      failBelow: 300,
+      normalBelow: 1000,
+    },
+    visitRate: {
+      badBelow: 0.02,
+      normalBelow: 0.05,
+    },
+    amountKill: {
+      windowDays: 14,
+      threshold: 0,
+    },
   },
 };
 
@@ -93,20 +121,36 @@ function assertFiniteNonNegative(name: string, value: number): void {
   }
 }
 
+function validateNumberSection(sectionName: string, section: Record<string, number>): void {
+  for (const [key, value] of Object.entries(section)) {
+    assertFiniteNonNegative(`${sectionName}.${key}`, value);
+  }
+}
+
 function validateConfig(config: PublicTrafficRulesConfig): void {
   if (!Number.isInteger(config.topN) || config.topN <= 0) {
     throw new Error('Invalid public traffic rules config: topN must be a positive integer');
   }
 
-  for (const [sectionName, section] of Object.entries(config)) {
-    if (sectionName === 'topN') continue;
-    for (const [key, value] of Object.entries(section as Record<string, number>)) {
-      assertFiniteNonNegative(`${sectionName}.${key}`, value);
-    }
-  }
+  validateNumberSection('exposureOptimization', config.exposureOptimization);
+  validateNumberSection('conversionOptimization', config.conversionOptimization);
+  validateNumberSection('newProductObservation', config.newProductObservation);
+  validateNumberSection('lifecycleGovernance', config.lifecycleGovernance);
+  validateNumberSection('health.exposureDailyAverage', config.health.exposureDailyAverage);
+  validateNumberSection('health.visitRate', config.health.visitRate);
+  validateNumberSection('health.amountKill', config.health.amountKill);
 
   if (config.exposureOptimization.lowVisitRate > 1) {
     throw new Error('Invalid public traffic rules config: exposureOptimization.lowVisitRate must be between 0 and 1');
+  }
+  if (config.health.exposureDailyAverage.failBelow >= config.health.exposureDailyAverage.normalBelow) {
+    throw new Error('Invalid public traffic rules config: health.exposureDailyAverage.failBelow must be less than normalBelow');
+  }
+  if (config.health.visitRate.badBelow >= config.health.visitRate.normalBelow || config.health.visitRate.normalBelow > 1) {
+    throw new Error('Invalid public traffic rules config: health.visitRate thresholds must be ordered between 0 and 1');
+  }
+  if (!Number.isInteger(config.health.amountKill.windowDays) || config.health.amountKill.windowDays <= 0) {
+    throw new Error('Invalid public traffic rules config: health.amountKill.windowDays must be a positive integer');
   }
 }
 
@@ -125,7 +169,7 @@ export async function loadPublicTrafficRulesConfig(path = DEFAULT_RULES_CONFIG_P
     throw new Error('Invalid public traffic rules config: root must be an object');
   }
 
-  const knownTopLevelKeys = ['topN', 'exposureOptimization', 'conversionOptimization', 'newProductObservation', 'lifecycleGovernance'];
+  const knownTopLevelKeys = ['topN', 'exposureOptimization', 'conversionOptimization', 'newProductObservation', 'lifecycleGovernance', 'health'];
   for (const key of Object.keys(parsed)) {
     if (!knownTopLevelKeys.includes(key)) {
       throw new Error(`Unknown public traffic rules config key: ${key}`);
@@ -136,12 +180,30 @@ export async function loadPublicTrafficRulesConfig(path = DEFAULT_RULES_CONFIG_P
     throw new Error('Invalid public traffic rules config: topN must be a number');
   }
 
+  const healthOverride = isObject(parsed.health) ? parsed.health : undefined;
+  if (parsed.health !== undefined && !healthOverride) {
+    throw new Error('Invalid public traffic rules config: health must be an object');
+  }
+  if (healthOverride) {
+    const knownHealthKeys = ['exposureDailyAverage', 'visitRate', 'amountKill'];
+    for (const key of Object.keys(healthOverride)) {
+      if (!knownHealthKeys.includes(key)) {
+        throw new Error(`Unknown public traffic rules config key: health.${key}`);
+      }
+    }
+  }
+
   const config: PublicTrafficRulesConfig = {
     topN: typeof parsed.topN === 'number' ? parsed.topN : DEFAULT_PUBLIC_TRAFFIC_RULES_CONFIG.topN,
     exposureOptimization: mergeSection('exposureOptimization', DEFAULT_PUBLIC_TRAFFIC_RULES_CONFIG.exposureOptimization, parsed.exposureOptimization),
     conversionOptimization: mergeSection('conversionOptimization', DEFAULT_PUBLIC_TRAFFIC_RULES_CONFIG.conversionOptimization, parsed.conversionOptimization),
     newProductObservation: mergeSection('newProductObservation', DEFAULT_PUBLIC_TRAFFIC_RULES_CONFIG.newProductObservation, parsed.newProductObservation),
     lifecycleGovernance: mergeSection('lifecycleGovernance', DEFAULT_PUBLIC_TRAFFIC_RULES_CONFIG.lifecycleGovernance, parsed.lifecycleGovernance),
+    health: {
+      exposureDailyAverage: mergeSection('health.exposureDailyAverage', DEFAULT_PUBLIC_TRAFFIC_RULES_CONFIG.health.exposureDailyAverage, healthOverride?.exposureDailyAverage),
+      visitRate: mergeSection('health.visitRate', DEFAULT_PUBLIC_TRAFFIC_RULES_CONFIG.health.visitRate, healthOverride?.visitRate),
+      amountKill: mergeSection('health.amountKill', DEFAULT_PUBLIC_TRAFFIC_RULES_CONFIG.health.amountKill, healthOverride?.amountKill),
+    },
   };
 
   validateConfig(config);
