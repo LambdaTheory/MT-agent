@@ -11,12 +11,32 @@ interface ProblemSectionCardInput {
   queryRef?: string;
 }
 
+interface QueryTextCardOptions {
+  title?: string;
+  template?: 'blue' | 'green' | 'orange' | 'red' | 'grey';
+  maxBodyLines?: number;
+}
+
 function markdown(content: string): Record<string, unknown> {
   return { tag: 'markdown', content };
 }
 
 function divider(): Record<string, unknown> {
   return { tag: 'hr' };
+}
+
+function textTitle(text: string): string {
+  return text.split(/\r?\n/, 1)[0]?.trim() || '查询结果';
+}
+
+function textBody(text: string, maxLines: number): string {
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const bodyLines = lines.slice(1, maxLines + 1);
+  const hidden = Math.max(0, lines.length - 1 - bodyLines.length);
+  return [
+    ...(bodyLines.length ? bodyLines : [lines[0] ?? '暂无数据。']),
+    ...(hidden > 0 ? [`<font color='grey'>其余 ${hidden} 行请查看文本详情。</font>`] : []),
+  ].join('\n');
 }
 
 function metricValue(value: number | null): string {
@@ -42,6 +62,21 @@ function productMetricLines(match: ProductQueryMatch): string {
 function footer(context: PublicTrafficDataReportContext): string {
   const updatedAt = context.orderAnalysis?.capturedAt ?? context.orderAnalysis?.runDate ?? context.date;
   return `数据源：公域日报｜报告日期：${context.date}｜更新时间：${updatedAt}`;
+}
+
+export function buildQueryTextCard(context: PublicTrafficDataReportContext, text: string, options: QueryTextCardOptions = {}): FeishuCardPayload {
+  const title = options.title ?? textTitle(text);
+  return {
+    schema: '2.0',
+    config: { wide_screen_mode: true },
+    header: { title: { tag: 'plain_text', content: title }, template: options.template ?? 'blue' },
+    body: {
+      elements: [
+        markdown(textBody(text, options.maxBodyLines ?? 8)),
+        markdown(`<font color='grey'>${footer(context)}</font>`),
+      ],
+    },
+  };
 }
 
 export function buildProductDetailCard(context: PublicTrafficDataReportContext, result: ProductQueryResult): FeishuCardPayload | undefined {

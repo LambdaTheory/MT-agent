@@ -184,8 +184,8 @@ describe('executeAgentToolRequest public traffic report', () => {
 
     const response = await executeAgentToolRequest(
       {
-        toolName: 'publicTraffic.reportQuery',
-        arguments: { target: 'products', date: '2026-06-22', period: '7d', sortBy: 'publicVisits', metrics: ['publicVisits'], limit: 1 },
+        toolName: 'productLink.query',
+        arguments: { queryType: 'productList', date: '2026-06-22', period: '7d', sortBy: 'publicVisits', metrics: ['publicVisits'], limit: 1 },
         reason: '查询指定日期访问最高商品',
       },
       dir,
@@ -298,6 +298,97 @@ describe('executeAgentToolRequest public traffic report', () => {
     expect(String(response.metadata?.queryRef)).toMatch(/^q2:/);
   });
 
+  it('runs productLink.query problem pool counts through the unified query executor', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'mt-agent-product-link-problem-counts-'));
+    const runDir = join(dir, '2026-06-23');
+    await mkdir(runDir, { recursive: true });
+    const metric = {
+      exposure: 10,
+      publicVisits: 2,
+      dashboardVisits: 2,
+      createdOrders: 0,
+      signedOrders: 0,
+      reviewedOrders: 0,
+      shippedOrders: 0,
+      amount: 0,
+      exposureVisitRate: 0.2,
+      visitCreatedOrderRate: 0,
+      visitShipmentRate: 0,
+      hasExposureData: true,
+      hasDashboardData: true,
+    };
+    await writeFile(join(runDir, 'report-context.json'), JSON.stringify({
+      date: '2026-06-22',
+      summary: { '1d': metric, '7d': metric, '30d': metric },
+      conclusions: [],
+      rows: [{ productName: '托管异常商品 701', platformProductId: 'platform-701', displayProductId: '端内ID 701', custodyDays: 10, periods: { '1d': metric, '7d': metric, '30d': metric } }],
+      lowExposure: [],
+      weakClick: [],
+      weakConversion: [],
+      highPotential: [],
+      newProductObservation: [],
+      lifecycleGovernance: [],
+      custodyAbnormal: [{ identifier: '端内ID 701', action: '检查托管', reason: '托管异常', priority: 'high' }],
+      recommendedActions: [],
+      emptySectionNotes: {},
+    }));
+
+    const response = await executeAgentToolRequest(
+      { toolName: 'productLink.query', arguments: { queryType: 'problemPoolCounts', date: '2026-06-22' }, reason: '统一问题池数量查询' },
+      dir,
+    );
+
+    expect(response.text).toContain('公域日报问题池数量 2026-06-22');
+    expect(response.text).toContain('托管异常：1 条');
+    expect(response.metadata).toMatchObject({ toolName: 'productLink.query', queryType: 'problemPoolCounts', date: '2026-06-22' });
+    expect(JSON.stringify(response.card)).toContain('公域日报问题池数量 2026-06-22');
+  });
+
+  it('runs productLink.query link status against lifecycle governance by default', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'mt-agent-product-link-status-'));
+    const runDir = join(dir, '2026-06-23');
+    await mkdir(runDir, { recursive: true });
+    const metric = {
+      exposure: 10,
+      publicVisits: 1,
+      dashboardVisits: 1,
+      createdOrders: 0,
+      signedOrders: 0,
+      reviewedOrders: 0,
+      shippedOrders: 0,
+      amount: 0,
+      exposureVisitRate: 0.1,
+      visitCreatedOrderRate: 0,
+      visitShipmentRate: 0,
+      hasExposureData: true,
+      hasDashboardData: true,
+    };
+    await writeFile(join(runDir, 'report-context.json'), JSON.stringify({
+      date: '2026-06-22',
+      summary: { '1d': metric, '7d': metric, '30d': metric },
+      conclusions: [],
+      rows: [{ productName: '弱表现商品 706', platformProductId: 'platform-706', displayProductId: '端内ID 706', custodyDays: 45, periods: { '1d': metric, '7d': metric, '30d': metric } }],
+      lowExposure: [],
+      weakClick: [],
+      weakConversion: [],
+      highPotential: [],
+      newProductObservation: [],
+      lifecycleGovernance: [{ identifier: '端内ID 706', action: '下架、替换或重做素材', reason: '已托管 45 天，30日曝光 60，访问 1，金额 0.00', priority: 'medium' }],
+      recommendedActions: [{ identifier: '端内ID 999', action: '不要返回', reason: '不是链接状态' }],
+      emptySectionNotes: {},
+    }));
+
+    const response = await executeAgentToolRequest(
+      { toolName: 'productLink.query', arguments: { queryType: 'linkStatus', date: '2026-06-22' }, reason: '统一链接状态查询' },
+      dir,
+    );
+
+    expect(response.text).toContain('公域日报生命周期治理 2026-06-22');
+    expect(response.text).toContain('端内ID 706｜商品ID platform-706');
+    expect(response.text).not.toContain('端内ID 999');
+    expect(response.metadata).toMatchObject({ toolName: 'productLink.query', queryType: 'linkStatus', section: 'lifecycleGovernance', productIds: ['706'] });
+  });
+
   it('keeps filtered problem-pool full-list callbacks bound to the original controlled query', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'mt-agent-product-link-filtered-full-list-'));
     const runDir = join(dir, '2026-06-23');
@@ -398,6 +489,7 @@ describe('executeAgentToolRequest public traffic report', () => {
 
     expect(response.text).toContain('公域日报汇总 2026-06-22');
     expect(response.text).toContain('公域访问量 18');
+    expect(JSON.stringify(response.card)).toContain('公域日报汇总 2026-06-22');
   });
 
   it('returns inactive-link id collection from lifecycle governance', async () => {

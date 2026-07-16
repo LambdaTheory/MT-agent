@@ -63,6 +63,10 @@ function shouldStopAfterConfirmedResponse(response: BotResponse): boolean {
   return response.metadata?.ok === false;
 }
 
+function isBlockingCardResponse(response: BotResponse): boolean {
+  return response.metadata?.cardMode !== 'nonBlocking';
+}
+
 export function completePricePreviewArguments(
   toolName: string,
   args: Record<string, unknown>,
@@ -576,7 +580,7 @@ export async function continueAgentPlannerSteps(input: ContinuePlannerStepsInput
         ...(response.metadata ? { metadata: response.metadata } : {}),
       };
     }
-    if (response.card) {
+    if (response.card && isBlockingCardResponse(response)) {
       if (remainingSteps.length > 0) {
         input.textParts.push('');
         input.textParts.push('当前步骤返回了卡片，后续步骤已暂停，避免覆盖卡片结果。');
@@ -618,7 +622,7 @@ export async function continueAgentPlannerStepsAfterResponse(
     };
   }
 
-  if (response.card) {
+  if (response.card && isBlockingCardResponse(response)) {
     textParts.push('');
     textParts.push('当前步骤返回了卡片，后续步骤已暂停，避免覆盖卡片结果。');
     return { text: textParts.join('\n'), card: response.card };
