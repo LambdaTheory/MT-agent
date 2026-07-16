@@ -10,10 +10,14 @@
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+const { getInstallLayout } = require("./lib/install-layout");
+const { CURRENT_STATE_SCHEMA_VERSION, migrateJsonFile } = require("./lib/migrations");
 
-const SKILL_DIR = __dirname + "/..";
-const STORE_DIR = SKILL_DIR + "/tasks";
-const INDEX_FILE = STORE_DIR + "/_index.json";
+const SKILL_DIR = path.resolve(__dirname, "..");
+const LAYOUT = getInstallLayout(SKILL_DIR);
+const STORE_DIR = LAYOUT.tasksDir;
+const INDEX_FILE = path.join(STORE_DIR, "_index.json");
+let loadedIndexDocument = null;
 
 // ================================================================
 // Helpers
@@ -26,14 +30,21 @@ function ensureDir(dir) {
 function loadIndex() {
   ensureDir(STORE_DIR);
   if (!fs.existsSync(INDEX_FILE)) {
-    fs.writeFileSync(INDEX_FILE, "[]", "utf-8");
+    loadedIndexDocument = { stateSchemaVersion: CURRENT_STATE_SCHEMA_VERSION, tasks: [] };
+    fs.writeFileSync(INDEX_FILE, JSON.stringify(loadedIndexDocument, null, 2) + "\n", "utf-8");
     return [];
   }
-  return JSON.parse(fs.readFileSync(INDEX_FILE, "utf-8"));
+  loadedIndexDocument = migrateJsonFile(INDEX_FILE, { domain: "state", kind: "task-index" }).value;
+  return loadedIndexDocument.tasks;
 }
 
 function saveIndex(index) {
-  fs.writeFileSync(INDEX_FILE, JSON.stringify(index, null, 2), "utf-8");
+  loadedIndexDocument = { ...(loadedIndexDocument || {}), stateSchemaVersion: CURRENT_STATE_SCHEMA_VERSION, tasks: index };
+  fs.writeFileSync(INDEX_FILE, JSON.stringify(loadedIndexDocument, null, 2) + "\n", "utf-8");
+}
+
+function loadTask(taskFile) {
+  return migrateJsonFile(taskFile, { domain: "state", kind: "task" }).value;
 }
 
 function generateId() {
@@ -66,6 +77,7 @@ function doCreate(instruction, changesFile) {
   const timestamp = new Date().toISOString();
 
   const task = {
+    stateSchemaVersion: CURRENT_STATE_SCHEMA_VERSION,
     taskId,
     instruction,
     status: "planned",
@@ -106,7 +118,7 @@ function doUpdate(taskId, field, value) {
   const taskFile = STORE_DIR + "/" + taskId + ".json";
   if (!fs.existsSync(taskFile)) die("Task file not found: " + taskFile);
 
-  const task = JSON.parse(fs.readFileSync(taskFile, "utf-8"));
+  const task = loadTask(taskFile);
   const timestamp = new Date().toISOString();
 
   task[field] = value;
@@ -135,7 +147,7 @@ function doAddEvidence(taskId, type, filePath) {
   const taskFile = STORE_DIR + "/" + taskId + ".json";
   if (!fs.existsSync(taskFile)) die("Task file not found: " + taskFile);
 
-  const task = JSON.parse(fs.readFileSync(taskFile, "utf-8"));
+  const task = loadTask(taskFile);
   const timestamp = new Date().toISOString();
 
   task.evidence.push({ type, path: filePath, timestamp });
@@ -168,7 +180,7 @@ function doGet(taskId) {
   const taskFile = STORE_DIR + "/" + taskId + ".json";
   if (!fs.existsSync(taskFile)) die("Task not found: " + taskFile);
 
-  const task = JSON.parse(fs.readFileSync(taskFile, "utf-8"));
+  const task = loadTask(taskFile);
   return { status: "ok", task };
 }
 

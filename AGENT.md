@@ -2,7 +2,7 @@
 
 > 本文面向接手 MT-agent 的开发 Agent 与维护人员，说明模块现状、文件边界、主链路、开发方向、安全约束和验证方式。
 >
-> **最后核对基线：2026-07-16；当前稳定集成分支：`master`。** 文档描述应优先以当前代码和测试为准，阶段性审计文档仅用于理解未完成事项。
+> **最后核对基线：2026-07-16；当前稳定集成分支：`master`。** 文档描述应优先以当前代码和测试为准，阶段性审计文档仅用于理解历史决策和剩余运行边界。
 
 ---
 
@@ -426,7 +426,7 @@ npm run public-traffic-report / npm run rebuild-latest
 
 #### rental-price-agent 稳定版接入审计基线（2026-07-15）
 
-`C:\works\rental-price-agent-new` 已从 `https://gitee.com/lcc0628/rental-price-agent.git` 拉取到稳定提交 `de2010c`，`package.json.version`、`release-manifest.json.skillVersion`、`daemonVersion`、`protocolVersion`、`configSchemaVersion`、`stateSchemaVersion` 均为 `1.0.0`，Node 范围为 `>=18.0.0 <25.0.0`，Playwright 固定为 `1.60.0`。该版本不再只是 demo 快照，新增了正式的 release manifest、生命周期命令、双根目录、版本契约、daemon hello/negotiation、action registry、restart-required 和声明式迁移框架。MT-agent 仍未完成正式替换生产 `vendor/rental-price-agent/`；接入前必须先完成适配、回归和人工审批链路验证。
+稳定版 `rental-price-agent` 已正式 vendored 到项目内 `vendor/rental-price-agent/`，生产运行不得依赖外部工作副本 `C:\works\rental-price-agent-new`。当前 vendored release 的 `package.json.version`、`release-manifest.json.skillVersion`、`daemonVersion`、`protocolVersion`、`configSchemaVersion`、`stateSchemaVersion` 均为 `1.0.0`，Node 范围为 `>=18.0.0 <25.0.0`，Playwright 固定为 `1.60.0`。该版本包含正式 release manifest、生命周期命令、双根目录、版本契约、daemon hello/negotiation、action registry、restart-required 和声明式迁移框架。
 
 稳定版的发布与运行边界：
 
@@ -438,24 +438,24 @@ npm run public-traffic-report / npm run rebuild-latest
 
 MT-agent 当前的 rental 解耦边界：
 
-- `src/feishuBot/rentalPrice.ts` 的 `RentalPriceSkillClient` 是主要适配层，负责 daemon HTTP JSON action、单品预览、执行、回滚、当前页操作和审计文件。
+- `src/feishuBot/rentalPrice.ts` 的 `RentalPriceSkillClient` 是主要适配层，负责 daemon HTTP JSON action、单品预览、执行、回滚、当前页操作和审计文件；所有 MT 侧生成的 mutable artifact 必须写入 stable sibling data root（例如 `vendor/.rental-price-agent-data/tasks`），不得写入 release-owned `vendor/rental-price-agent/`。
 - `src/agentRuntime/toolRegistry.ts` 暴露 planner 可见/隐藏的 `rental.*` 工具 schema、风险等级和确认要求。
 - `rental.bulkPricePlan` 是当前唯一 planner-visible 的业务级批量租赁改价入口；`rental.bulkPriceApply` 是 hidden runtime 工具，只能通过持久化 `planId` 和确认卡触发。
 - `src/feishuBot/rentalBulkPriceHandlers.ts` 负责批量计划持久化、候选预览、执行报告和 ledger 记录；测试基线在 `tests/rentalBulkPrice.test.ts`。
-- `src/feishuBot/rentalBatchHandlers.ts`、`rentalMirrorHandlers.ts` 仍直接通过 `node scripts/batch-runner.js` / `mirror-search.js` 调 CLI，不经过 `RentalPriceSkillClient`。
+- `src/feishuBot/rentalBatchHandlers.ts`、`rentalMirrorHandlers.ts` 仍直接通过 `node scripts/batch-runner.js` / `mirror-search.js` 调 CLI，不经过 `RentalPriceSkillClient`；spec/state 路径必须校验在 stable sibling data root 的 `tasks/batches` 下。
 - `src/linkRegistry/daemonCatalog.ts` 会直接调用 daemon/CLI 的 `platform-search-all` 来刷新链接档案候选。
 
-新版接入的已知阻断/适配点：
+稳定版接入的当前运行边界：
 
 1. 稳定版 daemon `submit` 必须传 `expectedProductId` 并校验当前 canonical 商品编辑页；MT 单品改价、per-spec 改价、回滚、`submitCurrent`、规格增删等 submit 路径已经补齐该参数和回归测试。新增 submit 调用不得退回裸 `send({ action: 'submit' })`。
-2. `apply-current` 必须传 `allowCurrentPage: true` 与 `expectedProductId`；当前 MT 适配层大体符合，但正式替换前仍需回归。
+2. `apply-current` 必须传 `allowCurrentPage: true` 与 `expectedProductId`；MT 当前页应用路径已经适配并覆盖回归。
 3. legacy `verify` 变为 `verify <productId> <changes.json>`；新增代码不要依赖旧的单参数 verify。
 4. `config.json` 的租期字段应迁移到 `_dynamicFields.rentDays`，不要继续假设只存在固定 `rent1day/rent10day/rent30day` 等 selector。
-5. `rental.batchExecute` 目前只暴露 `confirmFormSetupWithoutPreview`；新版图片批处理还要求 `confirmImageWithoutPreview`，未补 schema/确认文案前不要通过 MT planner 开放图片批量执行。
-6. VAS 与图片能力尚无 MT 独立 planner-visible 工具、确认卡和回归测试；可以先作为人工 batch spec 试点，不建议直接交给 LLM 自主执行。
+5. `rental.batchExecute` 同时支持 `confirmFormSetupWithoutPreview` 和 `confirmImageWithoutPreview`；图片批量执行仍必须经显式确认，不得由 planner 自主绕过预览。
+6. VAS 与图片能力已有隐藏 MT 工具和回归测试，但默认不 planner-visible；可以作为人工确认/批量 spec 试点，不建议直接交给 LLM 自主执行。
 7. 新版 delayed-verify 是手动触发且 fail-closed；缺 readback、零校验、setup-only 结构校验缺失、image/VAS 证据异常都不得宣称成功。
 8. 新版 rollback 明确只覆盖字段/VAS，图片/spec/tenancy 不支持自动回滚；飞书卡片和报告必须如实呈现该边界。
-9. MT 直接读旧 `.daemon.port` / `.daemon.token` 的逻辑需要适配稳定版 sibling data root 下的 `daemon/daemon.port`、`daemon/daemon.token`，并优先使用稳定版 `daemon send` negotiation/client 行为，而不是裸 HTTP mutation。
+9. MT daemon 配置读取已适配稳定版 sibling data root 下的 `daemon/daemon.port`、`daemon/daemon.token`，并在命令中携带 hello negotiation/client 元数据；新增 mutation 必须保持 negotiated dispatch，不得绕过版本/状态协商。
 10. lifecycle 命令、PM2 daemon 启停、真实 SaaS 操作、浏览器 profile 和 `.env` 都有外部副作用；审计和开发默认只做静态检查、单元测试、schema/contract 测试，不自动执行真实操作。
 
 业务级批量租赁改价基线（2026-07-15 已合入 master）：

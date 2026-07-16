@@ -1,7 +1,8 @@
 import { execFile } from 'node:child_process';
 import { access, readFile } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
+import { createRentalPriceSkillClient } from '../feishuBot/rentalPrice.js';
 import type { GoodsSnapshotItem } from '../publicTraffic/types.js';
 import { writeJsonAtomic } from './persistence.js';
 
@@ -198,8 +199,9 @@ async function resolveDaemonConfig(options: DaemonCatalogFetchOptions = {}): Pro
     };
   }
 
-  const port = await readOptionalText(join(rootDir, '.daemon.port'));
-  const token = configuredDaemonToken || await readOptionalText(join(rootDir, '.daemon.token'));
+  const stableDataRoot = join(dirname(resolve(rootDir)), `.${basename(resolve(rootDir))}-data`);
+  const port = await readOptionalText(join(stableDataRoot, 'daemon', 'daemon.port')) ?? await readOptionalText(join(rootDir, '.daemon.port'));
+  const token = configuredDaemonToken || await readOptionalText(join(stableDataRoot, 'daemon', 'daemon.token')) || await readOptionalText(join(rootDir, '.daemon.token'));
   return {
     daemonUrl: port ? `http://127.0.0.1:${port}` : 'http://127.0.0.1:9223',
     daemonToken: token || null,
@@ -213,7 +215,15 @@ function buildSnapshotFromPlatformSearchPayload(value: unknown, generatedAt = ne
     throw new Error(`Daemon catalog request failed: ${readString(record ?? {}, 'message') ?? 'unknown error'}`);
   }
 
-  const products = Array.isArray(record.products) ? record.products : [];
+  const products = Array.isArray(record.products)
+    ? record.products
+    : Array.isArray(record.rows)
+      ? record.rows
+      : Array.isArray(record.results)
+        ? record.results
+        : Array.isArray(record.items)
+          ? record.items
+          : [];
   const entries = products
     .map((item) => {
       const productRecord = asRecord(item);
@@ -232,24 +242,14 @@ function buildSnapshotFromPlatformSearchPayload(value: unknown, generatedAt = ne
 
 async function fetchDaemonCatalogViaHttp(config: ResolvedDaemonConfig): Promise<DaemonCatalogSnapshot> {
   const { daemonUrl, daemonToken } = config;
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (daemonToken) headers['x-rental-agent-token'] = daemonToken;
-
-  const response = await fetch(daemonUrl, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({ action: 'platform-search-all' }),
-  });
-  const payload = await response.json() as unknown;
-  if (!response.ok) {
-    throw new Error(`Daemon catalog request failed: HTTP ${response.status}`);
-  }
-  return buildSnapshotFromPlatformSearchPayload(payload);
+  const client = createRentalPriceSkillClient({ rootDir: config.rootDir, daemonUrl, ...(daemonToken ? { daemonToken } : {}) });
+  if (!client.platformSearchAll) throw new Error('Rental price client platformSearchAll is unavailable');
+  return buildSnapshotFromPlatformSearchPayload(await client.platformSearchAll());
 }
 
 async function fetchDaemonCatalogViaCommand(config: ResolvedDaemonConfig, cwd: string): Promise<DaemonCatalogSnapshot> {
   const scriptPath = join(config.rootDir, 'scripts', 'playwright-runner.js');
-  const { stdout } = await execFileAsync(process.execPath, [scriptPath, 'platform-search-all'], {
+  const { stdout } = await execFileAsync(process.execPath, [scriptPath, 'platform-search', ''], {
     cwd,
     maxBuffer: 20 * 1024 * 1024,
   });
@@ -263,7 +263,7 @@ async function fetchDaemonCatalogViaCommand(config: ResolvedDaemonConfig, cwd: s
 
 function shouldFallbackToCommand(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
-  return /ECONNREFUSED|fetch failed|Unknown action: platform-search-all|HTTP 4\d{2}|HTTP 5\d{2}/i.test(message);
+  return /ECONNREFUSED|fetch failed|Unknown action: platform-search|HTTP 4\d{2}|HTTP 5\d{2}/i.test(message);
 }
 
 export async function fetchDaemonCatalogSnapshot(options: DaemonCatalogFetchOptions = {}): Promise<DaemonCatalogSnapshot> {

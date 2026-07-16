@@ -1,19 +1,22 @@
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRentalPriceSkillClient } from '../src/feishuBot/rentalPrice.js';
 
 describe('applyPerSpec', () => {
   let rootDir: string;
+  let dataRoot: string;
 
   beforeEach(async () => {
     rootDir = await mkdtemp(join(tmpdir(), 'mt-agent-apply-per-spec-'));
+    dataRoot = join(dirname(rootDir), `.${basename(rootDir)}-data`);
   });
 
   afterEach(async () => {
     vi.unstubAllGlobals();
     await rm(rootDir, { recursive: true, force: true });
+    await rm(dataRoot, { recursive: true, force: true });
   });
 
   it('sends nested per-spec changes to daemon apply and does not broadcast', async () => {
@@ -47,13 +50,14 @@ describe('applyPerSpec', () => {
     const applyCall = commands.find((command) => command.action === 'apply');
     expect(applyCall).toMatchObject({ action: 'apply', productId: '648' });
     expect(typeof applyCall?.changesFile).toBe('string');
+    expect(String(applyCall?.changesFile)).toContain(join(dataRoot, 'tasks'));
     const changes = JSON.parse(await readFile(String(applyCall?.changesFile), 'utf8')) as Record<string, unknown>;
     expect(changes).toEqual({
       '3862': { rent1day: '50.00' },
       '3863': { rent1day: '80.00' },
     });
     expect(changes).not.toHaveProperty('__broadcast');
-    expect(commands.map((command) => command.action)).toEqual(['apply', 'submit', 'read']);
+    expect(commands.map((command) => command.action).filter((action) => action !== 'hello')).toEqual(['apply', 'submit', 'read']);
   });
 
   it('rejects non-numeric product ids before writing changes files', async () => {

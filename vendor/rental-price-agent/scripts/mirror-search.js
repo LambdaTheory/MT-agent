@@ -79,7 +79,11 @@ function skuToFieldName(skuKey) {
     "库存": "stock", "市场价": "marketPrice", "押金": "deposit",
     "购买价": "purchasePrice", "采购价": "costPrice", "购买尾款": "finalPayment",
   };
-  return map[skuKey] || null;
+  if (map[skuKey]) return map[skuKey];
+  // Dynamic fallback: "N天租金" → rent{N}day (covers any custom rent period)
+  const match = skuKey.match(/^(\d+)天租金$/);
+  if (match) return "rent" + match[1] + "day";
+  return null;
 }
 
 function formatPrice(val) {
@@ -91,12 +95,34 @@ function normalizeText(val) {
   return String(val || "").trim();
 }
 
+function extractNumericPrices(val) {
+  const raw = normalizeText(val).replace(/[,，￥¥]/g, "");
+  return (raw.match(/\d+(?:\.\d+)?/g) || [])
+    .map(x => Number(x))
+    .filter(n => Number.isFinite(n));
+}
+
+function isLinkPrice(val) {
+  return extractNumericPrices(val).some(n => Math.abs(n - 0.01) < 0.000001 || Math.abs(n - 0.1) < 0.000001);
+}
+
 function isMqMaintainedProduct(product) {
   return /^MQ/i.test(normalizeText(product && product.name));
 }
 
+function hasLinkPriceSku(product) {
+  for (const sku of product.skus || []) {
+    for (const [key, val] of Object.entries(sku || {})) {
+      const k = normalizeText(key);
+      if ((k.includes("租金") || k === "价格" || k === "售价") && isLinkPrice(val)) return true;
+    }
+  }
+  return false;
+}
+
 function classifyProductExclusion(product) {
   if (isMqMaintainedProduct(product)) return { excluded: true, reason: "mq-maintained", message: "Product name starts with MQ" };
+  if (hasLinkPriceSku(product)) return { excluded: true, reason: "link-price", message: "Product has link price 0.01/0.1" };
   return { excluded: false };
 }
 
@@ -123,16 +149,40 @@ function reverseFieldMap() {
   return map;
 }
 
+function buildMirrorFieldUpdates(changes) {
+  const reverseMap = reverseFieldMap();
+  const skuFields = {};
+  const unmappedFields = [];
+  for (const [field, value] of Object.entries(changes || {})) {
+    const rentMatch = field.match(/^rent(\d+)day$/);
+    const mirrorField = reverseMap[field] || (rentMatch ? rentMatch[1] + "天租金" : null);
+    if (!mirrorField) unmappedFields.push(field);
+    else skuFields[mirrorField] = String(value);
+  }
+  if (unmappedFields.length > 0) return { ok: false, skuFields: {}, unmappedFields };
+  return { ok: true, skuFields, unmappedFields: [] };
+}
+
 function isNestedChanges(changes) {
   const firstVal = Object.values(changes || {})[0];
   return typeof firstVal === "object" && firstVal !== null && !Array.isArray(firstVal);
 }
 
-async function writebackItems(items) {
+function buildMirrorWritebackPayload(productId, skuUpdates, verificationAt) {
+  return { goods_id: productId, sku_updates: skuUpdates, source: "saas_verify", verified_at: verificationAt };
+}
+
+function resolveVerifiedWritebackTimestamp(state) {
+  if (!state || state.status !== "delayed_verified") return { ok: false, message: "Writeback requires delayed_verified state" };
+  const verificationAt = String(state && state.delayedVerify && state.delayedVerify.at || "").trim();
+  if (!verificationAt || !Number.isFinite(Date.parse(verificationAt))) return { ok: false, message: "Writeback requires a valid delayedVerify.at timestamp" };
+  return { ok: true, verificationAt };
+}
+
+async function writebackItems(items, verificationAt) {
   if (items.length === 0) die("No items to write back");
   log("Writeback " + items.length + " products to mirror...");
 
-  const reverseMap = reverseFieldMap();
   const results = [];
   for (const item of items) {
     const pid = item.productId;
@@ -143,29 +193,24 @@ async function writebackItems(items) {
     }
     const changes = rawChanges;
     if (Object.keys(changes).length === 0) { results.push({ productId: pid, status: "skipped", reason: "no changes" }); continue; }
+    const fieldUpdates = buildMirrorFieldUpdates(changes);
+    if (!fieldUpdates.ok) {
+      results.push({ productId: pid, status: "error", reason: "unmapped fields", unmappedFields: fieldUpdates.unmappedFields });
+      continue;
+    }
+    const skuFields = fieldUpdates.skuFields;
 
     // Get mirror data (for SKU strings)
     const detail = await batchDetail([pid]);
     const product = detail.data[0];
     if (!product || !product.skus || product.skus.length === 0) { results.push({ productId: pid, status: "error", reason: "not in mirror" }); continue; }
 
-    // Map field names and build sku_updates
-    const skuFields = {};
-    for (const [enField, val] of Object.entries(changes)) {
-      const cnField = reverseMap[enField];
-      if (cnField) skuFields[cnField] = String(val);
-    }
-
     if (Object.keys(skuFields).length === 0) { results.push({ productId: pid, status: "skipped", reason: "no mappable fields" }); continue; }
 
     const skuUpdates = product.skus.map(sku => ({ SKU: sku.SKU, fields: skuFields }));
 
     try {
-      const resp = await request("POST", "/skill/products/update-local", {
-        goods_id: pid,
-        sku_updates: skuUpdates,
-        source: "rental-price-agent",
-      });
+      const resp = await request("POST", "/skill/products/update-local", buildMirrorWritebackPayload(pid, skuUpdates, verificationAt));
       results.push({ productId: pid, status: resp.status || "ok", updated: resp.updated_sku_count, rows: resp.updated_row_count, missing: resp.missing_skus });
       log("  " + pid + ": " + resp.updated_sku_count + " SKUs / " + resp.updated_row_count + " rows");
     } catch (err) {
@@ -214,7 +259,7 @@ async function main() {
         return { productId: product.id, name: product.name, mirrorFields: fields, changed: false };
       });
 
-      output({ items, excluded: filtered.excluded, filterRules: ["exclude MQ-maintained products"] });
+      output({ items, excluded: filtered.excluded, filterRules: ["exclude MQ-maintained products", "exclude link-price products with rental price 0.01/0.1"] });
       if (filtered.excluded.length > 0) log("Excluded " + filtered.excluded.length + " products by search filter rules");
       log("Run: batch-runner.js preview <this-file>");
       break;
@@ -229,9 +274,11 @@ async function main() {
       const state = JSON.parse(fs.readFileSync(statePath, "utf-8"));
       if (state.status !== "delayed_verified") die("Writeback requires delayed_verified state");
       if ((state.verifyFailed || []).length > 0 || (state.failed || []).length > 0) die("Writeback requires no failed or verifyFailed items");
-      const completedIds = new Set((state.completed || []).map(x => String(x.productId)));
+      const timestampDecision = resolveVerifiedWritebackTimestamp(state);
+      if (!timestampDecision.ok) die(timestampDecision.message);
+      const completedIds = new Set((state.completed || []).filter(entry => entry && entry.status !== "preview_only").map(x => String(x.productId)));
       const items = (state.spec && state.spec.items ? state.spec.items : []).filter(item => completedIds.has(String(item.productId)));
-      await writebackItems(items);
+      await writebackItems(items, timestampDecision.verificationAt);
       break;
     }
     default:
@@ -239,4 +286,20 @@ async function main() {
   }
 }
 
-main().catch(err => { die(err.message); });
+if (require.main === module) {
+  main().catch(err => { die(err.message); });
+} else {
+  module.exports = {
+    normalizeText,
+    extractNumericPrices,
+    isLinkPrice,
+    isMqMaintainedProduct,
+    hasLinkPriceSku,
+    classifyProductExclusion,
+    filterSearchDetails,
+    skuToFieldName,
+    buildMirrorWritebackPayload,
+    buildMirrorFieldUpdates,
+    resolveVerifiedWritebackTimestamp,
+  };
+}

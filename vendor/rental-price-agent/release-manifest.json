@@ -1,0 +1,54 @@
+{
+  "manifestSchemaVersion": 1,
+  "name": "rental-price-agent",
+  "releaseTag": "v1.0.0",
+  "skillVersion": "1.0.0",
+  "daemonVersion": "1.0.0",
+  "protocolVersion": "1.0.0",
+  "configSchemaVersion": "1.0.0",
+  "stateSchemaVersion": "1.0.0",
+  "nodeRange": ">=18.0.0 <25.0.0",
+  "playwrightVersion": "1.60.0",
+  "browserPolicy": {
+    "supported": [
+      "managed-chromium",
+      "system-chrome"
+    ],
+    "default": "system-chrome",
+    "allowFallback": false
+  },
+  "compatibility": {
+    "skill": {
+      "min": "1.0.0",
+      "max": "1.0.0"
+    },
+    "daemon": {
+      "min": "1.0.0",
+      "max": "1.0.0"
+    },
+    "protocol": {
+      "min": "1.0.0",
+      "max": "1.0.0"
+    },
+    "configSchema": {
+      "min": "1.0.0",
+      "max": "1.0.0"
+    },
+    "stateSchema": {
+      "min": "1.0.0",
+      "max": "1.0.0"
+    }
+  },
+  "migration": {
+    "contractVersion": 2,
+    "definition": "scripts/lib/target-migration.json",
+    "sources": {
+      "configSchema": [
+        { "min": "1.0.0", "max": "1.0.0" }
+      ],
+      "stateSchema": [
+        { "min": "1.0.0", "max": "1.0.0" }
+      ]
+    }
+  }
+}

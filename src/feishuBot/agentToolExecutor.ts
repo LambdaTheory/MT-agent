@@ -92,7 +92,9 @@ import {
   RENTAL_DELIST_MAX_AUDIT_WARNINGS,
 } from './rentalWriteOperationHandlers.js';
 import { executeRentalBatchTool } from './rentalBatchHandlers.js';
+import { executeRentalImageTool } from './rentalImageHandlers.js';
 import { executeRentalMirrorTool } from './rentalMirrorHandlers.js';
+import { executeRentalVasTool } from './rentalVasHandlers.js';
 import { findReadOnlyTool } from './readOnlyToolRegistry.js';
 import { inferPriceAdjustmentAmountFromText, readPriceAdjustmentAmountArgument } from './priceAdjustment.js';
 import {
@@ -2622,6 +2624,18 @@ export async function executeAgentToolRequest(
     case 'rental.specDiscoverFull':
     case 'rental.readRaw':
       return executeRentalReadOnlyOperationHandler(request, options.rentalPriceClient ?? createRentalPriceSkillClient());
+    case 'rental.imageRead':
+    case 'rental.imageUpload':
+    case 'rental.imagePick':
+    case 'rental.imageOrder':
+    case 'rental.whiteImageSet':
+    case 'rental.imageVerify':
+      return executeRentalImageTool(request, options.rentalPriceClient);
+    case 'rental.vasRead':
+    case 'rental.vasCatalogRead':
+    case 'rental.vasApply':
+    case 'rental.vasVerify':
+      return executeRentalVasTool(request, options.rentalPriceClient);
     case 'rental.copy':
     case 'rental.tenancySet':
     case 'rental.specDiscover':
@@ -2738,9 +2752,11 @@ export async function executeAgentToolRequest(
     case 'rental.batchResume':
     case 'rental.batchReport':
     case 'rental.batchRollback':
+    case 'rental.batchDelayedVerify':
       return executeRentalBatchTool(request.toolName, request.arguments, options.ledgerContext);
     case 'rental.mirrorSearch':
     case 'rental.mirrorBatchSpec':
+    case 'rental.mirrorWritebackState':
       return executeRentalMirrorTool(request.toolName, request.arguments);
     case 'closedOrder.syncFeedback': {
       const result = await syncClosedOrderFeedbackFromApi(

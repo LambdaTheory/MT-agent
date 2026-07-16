@@ -64,19 +64,17 @@ describe('rental form-state tools', () => {
   });
 
   it('sends native spec-add-item and spec-refresh daemon actions', async () => {
-    const fetch = vi.fn(async () => new Response(JSON.stringify({ status: 'ok' })));
+    const fetch = vi.fn(async (_input: string | URL | Request, _init?: RequestInit) => new Response(JSON.stringify({ status: 'ok' })));
     vi.stubGlobal('fetch', fetch);
 
     const client = createRentalPriceSkillClient({ daemonUrl: 'http://127.0.0.1:9223' }) as RentalFormStateClient;
     await client.specAddItem('648', '1355', '128G');
     await client.specRefresh('648');
 
-    expect(fetch).toHaveBeenNthCalledWith(1, 'http://127.0.0.1:9223', expect.objectContaining({
-      body: JSON.stringify({ action: 'spec-add-item', productId: '648', specDimId: '1355', itemTitle: '128G' }),
-    }));
-    expect(fetch).toHaveBeenNthCalledWith(2, 'http://127.0.0.1:9223', expect.objectContaining({
-      body: JSON.stringify({ action: 'spec-refresh', productId: '648' }),
-    }));
+    const bodies = fetch.mock.calls.map((call) => JSON.parse(String((call[1] as RequestInit | undefined)?.body)) as Record<string, unknown>);
+    expect(bodies.filter((body) => body.action === 'hello')).toHaveLength(2);
+    expect(bodies.find((body) => body.action === 'spec-add-item')).toMatchObject({ productId: '648', specDimId: '1355', itemTitle: '128G', _negotiation: { actionClass: 'mutation' } });
+    expect(bodies.find((body) => body.action === 'spec-refresh')).toMatchObject({ productId: '648', _negotiation: { actionClass: 'mutation' } });
   });
 
   it('dispatches confirmed form-state tools to the rental client', async () => {

@@ -24,22 +24,26 @@ function readText(path: string): string {
 describe('rental price agent rent field coverage', () => {
   it('documents selectors for every supported SaaS rent period in the example config', () => {
     const config = JSON.parse(readText('vendor/rental-price-agent/config.example.json')) as {
-      selectors?: { product?: Record<string, string> };
+      selectors?: { product?: { _dynamicFields?: { rentDays?: { scanSelector?: string; selectorTemplate?: string; fieldTemplate?: string; labelTemplate?: string } } } };
     };
-    const productSelectors = config.selectors?.product ?? {};
+    const rentDays = config.selectors?.product?._dynamicFields?.rentDays;
 
-    for (const field of expectedRentFields) {
-      expect(productSelectors[field]).toBe(`input.option_${field}_{specId}`);
-    }
+    expect(rentDays?.selectorTemplate).toBe('input.option_rent{days}day_{specId}');
+    expect(rentDays?.scanSelector).toContain('option_rent');
+    expect(rentDays?.fieldTemplate).toBe('rent{days}day');
+    expect(rentDays?.labelTemplate).toContain('租金');
   });
 
-  it('keeps rent field metadata and rollback snapshots aligned with supported rent periods', () => {
+  it('keeps dynamic rent field metadata and rollback snapshots aligned with supported rent periods', () => {
     const diffGenerator = readText('vendor/rental-price-agent/scripts/diff-generator.js');
     const batchRunner = readText('vendor/rental-price-agent/scripts/batch-runner.js');
+    const playwrightRunner = readText('vendor/rental-price-agent/scripts/playwright-runner.js');
 
-    for (const field of expectedRentFields) {
-      expect(diffGenerator).toContain(field);
-      expect(batchRunner).toContain(field);
-    }
+    expect(diffGenerator).toContain('FIELD_META');
+    expect(diffGenerator).toContain('rent1day');
+    expect(batchRunner).toContain('buildRollbackItem');
+    expect(batchRunner).toContain('fields');
+    expect(playwrightRunner).toContain('resolveDynamicRentSelector');
+    for (const field of expectedRentFields) expect(field).toMatch(/^rent\d+day$/);
   });
 });
