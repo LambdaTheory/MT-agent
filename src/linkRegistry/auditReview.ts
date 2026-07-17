@@ -1,4 +1,5 @@
 import { canonicalProductShortName } from '../publicTraffic/productDisplayName.js';
+import type { LlmProvider } from '../llm/provider.js';
 import type { LinkRegistryAudit, LinkRegistrySameSkuGroupAudit } from './audit.js';
 import { isLinkRegistryMaintenanceIgnoredEntry, isMqOfflineLinkText } from './maintenance.js';
 import type { LinkRegistryMaintenanceQueueItem, LinkRegistryMaintenanceReport } from './maintenance.js';
@@ -32,6 +33,19 @@ export interface LinkRegistryAuditReviewRow {
   finalProductType: string;
   finalShortName: string;
   note: string;
+  llmSuggestion?: LinkRegistryAuditReviewLlmSuggestion;
+}
+
+export interface LinkRegistryAuditReviewLlmSuggestion {
+  status: 'available' | 'unavailable';
+  action: string;
+  confidence: string;
+  rationale: string;
+  suggestedSameSkuGroupId: string;
+  suggestedCategoryName: string;
+  suggestedProductType: string;
+  suggestedShortName: string;
+  uncertainties: string[];
 }
 
 export interface LinkRegistryAuditReviewReport {
@@ -56,6 +70,10 @@ function reviewKeyOf(row: LinkRegistryAuditReviewRow): string {
 
 function reviewSubjectOf(row: LinkRegistryAuditReviewRow): string {
   return row.internalProductId || row.sameSkuGroupId || row.shortName || row.productName || row.platformProductId || '未命名项';
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
 function uniqueSorted(values: string[]): string[] {
@@ -276,8 +294,113 @@ export function buildLinkRegistryAuditReviewReport(
   };
 }
 
+const LLM_SUGGESTION_ACTIONS = new Set(['map_platform_id', 'split_group', 'merge_group', 'classify', 'watch', 'ignore']);
+
+const LLM_AUDIT_REVIEW_SYSTEM_PROMPT = [
+  '你是链接档案审计助手。只生成建议，供人工审批参考。',
+  '不得写入 override，不得生成执行命令，不得要求调用 shell、文件系统或外部接口。',
+  '只输出 JSON，形如 {"suggestions":[{"reviewKey":"entry:902","action":"watch","confidence":0.7,"rationale":"...","suggestedSameSkuGroupId":"","suggestedCategoryName":"","suggestedProductType":"","suggestedShortName":"","uncertainties":[]}]}。',
+  'action 只能取 map_platform_id|split_group|merge_group|classify|watch|ignore。',
+].join('\n');
+
+function llmRowContext(row: LinkRegistryAuditReviewRow): Record<string, unknown> {
+  return {
+    reviewKey: reviewKeyOf(row),
+    priority: row.priority,
+    kind: row.kind,
+    reviewReasons: row.reviewReasons,
+    internalProductId: row.internalProductId,
+    internalProductIds: row.internalProductIds,
+    platformProductId: row.platformProductId,
+    sameSkuGroupId: row.sameSkuGroupId,
+    originalProductName: row.originalProductName,
+    productName: row.productName,
+    shortName: row.shortName,
+    categoryName: row.categoryName,
+    productType: row.productType,
+    status: row.status,
+    message: row.message,
+  };
+}
+
+function stringField(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function llmTextField(value: unknown): string {
+  return stringField(value).replace(/[\r\n]+/g, ' / ');
+}
+
+function unavailableLlmSuggestion(rationale = 'LLM 建议未通过数据契约校验'): LinkRegistryAuditReviewLlmSuggestion {
+  return {
+    status: 'unavailable',
+    action: '',
+    confidence: '',
+    rationale,
+    suggestedSameSkuGroupId: '',
+    suggestedCategoryName: '',
+    suggestedProductType: '',
+    suggestedShortName: '',
+    uncertainties: [],
+  };
+}
+
+function parseLlmSuggestion(value: unknown): LinkRegistryAuditReviewLlmSuggestion {
+  if (!isRecord(value)) return unavailableLlmSuggestion();
+  const action = stringField(value.action);
+  const confidence = value.confidence;
+  const rationale = llmTextField(value.rationale);
+  if (!LLM_SUGGESTION_ACTIONS.has(action) || typeof confidence !== 'number' || confidence < 0 || confidence > 1 || !rationale) {
+    return unavailableLlmSuggestion();
+  }
+  return {
+    status: 'available',
+    action,
+    confidence: confidence.toFixed(2),
+    rationale,
+    suggestedSameSkuGroupId: llmTextField(value.suggestedSameSkuGroupId),
+    suggestedCategoryName: llmTextField(value.suggestedCategoryName),
+    suggestedProductType: llmTextField(value.suggestedProductType),
+    suggestedShortName: llmTextField(value.suggestedShortName),
+    uncertainties: Array.isArray(value.uncertainties) ? value.uncertainties.map(llmTextField).filter(Boolean) : [],
+  };
+}
+
+export async function enrichLinkRegistryAuditReviewReportWithLlmSuggestions(
+  report: LinkRegistryAuditReviewReport,
+  options: { provider: LlmProvider },
+): Promise<LinkRegistryAuditReviewReport> {
+  let suggestions: unknown[] = [];
+  try {
+    const result = await options.provider.generateJson({
+      messages: [
+        { role: 'system', content: LLM_AUDIT_REVIEW_SYSTEM_PROMPT },
+        { role: 'user', content: JSON.stringify({ generatedAt: report.generatedAt, rows: report.rows.map(llmRowContext) }) },
+      ],
+      temperature: 0,
+    });
+    suggestions = Array.isArray(result.json.suggestions) ? result.json.suggestions : [];
+  } catch {
+    return { ...report, rows: report.rows.map((row) => ({ ...row, llmSuggestion: unavailableLlmSuggestion('LLM 建议生成失败') })) };
+  }
+  const suggestionByKey = new Map<string, unknown>();
+  for (const suggestion of suggestions) {
+    if (!isRecord(suggestion)) continue;
+    const reviewKey = stringField(suggestion.reviewKey);
+    if (reviewKey) suggestionByKey.set(reviewKey, suggestion);
+  }
+  return {
+    ...report,
+    rows: report.rows.map((row) => {
+      const raw = suggestionByKey.get(reviewKeyOf(row));
+      return { ...row, llmSuggestion: raw ? parseLlmSuggestion(raw) : unavailableLlmSuggestion('LLM 未返回该行建议') };
+    }),
+  };
+}
+
 function csvCell(value: string | number): string {
-  const text = String(value ?? '');
+  const raw = String(value ?? '');
+  const text = /^\s*[=+\-@]/.test(raw) || /^[\t\r\n]/.test(raw) ? `'${raw}` : raw;
   return `"${text.replaceAll('"', '""')}"`;
 }
 
@@ -304,6 +427,15 @@ export function renderLinkRegistryAuditReviewCsv(report: LinkRegistryAuditReview
     'firstSeenDate',
     'updatedAt',
     'suggestedShortName',
+    'llmSuggestionStatus',
+    'llmSuggestedAction',
+    'llmConfidence',
+    'llmRationale',
+    'llmSuggestedSameSkuGroupId',
+    'llmSuggestedCategoryName',
+    'llmSuggestedProductType',
+    'llmSuggestedShortName',
+    'llmUncertainties',
     'decision',
     'finalSameSkuGroupId',
     'finalCategoryName',
@@ -333,6 +465,15 @@ export function renderLinkRegistryAuditReviewCsv(report: LinkRegistryAuditReview
     row.firstSeenDate,
     row.updatedAt,
     row.suggestedShortName,
+    row.llmSuggestion?.status ?? '',
+    row.llmSuggestion?.action ?? '',
+    row.llmSuggestion?.confidence ?? '',
+    row.llmSuggestion?.rationale ?? '',
+    row.llmSuggestion?.suggestedSameSkuGroupId ?? '',
+    row.llmSuggestion?.suggestedCategoryName ?? '',
+    row.llmSuggestion?.suggestedProductType ?? '',
+    row.llmSuggestion?.suggestedShortName ?? '',
+    row.llmSuggestion?.uncertainties.join('、') ?? '',
     row.decision,
     row.finalSameSkuGroupId,
     row.finalCategoryName,
@@ -361,6 +502,7 @@ export function renderLinkRegistryAuditReviewGuide(report: LinkRegistryAuditRevi
     '- `finalCategoryName` / `finalProductType`：如果你确认分类，就直接填最终值。',
     '- `finalShortName`：默认已预填建议短名；如果你想改，就直接覆盖。',
     '- `note`：补充原因、判断依据或后续动作。',
+    '- LLM 建议仅供人工确认，不会自动写入 override；如需采纳，仍要手动填写最终字段。',
     '',
     '常见填写方式：',
     '- 单条新链接缺归组：填 `finalSameSkuGroupId`，必要时补 `finalCategoryName` / `finalProductType` / `finalShortName`。',
@@ -406,6 +548,7 @@ export function renderLinkRegistryAuditReviewApprovalMarkdown(report: LinkRegist
   lines.push('- 直接修改每条下面的 `decision` / `finalSameSkuGroupId` / `finalCategoryName` / `finalProductType` / `finalShortName` / `note`。');
   lines.push('- 建议 `decision` 只填 `accept`、`watch`、`ignore`。');
   lines.push('- 没意见就可以留空；如果你认可建议短名，也可以直接把 `finalShortName` 留成系统建议值。');
+  lines.push('- LLM 建议仅供人工确认，不会自动写入 override；采纳时仍需人工填写最终字段。');
   lines.push('- 填完后告诉我“已审核完，请读取审计 Markdown”。');
   lines.push('');
   lines.push(`生成时间: ${report.generatedAt}`);
@@ -437,6 +580,15 @@ export function renderLinkRegistryAuditReviewApprovalMarkdown(report: LinkRegist
     pushEditableField(lines, 'firstSeenDate', row.firstSeenDate);
     pushEditableField(lines, 'updatedAt', row.updatedAt);
     pushEditableField(lines, 'suggestedShortName', row.suggestedShortName);
+    pushEditableField(lines, 'llmSuggestionStatus', row.llmSuggestion?.status ?? '');
+    pushEditableField(lines, 'llmSuggestedAction', row.llmSuggestion?.action ?? '');
+    pushEditableField(lines, 'llmConfidence', row.llmSuggestion?.confidence ?? '');
+    pushEditableField(lines, 'llmRationale', row.llmSuggestion?.rationale ?? '');
+    pushEditableField(lines, 'llmSuggestedSameSkuGroupId', row.llmSuggestion?.suggestedSameSkuGroupId ?? '');
+    pushEditableField(lines, 'llmSuggestedCategoryName', row.llmSuggestion?.suggestedCategoryName ?? '');
+    pushEditableField(lines, 'llmSuggestedProductType', row.llmSuggestion?.suggestedProductType ?? '');
+    pushEditableField(lines, 'llmSuggestedShortName', row.llmSuggestion?.suggestedShortName ?? '');
+    pushEditableField(lines, 'llmUncertainties', row.llmSuggestion?.uncertainties.join('、') ?? '');
     lines.push('');
     pushEditableField(lines, 'decision', row.decision);
     pushEditableField(lines, 'finalSameSkuGroupId', row.finalSameSkuGroupId);
