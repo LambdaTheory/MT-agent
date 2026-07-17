@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -82,6 +83,31 @@ const metric = {
   hasExposureData: true,
   hasDashboardData: true,
 };
+
+const AUDIT_HASH = 'a'.repeat(64);
+
+function completeAudit(productId: string, taskIdOrOverrides: string | Record<string, unknown> = `task_${productId}_ref`) {
+  const overrides = typeof taskIdOrOverrides === 'string' ? { taskId: taskIdOrOverrides } : taskIdOrOverrides;
+  return {
+    taskId: `task_${productId}_ref`,
+    changesFile: `changes-${productId}.json`,
+    rollbackFile: `rollback-${productId}.json`,
+    currentValuesFile: `current-${productId}.json`,
+    changesSha256: AUDIT_HASH,
+    rollbackSha256: AUDIT_HASH,
+    currentSnapshotSha256: AUDIT_HASH,
+    planHash: AUDIT_HASH,
+    expectedFieldCount: 2,
+    hasErrors: false,
+    hasWarnings: false,
+    diff: [{ field: 'rent1day', label: '1天', old: '33.00', new: '29.85', change: '-3.15', changePct: '-9.5%', issues: [] }],
+    ...overrides,
+  };
+}
+
+function legacyPriceConfirmValue(request: Record<string, unknown>): Record<string, unknown> {
+  return { action: 'rental_price_confirm', request, confirmationKey: createHash('sha256').update(JSON.stringify(request)).digest('hex').slice(0, 24) };
+}
 
 async function writeLearningContext(): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), 'mt-agent-bot-http-learning-'));
@@ -528,6 +554,7 @@ describe('startFeishuBotServer', () => {
 
   it('routes text event through dispatcher and replies', async () => {
     const replies: Array<{ messageId: string; text: string }> = [];
+    const cards: Array<{ messageId: string; card: unknown }> = [];
     const messages: FeishuBotIncomingTextMessage[] = [];
     let resolveReplySent!: () => void;
     const replySent = new Promise<void>((resolve) => {
@@ -1723,15 +1750,70 @@ describe('startFeishuBotServer', () => {
     }
   });
 
+  it('rejects legacy HTTP rental price confirmation before execution', async () => {
+    const replies: Array<{ messageId: string; text: string }> = [];
+    const calls: unknown[] = [];
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run'); },
+      async execute(request) {
+        calls.push(request);
+        return { productId: request.productId, ok: true, lines: ['apply: ok'] };
+      },
+      async copy() { throw new Error('copy should not run'); },
+      async delist() { throw new Error('delist should not run'); },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+    const server = startFeishuBotServer({
+      port: 0,
+      appId: 'app',
+      appSecret: 'secret',
+      outputDir: 'output',
+      rentalPriceClient,
+      replyText: async ({ messageId }, text) => {
+        replies.push({ messageId, text });
+        return { sent: true, channel: 'app' };
+      },
+    });
+    try {
+      await new Promise<void>((resolve) => server.once('listening', resolve));
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+      const confirmValue = legacyPriceConfirmValue({ mode: 'explicit_fields', productId: '761', fields: { rent1day: '22.00' } });
+
+      const response = await fetch(`http://127.0.0.1:${address.port}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          header: { event_type: 'card.action.trigger' },
+          event: { context: { open_message_id: 'mid-http-legacy-price-confirm' }, action: { value: confirmValue } },
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      expect(calls).toEqual([]);
+      expect(replies).toEqual([{ messageId: 'mid-http-legacy-price-confirm', text: expect.stringContaining('旧改价确认入口已停用') }]);
+    } finally {
+      server.close();
+    }
+  });
+
   it('executes a referenced Agent price apply confirmation from the HTTP callback', async () => {
     const replies: Array<{ messageId: string; text: string }> = [];
+    const cards: Array<{ messageId: string; card: unknown }> = [];
     const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-http-agent-tool-ref-'));
     const calls: Array<{ productId: string; fields: Record<string, string> }> = [];
     const rentalPriceClient: RentalPriceSkillClient = {
       async preview() { throw new Error('preview should not run'); },
       async execute(request) {
         calls.push({ productId: request.productId, fields: request.fields });
-        return { productId: request.productId, ok: true, lines: ['apply: ok'] };
+        return {
+          productId: request.productId,
+          ok: true,
+          lines: ['apply: ok', 'submit: ok', 'verify: ok'],
+          audit: { taskId: 'task_653_done', status: 'completed' as const, rollbackFile: 'rollback-653.json' },
+        };
       },
       async copy() { throw new Error('copy should not run'); },
       async delist() { throw new Error('delist should not run'); },
@@ -1749,6 +1831,10 @@ describe('startFeishuBotServer', () => {
         replies.push({ messageId, text });
         return { sent: true, channel: 'app' };
       },
+      replyCard: async ({ messageId }, card) => {
+        cards.push({ messageId, card });
+        return { sent: true, channel: 'app' };
+      },
     });
     try {
       await new Promise<void>((resolve) => server.once('listening', resolve));
@@ -1761,7 +1847,7 @@ describe('startFeishuBotServer', () => {
             {
               productId: '653',
               fields: { rent1day: '29.85', rent10day: '74.85' },
-              audit: { taskId: 'task_653_ref', rollbackFile: 'rollback-653.json' },
+              audit: completeAudit('653', 'task_653_ref'),
             },
           ],
         },
@@ -1787,9 +1873,12 @@ describe('startFeishuBotServer', () => {
 
       expect(response.status).toBe(200);
       expect(calls).toEqual([{ productId: '653', fields: { rent1day: '29.85', rent10day: '74.85' } }]);
-      expect(replies).toHaveLength(1);
-      expect(replies[0].text).toContain('改价执行完成');
-      expect(replies[0].text).toContain('apply: ok');
+      expect(replies).toHaveLength(0);
+      expect(cards).toHaveLength(1);
+      const cardText = JSON.stringify(cards[0].card);
+      expect(cardText).toContain('租赁改价执行完成');
+      expect(cardText).toContain('生成回滚确认卡');
+      expect(cardText).toContain('rental_price_prepare_rollback');
     } finally {
       server.close();
     }
@@ -1937,7 +2026,15 @@ describe('startFeishuBotServer', () => {
     }), 'utf8');
     const cards: Array<{ messageId: string; card: Record<string, unknown> }> = [];
     const rentalPriceClient = {
-      async preview() { return { productId: '648', fields: { rent1day: '18.00' }, lines: ['1天:20->18'], warnings: [] }; },
+      async preview() {
+        return {
+          productId: '648',
+          fields: { rent1day: '18.00' },
+          lines: ['1天:20->18'],
+          warnings: [],
+          audit: completeAudit('648', { taskId: undefined, expectedFieldCount: 1, diff: [{ field: 'rent1day', label: '1天', old: '20.00', new: '18.00', change: '-2.00', changePct: '-10.0%', issues: [] }] }),
+        };
+      },
       async execute() { throw new Error('execute should not run during preview'); },
       async copy() { throw new Error('copy should not run during preview'); },
       async delist() { throw new Error('delist should not run during preview'); },

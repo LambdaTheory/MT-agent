@@ -17,6 +17,7 @@ import { resolveQueryFullListText } from './queryFullListAction.js';
 import { buildIdLookupCard } from './idLookupCard.js';
 import { lookupProductId } from './idLookup.js';
 import { createFeishuMessageDispatcher } from './dispatcher.js';
+import { buildRentalPricePreviewProgressCard, buildRentalPriceRollbackConfirmCard } from './agentToolExecutor.js';
 import {
   buildActivityCancelAssistanceCard,
   buildActivityCancelFailureCard,
@@ -42,16 +43,19 @@ import {
   agentRequestFromNewLinkBatchConfirm,
   agentRequestFromNewLinkBatchMultiConfirm,
   agentRequestFromRentalOperationConfirm,
-  agentRequestFromRentalPriceConfirm,
   botResponseFromNewLinkBatchResult,
   botResponseFromRentalOperationResult,
-  botResponseFromRentalPriceExecution,
 } from './agentSpecializedContinuation.js';
 import { executeNewLinkBatchConfirmRequest, executeNewLinkBatchMultiConfirmRequest, parseNewLinkBatchConfirmRequest, parseNewLinkBatchMultiConfirmRequest } from '../newLinkWorkflow/batch.js';
 import { createRentalPriceSkillClient, executeRentalOperationConfirmRequest, parseRentalOperationConfirmRequest, parseRentalPriceConfirmRequest, type RentalPriceSkillClient } from './rentalPrice.js';
 import type { LlmIntentProposalProvider } from './llmIntentProposal.js';
 import type { BotIntent, BotResponse, FeishuBotDispatchResult, FeishuBotIncomingTextMessage, FeishuMessageEvent } from './types.js';
 import { handleUrlVerification, verifyFeishuSignature } from './verify.js';
+
+function shouldSendRentalPricePreviewProgress(text: string): boolean {
+  const compact = text.replace(/\s+/g, '');
+  return /(改价|pricePreview|pricechange|价格预览)/i.test(compact) && !/(回滚|rollback)/i.test(compact);
+}
 
 export interface FeishuBotServerConfig {
   port: number;
@@ -634,6 +638,13 @@ async function handleCardActionTrigger(
     return;
   }
 
+  if (actionName === 'rental_price_prepare_rollback') {
+    const card = await buildRentalPriceRollbackConfirmCard(config.outputDir ?? 'output', value);
+    if (!card) return statusCard('改价回滚确认异常', '回滚确认参数无效，请从执行完成卡重新发起。', 'red');
+    await replyCard(replyConfig, card);
+    return;
+  }
+
   if (actionName === 'agent_tool_cancel') {
     const referencedRequest = await loadAgentToolConfirmRequestFromValue(config.outputDir ?? 'output', value);
     if (readString(value?.requestRef) && !referencedRequest) {
@@ -761,11 +772,8 @@ async function handleCardActionTrigger(
     if (!claim.claimed) {
       return claimStatusCard('租赁商品改价已处理', claim.claim);
     }
-    const result = await (config.rentalPriceClient ?? createRentalPriceSkillClient()).execute(request);
-    setServerCardActionStatus(claim.key, result.ok ? 'completed' : 'failed');
-    const response = await continueSpecializedResponse(agentRequestFromRentalPriceConfirm(request), botResponseFromRentalPriceExecution(result));
-    if (response.card) await replyCard(replyConfig, response.card);
-    else await replyText(replyConfig, response.text);
+    setServerCardActionStatus(claim.key, 'failed');
+    await replyText(replyConfig, `旧改价确认入口已停用：商品 ${request.productId} 未执行。请重新发起改价预览，并使用新的 Agent 审计确认卡。`);
     return;
   }
 
@@ -989,10 +997,15 @@ export function startFeishuBotServer(config: FeishuBotServerConfig) {
 
     writeJson(res, 200, { ok: true });
 
+    const replyConfig = { appId: config.appId, appSecret: config.appSecret, messageId: textMessage.messageId };
+    const replyCard = config.replyCard ?? replyFeishuMessageCard;
+    const sentPreviewProgress = shouldSendRentalPricePreviewProgress(textMessage.text);
+    if (sentPreviewProgress) await replyCard(replyConfig, buildRentalPricePreviewProgressCard([], textMessage.text));
+
     const response = await dispatchMessage({ ...textMessage, source: 'http' });
     if (!response.skipped) {
-      const replyConfig = { appId: config.appId, appSecret: config.appSecret, messageId: textMessage.messageId };
-      if (response.card) await (config.replyCard ?? replyFeishuMessageCard)(replyConfig, response.card);
+      if (response.progressCard && !sentPreviewProgress) await replyCard(replyConfig, response.progressCard);
+      if (response.card) await replyCard(replyConfig, response.card);
       else await (config.replyText ?? replyFeishuMessageText)(replyConfig, response.text);
     }
   });
