@@ -1319,16 +1319,20 @@
     },
     {
       "internalProductId": "676",
-      "shortName": "x100v",
+      "sameSkuGroupId": "fujifilm-x100v",
+      "categoryId": "camera",
+      "categoryName": "相机",
+      "productType": "camera",
+      "shortName": "X100V",
       "aliases": [
-        "x 100v",
-        "x100 v",
-        "x100v"
+        "X100V",
+        "x100v",
+        "富士 X100V"
       ],
       "confidence": 0.95,
-      "reason": "link_registry_group_review_approval",
-      "maintainer": "group_review_csv",
-      "updatedAt": "2026-06-26"
+      "reason": "approved_product_group_audit",
+      "maintainer": "taxonomy_governance",
+      "updatedAt": "2026-07-16"
     },
     {
       "internalProductId": "677",
@@ -1358,16 +1362,20 @@
     },
     {
       "internalProductId": "679",
-      "shortName": "x100v",
+      "sameSkuGroupId": "fujifilm-x100v",
+      "categoryId": "camera",
+      "categoryName": "相机",
+      "productType": "camera",
+      "shortName": "X100V",
       "aliases": [
-        "x 100v",
-        "x100 v",
-        "x100v"
+        "X100V",
+        "x100v",
+        "富士 X100V"
       ],
       "confidence": 0.95,
-      "reason": "link_registry_group_review_approval",
-      "maintainer": "group_review_csv",
-      "updatedAt": "2026-06-26"
+      "reason": "approved_product_group_audit",
+      "maintainer": "taxonomy_governance",
+      "updatedAt": "2026-07-16"
     },
     {
       "internalProductId": "680",
@@ -1476,11 +1484,15 @@
     },
     {
       "internalProductId": "694",
-      "sameSkuGroupId": "vivo x300 pro",
+      "sameSkuGroupId": "vivo-x300-pro",
+      "categoryId": "phone",
+      "categoryName": "手机",
+      "productType": "smartphone",
+      "shortName": "vivo X300 Pro",
       "confidence": 0.95,
-      "reason": "link_registry_merge_review_approval",
-      "maintainer": "merge_review_csv",
-      "updatedAt": "2026-06-26"
+      "reason": "approved_product_group_audit",
+      "maintainer": "taxonomy_governance",
+      "updatedAt": "2026-07-16"
     },
     {
       "internalProductId": "695",
@@ -2583,7 +2595,7 @@
     },
     {
       "internalProductId": "929",
-      "shortName": "rx10m4",
+      "shortName": "RX10M4",
       "aliases": [
         "RX10M4",
         "rx10m4",
@@ -2637,6 +2649,137 @@
       "confidence": 0.95,
       "updatedAt": "2026-07-04",
       "reason": "link_registry_maintenance_review"
+    },
+    {
+      "internalProductId": "969",
+      "sameSkuGroupId": "canon-g7x2",
+      "categoryId": "camera",
+      "categoryName": "相机",
+      "productType": "camera",
+      "shortName": "G7X2",
+      "aliases": [
+        "G7",
+        "G7X2",
+        "G7 X2"
+      ],
+      "confidence": 0.95,
+      "updatedAt": "2026-07-16",
+      "reason": "approved_product_group_audit"
+    },
+    {
+      "internalProductId": "987",
+      "sameSkuGroupId": "fujifilm-instax-wide-400",
+      "categoryId": "camera",
+      "categoryName": "相机",
+      "productType": "instant-camera",
+      "shortName": "Wide 400",
+      "confidence": 0.95,
+      "updatedAt": "2026-07-16",
+      "reason": "approved_product_group_audit"
+    },
+    {
+      "internalProductId": "988",
+      "sameSkuGroupId": "fujifilm-instax-wide-400",
+      "categoryId": "camera",
+      "categoryName": "相机",
+      "productType": "instant-camera",
+      "shortName": "Wide 400",
+      "confidence": 0.95,
+      "updatedAt": "2026-07-16",
+      "reason": "approved_product_group_audit"
+    },
+    {
+      "internalProductId": "989",
+      "sameSkuGroupId": "fujifilm-instax-wide-400",
+      "categoryId": "camera",
+      "categoryName": "相机",
+      "productType": "instant-camera",
+      "shortName": "Wide 400",
+      "confidence": 0.95,
+      "updatedAt": "2026-07-16",
+      "reason": "approved_product_group_audit"
+    },
+    {
+      "internalProductId": "990",
+      "sameSkuGroupId": "fujifilm-instax-wide-400",
+      "categoryId": "camera",
+      "categoryName": "相机",
+      "productType": "instant-camera",
+      "shortName": "Wide 400",
+      "confidence": 0.95,
+      "updatedAt": "2026-07-16",
+      "reason": "approved_product_group_audit"
+    },
+    {
+      "internalProductId": "991",
+      "sameSkuGroupId": "fujifilm-instax-wide-400",
+      "categoryId": "camera",
+      "categoryName": "相机",
+      "productType": "instant-camera",
+      "shortName": "Wide 400",
+      "confidence": 0.95,
+      "updatedAt": "2026-07-16",
+      "reason": "approved_product_group_audit"
+    },
+    {
+      "internalProductId": "1012",
+      "sameSkuGroupId": "fujifilm-instax-wide-400",
+      "categoryId": "camera",
+      "categoryName": "相机",
+      "productType": "instant-camera",
+      "shortName": "Wide 400",
+      "confidence": 0.95,
+      "updatedAt": "2026-07-16",
+      "reason": "approved_product_group_audit"
+    },
+    {
+      "internalProductId": "1013",
+      "sameSkuGroupId": "fujifilm-instax-wide-400",
+      "categoryId": "camera",
+      "categoryName": "相机",
+      "productType": "instant-camera",
+      "shortName": "Wide 400",
+      "confidence": 0.95,
+      "updatedAt": "2026-07-16",
+      "reason": "approved_product_group_audit"
+    },
+    {
+      "internalProductId": "1015",
+      "sameSkuGroupId": "fujifilm-instax-wide-400",
+      "categoryId": "camera",
+      "categoryName": "相机",
+      "productType": "instant-camera",
+      "shortName": "Wide 400",
+      "confidence": 0.95,
+      "updatedAt": "2026-07-16",
+      "reason": "approved_product_group_audit"
+    },
+    {
+      "internalProductId": "1030",
+      "sameSkuGroupId": "samsung-galaxy-s23-ultra",
+      "categoryId": "phone",
+      "categoryName": "手机",
+      "productType": "smartphone",
+      "shortName": "S23U",
+      "aliases": [
+        "S23U",
+        "s23u",
+        "Galaxy S23 Ultra"
+      ],
+      "confidence": 0.95,
+      "updatedAt": "2026-07-16",
+      "reason": "approved_product_group_audit"
+    },
+    {
+      "internalProductId": "1031",
+      "sameSkuGroupId": "vivo-x300-pro",
+      "categoryId": "phone",
+      "categoryName": "手机",
+      "productType": "smartphone",
+      "shortName": "vivo X300 Pro",
+      "confidence": 0.95,
+      "updatedAt": "2026-07-16",
+      "reason": "approved_product_group_audit"
     }
   ],
   "sameSkuGroupRules": [
@@ -2800,7 +2943,16 @@
     },
     {
       "matchSameSkuGroupId": "amiro-rainbow-light-mask-abm502",
-      "shortName": "�ٹ� �ʺ������",
+      "categoryId": "beauty-device",
+      "categoryName": "美容仪",
+      "productType": "led-face-mask",
+      "shortName": "AMIRO ABM502",
+      "aliases": [
+        "AMIRO ABM502",
+        "AMIRO 彩虹光面罩",
+        "觅光 彩虹光面罩",
+        "彩虹光面罩ABM502"
+      ],
       "confidence": 0.95,
       "updatedAt": "2026-06-28",
       "reason": "link_registry_audit_review_csv",
@@ -3194,6 +3346,23 @@
       "maintainer": "audit_review_csv"
     },
     {
+      "matchSameSkuGroupId": "canon-g7",
+      "categoryId": "camera",
+      "categoryName": "相机",
+      "productType": "camera",
+      "shortName": "G7X2",
+      "aliases": [
+        "G7",
+        "G7X2",
+        "G7 X2"
+      ],
+      "sameSkuGroupId": "canon-g7x2",
+      "confidence": 0.95,
+      "reason": "approved_product_group_audit",
+      "maintainer": "taxonomy_governance",
+      "updatedAt": "2026-07-16"
+    },
+    {
       "matchSameSkuGroupId": "canon-g7x3",
       "shortName": "G7X3",
       "confidence": 0.95,
@@ -3240,7 +3409,10 @@
     },
     {
       "matchSameSkuGroupId": "canon-rf-50-f1-8",
-      "shortName": "���� RF 50mm F1.8 ��ͷ",
+      "categoryId": "lens",
+      "categoryName": "镜头",
+      "productType": "lens-accessory",
+      "shortName": "RF 50 F1.8",
       "confidence": 0.95,
       "updatedAt": "2026-06-28",
       "reason": "link_registry_audit_review_csv",
@@ -3263,7 +3435,10 @@
     },
     {
       "matchSameSkuGroupId": "canon-rf-s-18-150",
-      "shortName": "���� RF-S 18-150mm ��ͷ",
+      "categoryId": "lens",
+      "categoryName": "镜头",
+      "productType": "lens-accessory",
+      "shortName": "RF-S 18-150",
       "confidence": 0.95,
       "updatedAt": "2026-06-28",
       "reason": "link_registry_audit_review_csv",
@@ -3301,7 +3476,10 @@
     },
     {
       "matchSameSkuGroupId": "dji-action-6",
-      "shortName": "�� Action 6",
+      "categoryId": "camera",
+      "categoryName": "运动相机",
+      "productType": "action-camera",
+      "shortName": "Action 6",
       "confidence": 0.95,
       "updatedAt": "2026-06-28",
       "reason": "link_registry_audit_review_csv",
@@ -3314,6 +3492,17 @@
       "updatedAt": "2026-06-28",
       "reason": "link_registry_audit_review_csv",
       "maintainer": "audit_review_csv"
+    },
+    {
+      "matchSameSkuGroupId": "dji-osmo-nano",
+      "categoryId": "camera",
+      "categoryName": "运动相机",
+      "productType": "action-camera",
+      "shortName": "Osmo Nano",
+      "confidence": 0.95,
+      "reason": "approved_product_group_audit",
+      "maintainer": "taxonomy_governance",
+      "updatedAt": "2026-07-16"
     },
     {
       "matchSameSkuGroupId": "dji-pocket-3",
@@ -3589,6 +3778,24 @@
       "maintainer": "audit_review_csv"
     },
     {
+      "matchSameSkuGroupId": "fujifilm-instax-wide-40",
+      "categoryId": "camera",
+      "categoryName": "相机",
+      "productType": "instant-camera",
+      "shortName": "Wide 400",
+      "aliases": [
+        "Wide 400",
+        "Wide400",
+        "wide 400",
+        "wide400"
+      ],
+      "sameSkuGroupId": "fujifilm-instax-wide-400",
+      "confidence": 0.95,
+      "reason": "approved_product_group_audit",
+      "maintainer": "taxonomy_governance",
+      "updatedAt": "2026-07-16"
+    },
+    {
       "matchSameSkuGroupId": "fujifilm-instax-wide-400",
       "shortName": "Wide 400",
       "aliases": [
@@ -3748,7 +3955,44 @@
       "updatedAt": "2026-06-27"
     },
     {
+      "matchSameSkuGroupId": "fujifilm-x100v-旁轴-复古胶",
+      "categoryId": "camera",
+      "categoryName": "相机",
+      "productType": "camera",
+      "shortName": "X100V",
+      "aliases": [
+        "X100V",
+        "x100v",
+        "富士 X100V"
+      ],
+      "sameSkuGroupId": "fujifilm-x100v",
+      "confidence": 0.95,
+      "reason": "approved_product_group_audit",
+      "maintainer": "taxonomy_governance",
+      "updatedAt": "2026-07-16"
+    },
+    {
+      "matchSameSkuGroupId": "fujifilm-x100v-旁轴-复古胶片感街拍神器-安心保",
+      "categoryId": "camera",
+      "categoryName": "相机",
+      "productType": "camera",
+      "shortName": "X100V",
+      "aliases": [
+        "X100V",
+        "x100v",
+        "富士 X100V"
+      ],
+      "sameSkuGroupId": "fujifilm-x100v",
+      "confidence": 0.95,
+      "reason": "approved_product_group_audit",
+      "maintainer": "taxonomy_governance",
+      "updatedAt": "2026-07-16"
+    },
+    {
       "matchSameSkuGroupId": "insta360-go3s",
+      "categoryId": "camera",
+      "categoryName": "运动相机",
+      "productType": "action-camera",
       "shortName": "Insta360 GO3S",
       "confidence": 0.95,
       "updatedAt": "2026-06-28",
@@ -3986,6 +4230,23 @@
       "updatedAt": "2026-06-27"
     },
     {
+      "matchSameSkuGroupId": "三星galaxy-s23ultra短租特惠演唱",
+      "categoryId": "phone",
+      "categoryName": "手机",
+      "productType": "smartphone",
+      "shortName": "S23U",
+      "aliases": [
+        "S23U",
+        "s23u",
+        "Galaxy S23 Ultra"
+      ],
+      "sameSkuGroupId": "samsung-galaxy-s23-ultra",
+      "confidence": 0.95,
+      "reason": "approved_product_group_audit",
+      "maintainer": "taxonomy_governance",
+      "updatedAt": "2026-07-16"
+    },
+    {
       "matchSameSkuGroupId": "samsung-galaxy-s24-ultra",
       "shortName": "S24U",
       "confidence": 0.95,
@@ -3995,7 +4256,15 @@
     },
     {
       "matchSameSkuGroupId": "seayeo-led-face-mask",
-      "shortName": "SEAYEO ���ŵ�������",
+      "categoryId": "beauty-device",
+      "categoryName": "美容仪",
+      "productType": "led-face-mask",
+      "shortName": "SEAYEO 大排灯美容仪",
+      "aliases": [
+        "SEAYEO 大排灯美容仪",
+        "SEAYEO大排灯",
+        "大排灯美容仪"
+      ],
       "confidence": 0.95,
       "updatedAt": "2026-06-28",
       "reason": "link_registry_audit_review_csv",
@@ -4018,7 +4287,15 @@
     },
     {
       "matchSameSkuGroupId": "sony-rx10m4",
-      "shortName": "���� RX10M4",
+      "categoryId": "camera",
+      "categoryName": "相机",
+      "productType": "camera",
+      "shortName": "RX10M4",
+      "aliases": [
+        "RX10M4",
+        "rx10m4",
+        "索尼 RX10M4"
+      ],
       "confidence": 0.95,
       "updatedAt": "2026-06-28",
       "reason": "link_registry_audit_review_csv",
