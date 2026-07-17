@@ -12,6 +12,8 @@ test-results/
 # Runtime outputs
 output/
 .browser-profile/
+.browser-profile-dashboard-batch/
+vendor/.rental-price-agent-data/
 *.log
 
 # Local environment files

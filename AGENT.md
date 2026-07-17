@@ -2,7 +2,7 @@
 
 > 本文面向接手 MT-agent 的开发 Agent 与维护人员，说明模块现状、文件边界、主链路、开发方向、安全约束和验证方式。
 >
-> **最后核对基线：2026-07-16；当前稳定集成分支：`master`。** 文档描述应优先以当前代码和测试为准，阶段性审计文档仅用于理解历史决策和剩余运行边界。
+> **最后核对基线：2026-07-17；当前稳定集成分支：`master`。** 文档描述应优先以当前代码和测试为准，阶段性审计文档仅用于理解历史决策和剩余运行边界。
 
 ---
 
@@ -302,6 +302,7 @@ MT-agent/
 - 报表重发/推送、关单同步/报告等非商品变更操作可直接执行。
 - 确认卡使用从完整请求派生的 `confirmationKey`，解析时必须复算并验证，防止卡片 payload 篡改。
 - `buildAgentToolConfirmCard()` 仅在展示层把工具名包装成中文操作名，例如 `操作：复制商品（rental.copy）`；callback payload、`request.toolName`、`confirmationKey`、parser、ledger/audit 仍必须使用原始工具名，不能把中文展示文本反解析为执行参数。
+- `buildAgentToolConfirmCard()` 支持 `displayElements` 作为纯展示扩展，用于表格、指标块等富信息确认卡；这些元素不得承载可执行参数。确认/取消按钮仍只能使用 `requestRef + confirmationKey` 或受校验的 inline request。
 
 #### Daily Mission 当前状态
 
@@ -492,6 +493,9 @@ MT-agent 当前的 rental 解耦边界：
 - `bulkPriceApply` 只接受已持久化且已确认的 `planId`，执行时使用持久化 plan 逐项执行、记录 operation ledger 和 final report。不得从自由文本重新解析执行参数，也不得允许 planner/continuation 直接构造 hidden apply 参数。
 - Agent Explore 只能为 `rental.delist`、`rental.delistBatch`、`rental.priceRollback` 生成低层 rental 写确认；不得让 Explore 自由串联 `rental.priceApply`、`rental.perSpecPriceApply`、`rental.specDimApply` 等低层改价/规格写工具来绕过业务级 plan/apply。
 - hidden 工具确认必须依赖已存储的 `requestRef`，确认时重新加载完整请求并拒绝 inline hidden payload；这条边界由 `approvalCard` 和 `agentToolConfirmStore` 维护，防止确认卡篡改或工具参数被卡片 payload 替换。
+- 租赁改价确认卡已采用表格化 diff 样式（2026-07-17）：首屏展示链接数、价格字段数、审计状态、回滚文件状态；随后使用 root-level Feishu `table` 展示商品汇总和前几条详细 diff。详细 diff 优先来自 `RentalPriceAuditReference.diff` 的 `old -> new`、`change`、`changePct`、`specTitle`，缺少审计 diff 时只能展示新值，不得临时重算或反解析自由文本。
+- 多链接、多规格、多租期展示规则：汇总表分页展示全部链接；详细表默认只展开前几条链接/规格，完整执行范围以已保存请求和审计文件为准。两层规格（如“特惠期 x 套餐”）当前用审计中的 `specTitle` 作为规格行标签，不强行拆维度，除非上游明确提供结构化维度。
+- 改价确认卡的表格、指标块、颜色和按钮文案只改变展示，不改变执行语义：`rental.priceApply` 仍以存储的确认请求为准，按钮 callback 不得嵌入完整 `items`、审计文件路径或其他可被篡改后直接执行的数据。
 - executor adapter 应独立于业务 planner：负责稳定版 skill 路径、sibling data root、daemon token/port、hello negotiation、`expectedProductId`、batch CLI 参数、错误码归一化和 no-real-op 测试替身。
 - 不同业务域可共享计划对象、审批、执行、状态机和报告规范，但不要合并成一个万能工具。批量改价、日报驱动下架/补链、新链复制、规格清理、图片/VAS 应保留各自的 plan/apply 工具。
 - 图片/VAS、规格/租期结构变更、release lifecycle 暂不作为第一阶段 LLM planner-visible 写工具；等字段批量改价 plan/apply 跑通并补齐回归后，再按同一计划框架逐项开放。
