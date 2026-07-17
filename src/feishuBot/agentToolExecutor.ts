@@ -68,6 +68,7 @@ import {
   formatInventoryStatusOverviewText,
 } from './inventoryStatusCard.js';
 import { buildLinkRegistryOverviewCard, formatLinkRegistryOverviewText } from './linkRegistryOverviewCard.js';
+import { buildQueryTextCard } from './queryCards.js';
 import {
   buildRentalOperationConfirmCard,
   buildRentalPricePreviewCard,
@@ -103,10 +104,9 @@ import {
   PRICE_ADJUSTMENT_CONFLICT_MESSAGE,
 } from './priceChangeContract.js';
 import { inferPriceMultiplierFromText, readPriceMultiplierArgument } from './priceMultiplier.js';
-import { buildReportSectionCardData, runPublicTrafficReportDateComparison, runPublicTrafficReportQuery, type PublicTrafficReportQueryArguments } from './reportQuery.js';
-import { buildProblemSectionCard, buildProductDetailCard } from './queryCards.js';
+import { runPublicTrafficReportDateComparison, runPublicTrafficReportQuery, type PublicTrafficReportQueryArguments } from './reportQuery.js';
 import { runProductLinkQuery, type ProductLinkQueryArguments } from './productLinkQuery.js';
-import { findLatestReportContext, findReportContextByDate, formatConversionSummary, formatLatestSummary, formatProductQueryResult, formatProductRows, parseNumericProductIdList, queryProductResult } from './reportStore.js';
+import { findLatestReportContext, findReportContextByDate, formatConversionSummary, formatLatestSummary, formatProductRows, parseNumericProductIdList } from './reportStore.js';
 import { saveAgentToolConfirmRequest } from './agentToolConfirmStore.js';
 import { refreshActivityPlanConfirmationKey, saveRefreshActivityPlan, type RefreshActivityPlan } from './refreshActivityPlanStore.js';
 import type { RentalWriteLedgerContext } from './rentalWriteOperationHandlers.js';
@@ -2437,12 +2437,16 @@ export async function executeAgentToolRequest(
     case 'publicTraffic.latestSummary': {
       const date = readOptionalDate(request.arguments.date);
       const report = await findReportContextForTool(outputDir, date);
-      return { text: report ? formatLatestSummary(report.context) : missingReportContextText(date) };
+      if (!report) return { text: missingReportContextText(date) };
+      const text = formatLatestSummary(report.context);
+      return { text, card: buildQueryTextCard(report.context, text, { template: 'blue' }), metadata: { cardMode: 'nonBlocking' } };
     }
     case 'publicTraffic.conversionSummary': {
       const date = readOptionalDate(request.arguments.date);
       const report = await findReportContextForTool(outputDir, date);
-      return { text: report ? formatConversionSummary(report.context) : missingReportContextText(date) };
+      if (!report) return { text: missingReportContextText(date) };
+      const text = formatConversionSummary(report.context);
+      return { text, card: buildQueryTextCard(report.context, text, { template: 'blue' }), metadata: { cardMode: 'nonBlocking' } };
     }
     case 'publicTraffic.reportQuery': {
       const date = readOptionalDate(request.arguments.date);
@@ -2451,35 +2455,19 @@ export async function executeAgentToolRequest(
         if (!report) return { text: missingReportContextText(date) };
         const compareDate = comparisonReportDate(report.context.date, request.arguments);
         const compareReport = await findReportContextForTool(outputDir, compareDate);
+        if (compareReport) {
+          const text = runPublicTrafficReportDateComparison(report.context, compareReport.context, { ...request.arguments, ...(date ? { date } : {}), compareDate } as PublicTrafficReportQueryArguments);
+          return { text, card: buildQueryTextCard(report.context, text, { template: 'blue' }), metadata: { cardMode: 'nonBlocking' } };
+        }
         return {
-          text: compareReport
-            ? runPublicTrafficReportDateComparison(report.context, compareReport.context, { ...request.arguments, ...(date ? { date } : {}), compareDate } as PublicTrafficReportQueryArguments)
-            : missingReportContextText(compareDate),
+          text: missingReportContextText(compareDate),
         };
       }
       const text = report
         ? runPublicTrafficReportQuery(report.context, { ...request.arguments, ...(date ? { date } : {}) } as PublicTrafficReportQueryArguments)
         : missingReportContextText(date);
-      if (report && request.arguments.target === 'section') {
-        const args = { ...request.arguments, ...(date ? { date } : {}) } as PublicTrafficReportQueryArguments;
-        const sectionData = buildReportSectionCardData(report.context, args);
-        if (sectionData) {
-          const productIds = sectionData.rows.map((row) => row.id.replace(/^端内ID\s*/i, ''));
-          const result = queryProductResult(report.context, productIds.join(','));
-          return {
-            text,
-            card: buildProblemSectionCard({
-              title: sectionData.label,
-              context: report.context,
-              result,
-              actionRows: sectionData.rows.map((row, index) => ({ ...row, id: productIds[index] ?? row.id })),
-              total: sectionData.total,
-              queryRef: `${report.context.date}:${args.section ?? 'recommendedActions'}`,
-            }),
-          };
-        }
-      }
-      return { text };
+      const cardTargets = new Set(['summary', 'comparison', 'productAggregation', 'orders', 'orderDerived', 'dataQuality', 'conclusions']);
+      return report && cardTargets.has(String(request.arguments.target)) ? { text, card: buildQueryTextCard(report.context, text, { template: 'blue' }), metadata: { cardMode: 'nonBlocking' } } : { text };
     }
     case 'productLink.query': {
       const date = readOptionalDate(request.arguments.date);

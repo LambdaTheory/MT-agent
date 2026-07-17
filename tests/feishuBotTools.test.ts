@@ -1422,7 +1422,7 @@ describe('handleBotIntent', () => {
     expect(response.text).not.toContain('没有找到匹配商品');
   });
 
-  it('returns a bounded issue-pool card for report section queries', async () => {
+  it('keeps legacy report section queries text-only so productLink.query owns issue-pool cards', async () => {
     const outputDir = await writeContext();
     const response = await executeAgentToolRequest(
       { toolName: 'publicTraffic.reportQuery', arguments: { target: 'section', section: 'custodyAbnormal' }, reason: '查询托管异常问题池' },
@@ -1430,13 +1430,9 @@ describe('handleBotIntent', () => {
     );
 
     expect(response.text).toContain('公域日报托管异常 2026-06-11');
-    expect(response.card).toBeDefined();
-    const cardText = JSON.stringify(response.card);
-    expect(cardText).toContain('托管异常 · 6 条');
-    expect(cardText).toContain('端内ID 565｜商品ID 2000000000000000000001');
-    expect(cardText).toContain('查看完整清单');
-    expect(cardText).toContain('query_full_list');
-    expect(cardText).not.toContain('端内ID 733｜商品ID p-733-target');
+    expect(response.card).toBeUndefined();
+    expect(JSON.stringify(response)).not.toContain('query_full_list');
+    expect(JSON.stringify(response)).not.toContain('2026-06-11:custodyAbnormal');
   });
 
   it('keeps gone links out of resolved operation candidates', async () => {
@@ -1719,19 +1715,19 @@ describe('handleBotIntent', () => {
     expect(response.text).toContain('iPhone 15');
   });
 
-  it('lets the Agent planner answer natural report data questions through publicTraffic.reportQuery', async () => {
+  it('lets the Agent planner answer product list questions through productLink.query', async () => {
     const outputDir = await writeContext();
     let plannerCalled = false;
     const planner: AgentPlannerProvider = {
       async proposePlan(request) {
         plannerCalled = true;
         expect(request.message).toBe('2026-06-11 7日访问最高的1个商品是谁');
-        expect(request.tools.map((tool) => tool.name)).toContain('publicTraffic.reportQuery');
+        expect(request.tools.map((tool) => tool.name)).toContain('productLink.query');
         return JSON.stringify({
           goal: '查询指定日期7日访问最高商品',
-          selectedTool: 'publicTraffic.reportQuery',
+          selectedTool: 'productLink.query',
           arguments: {
-            target: 'products',
+            queryType: 'productList',
             date: '2026-06-11',
             period: '7d',
             sortBy: 'publicVisits',
@@ -1750,7 +1746,7 @@ describe('handleBotIntent', () => {
     expect(response.text).toContain('公域日报商品查询 2026-06-11');
     expect(response.text).toContain('端内ID 702');
     expect(response.text).toContain('7d 公域访问量 80');
-    expect(response.card).toBeUndefined();
+    expect(JSON.stringify(response.card)).toContain('公域日报商品查询 2026-06-11');
   });
 
   it('lets the Agent planner answer aggregate report row questions through publicTraffic.reportQuery', async () => {
@@ -1784,7 +1780,7 @@ describe('handleBotIntent', () => {
     expect(response.text).toContain('公域日报商品聚合统计 2026-06-11');
     expect(response.text).toContain('匹配 2 条商品');
     expect(response.text).toContain('公域访问量总和 = 82');
-    expect(response.card).toBeUndefined();
+    expect(JSON.stringify(response.card)).toContain('公域日报商品聚合统计 2026-06-11');
   });
 
   it('lets the Agent planner answer link count questions through link registry instead of report aggregation', async () => {
@@ -1880,19 +1876,19 @@ describe('handleBotIntent', () => {
     expect(sameSkuGroup.metadata).toMatchObject({ productIds: ['914', '915', '916'], count: 3, resolutionMode: 'sameSkuGroup' });
   });
 
-  it('lets the Agent planner answer report source coverage questions through publicTraffic.reportQuery', async () => {
+  it('lets the Agent planner answer source coverage questions through productLink.query', async () => {
     const outputDir = await writeContext();
     let plannerCalled = false;
     const planner: AgentPlannerProvider = {
       async proposePlan(request) {
         plannerCalled = true;
         expect(request.message).toBe('7日访问页覆盖情况怎么样');
-        expect(request.tools.map((tool) => tool.name)).toContain('publicTraffic.reportQuery');
+        expect(request.tools.map((tool) => tool.name)).toContain('productLink.query');
         return JSON.stringify({
           goal: '查询7日访问页覆盖情况',
-          selectedTool: 'publicTraffic.reportQuery',
+          selectedTool: 'productLink.query',
           arguments: {
-            target: 'sourceCoverage',
+            queryType: 'sourceCoverage',
             date: '2026-06-11',
             period: '7d',
             source: 'dashboard',
@@ -1911,7 +1907,7 @@ describe('handleBotIntent', () => {
     expect(response.text).toContain('数据源：访问页，状态：全部');
     expect(response.text).toContain('7d：商品 6 条');
     expect(response.text).toContain('访问页已抓取 6 条/未更新 0 条');
-    expect(response.card).toBeUndefined();
+    expect(JSON.stringify(response.card)).toContain('日报数据源覆盖 2026-06-11');
   });
 
   it('lets the Agent planner answer derived order metric questions through publicTraffic.reportQuery', async () => {
@@ -1942,7 +1938,7 @@ describe('handleBotIntent', () => {
     expect(response.text).toContain('订单经营指标 2026-06-11');
     expect(response.text).toContain('关单率状态：达标（目标<=35%）');
     expect(response.text).not.toContain('客单价');
-    expect(response.card).toBeUndefined();
+    expect(JSON.stringify(response.card)).toContain('订单经营指标 2026-06-11');
   });
 
   it('does not fall back to deterministic exact routing when the Agent planner is configured but invalid', async () => {

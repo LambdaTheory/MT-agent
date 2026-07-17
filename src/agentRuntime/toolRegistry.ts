@@ -131,7 +131,7 @@ const reportQuerySortFieldSchema = {
 const publicTrafficReportQueryArgumentsSchema = {
   type: 'object',
   properties: {
-    target: { type: 'string', enum: ['summary', 'comparison', 'dateComparison', 'products', 'productDetail', 'productAggregation', 'sourceCoverage', 'section', 'sectionCounts', 'orders', 'orderDerived', 'dataQuality', 'conclusions'] },
+    target: { type: 'string', enum: ['summary', 'comparison', 'dateComparison', 'productAggregation', 'orders', 'orderDerived', 'dataQuality', 'conclusions'] },
     date: reportDateSchema,
     compareDate: reportDateSchema,
     compareWith: { type: 'string', enum: ['previousDay', 'previousPeriod'] },
@@ -1166,7 +1166,7 @@ const agentTools: AgentToolDefinition[] = [
   },
   {
     name: 'publicTraffic.removedLinks',
-    description: '查询最近已下架、已移除、已消失的链接。不要用于疑似失活/低活跃/生命周期治理候选，后者应使用 publicTraffic.inactiveLinks 或 publicTraffic.reportQuery section=lifecycleGovernance。',
+    description: '查询最近已下架、已移除、已消失的链接。不要用于疑似失活/低活跃/生命周期治理候选，后者应使用 publicTraffic.inactiveLinks 或 productLink.query。',
     risk: 'read',
     requiresConfirmation: false,
     inputSchema: noArgumentsSchema,

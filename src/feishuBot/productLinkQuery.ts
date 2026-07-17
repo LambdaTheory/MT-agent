@@ -2,7 +2,7 @@ import type { ProductQueryResult } from '../agentData/productQuery.js';
 import { parseNumericProductQueryList } from '../agentData/productQuery.js';
 import type { PublicTrafficDataReportContext } from '../publicTraffic/types.js';
 import type { BotResponse } from './types.js';
-import { buildProblemSectionCard, buildProductDetailCard } from './queryCards.js';
+import { buildProblemSectionCard, buildProductDetailCard, buildQueryTextCard } from './queryCards.js';
 import { buildQueryFullListRef } from './queryFullListAction.js';
 import { buildReportSectionCardData, runPublicTrafficReportQuery, type PublicTrafficReportQueryArguments, type ReportSectionName } from './reportQuery.js';
 import { formatProductQueryResult, queryProductResult } from './reportStore.js';
@@ -56,7 +56,7 @@ function queryTypeFromArgs(args: ProductLinkQueryArguments): ProductLinkQueryTyp
 function problemPoolReportArgs(args: ProductLinkQueryArguments): PublicTrafficReportQueryArguments {
   return {
     target: 'section',
-    section: args.section ?? 'recommendedActions',
+    section: args.section ?? (args.queryType === 'linkStatus' ? 'lifecycleGovernance' : 'recommendedActions'),
     ...(args.filters ? { filters: args.filters } : {}),
     ...(args.sortBy ? { sortBy: args.sortBy } : {}),
     ...(args.sortDirection ? { sortDirection: args.sortDirection } : {}),
@@ -80,7 +80,7 @@ export function runProductLinkQuery(context: PublicTrafficDataReportContext, arg
 
   if (queryType === 'problemPoolCounts') {
     const text = runPublicTrafficReportQuery(context, { target: 'sectionCounts' });
-    return { response: { text, metadata: { toolName: 'productLink.query', queryType, date: context.date } }, productIds: [] };
+    return { response: { text, card: buildQueryTextCard(context, text, { template: 'blue' }), metadata: { toolName: 'productLink.query', queryType, date: context.date, cardMode: 'nonBlocking' } }, productIds: [] };
   }
 
   if (queryType === 'problemPool' || queryType === 'linkStatus') {
@@ -127,7 +127,7 @@ export function runProductLinkQuery(context: PublicTrafficDataReportContext, arg
 
   if (queryType === 'sourceCoverage') {
     const text = runPublicTrafficReportQuery(context, sourceCoverageReportArgs(args));
-    return { response: { text, metadata: { toolName: 'productLink.query', queryType, date: context.date } }, productIds: [] };
+    return { response: { text, card: buildQueryTextCard(context, text, { template: 'blue' }), metadata: { toolName: 'productLink.query', queryType, date: context.date, cardMode: 'nonBlocking' } }, productIds: [] };
   }
 
   if (queryType === 'productList' && (!args.productQuery?.trim() || args.filters?.length || args.sortBy || args.limit || args.metrics?.length)) {
@@ -142,13 +142,16 @@ export function runProductLinkQuery(context: PublicTrafficDataReportContext, arg
       ...(args.sortDirection ? { sortDirection: args.sortDirection } : {}),
       ...(args.limit ? { limit: args.limit } : {}),
     };
+    const text = runPublicTrafficReportQuery(context, reportArgs);
     return {
       response: {
-        text: runPublicTrafficReportQuery(context, reportArgs),
+        text,
+        card: buildQueryTextCard(context, text, { template: 'blue', maxBodyLines: 6 }),
         metadata: {
           toolName: 'productLink.query',
           queryType,
           date: context.date,
+          cardMode: 'nonBlocking',
           count: context.rows.length,
           shownCount: Number(args.limit ?? 10),
         },
