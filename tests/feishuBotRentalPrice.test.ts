@@ -1,4 +1,4 @@
-import { copyFile, mkdir, mkdtemp, readdir, readFile } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -10,6 +10,8 @@ import { createRentalPriceSkillClient, type RentalPriceSkillClient } from '../sr
 afterEach(() => {
   vi.unstubAllGlobals();
 });
+
+const HASH = 'a'.repeat(64);
 
 function fakeClient(): RentalPriceSkillClient & { previews: unknown[]; executions: unknown[]; copies: unknown[]; delists: unknown[]; tenancySets: unknown[]; specDiscovers: unknown[]; specAdds: unknown[]; specRemoves: unknown[] } {
   return {
@@ -28,6 +30,19 @@ function fakeClient(): RentalPriceSkillClient & { previews: unknown[]; execution
         fields: request.mode === 'explicit_fields' ? request.fields : { rent1day: '90.00', rent10day: '180.00' },
         lines: ['rent1day: 100.00 -> 90.00', 'rent10day: 200.00 -> 180.00'],
         warnings: [],
+        audit: {
+          changesFile: 'C:/tmp/changes.json',
+          rollbackFile: 'C:/tmp/rollback.json',
+          currentValuesFile: 'C:/tmp/current.json',
+          changesSha256: HASH,
+          rollbackSha256: HASH,
+          currentSnapshotSha256: HASH,
+          planHash: HASH,
+          expectedFieldCount: 1,
+          hasErrors: false,
+          hasWarnings: false,
+          diff: [{ field: 'rent1day', label: '1天租金', old: '100.00', new: '90.00', change: '-10.00', changePct: '-10.0%', issues: [] }],
+        },
       };
     },
     async execute(request) {
@@ -86,12 +101,12 @@ describe('rental price Feishu integration', () => {
 
     expect(client.previews).toHaveLength(1);
     expect(client.executions).toHaveLength(0);
-    expect(response.text).toContain('请确认商品 761 改价');
-    expect(JSON.stringify(response.card)).toContain('确认改价');
-    expect(JSON.stringify(response.card)).toContain('rental_price_confirm');
+    expect(response.text).toContain('改价预览：1 个端内ID');
+    expect(JSON.stringify(response.card)).toContain('agent_tool_confirm');
+    expect(JSON.stringify(response.card)).toContain('rental.priceApply');
   });
 
-  it('renders rental price audit details in the confirmation card when preview provides them', async () => {
+  it('blocks rental price confirmation when audit preview has warnings', async () => {
     const client = fakeClient();
     client.preview = async (request) => {
       client.previews.push(request);
@@ -113,13 +128,9 @@ describe('rental price Feishu integration', () => {
     };
 
     const response = await handleBotIntent(parseBotIntent('改价 商品761 1天22'), 'output', { rentalPriceClient: client });
-    const serialized = JSON.stringify(response.card);
-
-    expect(serialized).toContain('审计预览');
-    expect(serialized).toContain('task_1_abcd1234');
-    expect(serialized).toContain('回滚文件');
-    expect(serialized).toContain('确认改价');
-    expect(serialized).toContain('task_1_abcd1234');
+    expect(response.card).toBeUndefined();
+    expect(response.text).toContain('审计存在警告');
+    expect(response.text).toContain('改价预览：1 个端内ID');
   });
 
   it('blocks rental price confirmation when audit preview has rule errors', async () => {
@@ -141,11 +152,9 @@ describe('rental price Feishu integration', () => {
     };
 
     const response = await handleBotIntent(parseBotIntent('改价 商品761 1天0'), 'output', { rentalPriceClient: client });
-    const serialized = JSON.stringify(response.card);
-
-    expect(serialized).toContain('审计发现错误，已阻断执行');
-    expect(serialized).not.toContain('rental_price_confirm');
-    expect(serialized).not.toContain('确认改价');
+    expect(response.card).toBeUndefined();
+    expect(response.text).toContain('审计存在错误');
+    expect(response.text).not.toContain('rental_price_confirm');
   });
 
   it('parses copy product commands and returns a confirmation card without executing', async () => {
@@ -560,13 +569,13 @@ describe('rental price skill client copy diagnostics', () => {
     }));
     const client = createRentalPriceSkillClient({ rootDir, daemonUrl: 'http://127.0.0.1:9223' });
 
-    const preview = await client.preview({ mode: 'explicit_fields', productId: '761', fields: { rent1day: '22.00' } });
+    const preview = await client.preview({ mode: 'explicit_fields', productId: '761', fields: { rent1day: '29.00' } });
 
     expect(preview.audit?.taskId).toMatch(/^task_/);
     expect(preview.audit?.changesFile).toContain('changes_');
     expect(preview.audit?.rollbackFile).toContain('rollback_');
     expect(preview.audit?.rollbackFile).toContain(join('artifacts', 'mt-agent-audit'));
-    expect(preview.audit!.diff![0]).toMatchObject({ field: 'rent1day', old: '30.00', new: '22.00' });
+    expect(preview.audit!.diff![0]).toMatchObject({ field: 'rent1day', old: '30.00', new: '29.00' });
     expect(preview.lines.join('\n')).toContain('审计任务');
     expect(await readFile(preview.audit!.rollbackFile!, 'utf8')).toContain('"rent1day": "30.00"');
     expect(await readdir(join(dataRoot, 'tasks'))).not.toContainEqual(expect.stringMatching(/^mt-agent-|^rollback_|^preview_/));
@@ -593,7 +602,181 @@ describe('rental price skill client copy diagnostics', () => {
     expect(rolledBackTask.evidence.some((item) => item.type === 'rollback_verify_result')).toBe(true);
   }, 30000);
 
-  it('keeps fallback price execution artifacts outside lifecycle tasks state', async () => {
+  it('rejects tampered rollback artifacts before daemon apply', async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), 'mt-agent-rental-price-rollback-tamper-'));
+    await copyRentalPriceAuditScripts(rootDir);
+    const currentValues = { rent1day: '30.00' };
+    const commands: Array<Record<string, unknown>> = [];
+    vi.stubGlobal('fetch', vi.fn(async (_input, init) => {
+      const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+      commands.push(body);
+      if (body.action === 'read') {
+        return new Response(JSON.stringify({ status: 'ok', productId: '761', values: currentValues, specs: [] }));
+      }
+      if (body.action === 'apply' && typeof body.changesFile === 'string') {
+        const changes = JSON.parse(await readFile(body.changesFile, 'utf8')) as Record<string, string>;
+        if (typeof changes.rent1day === 'string') currentValues.rent1day = changes.rent1day;
+        return new Response(JSON.stringify({ status: 'ok' }));
+      }
+      return new Response(JSON.stringify({ status: 'ok' }));
+    }));
+    const client = createRentalPriceSkillClient({ rootDir, daemonUrl: 'http://127.0.0.1:9223' });
+
+    const preview = await client.preview({ mode: 'explicit_fields', productId: '761', fields: { rent1day: '29.00' } });
+    const result = await client.execute({ mode: 'explicit_fields', productId: '761', fields: preview.fields, audit: preview.audit });
+    expect(result.ok).toBe(true);
+    await writeFile(preview.audit!.rollbackFile!, JSON.stringify({ rent1day: '1.00' }, null, 2), 'utf8');
+
+    await expect(client.rollback!({ taskId: preview.audit!.taskId! })).rejects.toThrow('回滚审计不完整');
+
+    expect(commands.filter((command) => command.action === 'apply')).toHaveLength(1);
+    expect(currentValues.rent1day).toBe('29.00');
+  }, 30000);
+
+  it('rejects tampered changes artifacts before rollback daemon apply', async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), 'mt-agent-rental-price-changes-tamper-'));
+    await copyRentalPriceAuditScripts(rootDir);
+    const currentValues = { rent1day: '30.00' };
+    const commands: Array<Record<string, unknown>> = [];
+    vi.stubGlobal('fetch', vi.fn(async (_input, init) => {
+      const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+      commands.push(body);
+      if (body.action === 'read') return new Response(JSON.stringify({ status: 'ok', productId: '761', values: currentValues, specs: [] }));
+      if (body.action === 'apply' && typeof body.changesFile === 'string') {
+        const changes = JSON.parse(await readFile(body.changesFile, 'utf8')) as Record<string, string>;
+        if (typeof changes.rent1day === 'string') currentValues.rent1day = changes.rent1day;
+        return new Response(JSON.stringify({ status: 'ok' }));
+      }
+      return new Response(JSON.stringify({ status: 'ok' }));
+    }));
+    const client = createRentalPriceSkillClient({ rootDir, daemonUrl: 'http://127.0.0.1:9223' });
+
+    const preview = await client.preview({ mode: 'explicit_fields', productId: '761', fields: { rent1day: '29.00' } });
+    const result = await client.execute({ mode: 'explicit_fields', productId: '761', fields: preview.fields, audit: preview.audit });
+    expect(result.ok).toBe(true);
+    await writeFile(preview.audit!.changesFile!, JSON.stringify({ rent1day: '28.00' }, null, 2), 'utf8');
+
+    await expect(client.rollback!({ taskId: preview.audit!.taskId! })).rejects.toThrow('计划哈希不匹配');
+
+    expect(commands.filter((command) => command.action === 'apply')).toHaveLength(1);
+    expect(currentValues.rent1day).toBe('29.00');
+  }, 30000);
+
+  it('rejects rollback for preview-only tasks before daemon apply', async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), 'mt-agent-rental-price-preview-rollback-'));
+    await copyRentalPriceAuditScripts(rootDir);
+    const commands: Array<Record<string, unknown>> = [];
+    vi.stubGlobal('fetch', vi.fn(async (_input, init) => {
+      const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+      commands.push(body);
+      if (body.action === 'read') return new Response(JSON.stringify({ status: 'ok', productId: '761', values: { rent1day: '30.00' }, specs: [] }));
+      return new Response(JSON.stringify({ status: 'ok' }));
+    }));
+    const client = createRentalPriceSkillClient({ rootDir, daemonUrl: 'http://127.0.0.1:9223' });
+
+    const preview = await client.preview({ mode: 'explicit_fields', productId: '761', fields: { rent1day: '29.00' } });
+
+    await expect(client.rollback!({ taskId: preview.audit!.taskId! })).rejects.toThrow('尚未成功完成');
+
+    expect(commands.filter((command) => command.action === 'apply')).toHaveLength(0);
+  }, 30000);
+
+  it('rejects rollback when prior verify evidence has mismatched field counts before daemon apply', async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), 'mt-agent-rental-price-verify-mismatch-'));
+    await copyRentalPriceAuditScripts(rootDir);
+    const currentValues = { rent1day: '30.00' };
+    const commands: Array<Record<string, unknown>> = [];
+    vi.stubGlobal('fetch', vi.fn(async (_input, init) => {
+      const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+      commands.push(body);
+      if (body.action === 'read') return new Response(JSON.stringify({ status: 'ok', productId: '761', values: currentValues, specs: [] }));
+      if (body.action === 'apply' && typeof body.changesFile === 'string') {
+        const changes = JSON.parse(await readFile(body.changesFile, 'utf8')) as Record<string, string>;
+        if (typeof changes.rent1day === 'string') currentValues.rent1day = changes.rent1day;
+        return new Response(JSON.stringify({ status: 'ok' }));
+      }
+      return new Response(JSON.stringify({ status: 'ok' }));
+    }));
+    const client = createRentalPriceSkillClient({ rootDir, daemonUrl: 'http://127.0.0.1:9223' });
+
+    const preview = await client.preview({ mode: 'explicit_fields', productId: '761', fields: { rent1day: '29.00' } });
+    const result = await client.execute({ mode: 'explicit_fields', productId: '761', fields: preview.fields, audit: preview.audit });
+    expect(result.ok).toBe(true);
+    const verify = JSON.parse(await readFile(result.audit!.resultFile!, 'utf8')) as Record<string, unknown>;
+    await writeFile(result.audit!.resultFile!, JSON.stringify({ ...verify, ok: false, matchedFieldCount: 0 }, null, 2), 'utf8');
+
+    await expect(client.rollback!({ taskId: preview.audit!.taskId! })).rejects.toThrow('原改价验证字段数量不匹配');
+
+    expect(commands.filter((command) => command.action === 'apply')).toHaveLength(1);
+    expect(currentValues.rent1day).toBe('29.00');
+  }, 30000);
+
+  it('generates nested changes and rollback artifacts for multi-spec relative price preview', async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), 'mt-agent-rental-price-multispec-audit-'));
+    await copyRentalPriceAuditScripts(rootDir);
+    const dataRoot = join(dirname(rootDir), `.${basename(rootDir)}-data`);
+    const currentValues = {
+      s1: { rent1day: '100.00', rent2day: '120.00' },
+      s2: { rent1day: '300.00', rent2day: '320.00' },
+    };
+    const applyChanges: unknown[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (_input, init) => {
+      const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+      if (body.action === 'read') {
+        return new Response(JSON.stringify({
+          status: 'ok',
+          productId: '900',
+          specs: [{ specId: 's1', title: '默认' }, { specId: 's2', title: '套装' }],
+          values: currentValues,
+        }));
+      }
+      if (body.action === 'apply' && typeof body.changesFile === 'string') {
+        const changes = JSON.parse(await readFile(body.changesFile, 'utf8')) as Record<string, Record<string, string>>;
+        applyChanges.push(changes);
+        for (const [specId, fields] of Object.entries(changes)) Object.assign(currentValues[specId as keyof typeof currentValues], fields);
+        return new Response(JSON.stringify({ status: 'ok' }));
+      }
+      return new Response(JSON.stringify({ status: 'ok' }));
+    }));
+    const client = createRentalPriceSkillClient({ rootDir, daemonUrl: 'http://127.0.0.1:9223' });
+
+    const preview = await client.preview({ mode: 'global_adjustment', productId: '900', adjustmentAmount: -10, scope: 'rent_fields' });
+
+    expect(preview.audit?.changesFile).toContain('changes_');
+    const changes = JSON.parse(await readFile(preview.audit!.changesFile!, 'utf8')) as Record<string, unknown>;
+    const rollback = JSON.parse(await readFile(preview.audit!.rollbackFile!, 'utf8')) as Record<string, unknown>;
+    expect(changes).toStrictEqual({
+      s1: { rent1day: '90.00', rent2day: '110.00' },
+      s2: { rent1day: '290.00', rent2day: '310.00' },
+    });
+    expect(rollback).toStrictEqual({
+      s1: { rent1day: '100.00', rent2day: '120.00' },
+      s2: { rent1day: '300.00', rent2day: '320.00' },
+    });
+    expect(changes).not.toHaveProperty('__broadcast');
+    expect(preview.audit?.diff?.map((diff) => diff.specId)).toEqual(['s1', 's1', 's2', 's2']);
+
+    const result = await client.execute({ mode: 'explicit_fields', productId: '900', fields: preview.fields, audit: preview.audit });
+
+    expect(result.ok).toBe(true);
+    expect(applyChanges[0]).toStrictEqual(changes);
+    expect(result.audit?.resultFile).toBeTruthy();
+    const verify = JSON.parse(await readFile(result.audit!.resultFile!, 'utf8')) as { expectedFieldCount: number; expectedFields: unknown };
+    expect(verify.expectedFieldCount).toBe(4);
+    expect(verify.expectedFields).toStrictEqual(changes);
+
+    const rollbackResult = await client.rollback!({ taskId: preview.audit!.taskId! });
+
+    expect(rollbackResult.ok).toBe(true);
+    expect(applyChanges[1]).toStrictEqual(rollback);
+    expect(currentValues).toStrictEqual({
+      s1: { rent1day: '100.00', rent2day: '120.00' },
+      s2: { rent1day: '300.00', rent2day: '320.00' },
+    });
+    expect(await readdir(join(dataRoot, 'tasks'))).not.toContainEqual(expect.stringMatching(/^mt-agent-|^rollback_|^preview_/));
+  }, 30000);
+
+  it('rejects price execution without audit artifacts before daemon apply', async () => {
     const rootDir = await mkdtemp(join(tmpdir(), 'mt-agent-rental-price-fallback-artifacts-'));
     const dataRoot = join(dirname(rootDir), `.${basename(rootDir)}-data`);
     const applyChangesFiles: string[] = [];
@@ -611,7 +794,8 @@ describe('rental price skill client copy diagnostics', () => {
     const result = await client.execute({ mode: 'explicit_fields', productId: '761', fields: { rent1day: '22.00' } });
 
     expect(result.ok).toBe(false);
-    expect(applyChangesFiles[0]).toContain(join('artifacts', 'mt-agent-audit'));
+    expect(result.lines.join('\n')).toContain('缺少审计预览');
+    expect(applyChangesFiles).toEqual([]);
     expect(await readdir(join(dataRoot, 'tasks'))).not.toContainEqual(expect.stringMatching(/^mt-agent-|^verify-|^rollback-verify/));
   });
 });

@@ -36,6 +36,11 @@ export interface RentalPriceAuditReference {
   previewFile?: string | null;
   currentValuesFile?: string;
   diffFile?: string;
+  changesSha256?: string;
+  rollbackSha256?: string;
+  currentSnapshotSha256?: string;
+  planHash?: string;
+  expectedFieldCount?: number;
   hasErrors?: boolean;
   hasWarnings?: boolean;
   rulesApplied?: string[];
@@ -60,6 +65,38 @@ export interface RentalPriceExecutionResult {
   ok: boolean;
   lines: string[];
   audit?: { taskId?: string; status: 'completed' | 'verify_failed' | 'failed' | 'untracked'; resultFile?: string; rollbackFile?: string };
+}
+
+export type PriceFieldMap = Record<string, string>;
+export type PerSpecPriceFieldMap = Record<string, PriceFieldMap>;
+export type PriceChangeArtifact = PriceFieldMap | PerSpecPriceFieldMap;
+
+interface PriceAuditPlanMetadata {
+  changesSha256: string;
+  rollbackSha256: string;
+  currentSnapshotSha256: string;
+  planHash: string;
+  expectedFieldCount: number;
+}
+
+interface AuditEvidenceRecord {
+  type?: unknown;
+  path?: unknown;
+}
+
+export function rentalPriceExecutionAuditBlockReason(audit: RentalPriceAuditReference | undefined): string | null {
+  if (!audit) return '改价执行审计不完整：缺少审计预览，请重新发起改价预览。';
+  if (audit.hasErrors !== false) return audit.hasErrors ? '改价执行审计不完整：审计存在错误，请重新发起改价预览。' : '改价执行审计不完整：缺少审计错误状态，请重新发起改价预览。';
+  if (audit.hasWarnings !== false) return audit.hasWarnings ? '改价执行审计不完整：审计存在警告，请处理后重新发起改价预览。' : '改价执行审计不完整：缺少审计警告状态，请重新发起改价预览。';
+  if (!audit.changesFile) return '改价执行审计不完整：缺少变更文件，请重新发起改价预览。';
+  if (!audit.rollbackFile) return '改价执行审计不完整：缺少回滚文件，请重新发起改价预览。';
+  if (!audit.changesSha256 || !audit.rollbackSha256 || !audit.currentSnapshotSha256 || !audit.planHash) return '改价执行审计不完整：缺少计划哈希，请重新发起改价预览。';
+  const expectedFieldCount = audit.expectedFieldCount;
+  if (typeof expectedFieldCount !== 'number' || !Number.isInteger(expectedFieldCount) || expectedFieldCount <= 0) return '改价执行审计不完整：缺少计划字段数量，请重新发起改价预览。';
+  if (!Array.isArray(audit.diff) || audit.diff.length === 0) return '改价执行审计不完整：缺少价格差异明细，请重新发起改价预览。';
+  if (audit.diff.some((diff) => diff.issues.some((issue) => issue.level === 'error'))) return '改价执行审计不完整：价格差异明细包含错误，请重新发起改价预览。';
+  if (audit.diff.some((diff) => diff.issues.some((issue) => issue.level === 'warn'))) return '改价执行审计不完整：价格差异明细包含警告，请处理后重新发起改价预览。';
+  return null;
 }
 
 export interface RentalPriceRollbackRequest {
@@ -322,7 +359,7 @@ export interface RentalPriceSkillClient {
   specDiscoverFull?(productId: string): Promise<RentalSpecDiscoverFullResult>;
   readRaw?(productId: string, fields?: string[]): Promise<RentalRawReadResult>;
   preview(request: RentalPriceChangeRequest): Promise<RentalPricePreview>;
-  auditPreviewFromRead?(productId: string, current: Record<string, unknown>, fields: Record<string, string>): Promise<RentalPriceAuditReference | null>;
+  auditPreviewFromRead?(productId: string, current: Record<string, unknown>, fields: Record<string, string>, artifactFields?: PriceChangeArtifact): Promise<RentalPriceAuditReference | null>;
   execute(request: Extract<RentalPriceChangeRequest, { mode: 'explicit_fields' }>): Promise<RentalPriceExecutionResult>;
   applyPerSpec?(productId: string, specFields: Record<string, Record<string, string>>): Promise<RentalPriceExecutionResult>;
   rollback?(request: RentalPriceRollbackRequest): Promise<RentalPriceRollbackResult>;
@@ -477,9 +514,15 @@ export function compactAuditReference(audit: RentalPriceAuditReference | undefin
     ...(audit.previewFile ? { previewFile: audit.previewFile } : {}),
     ...(audit.currentValuesFile ? { currentValuesFile: audit.currentValuesFile } : {}),
     ...(audit.diffFile ? { diffFile: audit.diffFile } : {}),
+    ...(audit.changesSha256 ? { changesSha256: audit.changesSha256 } : {}),
+    ...(audit.rollbackSha256 ? { rollbackSha256: audit.rollbackSha256 } : {}),
+    ...(audit.currentSnapshotSha256 ? { currentSnapshotSha256: audit.currentSnapshotSha256 } : {}),
+    ...(audit.planHash ? { planHash: audit.planHash } : {}),
+    ...(audit.expectedFieldCount ? { expectedFieldCount: audit.expectedFieldCount } : {}),
     ...(audit.hasErrors !== undefined ? { hasErrors: audit.hasErrors } : {}),
     ...(audit.hasWarnings !== undefined ? { hasWarnings: audit.hasWarnings } : {}),
     ...(audit.rulesApplied ? { rulesApplied: audit.rulesApplied } : {}),
+    ...(audit.diff ? { diff: audit.diff } : {}),
   };
 }
 
@@ -521,16 +564,6 @@ export function buildRentalPricePreviewCard(preview: RentalPricePreview, options
   };
   const key = confirmationKey(request as unknown as Record<string, unknown>);
   const formElements: Record<string, unknown>[] = [];
-  if (!audit?.hasErrors) {
-    formElements.push({
-      tag: 'button',
-      text: { tag: 'plain_text', content: '确认改价' },
-      type: 'primary',
-      form_action_type: 'submit',
-      name: 'rental_price_confirm_submit',
-      behaviors: [{ type: 'callback', value: { action: 'rental_price_confirm', request, confirmationKey: key } }],
-    });
-  }
   formElements.push({
     tag: 'button',
     text: { tag: 'plain_text', content: '取消' },
@@ -551,7 +584,7 @@ export function buildRentalPricePreviewCard(preview: RentalPricePreview, options
         ...(preview.warnings.length ? [{ tag: 'markdown', content: `**风险提示**\n${preview.warnings.join('\n')}` }] : []),
         {
           tag: 'form',
-          name: audit?.hasErrors ? 'rental_price_cancel_form' : 'rental_price_confirm_form',
+          name: 'rental_price_cancel_form',
           elements: formElements,
         },
       ],
@@ -650,6 +683,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function selectedFields(values: Record<string, unknown>, request: RentalPriceChangeRequest): Record<string, string> {
   if (request.mode === 'explicit_fields') return request.fields;
+  const perSpec = selectedPerSpecFields(values, request);
+  if (Object.keys(perSpec).length) return Object.values(perSpec)[0] ?? {};
   const fields: Record<string, string> = {};
   const firstSpec = Object.values(values).find(isRecord) as Record<string, unknown> | undefined;
   const source = firstSpec ?? values;
@@ -662,6 +697,12 @@ function selectedFields(values: Record<string, unknown>, request: RentalPriceCha
       : current + request.adjustmentAmount);
   }
   return fields;
+}
+
+function selectedAuditArtifactFields(values: Record<string, unknown>, request: RentalPriceChangeRequest, fields: Record<string, string>): PriceChangeArtifact {
+  if (request.mode === 'explicit_fields') return fields;
+  const perSpec = selectedPerSpecFields(values, request);
+  return Object.keys(perSpec).length > 1 ? perSpec : fields;
 }
 
 function commandStatus(response: Record<string, unknown>): string {
@@ -804,6 +845,11 @@ function verifiedFields(response: Record<string, unknown>, fields: Record<string
   return Object.entries(fields).every(([field, value]) => moneyValue(values[field]) === value);
 }
 
+function countVerifiedFields(response: Record<string, unknown>, fields: Record<string, string>): number {
+  const values = readableValues(response);
+  return Object.entries(fields).filter(([field, value]) => moneyValue(values[field]) === value).length;
+}
+
 function normalizePerSpecPriceFields(specFields: Record<string, Record<string, string>>): Record<string, Record<string, string>> {
   const normalized: Record<string, Record<string, string>> = {};
   for (const [specId, fields] of Object.entries(specFields)) {
@@ -822,6 +868,30 @@ function verifiedPerSpecFields(response: Record<string, unknown>, specFields: Re
     const actual = values[specId] ?? {};
     return Object.entries(fields).every(([field, value]) => moneyValue(actual[field]) === value);
   });
+}
+
+function countVerifiedPerSpecFields(response: Record<string, unknown>, specFields: Record<string, Record<string, string>>): number {
+  const values = normalizeReadValues(response.values);
+  let count = 0;
+  for (const [specId, fields] of Object.entries(specFields)) {
+    const actual = values[specId] ?? {};
+    for (const [field, value] of Object.entries(fields)) {
+      if (moneyValue(actual[field]) === value) count += 1;
+    }
+  }
+  return count;
+}
+
+async function fileSha256(path: string): Promise<string> {
+  return createHash('sha256').update(await readFile(path)).digest('hex');
+}
+
+function pricePlanHash(parts: { productId: string; changesSha256: string; rollbackSha256: string; currentSnapshotSha256: string; expectedFieldCount: number }): string {
+  return createHash('sha256').update(JSON.stringify(parts)).digest('hex');
+}
+
+function hasMultipleReadSpecs(values: Record<string, unknown>): boolean {
+  return Object.values(values).filter(isRecord).length > 1;
 }
 
 function moneyValue(value: unknown): string | null {
@@ -915,6 +985,33 @@ function normalizePriceFields(value: unknown): Record<string, string> | null {
   return Object.keys(fields).length ? fields : null;
 }
 
+function normalizePriceArtifact(value: unknown): PriceChangeArtifact | null {
+  const flat = normalizePriceFields(value);
+  if (flat) return flat;
+  if (!isRecord(value)) return null;
+  const specFields: PerSpecPriceFieldMap = {};
+  for (const [specId, rawFields] of Object.entries(value)) {
+    const fields = normalizePriceFields(rawFields);
+    if (fields) specFields[specId] = fields;
+  }
+  return Object.keys(specFields).length ? specFields : null;
+}
+
+function isPerSpecPriceArtifact(value: PriceChangeArtifact): value is PerSpecPriceFieldMap {
+  return Object.values(value).some(isRecord);
+}
+
+function priceArtifactFieldCount(value: PriceChangeArtifact): number {
+  return isPerSpecPriceArtifact(value)
+    ? Object.values(value).reduce((sum, fields) => sum + Object.keys(fields).length, 0)
+    : Object.keys(value).length;
+}
+
+function multiSpecAuditEvidence(audit: RentalPriceAuditReference | undefined): boolean {
+  const specIds = new Set((audit?.diff ?? []).map((diff) => diff.specId).filter((value): value is string => Boolean(value)));
+  return specIds.size > 1;
+}
+
 function buildRollbackFields(current: Record<string, unknown>, fields: Record<string, string>): Record<string, string> {
   const values = readableValues(current);
   const rollback: Record<string, string> = {};
@@ -926,11 +1023,66 @@ function buildRollbackFields(current: Record<string, unknown>, fields: Record<st
   return rollback;
 }
 
+function buildPerSpecRollbackFields(current: Record<string, unknown>, specFields: PerSpecPriceFieldMap): PerSpecPriceFieldMap {
+  const values = normalizeReadValues(current.values);
+  const rollback: PerSpecPriceFieldMap = {};
+  for (const [specId, fields] of Object.entries(specFields)) {
+    const currentFields = values[specId] ?? {};
+    const specRollback: PriceFieldMap = {};
+    for (const field of Object.keys(fields)) {
+      const formatted = moneyValue(currentFields[field]);
+      if (formatted !== null) specRollback[field] = formatted;
+      else if (typeof currentFields[field] === 'string' && currentFields[field].trim()) specRollback[field] = currentFields[field].trim();
+    }
+    if (Object.keys(specRollback).length) rollback[specId] = specRollback;
+  }
+  return rollback;
+}
+
+function specTitleById(current: Record<string, unknown>): Map<string, string> {
+  const specs = normalizeReadSpecs(current.specs);
+  return new Map(specs.map((spec) => [spec.specId, spec.title]));
+}
+
+function buildPerSpecAuditDiff(current: Record<string, unknown>, specFields: PerSpecPriceFieldMap): RentalPriceAuditDiff[] {
+  const values = normalizeReadValues(current.values);
+  const titles = specTitleById(current);
+  const diffs: RentalPriceAuditDiff[] = [];
+  for (const [specId, fields] of Object.entries(specFields)) {
+    const currentFields = values[specId] ?? {};
+    for (const [field, next] of Object.entries(fields)) {
+      const before = moneyValue(currentFields[field]) ?? String(currentFields[field] ?? '');
+      const oldNumber = Number(before);
+      const newNumber = Number(next);
+      const change = Number.isFinite(oldNumber) && Number.isFinite(newNumber) ? money(newNumber - oldNumber) : '-';
+      const changePct = Number.isFinite(oldNumber) && oldNumber !== 0 && Number.isFinite(newNumber) ? `${(((newNumber - oldNumber) / oldNumber) * 100).toFixed(1)}%` : '-';
+      diffs.push({ specId, specTitle: titles.get(specId) ?? specId, field, label: field, old: before, new: next, change, changePct, issues: [] });
+    }
+  }
+  return diffs;
+}
+
+function selectedPerSpecFields(values: Record<string, unknown>, request: Extract<RentalPriceChangeRequest, { mode: 'global_discount' | 'global_adjustment' }>): PerSpecPriceFieldMap {
+  const specValues = normalizeReadValues(values);
+  const specFields: PerSpecPriceFieldMap = {};
+  for (const [specId, fields] of Object.entries(specValues)) {
+    const nextFields: PriceFieldMap = {};
+    for (const [field, raw] of Object.entries(fields)) {
+      if (!isRentPriceField(field)) continue;
+      const current = Number(raw);
+      if (!Number.isFinite(current)) continue;
+      nextFields[field] = money(request.mode === 'global_discount' ? current * request.discount : current + request.adjustmentAmount);
+    }
+    if (Object.keys(nextFields).length) specFields[specId] = nextFields;
+  }
+  return specFields;
+}
+
 function timestampToken(): string {
   return `${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
 }
 
-async function createAuditPreview(rootDir: string, productId: string, current: Record<string, unknown>, fields: Record<string, string>): Promise<RentalPriceAuditReference | null> {
+async function createAuditPreview(rootDir: string, productId: string, current: Record<string, unknown>, fields: Record<string, string>, artifactFields: PriceChangeArtifact = fields): Promise<RentalPriceAuditReference | null> {
   const diffScript = join(rootDir, 'scripts', 'diff-generator.js');
   const taskStoreScript = join(rootDir, 'scripts', 'task-store.js');
   const dataRoot = stableSiblingDataRoot(rootDir);
@@ -954,14 +1106,21 @@ async function createAuditPreview(rootDir: string, productId: string, current: R
     specs: Array.isArray(current.specs) ? current.specs : [],
   };
   await writeJsonFile(currentValuesFile, currentSnapshot);
-  await writeJsonFile(intentFile, fields);
+  await writeJsonFile(intentFile, artifactFields);
 
   const diffResult = await runNodeJson(diffScript, [currentValuesFile, intentFile, '--html']);
   await writeJsonFile(diffFile, diffResult);
-  const changesFile = safeAuditPath(rootDir, diffResult.changesFile) ?? undefined;
+  let changesFile = safeAuditPath(rootDir, diffResult.changesFile) ?? undefined;
+  if (!changesFile) changesFile = join(artifactDir, `changes_${productId}-${token}.json`);
+  if (isPerSpecPriceArtifact(artifactFields) || !(await fileExists(changesFile))) await writeJsonFile(changesFile, artifactFields);
   const previewFile = typeof diffResult.previewFile === 'string' ? safeAuditPath(rootDir, diffResult.previewFile) ?? null : null;
-  const rollbackFields = buildRollbackFields(currentSnapshot, fields);
-  await writeJsonFile(rollbackFile, { __broadcast: true, ...rollbackFields });
+  const rollbackFields = isPerSpecPriceArtifact(artifactFields) ? buildPerSpecRollbackFields(currentSnapshot, artifactFields) : buildRollbackFields(currentSnapshot, fields);
+  await writeJsonFile(rollbackFile, rollbackFields);
+  const expectedFieldCount = priceArtifactFieldCount(artifactFields);
+  const changesSha256 = await fileSha256(changesFile);
+  const rollbackSha256 = await fileSha256(rollbackFile);
+  const currentSnapshotSha256 = await fileSha256(currentValuesFile);
+  const boundPlanHash = pricePlanHash({ productId, changesSha256, rollbackSha256, currentSnapshotSha256, expectedFieldCount });
 
   let taskId: string | undefined;
   if (changesFile) {
@@ -970,8 +1129,14 @@ async function createAuditPreview(rootDir: string, productId: string, current: R
       taskId = typeof taskResult.taskId === 'string' && AUDIT_TASK_ID_PATTERN.test(taskResult.taskId) ? taskResult.taskId : undefined;
       if (taskId) {
         await runNodeJson(taskStoreScript, ['update', taskId, 'rollbackFile', rollbackFile]).catch(() => ({}));
+        await runNodeJson(taskStoreScript, ['update', taskId, 'changesFile', changesFile]).catch(() => ({}));
         await runNodeJson(taskStoreScript, ['update', taskId, 'currentValuesFile', currentValuesFile]).catch(() => ({}));
         await runNodeJson(taskStoreScript, ['update', taskId, 'diffFile', diffFile]).catch(() => ({}));
+        await runNodeJson(taskStoreScript, ['update', taskId, 'changesSha256', changesSha256]).catch(() => ({}));
+        await runNodeJson(taskStoreScript, ['update', taskId, 'rollbackSha256', rollbackSha256]).catch(() => ({}));
+        await runNodeJson(taskStoreScript, ['update', taskId, 'currentSnapshotSha256', currentSnapshotSha256]).catch(() => ({}));
+        await runNodeJson(taskStoreScript, ['update', taskId, 'expectedFieldCount', String(expectedFieldCount)]).catch(() => ({}));
+        await runNodeJson(taskStoreScript, ['update', taskId, 'planHash', boundPlanHash]).catch(() => ({}));
         if (previewFile) await runNodeJson(taskStoreScript, ['update', taskId, 'previewFile', previewFile]).catch(() => ({}));
       }
     } catch {
@@ -979,6 +1144,7 @@ async function createAuditPreview(rootDir: string, productId: string, current: R
     }
   }
 
+  const perSpecDiff = isPerSpecPriceArtifact(artifactFields) ? buildPerSpecAuditDiff(currentSnapshot, artifactFields) : [];
   return {
     ...(taskId ? { taskId } : {}),
     ...(changesFile ? { changesFile } : {}),
@@ -986,9 +1152,14 @@ async function createAuditPreview(rootDir: string, productId: string, current: R
     previewFile,
     currentValuesFile,
     diffFile,
-    diff: normalizeAuditDiffs(diffResult.diff),
-    hasErrors: Boolean(diffResult.hasErrors),
-    hasWarnings: Boolean(diffResult.hasWarnings),
+    changesSha256,
+    rollbackSha256,
+    currentSnapshotSha256,
+    expectedFieldCount,
+    planHash: boundPlanHash,
+    diff: perSpecDiff.length ? perSpecDiff : normalizeAuditDiffs(diffResult.diff),
+    hasErrors: perSpecDiff.length ? false : Boolean(diffResult.hasErrors),
+    hasWarnings: perSpecDiff.length ? false : Boolean(diffResult.hasWarnings),
     ...(normalizeStringArray(diffResult.rulesApplied) ? { rulesApplied: normalizeStringArray(diffResult.rulesApplied) } : {}),
   };
 }
@@ -1005,6 +1176,13 @@ function parseAuditCallbackReference(value: unknown): RentalPriceAuditReference 
   if (previewFile !== null && !previewFile.includes('\0')) audit.previewFile = previewFile;
   if (typeof value.hasErrors === 'boolean') audit.hasErrors = value.hasErrors;
   if (typeof value.hasWarnings === 'boolean') audit.hasWarnings = value.hasWarnings;
+  for (const key of ['changesSha256', 'rollbackSha256', 'currentSnapshotSha256', 'planHash'] as const) {
+    const hash = readString(value[key]);
+    if (hash && /^[a-f0-9]{64}$/.test(hash)) audit[key] = hash;
+  }
+  if (Number.isInteger(value.expectedFieldCount) && Number(value.expectedFieldCount) > 0) audit.expectedFieldCount = Number(value.expectedFieldCount);
+  const diff = normalizeAuditDiffs(value.diff);
+  if (diff.length) audit.diff = diff;
   const rulesApplied = normalizeStringArray(value.rulesApplied);
   if (rulesApplied) audit.rulesApplied = rulesApplied;
   return Object.keys(audit).length ? audit : undefined;
@@ -1019,6 +1197,11 @@ function safeAuditForExecution(rootDir: string, audit: RentalPriceAuditReference
     ...(safeAuditPath(rootDir, audit.previewFile ?? undefined) ? { previewFile: safeAuditPath(rootDir, audit.previewFile ?? undefined) } : {}),
     ...(safeAuditPath(rootDir, audit.currentValuesFile) ? { currentValuesFile: safeAuditPath(rootDir, audit.currentValuesFile) } : {}),
     ...(safeAuditPath(rootDir, audit.diffFile) ? { diffFile: safeAuditPath(rootDir, audit.diffFile) } : {}),
+    ...(audit.changesSha256 ? { changesSha256: audit.changesSha256 } : {}),
+    ...(audit.rollbackSha256 ? { rollbackSha256: audit.rollbackSha256 } : {}),
+    ...(audit.currentSnapshotSha256 ? { currentSnapshotSha256: audit.currentSnapshotSha256 } : {}),
+    ...(audit.planHash ? { planHash: audit.planHash } : {}),
+    ...(audit.expectedFieldCount ? { expectedFieldCount: audit.expectedFieldCount } : {}),
     ...(audit.hasErrors !== undefined ? { hasErrors: audit.hasErrors } : {}),
     ...(audit.hasWarnings !== undefined ? { hasWarnings: audit.hasWarnings } : {}),
     ...(audit.rulesApplied ? { rulesApplied: audit.rulesApplied } : {}),
@@ -1051,32 +1234,92 @@ function productIdFromRollbackFile(path: string): string | undefined {
   return /(?:^|[\\/])rollback_(\d+)[-_]/.exec(path)?.[1];
 }
 
-async function resolveRollbackReference(rootDir: string, request: RentalPriceRollbackRequest): Promise<{ productId: string; audit: RentalPriceAuditReference; fields: Record<string, string> }> {
+function readAuditHash(value: unknown): string | undefined {
+  const hash = readString(value);
+  return hash && /^[a-f0-9]{64}$/.test(hash) ? hash : undefined;
+}
+
+function readPositiveInteger(value: unknown): number | undefined {
+  const numeric = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN;
+  return Number.isInteger(numeric) && numeric > 0 ? numeric : undefined;
+}
+
+function readEvidencePath(rootDir: string, evidence: unknown, type: string): string | undefined {
+  if (!Array.isArray(evidence)) return undefined;
+  for (let index = evidence.length - 1; index >= 0; index -= 1) {
+    const item = evidence[index] as AuditEvidenceRecord;
+    if (!isRecord(item) || item.type !== type) continue;
+    const evidencePath = safeAuditPath(rootDir, readString(item.path));
+    if (evidencePath) return evidencePath;
+  }
+  return undefined;
+}
+
+async function assertAppliedAuditEvidence(rootDir: string, task: Record<string, unknown>, changesFile: string, expectedFieldCount: number): Promise<void> {
+  if (readString(task.status) !== 'completed') throw new Error('回滚审计不完整：原改价任务尚未成功完成，不能执行回滚。');
+  const verifyResultFile = readEvidencePath(rootDir, task.evidence, 'verify_result');
+  if (!verifyResultFile || !(await fileExists(verifyResultFile))) throw new Error('回滚审计不完整：缺少原改价验证证据，不能执行回滚。');
+  const verifyResult = await readJsonRecord(verifyResultFile);
+  const verifyExpectedFieldCount = readPositiveInteger(verifyResult.expectedFieldCount);
+  const verifyMatchedFieldCount = readPositiveInteger(verifyResult.matchedFieldCount);
+  const verifyChangesFile = safeAuditPath(rootDir, readString(verifyResult.changesFile));
+  if (verifyResult.ok !== true || verifyExpectedFieldCount !== expectedFieldCount || verifyMatchedFieldCount !== expectedFieldCount || (verifyChangesFile && verifyChangesFile !== changesFile)) {
+    throw new Error('回滚审计不完整：原改价验证字段数量不匹配，不能执行回滚。');
+  }
+}
+
+async function resolveRollbackReference(rootDir: string, request: RentalPriceRollbackRequest): Promise<{ productId: string; audit: RentalPriceAuditReference; fields: PriceChangeArtifact }> {
   const audit: RentalPriceAuditReference = {};
   if (request.taskId && AUDIT_TASK_ID_PATTERN.test(request.taskId)) audit.taskId = request.taskId;
 
   let productId = request.productId;
-  let rollbackFile = safeAuditPath(rootDir, request.rollbackFile);
-  if (!rollbackFile && audit.taskId) {
-    const taskFile = join(stableSiblingDataRoot(rootDir), 'tasks', `${audit.taskId}.json`);
-    if (!(await fileExists(taskFile))) throw new Error(`审计任务不存在：${audit.taskId}`);
-    const task = await readJsonRecord(taskFile);
-    productId = productId ?? productIdFromTaskRecord(task);
-    const currentValuesFile = safeAuditPath(rootDir, task.currentValuesFile);
-    if (!productId && currentValuesFile && await fileExists(currentValuesFile)) {
-      productId = readProductId((await readJsonRecord(currentValuesFile)).productId) ?? undefined;
-    }
-    rollbackFile = safeAuditPath(rootDir, task.rollbackFile);
+  const requestedRollbackFile = safeAuditPath(rootDir, request.rollbackFile);
+  if (!audit.taskId) throw new Error('回滚需要包含完整审计哈希的 taskId；直接 rollbackFile 回滚已停用。');
+
+  const taskFile = join(stableSiblingDataRoot(rootDir), 'tasks', `${audit.taskId}.json`);
+  if (!(await fileExists(taskFile))) throw new Error(`审计任务不存在：${audit.taskId}`);
+  const task = await readJsonRecord(taskFile);
+  productId = productId ?? productIdFromTaskRecord(task);
+  const changesFile = safeAuditPath(rootDir, task.changesFile);
+  const rollbackFile = safeAuditPath(rootDir, task.rollbackFile);
+  const currentValuesFile = safeAuditPath(rootDir, task.currentValuesFile);
+  const changesSha256 = readAuditHash(task.changesSha256);
+  const rollbackSha256 = readAuditHash(task.rollbackSha256);
+  const currentSnapshotSha256 = readAuditHash(task.currentSnapshotSha256);
+  const planHash = readAuditHash(task.planHash);
+  const expectedFieldCount = readPositiveInteger(task.expectedFieldCount);
+  if (!changesSha256 || !rollbackSha256 || !currentSnapshotSha256 || !planHash || !expectedFieldCount || !changesFile || !rollbackFile || !currentValuesFile) {
+    throw new Error('回滚审计不完整：缺少回滚哈希、当前快照哈希、计划哈希或字段数量，请重新发起改价预览。');
   }
+  if (requestedRollbackFile && requestedRollbackFile !== rollbackFile) throw new Error('回滚文件与审计任务不匹配。');
+  if (!productId && await fileExists(currentValuesFile)) productId = readProductId((await readJsonRecord(currentValuesFile)).productId) ?? undefined;
 
   if (!rollbackFile) throw new Error('回滚需要 rollbackFile，或提供包含 rollbackFile 的 taskId。');
+  if (!(await fileExists(changesFile))) throw new Error(`回滚变更文件不存在：${changesFile}`);
   if (!(await fileExists(rollbackFile))) throw new Error(`回滚文件不存在：${rollbackFile}`);
+  if (!(await fileExists(currentValuesFile))) throw new Error(`回滚当前快照不存在：${currentValuesFile}`);
   productId = productId ?? productIdFromRollbackFile(rollbackFile);
   if (!productId) throw new Error('回滚需要 productId；如果只提供 taskId，该审计任务中必须包含商品信息。');
 
-  const fields = normalizePriceFields(await readJsonRecord(rollbackFile));
+  const fields = normalizePriceArtifact(await readJsonRecord(rollbackFile));
   if (!fields) throw new Error(`回滚文件没有可执行的价格字段：${rollbackFile}`);
+  const actualChangesSha256 = await fileSha256(changesFile);
+  const actualRollbackSha256 = await fileSha256(rollbackFile);
+  const actualCurrentSnapshotSha256 = await fileSha256(currentValuesFile);
+  const actualExpectedFieldCount = priceArtifactFieldCount(fields);
+  const actualPlanHash = pricePlanHash({ productId, changesSha256: actualChangesSha256, rollbackSha256: actualRollbackSha256, currentSnapshotSha256: actualCurrentSnapshotSha256, expectedFieldCount: actualExpectedFieldCount });
+  if (actualChangesSha256 !== changesSha256 || actualRollbackSha256 !== rollbackSha256 || actualCurrentSnapshotSha256 !== currentSnapshotSha256 || actualExpectedFieldCount !== expectedFieldCount || actualPlanHash !== planHash) {
+    throw new Error('回滚审计不完整：计划哈希不匹配，请重新发起改价预览。');
+  }
+  await assertAppliedAuditEvidence(rootDir, task, changesFile, expectedFieldCount);
+  audit.changesFile = changesFile;
   audit.rollbackFile = rollbackFile;
+  audit.currentValuesFile = currentValuesFile;
+  audit.changesSha256 = changesSha256;
+  audit.rollbackSha256 = rollbackSha256;
+  audit.currentSnapshotSha256 = currentSnapshotSha256;
+  audit.expectedFieldCount = expectedFieldCount;
+  audit.planHash = planHash;
   return { productId, audit, fields };
 }
 
@@ -1498,12 +1741,16 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
       }
       const values = isRecord(current.values) ? current.values : {};
       const fields = selectedFields(values, request);
+      const artifactFields = selectedAuditArtifactFields(values, request, fields);
+      if (request.mode === 'explicit_fields' && hasMultipleReadSpecs(values) && !isPerSpecPriceArtifact(artifactFields)) {
+        throw new Error('多规格商品不能使用扁平改价字段，请使用按规格生成的相对改价计划。');
+      }
       const lines = Object.entries(fields).map(([field, value]) => `${field} -> ${value}`);
       const warnings: string[] = [];
       let audit: RentalPriceAuditReference | null = null;
       if (Object.keys(fields).length > 0) {
         try {
-          audit = await createAuditPreview(rootDir, request.productId, current, fields);
+          audit = await createAuditPreview(rootDir, request.productId, current, fields, artifactFields);
           if (audit?.taskId) lines.push(`审计任务: ${audit.taskId}`);
           if (audit?.rollbackFile) lines.push(`回滚文件: ${audit.rollbackFile}`);
           if (audit?.hasErrors) warnings.push('审计发现错误，已阻断执行。');
@@ -1515,14 +1762,23 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
       }
       return { productId: request.productId, fields, lines, warnings, ...(audit ? { audit } : {}) };
     },
-    async auditPreviewFromRead(productId, current, fields) {
-      return createAuditPreview(rootDir, productId, current, fields);
+    async auditPreviewFromRead(productId, current, fields, artifactFields) {
+      return createAuditPreview(rootDir, productId, current, fields, artifactFields ?? fields);
     },
     async execute(request) {
       const tasksDir = stableTasksDir(rootDir);
       const artifactDir = mtAgentAuditArtifactDir(rootDir);
       await mkdir(tasksDir, { recursive: true });
       await mkdir(artifactDir, { recursive: true });
+      const auditBlockReason = rentalPriceExecutionAuditBlockReason(request.audit);
+      if (auditBlockReason) {
+        return {
+          productId: request.productId,
+          ok: false,
+          lines: ['apply: skipped', 'submit: skipped', 'verify: skipped', auditBlockReason],
+          audit: { ...(request.audit?.taskId ? { taskId: request.audit.taskId } : {}), status: 'failed', ...(request.audit?.rollbackFile ? { rollbackFile: request.audit.rollbackFile } : {}) },
+        };
+      }
       if (request.audit?.hasErrors) {
         return {
           productId: request.productId,
@@ -1532,10 +1788,52 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
         };
       }
       const audit = safeAuditForExecution(rootDir, request.audit);
-      let changesFile = audit?.changesFile;
+      const changesFile = audit?.changesFile;
       if (!changesFile || !(await fileExists(changesFile))) {
-        changesFile = join(artifactDir, `mt-agent-changes-${Date.now()}.json`);
-        await writeFile(changesFile, JSON.stringify({ __broadcast: true, ...request.fields }, null, 2), 'utf8');
+        return {
+          productId: request.productId,
+          ok: false,
+          lines: ['apply: skipped', 'submit: skipped', 'verify: skipped', '改价执行审计不完整：变更文件不存在，请重新发起改价预览。'],
+          audit: { ...(audit?.taskId ? { taskId: audit.taskId } : {}), status: 'failed', ...(audit?.rollbackFile ? { rollbackFile: audit.rollbackFile } : {}) },
+        };
+      }
+      if (!audit?.rollbackFile || !(await fileExists(audit.rollbackFile))) {
+        return {
+          productId: request.productId,
+          ok: false,
+          lines: ['apply: skipped', 'submit: skipped', 'verify: skipped', '改价执行审计不完整：回滚文件不存在，请重新发起改价预览。'],
+          audit: { ...(audit?.taskId ? { taskId: audit.taskId } : {}), status: 'failed', ...(audit?.rollbackFile ? { rollbackFile: audit.rollbackFile } : {}) },
+        };
+      }
+      const changes = normalizePriceArtifact(await readJsonRecord(changesFile));
+      if (!changes) {
+        return {
+          productId: request.productId,
+          ok: false,
+          lines: ['apply: skipped', 'submit: skipped', 'verify: skipped', '改价执行审计不完整：变更文件没有可执行价格字段，请重新发起改价预览。'],
+          audit: { ...(audit?.taskId ? { taskId: audit.taskId } : {}), status: 'failed', ...(audit?.rollbackFile ? { rollbackFile: audit.rollbackFile } : {}) },
+        };
+      }
+      const actualChangesSha256 = await fileSha256(changesFile);
+      const actualRollbackSha256 = await fileSha256(audit.rollbackFile);
+      const actualCurrentSnapshotSha256 = audit.currentValuesFile ? await fileSha256(audit.currentValuesFile) : '';
+      const expectedFieldCount = priceArtifactFieldCount(changes);
+      const actualPlanHash = pricePlanHash({ productId: request.productId, changesSha256: actualChangesSha256, rollbackSha256: actualRollbackSha256, currentSnapshotSha256: actualCurrentSnapshotSha256, expectedFieldCount });
+      if (actualChangesSha256 !== audit.changesSha256 || actualRollbackSha256 !== audit.rollbackSha256 || actualCurrentSnapshotSha256 !== audit.currentSnapshotSha256 || actualPlanHash !== audit.planHash || audit.expectedFieldCount !== expectedFieldCount) {
+        return {
+          productId: request.productId,
+          ok: false,
+          lines: ['apply: skipped', 'submit: skipped', 'verify: skipped', '改价执行审计不完整：计划哈希不匹配，请重新发起改价预览。'],
+          audit: { ...(audit?.taskId ? { taskId: audit.taskId } : {}), status: 'failed', ...(audit?.rollbackFile ? { rollbackFile: audit.rollbackFile } : {}) },
+        };
+      }
+      if (multiSpecAuditEvidence(request.audit) && !isPerSpecPriceArtifact(changes)) {
+        return {
+          productId: request.productId,
+          ok: false,
+          lines: ['apply: skipped', 'submit: skipped', 'verify: skipped', '改价执行审计不完整：多规格改价不能使用扁平变更文件，请重新生成逐规格计划。'],
+          audit: { ...(audit?.taskId ? { taskId: audit.taskId } : {}), status: 'failed', ...(audit?.rollbackFile ? { rollbackFile: audit.rollbackFile } : {}) },
+        };
       }
       const auditLines = [
         ...(audit?.taskId ? [`auditTask: ${audit.taskId}`] : []),
@@ -1567,14 +1865,17 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
 
       const verified = await send({ action: 'read', productId: request.productId });
       const verifyStatus = commandStatus(verified);
-      const fieldsMatch = verifiedFields(verified, request.fields);
-      const ok = verifyStatus !== 'error' && fieldsMatch;
+      const matchedFieldCount = isPerSpecPriceArtifact(changes) ? countVerifiedPerSpecFields(verified, changes) : countVerifiedFields(verified, changes);
+      const fieldsMatch = isPerSpecPriceArtifact(changes) ? verifiedPerSpecFields(verified, changes) : verifiedFields(verified, changes);
+      const ok = verifyStatus !== 'error' && fieldsMatch && expectedFieldCount > 0 && matchedFieldCount === expectedFieldCount;
       const auditStatus: 'completed' | 'verify_failed' = ok ? 'completed' : 'verify_failed';
       const resultFile = join(artifactDir, `verify-${request.productId}-${timestampToken()}.json`);
       await writeJsonFile(resultFile, {
         productId: request.productId,
         ok,
-        expectedFields: request.fields,
+        expectedFields: changes,
+        expectedFieldCount,
+        matchedFieldCount,
         applyStatus,
         submitStatus,
         verifyStatus,
@@ -1595,50 +1896,8 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
     async applyPerSpec(productId, specFields) {
       const safeProductId = readProductId(productId);
       if (!safeProductId) throw new Error('productId must be a numeric string');
-      const artifactDir = mtAgentAuditArtifactDir(rootDir);
-      await mkdir(artifactDir, { recursive: true });
-      const normalized = normalizePerSpecPriceFields(specFields);
-      if (!Object.keys(normalized).length) {
-        return { productId: safeProductId, ok: false, lines: ['apply: skipped', 'submit: skipped', 'verify: skipped', 'fields: empty'] };
-      }
-      const changesFile = join(artifactDir, `mt-agent-per-spec-changes-${safeProductId}-${timestampToken()}.json`);
-      await writeJsonFile(changesFile, normalized);
-
-      const apply = await send({ action: 'apply', productId: safeProductId, changesFile });
-      const applyStatus = commandStatus(apply);
-      if (applyStatus !== 'ok') {
-        return { productId: safeProductId, ok: false, lines: [`apply: ${applyStatus}`, 'submit: skipped', 'verify: skipped', `changesFile: ${changesFile}`] };
-      }
-
-      const submit = await send({ action: 'submit', expectedProductId: safeProductId });
-      const submitStatus = commandStatus(submit);
-      if (submitStatus !== 'ok') {
-        return { productId: safeProductId, ok: false, lines: [`apply: ${applyStatus}`, `submit: ${submitStatus}`, 'verify: skipped', `changesFile: ${changesFile}`] };
-      }
-
-      const verified = await send({ action: 'read', productId: safeProductId });
-      const verifyStatus = commandStatus(verified);
-      const fieldsMatch = verifiedPerSpecFields(verified, normalized);
-      const ok = verifyStatus !== 'error' && fieldsMatch;
-      const resultFile = join(artifactDir, `per-spec-verify-${safeProductId}-${timestampToken()}.json`);
-      await writeJsonFile(resultFile, {
-        productId: safeProductId,
-        ok,
-        expectedSpecFields: normalized,
-        applyStatus,
-        submitStatus,
-        verifyStatus,
-        fieldsMatch,
-        verified,
-        changesFile,
-        createdAt: new Date().toISOString(),
-      });
-      return {
-        productId: safeProductId,
-        ok,
-        lines: [`apply: ${applyStatus}`, `submit: ${submitStatus}`, `verify: ${verifyStatus}`, `fields: ${fieldsMatch ? 'matched' : 'mismatch'}`, `changesFile: ${changesFile}`, `verifyFile: ${resultFile}`],
-        audit: { status: ok ? 'completed' : 'verify_failed', resultFile },
-      };
+      void specFields;
+      throw new Error('逐规格直接写入已停用：请重新发起审计预览并使用租赁改价确认卡执行。');
     },
     async rollback(request) {
       const artifactDir = mtAgentAuditArtifactDir(rootDir);
@@ -1674,14 +1933,18 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
 
       const verified = await send({ action: 'read', productId });
       const verifyStatus = commandStatus(verified);
-      const fieldsMatch = verifiedFields(verified, fields);
-      const ok = verifyStatus !== 'error' && fieldsMatch;
+      const expectedFieldCount = priceArtifactFieldCount(fields);
+      const matchedFieldCount = isPerSpecPriceArtifact(fields) ? countVerifiedPerSpecFields(verified, fields) : countVerifiedFields(verified, fields);
+      const fieldsMatch = isPerSpecPriceArtifact(fields) ? verifiedPerSpecFields(verified, fields) : verifiedFields(verified, fields);
+      const ok = verifyStatus !== 'error' && fieldsMatch && expectedFieldCount > 0 && matchedFieldCount === expectedFieldCount;
       const auditStatus: 'rolled_back' | 'rollback_verify_failed' = ok ? 'rolled_back' : 'rollback_verify_failed';
       const resultFile = join(artifactDir, `rollback-verify-${productId}-${timestampToken()}.json`);
       await writeJsonFile(resultFile, {
         productId,
         ok,
         expectedFields: fields,
+        expectedFieldCount,
+        matchedFieldCount,
         applyStatus,
         submitStatus,
         verifyStatus,
@@ -1762,20 +2025,13 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
     async applyCurrent(expectedProductId, changes) {
       const safeProductId = readProductId(expectedProductId);
       if (!safeProductId) throw new Error('expectedProductId must be a numeric string');
-      const artifactDir = mtAgentAuditArtifactDir(rootDir);
-      await mkdir(artifactDir, { recursive: true });
-      const changesFile = join(artifactDir, `mt-agent-apply-current-${safeProductId}-${timestampToken()}.json`);
-      await writeJsonFile(changesFile, changes);
-      const result = await send({ action: 'apply-current', changesFile, allowCurrentPage: true, expectedProductId: safeProductId });
-      const status = commandStatus(result);
-      return { productId: safeProductId, ok: status === 'ok', changesFile, lines: [`apply-current: ${status}`, `changesFile: ${changesFile}`] };
+      void changes;
+      throw new Error('当前页直接应用已停用：请重新发起改价预览并使用审计确认卡执行。');
     },
     async submitCurrent(expectedProductId) {
       const safeProductId = readProductId(expectedProductId);
       if (!safeProductId) throw new Error('expectedProductId must be a numeric string');
-      const result = await send({ action: 'submit', expectedProductId: safeProductId });
-      const status = commandStatus(result);
-      return { productId: safeProductId, ok: status === 'ok', lines: [`submit: ${status}`] };
+      throw new Error('当前页直接提交已停用：请重新发起改价预览并使用审计确认卡执行。');
     },
     async specAddDim(productId, title) {
       const safeProductId = readProductId(productId);
@@ -2100,13 +2356,11 @@ function normalizeReadDiagnostics(value: unknown): Array<{ level?: string; specI
 export function rentalPriceRollbackRequestFromToolArguments(args: Record<string, unknown>): RentalPriceRollbackRequest | null {
   const productId = readProductId(args.productId) ?? undefined;
   const taskId = readString(args.taskId);
-  const rollbackFile = readString(args.rollbackFile);
-  if (!taskId && !rollbackFile) return null;
+  if (!taskId) return null;
   if (taskId && !AUDIT_TASK_ID_PATTERN.test(taskId)) return null;
   return {
     ...(productId ? { productId } : {}),
-    ...(taskId ? { taskId } : {}),
-    ...(rollbackFile ? { rollbackFile } : {}),
+    taskId,
   };
 }
 
@@ -2223,14 +2477,12 @@ export async function executeRentalOperationConfirmRequest(client: RentalPriceSk
       return { ok: result.ok, text: result.ok ? `规格刷新成功：商品 ${result.productId}` : `规格刷新失败：商品 ${result.productId}\n${result.lines.join('\n')}` };
     }
     case 'apply-current': {
-      if (!client.applyCurrent) return { ok: false, text: '当前租赁商品客户端不支持当前页应用变更。' };
-      const result = await client.applyCurrent(request.productId, request.changes);
-      return { ok: result.ok, text: result.ok ? `当前页应用成功：商品 ${result.productId}\nchangesFile: ${result.changesFile}` : `当前页应用失败：商品 ${result.productId}\n${result.lines.join('\n')}` };
+      void client;
+      void request.changes;
+      return { ok: false, text: `当前页直接应用已停用：商品 ${request.productId}。请重新发起改价预览并使用审计确认卡执行。` };
     }
     case 'submit-current': {
-      if (!client.submitCurrent) return { ok: false, text: '当前租赁商品客户端不支持当前页提交。' };
-      const result = await client.submitCurrent(request.productId);
-      return { ok: result.ok, text: result.ok ? `当前页提交成功：商品 ${result.productId}` : `当前页提交失败：商品 ${result.productId}\n${result.lines.join('\n')}` };
+      return { ok: false, text: `当前页直接提交已停用：商品 ${request.productId}。请重新发起改价预览并使用审计确认卡执行。` };
     }
     case 'spec-remove-items': {
       if (!client.specRemoveItem) return { ok: false, text: '当前租赁商品客户端不支持规格项删除。' };
