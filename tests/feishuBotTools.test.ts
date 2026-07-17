@@ -42,6 +42,26 @@ vi.mock('../src/publicTraffic/dashboardRefresh.js', () => ({
   runDashboardRefresh: mocks.runDashboardRefresh,
 }));
 
+const AUDIT_HASH = 'a'.repeat(64);
+
+function completeAudit(productId: string, overrides: Record<string, unknown> = {}) {
+  return {
+    taskId: `task_${productId}_preview`,
+    changesFile: `changes-${productId}.json`,
+    rollbackFile: `rollback-${productId}.json`,
+    currentValuesFile: `current-${productId}.json`,
+    changesSha256: AUDIT_HASH,
+    rollbackSha256: AUDIT_HASH,
+    currentSnapshotSha256: AUDIT_HASH,
+    planHash: AUDIT_HASH,
+    expectedFieldCount: 1,
+    hasErrors: false,
+    hasWarnings: false,
+    diff: [{ field: 'rent1day', label: '1天', old: '100.00', new: '90.00', change: '-10.00', changePct: '-10.0%', issues: [] }],
+    ...overrides,
+  };
+}
+
 beforeEach(() => {
   mocks.runPublicTrafficReportCli.mockReset();
   mocks.runPublicTrafficReportCli.mockResolvedValue({
@@ -2772,7 +2792,7 @@ describe('handleBotIntent', () => {
     expect(cardText).not.toContain('agent_tool_confirm');
   });
 
-  it('turns Agent-planned per-spec price plan into the apply confirmation card without confirming the plan first', async () => {
+  it('turns Agent-planned per-spec price plan into a non-executable preview without an unsafe apply card', async () => {
     const outputDir = await writeContext();
     const planner: AgentPlannerProvider = {
       async proposePlan(request) {
@@ -2806,9 +2826,8 @@ describe('handleBotIntent', () => {
 
     expect(readCalls).toEqual(['648']);
     expect(response.text).toContain('按规格改价预览：商品 648');
-    const confirmRequest = await loadAgentToolConfirmRequestFromCard(outputDir, response.card);
-    expect(confirmRequest.toolName).toBe('rental.perSpecPriceApply');
-    expect(confirmRequest.arguments).toEqual({ productId: '648', specFields: { '3863': { rent1day: '80.00' } } });
+    expect(response.text).toContain('按规格直接改价执行入口已停用');
+    expect(response.card).toBeUndefined();
   });
 
   it('turns Agent-planned spec dimension plan into the apply confirmation card without confirming the plan first', async () => {
@@ -3913,7 +3932,13 @@ describe('handleBotIntent', () => {
       async preview(request) {
         expect(request).toEqual({ mode: 'explicit_fields', productId: '761', fields: { rent1day: '22.00', rent10day: '55.00' } });
         if (request.mode !== 'explicit_fields') throw new Error('expected explicit fields preview');
-        return { productId: '761', fields: request.fields, lines: ['rent1day -> 22.00', 'rent10day -> 55.00'], warnings: [] };
+        return {
+          productId: '761',
+          fields: request.fields,
+          lines: ['rent1day -> 22.00', 'rent10day -> 55.00'],
+          warnings: [],
+          audit: completeAudit('761', { taskId: undefined, diff: [{ field: 'rent1day', label: '1天', old: '30.00', new: '22.00', change: '-8.00', changePct: '-26.7%', issues: [] }] }),
+        };
       },
       async execute() { throw new Error('execute should not run before confirmation'); },
       async copy() { throw new Error('copy should not run'); },
@@ -3925,8 +3950,9 @@ describe('handleBotIntent', () => {
 
     const response = await handleBotIntent({ type: 'unknown', text: '把 761 的 1 天租金改成 22，10 天改成 55' }, 'output', { llmIntentProposalProvider: proposalProvider, rentalPriceClient });
 
-    expect(response.text).toContain('请确认商品 761 改价');
-    expect(JSON.stringify(response.card)).toContain('rental_price_confirm');
+    expect(response.text).toContain('改价预览：1 个端内ID');
+    expect(JSON.stringify(response.card)).toContain('agent_tool_confirm');
+    expect(JSON.stringify(response.card)).toContain('rental.priceApply');
     expect(JSON.stringify(response.card)).toContain('rent1day');
     expect(JSON.stringify(response.card)).toContain('22.00');
   });
@@ -3948,7 +3974,7 @@ describe('handleBotIntent', () => {
       async preview(request) {
         expect(request).toEqual({ mode: 'explicit_fields', productId: '761', fields: { rent1day: '22.00' } });
         if (request.mode !== 'explicit_fields') throw new Error('expected explicit fields preview');
-        return { productId: '761', fields: request.fields, lines: ['rent1day -> 22.00'], warnings: [] };
+        return { productId: '761', fields: request.fields, lines: ['rent1day -> 22.00'], warnings: [], audit: completeAudit('761', { taskId: undefined, diff: [{ field: 'rent1day', label: '1天', old: '30.00', new: '22.00', change: '-8.00', changePct: '-26.7%', issues: [] }] }) };
       },
       async execute() { throw new Error('execute should not run before price confirmation'); },
       async copy() { throw new Error('copy should not run'); },
@@ -3960,10 +3986,11 @@ describe('handleBotIntent', () => {
 
     const response = await handleBotIntent({ type: 'unknown', text: '把 761 的 1 天租金改成 22' }, 'output', { agentPlannerProvider: planner, rentalPriceClient });
 
-    expect(response.text).toContain('请确认商品 761 改价');
-    expect(JSON.stringify(response.card)).toContain('rental_price_confirm');
+    expect(response.text).toContain('改价预览：1 个端内ID');
+    expect(JSON.stringify(response.card)).toContain('agent_tool_confirm');
+    expect(JSON.stringify(response.card)).toContain('rental.priceApply');
     expect(JSON.stringify(response.card)).toContain('用户要求把 761 的 1 天租金改成 22');
-    expect(JSON.stringify(response.card)).not.toContain('agent_tool_confirm');
+    expect(JSON.stringify(response.card)).not.toContain('rental_price_confirm');
   });
 
   it('recovers explicit rent fields from the original message when Agent plans pricePreview with only productIds', async () => {
@@ -3983,7 +4010,7 @@ describe('handleBotIntent', () => {
       async preview(request) {
         expect(request).toEqual({ mode: 'explicit_fields', productId: '954', fields: { rent1day: '88.00', rent10day: '999.00' } });
         if (request.mode !== 'explicit_fields') throw new Error('expected explicit fields preview');
-        return { productId: '954', fields: request.fields, lines: ['rent1day -> 88.00', 'rent10day -> 999.00'], warnings: [] };
+        return { productId: '954', fields: request.fields, lines: ['rent1day -> 88.00', 'rent10day -> 999.00'], warnings: [], audit: completeAudit('954', { taskId: undefined, diff: [{ field: 'rent1day', label: '1天', old: '100.00', new: '88.00', change: '-12.00', changePct: '-12.0%', issues: [] }] }) };
       },
       async execute() { throw new Error('execute should not run before price confirmation'); },
       async copy() { throw new Error('copy should not run'); },
@@ -4030,7 +4057,19 @@ describe('handleBotIntent', () => {
           fields: { rent1day: request.productId === '841' ? '90.00' : '81.00' },
           lines: ['preview: ok'],
           warnings: [],
-          audit: { taskId: `task_${request.productId}_preview`, rollbackFile: `rollback-${request.productId}.json`, hasErrors: false },
+          audit: completeAudit(request.productId, {
+            diff: [
+              {
+                field: 'rent1day',
+                label: '1天',
+                old: request.productId === '841' ? '100.00' : '90.00',
+                new: request.productId === '841' ? '90.00' : '81.00',
+                change: request.productId === '841' ? '-10.00' : '-9.00',
+                changePct: '-10.0%',
+                issues: [],
+              },
+            ],
+          }),
         };
       },
       async execute() { throw new Error('execute should not run before confirmation'); },
@@ -4055,8 +4094,14 @@ describe('handleBotIntent', () => {
     expect(response.text).toContain('步骤 2/2：rental.pricePreview');
     expect(response.text).toContain('链接数量：2 条');
     expect(response.text).toContain('端内ID：841、842');
-    expect(JSON.stringify(response.card)).toContain('agent_tool_confirm');
-    expect(JSON.stringify(response.card)).toContain('rental.priceApply');
+    const cardText = JSON.stringify(response.card);
+    expect(cardText).toContain('agent_tool_confirm');
+    expect(cardText).toContain('rental.priceApply');
+    expect(cardText).toContain('tag":"table');
+    expect(cardText).toContain('链接汇总表');
+    expect(cardText).toContain('商品ID');
+    expect(cardText).toContain('100.00 -> 90.00');
+    expect(cardText).toContain('-10.0%');
     const confirmRequest = await loadAgentToolConfirmRequestFromCard(outputDir, response.card);
     expect(confirmRequest.toolName).toBe('rental.priceApply');
     expect((confirmRequest.arguments.items as Array<{ productId: string }>).map((item) => item.productId)).toEqual(['841', '842']);
@@ -4089,7 +4134,7 @@ describe('handleBotIntent', () => {
           fields: { rent1day: '99.00' },
           lines: ['preview: ok'],
           warnings: [],
-          audit: { taskId: `task_${request.productId}_preview`, rollbackFile: `rollback-${request.productId}.json`, hasErrors: false },
+          audit: completeAudit(request.productId, { diff: [{ field: 'rent1day', label: '1天', old: '100.00', new: '99.00', change: '-1.00', changePct: '-1.0%', issues: [] }] }),
         };
       },
       async execute() { throw new Error('execute should not run before confirmation'); },
@@ -4142,8 +4187,8 @@ describe('handleBotIntent', () => {
         toolName: 'rental.priceApply',
         arguments: {
           items: [
-            { productId: '841', fields: { rent1day: '90.00' }, audit: { taskId: 'task_841_preview', rollbackFile: 'rollback-841.json' } },
-            { productId: '842', fields: { rent1day: '81.00' }, audit: { taskId: 'task_842_preview', rollbackFile: 'rollback-842.json' } },
+            { productId: '841', fields: { rent1day: '90.00' }, audit: completeAudit('841', { diff: [{ field: 'rent1day', label: '1天', old: '100.00', new: '90.00', change: '-10.00', changePct: '-10.0%', issues: [] }] }) },
+            { productId: '842', fields: { rent1day: '81.00' }, audit: completeAudit('842', { diff: [{ field: 'rent1day', label: '1天', old: '90.00', new: '81.00', change: '-9.00', changePct: '-10.0%', issues: [] }] }) },
           ],
         },
         reason: '用户确认对 Ace Pro 2 商品组整体打九折',
@@ -4153,8 +4198,8 @@ describe('handleBotIntent', () => {
     );
 
     expect(calls).toEqual([
-      { mode: 'explicit_fields', productId: '841', fields: { rent1day: '90.00' }, audit: { taskId: 'task_841_preview', rollbackFile: 'rollback-841.json' } },
-      { mode: 'explicit_fields', productId: '842', fields: { rent1day: '81.00' }, audit: { taskId: 'task_842_preview', rollbackFile: 'rollback-842.json' } },
+      { mode: 'explicit_fields', productId: '841', fields: { rent1day: '90.00' }, audit: completeAudit('841', { diff: [{ field: 'rent1day', label: '1天', old: '100.00', new: '90.00', change: '-10.00', changePct: '-10.0%', issues: [] }] }) },
+      { mode: 'explicit_fields', productId: '842', fields: { rent1day: '81.00' }, audit: completeAudit('842', { diff: [{ field: 'rent1day', label: '1天', old: '90.00', new: '81.00', change: '-9.00', changePct: '-10.0%', issues: [] }] }) },
     ]);
     expect(response.text).toContain('改价执行完成：成功 2/2');
     expect(response.metadata).toMatchObject({
@@ -4164,6 +4209,33 @@ describe('handleBotIntent', () => {
       taskIds: ['task_841_done', 'task_842_done'],
       rollbackFiles: ['rollback-841.json', 'rollback-842.json'],
     });
+  });
+
+  it('rejects rental.priceApply without complete audit proof before execution', async () => {
+    const execute = vi.fn(async () => ({ productId: '841', ok: true, lines: ['apply: ok'] }));
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run after confirmation'); },
+      execute,
+      async copy() { throw new Error('copy should not run'); },
+      async delist() { throw new Error('delist should not run'); },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+
+    const response = await executeAgentToolRequest(
+      {
+        toolName: 'rental.priceApply',
+        arguments: { items: [{ productId: '841', fields: { rent1day: '90.00' }, audit: { taskId: 'task_841_preview', rollbackFile: 'rollback-841.json', hasWarnings: true } }] },
+        reason: '用户确认对 Ace Pro 2 商品组整体打九折',
+      },
+      'output',
+      { rentalPriceClient },
+    );
+
+    expect(execute).not.toHaveBeenCalled();
+    expect(response.metadata).toMatchObject({ toolName: 'rental.priceApply', ok: false, productIds: ['841'] });
+    expect(response.text).toContain('改价执行审计不完整');
   });
 
   it('returns a rollback confirmation card when a message contains rollback and an audit task id', async () => {

@@ -46,11 +46,11 @@ import { parseExactBotIntent } from './intent.js';
 import type { LlmProvider } from '../llm/provider.js';
 import {
   buildRentalOperationConfirmCard,
-  buildRentalPricePreviewCard,
   createRentalPriceSkillClient,
   parseRentPriceFieldsFromText,
   rentalPriceChangeRequestFromToolArguments,
   type RentalOperationConfirmRequest,
+  type RentalPriceChangeRequest,
   type RentalPriceSkillClient,
 } from './rentalPrice.js';
 import type { ReadOnlyToolRunOptions } from './readOnlyToolRegistry.js';
@@ -65,6 +65,12 @@ const NEW_LINK_WRITE_INTENT_PLAN_FAILED =
   '这像是新链批量铺设写操作，但 Agent planner 没有生成有效的新链批量铺设计划。为避免误执行或误答只读新链接池，本次不执行；请换个说法或检查 LLM 输出。';
 const LEGACY_WORKFLOW_PLAN_REJECTED =
   'Agent planner 返回了 legacy workflow 格式（selectedWorkflow），但当前飞书路径只接受 registered tool 或 steps 多步骤计划。未执行任何操作；请让 LLM 改为 selectedTool 或 steps。';
+
+function pricePreviewArgumentsFromChangeRequest(request: RentalPriceChangeRequest): Record<string, unknown> {
+  if (request.mode === 'explicit_fields') return { productIds: [request.productId], fields: request.fields };
+  if (request.mode === 'global_discount') return { productIds: [request.productId], discount: request.discount, scope: request.scope };
+  return { productIds: [request.productId], adjustmentAmount: request.adjustmentAmount, scope: request.scope };
+}
 
 const AMBIGUOUS_WRITE_ACTION_PATTERN = /(处理|操作|弄|搞|看着办|整一下|整一整)/;
 const EXPLICIT_ACTION_PATTERN = /(下架|复制|改价|补链|铺链|新链|租期|规格|查|查询|库存|状态|ID查询|(?<!着)看(?!着办))/;
@@ -395,9 +401,11 @@ export async function executeOrConfirmAgentToolRequest(
   if (request.toolName === 'rental.priceChange') {
     const rentalRequest = rentalPriceChangeRequestFromToolArguments(completedArguments);
     if (!rentalRequest) return { text: '租赁商品改价参数无效：需要 productId，并提供 fields 或 discount。' };
-    const rentalPriceClient = options.rentalPriceClient ?? createRentalPriceSkillClient();
-    const preview = await rentalPriceClient.preview(rentalRequest);
-    return { text: `请确认商品 ${rentalRequest.productId} 改价`, card: buildRentalPricePreviewCard(preview, { reason: request.reason }) };
+    return executeAgentToolRequest(
+      { toolName: 'rental.pricePreview', arguments: pricePreviewArgumentsFromChangeRequest(rentalRequest), reason: request.reason },
+      outputDir,
+      { rentalPriceClient: options.rentalPriceClient, closedOrderFetchImpl: options.closedOrderFetchImpl, closedOrderRegistryPaths: options.closedOrderRegistryPaths },
+    );
   }
   if (isPreConfirmationPlanningTool(request.toolName)) {
     return executeAgentToolRequest(completedRequest, outputDir, {
@@ -502,14 +510,12 @@ function rollbackTaskConfirmResponse(text: string): BotResponse | null {
   if (!/回滚|rollback/i.test(text)) return null;
   const taskId = /\btask_\d+_[a-f0-9]+\b/i.exec(text)?.[0];
   const productId = /(?:商品|端内ID|productId)\s*(\d+)/i.exec(text)?.[1];
-  const rollbackFile = /[A-Za-z]:[\\/][^\s"'，。；;]+rollback_[^\s"'，。；;]+\.json/i.exec(text)?.[0];
-  if (!taskId && !rollbackFile) return null;
+  if (!taskId) return null;
   return agentToolConfirmResponse(
     'rental.priceRollback',
     {
       ...(productId ? { productId } : {}),
-      ...(taskId ? { taskId } : {}),
-      ...(rollbackFile ? { rollbackFile } : {}),
+      taskId,
     },
     '识别到租赁改价回滚请求；回滚属于高风险写操作，需要二次确认。',
   );
@@ -773,9 +779,11 @@ export async function handleBotIntent(intent: BotIntent, outputDir = 'output', o
   }
 
   if (intent.type === 'rental_price_change') {
-    const rentalPriceClient = options.rentalPriceClient ?? createRentalPriceSkillClient();
-    const preview = await rentalPriceClient.preview(intent.request);
-    return { text: `请确认商品 ${intent.productId} 改价`, card: buildRentalPricePreviewCard(preview) };
+    return executeAgentToolRequest(
+      { toolName: 'rental.pricePreview', arguments: pricePreviewArgumentsFromChangeRequest(intent.request), reason: `明确飞书命令请求商品 ${intent.productId} 改价。` },
+      outputDir,
+      { rentalPriceClient: options.rentalPriceClient, closedOrderFetchImpl: options.closedOrderFetchImpl, closedOrderRegistryPaths: options.closedOrderRegistryPaths },
+    );
   }
 
   if (intent.type === 'rental_copy') {
@@ -901,10 +909,12 @@ export async function handleBotIntent(intent: BotIntent, outputDir = 'output', o
       if (parsedProposal.ok && parsedProposal.proposal.intent.type !== 'unknown') {
         if (gateByConfidence(parsedProposal.proposal.confidence, confidenceGateOptions(options)) === 'clarify') return declineUnknownIntent();
         const proposedIntent = parsedProposal.proposal.intent;
-        const rentalPriceClient = options.rentalPriceClient ?? createRentalPriceSkillClient();
         if (proposedIntent.type === 'rental_price_change') {
-          const preview = await rentalPriceClient.preview(proposedIntent.request);
-          return { text: `请确认商品 ${proposedIntent.productId} 改价`, card: buildRentalPricePreviewCard(preview) };
+          return executeAgentToolRequest(
+            { toolName: 'rental.pricePreview', arguments: pricePreviewArgumentsFromChangeRequest(proposedIntent.request), reason: parsedProposal.proposal.reason },
+            outputDir,
+            { rentalPriceClient: options.rentalPriceClient, closedOrderFetchImpl: options.closedOrderFetchImpl, closedOrderRegistryPaths: options.closedOrderRegistryPaths },
+          );
         }
         const request = rentalIntentToConfirmRequest(proposedIntent);
         if (request) {
