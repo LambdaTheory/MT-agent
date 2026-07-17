@@ -1,9 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { buildAgentToolConfirmCard, type AgentToolConfirmRequest } from '../agentRuntime/approvalCard.js';
-import { recordOperationEvent } from '../agentRuntime/operationLedger.js';
-import { saveAgentToolConfirmRequest } from './agentToolConfirmStore.js';
+import type { AgentToolConfirmRequest } from '../agentRuntime/approvalCard.js';
 import type { RentalPriceSkillClient } from './rentalPrice.js';
 import type { RentalWriteLedgerContext } from './rentalWriteOperationHandlers.js';
 import type { BotResponse } from './types.js';
@@ -74,7 +72,7 @@ function approvalSummaryLines(plan: RentalBulkPricePlan, planPath: string): stri
     '代表变更：',
     ...representatives,
     `计划文件：${planPath}`,
-    '确认后：按持久化计划执行 apply、submit、verify、ledger 和报告。',
+    '安全边界：批量改价确认执行入口已停用，请改用逐商品 rental.pricePreview / rental.priceApply 完整审计流程。',
   ];
 }
 
@@ -160,21 +158,6 @@ async function readPlan(outputDir: string, planId: string): Promise<RentalBulkPr
   return raw as unknown as RentalBulkPricePlan;
 }
 
-async function recordBulkEvent(context: RentalWriteLedgerContext | undefined, event: 'execution_started' | 'execution_succeeded' | 'execution_failed', planId: string, status?: string, productId?: string): Promise<void> {
-  if (!context) return;
-  await recordOperationEvent(context.outputDir, {
-    planId: context.decisionId ?? context.runId ?? planId,
-    at: new Date().toISOString(),
-    ...(context.missionDate ? { partitionDate: context.missionDate } : {}),
-    event,
-    toolName: 'rental.bulkPriceApply',
-    ...(context.runId ? { runId: context.runId } : {}),
-    ...(context.decisionId ? { decisionId: context.decisionId } : {}),
-    ...(productId ? { subject: { kind: 'product' as const, id: productId } } : {}),
-    metadata: { planId, ...(status ? { status } : {}), ...(context.missionDate ? { missionDate: context.missionDate } : {}) },
-  });
-}
-
 export async function rentalBulkPricePlanResponse(args: Record<string, unknown>, reason: string, _client: RentalPriceSkillClient, outputDir: string, continuation?: AgentToolConfirmRequest['continuation']): Promise<BotResponse> {
   const plan = buildPlan(args, reason);
   const { planPath } = paths(outputDir, plan.planId);
@@ -185,18 +168,10 @@ export async function rentalBulkPricePlanResponse(args: Record<string, unknown>,
       metadata: { toolName: 'rental.bulkPricePlan', ok: false, planId: plan.planId, planPath, blockedCount: plan.blockedItems.length },
     };
   }
-  const confirmRequest: AgentToolConfirmRequest = {
-    toolName: 'rental.bulkPriceApply',
-    arguments: { planId: plan.planId },
-    reason,
-    ...(continuation ? { continuation } : {}),
-  };
-  const requestRef = await saveAgentToolConfirmRequest(outputDir, confirmRequest);
   const summaryLines = approvalSummaryLines(plan, planPath);
   return {
-    text: ['批量租赁改价计划', ...summaryLines].join('\n'),
-    card: buildAgentToolConfirmCard(confirmRequest, { requestRef, summaryLines }),
-    metadata: { toolName: 'rental.bulkPricePlan', ok: true, planId: plan.planId, planPath, productCount: plan.summary.productCount, fieldCount: plan.summary.fieldCount },
+    text: ['批量租赁改价计划已生成但不可执行', ...summaryLines].join('\n'),
+    metadata: { toolName: 'rental.bulkPricePlan', ok: false, planId: plan.planId, planPath, productCount: plan.summary.productCount, fieldCount: plan.summary.fieldCount, disabled: true },
   };
 }
 
@@ -206,27 +181,5 @@ export async function rentalBulkPriceApplyResponse(args: Record<string, unknown>
   const plan = await readPlan(outputDir, planId);
   if (plan.status !== 'planned' || plan.blockedItems.length) throw new Error('批量改价计划不可执行。');
   if (plan.items.length === 0 || plan.items.length > MAX_BULK_ITEMS) throw new Error('批量改价计划商品数量无效。');
-  await recordBulkEvent(ledgerContext, 'execution_started', planId);
-  const startedAt = new Date().toISOString();
-  const results: RentalBulkPriceResult[] = [];
-  for (const item of plan.items) {
-    await recordBulkEvent(ledgerContext, 'execution_started', planId, undefined, item.productId);
-    try {
-      const result = await client.execute({ mode: 'explicit_fields', productId: item.productId, fields: item.fields });
-      results.push({ productId: result.productId, ok: result.ok, lines: result.lines, ...(result.audit?.resultFile ? { resultFile: result.audit.resultFile } : {}), ...(result.audit?.rollbackFile ? { rollbackFile: result.audit.rollbackFile } : {}) });
-      await recordBulkEvent(ledgerContext, result.ok ? 'execution_succeeded' : 'execution_failed', planId, undefined, result.productId);
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
-      results.push({ productId: item.productId, ok: false, lines: [`error: ${message}`] });
-      await recordBulkEvent(ledgerContext, 'execution_failed', planId, undefined, item.productId);
-    }
-  }
-  const ok = results.every((result) => result.ok);
-  const status = ok ? 'completed' : 'completed_with_failures';
-  const { planPath, reportPath } = paths(outputDir, planId);
-  const report = { version: 1, planId, status, startedAt, finishedAt: new Date().toISOString(), results };
-  await writeJson(reportPath, report);
-  await writeJson(planPath, { ...plan, status: ok ? 'applied' : 'failed' });
-  await recordBulkEvent(ledgerContext, ok ? 'execution_succeeded' : 'execution_failed', planId, status);
-  return { text: `批量租赁改价${ok ? '完成' : '部分失败'}：${plan.items.length} 个商品\n报告：${reportPath}`, metadata: { toolName: 'rental.bulkPriceApply', ok, planId, status, reportPath } };
+  throw new Error('批量改价执行入口已停用，请改用逐商品完整审计的 rental.priceApply。');
 }

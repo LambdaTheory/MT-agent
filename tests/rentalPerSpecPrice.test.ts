@@ -32,7 +32,7 @@ describe('rental per-spec price tools', () => {
     await rm(outputDir, { recursive: true, force: true });
   });
 
-  it('plans a confirmation request for exact per-spec prices without applying', async () => {
+  it('previews exact per-spec prices without creating an unsafe apply confirmation', async () => {
     const applyPerSpec = vi.fn();
     const client = clientWith({ applyPerSpec });
 
@@ -46,7 +46,8 @@ describe('rental per-spec price tools', () => {
     expect(response.text).toContain('按规格改价预览：商品 648');
     expect(response.text).toContain('3863');
     expect(response.text).toContain('rent1day: 70.00 -> 80.00');
-    expect(JSON.stringify(response.card)).toContain('rental.perSpecPriceApply');
+    expect(response.text).toContain('按规格直接改价执行入口已停用');
+    expect(response.card).toBeUndefined();
   });
 
   it('rejects non-numeric product ids before preview reads', async () => {
@@ -64,19 +65,17 @@ describe('rental per-spec price tools', () => {
     expect(response.text).toContain('productId');
   });
 
-  it('applies only the specified spec values', async () => {
+  it('rejects per-spec apply execution because it lacks complete audit proof', async () => {
     const applyPerSpec = vi.fn(async () => ({ productId: '648', ok: true, lines: ['apply: ok', 'submit: ok', 'verify: ok'] }));
     const client = clientWith({ applyPerSpec });
 
-    const response = await executeAgentToolRequest(
+    await expect(executeAgentToolRequest(
       { toolName: 'rental.perSpecPriceApply', arguments: { productId: '648', specFields: { '3863': { rent1day: '80.00' } } }, reason: '确认写 B 规格绝对价' },
       outputDir,
       { rentalPriceClient: client },
-    );
+    )).rejects.toThrow('按规格直接改价执行入口已停用');
 
-    expect(applyPerSpec).toHaveBeenCalledWith('648', { '3863': { rent1day: '80.00' } });
-    expect(response.text).toContain('按规格改价成功：商品 648');
-    expect(response.metadata).toMatchObject({ toolName: 'rental.perSpecPriceApply', ok: true, productId: '648' });
+    expect(applyPerSpec).not.toHaveBeenCalled();
   });
 
   it('rejects non-numeric product ids before applying', async () => {
