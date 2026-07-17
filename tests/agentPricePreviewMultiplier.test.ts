@@ -3,12 +3,32 @@ import { continueAgentPlannerSteps } from '../src/feishuBot/agentToolContinuatio
 import { executeAgentToolRequest } from '../src/feishuBot/agentToolExecutor.js';
 import type { RentalPriceChangeRequest, RentalPriceSkillClient } from '../src/feishuBot/rentalPrice.js';
 
+const HASH = 'a'.repeat(64);
+
+function audit(productId: string, hasErrors = false) {
+  return {
+    taskId: `task_${productId}`,
+    rollbackFile: `rollback-${productId}.json`,
+    changesFile: `changes-${productId}.json`,
+    currentValuesFile: `current-${productId}.json`,
+    changesSha256: HASH,
+    rollbackSha256: HASH,
+    currentSnapshotSha256: HASH,
+    planHash: HASH,
+    expectedFieldCount: 1,
+    hasErrors,
+    hasWarnings: false,
+    diff: [{ field: 'rent1day', label: '1天', old: '20.00', new: '18.00', change: '-2.00', changePct: '-10.0%', issues: hasErrors ? [{ level: 'error', msg: 'blocked' }] : [] }],
+  };
+}
+
 function fakeRentalPriceClient() {
   const preview = vi.fn(async (request: RentalPriceChangeRequest) => ({
     productId: request.productId,
     fields: { rent1: '18.00' },
     lines: ['preview ok'],
     warnings: [],
+    audit: audit(request.productId),
   }));
   return {
     client: { preview } as unknown as RentalPriceSkillClient,
@@ -246,19 +266,16 @@ describe('agent rental price preview multiplier handling', () => {
       results: Object.fromEntries(productIds.map((productId, index) => [productId, {
         status: 'ok',
         productId,
-        specs: [{ specId: 's1', title: '默认' }],
-        values: { s1: { rent1day: String(100 + index), rent2day: String(120 + index), marketPrice: '9999' } },
+        specs: productId === '900' ? [{ specId: 's1', title: '默认' }, { specId: 's2', title: '套装' }] : [{ specId: 's1', title: '默认' }],
+        values: productId === '900'
+          ? { s1: { rent1day: '100', rent2day: '120', marketPrice: '9999' }, s2: { rent1day: '300', rent2day: '320', marketPrice: '9999' } }
+          : { s1: { rent1day: String(100 + index), rent2day: String(120 + index), marketPrice: '9999' } },
       }])),
       errors: [],
       warnings: [],
       lines: ['batch-read: ok'],
     }));
-    const auditPreviewFromRead = vi.fn(async (productId: string) => ({
-      taskId: `task_${productId}`,
-      rollbackFile: `rollback-${productId}.json`,
-      changesFile: `changes-${productId}.json`,
-      hasErrors: false,
-    }));
+    const auditPreviewFromRead = vi.fn(async (productId: string) => audit(productId));
     const productIds = ['900', '901', '902', '903'];
 
     const response = await executeAgentToolRequest(
@@ -273,13 +290,27 @@ describe('agent rental price preview multiplier handling', () => {
 
     expect(batchRead).toHaveBeenCalledWith(productIds);
     expect(auditPreviewFromRead).toHaveBeenCalledTimes(4);
+    expect(auditPreviewFromRead).toHaveBeenCalledWith('900', expect.any(Object), { rent1day: '90.00', rent2day: '110.00' }, {
+      s1: { rent1day: '90.00', rent2day: '110.00' },
+      s2: { rent1day: '290.00', rent2day: '310.00' },
+    });
     expect(preview).not.toHaveBeenCalled();
     expect(response.metadata).toMatchObject({ toolName: 'rental.pricePreview', ok: true, previewCount: 4 });
     expect(response.text).toContain('rent1day=90.00');
     expect(response.text).toContain('rent2day=110.00');
     expect(response.text).toContain('审计 task_900');
     expect(response.text).not.toContain('marketPrice');
+    expect(JSON.stringify(response.progressCard)).toContain('租赁改价预览处理中');
+    expect(JSON.stringify(response.progressCard)).toContain('当前不会写入商品');
     expect(response.card).toBeDefined();
+    const cardText = JSON.stringify(response.card);
+    expect(cardText).toContain('写入模式');
+    expect(cardText).toContain('范围');
+    expect(cardText).toContain('最大降幅');
+    expect(cardText).toContain('最大涨幅');
+    expect(cardText).toContain('验证合同');
+    expect(cardText).toContain('参数摘要：见下方业务摘要与审计信息');
+    expect(cardText).not.toContain('参数：{"items"');
   });
 
   it('runs batchRead audit previews concurrently while preserving preview order', async () => {
@@ -307,12 +338,7 @@ describe('agent rental price preview multiplier handling', () => {
       maxActiveAudits = Math.max(maxActiveAudits, activeAudits);
       await new Promise((resolve) => setTimeout(resolve, productId === '900' ? 35 : 5));
       activeAudits -= 1;
-      return {
-        taskId: `task_${productId}`,
-        rollbackFile: `rollback-${productId}.json`,
-        changesFile: `changes-${productId}.json`,
-        hasErrors: false,
-      };
+      return audit(productId);
     });
 
     const response = await executeAgentToolRequest(
@@ -350,12 +376,7 @@ describe('agent rental price preview multiplier handling', () => {
       warnings: [],
       lines: ['batch-read: ok'],
     }));
-    const auditPreviewFromRead = vi.fn(async (productId: string) => ({
-      taskId: `task_${productId}`,
-      rollbackFile: `rollback-${productId}.json`,
-      changesFile: `changes-${productId}.json`,
-      hasErrors: productId === '901',
-    }));
+    const auditPreviewFromRead = vi.fn(async (productId: string) => audit(productId, productId === '901'));
 
     const response = await executeAgentToolRequest(
       {
@@ -370,7 +391,7 @@ describe('agent rental price preview multiplier handling', () => {
     expect(batchRead).toHaveBeenCalledTimes(1);
     expect(preview).not.toHaveBeenCalled();
     expect(response.metadata).toMatchObject({ toolName: 'rental.pricePreview', ok: false, previewCount: 1 });
-    expect(response.text).toContain('审计错误，已阻断');
+    expect(response.text).toContain('审计存在错误');
     expect(response.card).toBeUndefined();
   });
 

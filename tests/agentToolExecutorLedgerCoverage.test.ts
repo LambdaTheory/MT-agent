@@ -6,6 +6,8 @@ import { loadOperationLedgerJsonlEntries } from '../src/agentRuntime/operationLe
 import { executeAgentToolRequest } from '../src/feishuBot/agentToolExecutor.js';
 import type { RentalPriceSkillClient } from '../src/feishuBot/rentalPrice.js';
 
+const HASH = 'a'.repeat(64);
+
 function client(): RentalPriceSkillClient {
   return {
     preview: async () => ({ productId: '648', fields: { rent1day: '18.00' }, lines: [], warnings: [] }),
@@ -31,7 +33,29 @@ describe('ledgerContext coverage for priceApply', () => {
 
   it('records execution events with attribution for rental.priceApply', async () => {
     await executeAgentToolRequest(
-      { toolName: 'rental.priceApply', arguments: { items: [{ productId: '648', fields: { rent1day: '18.00' } }] }, reason: 'x' },
+      {
+        toolName: 'rental.priceApply',
+        arguments: {
+          items: [{
+            productId: '648',
+            fields: { rent1day: '18.00' },
+            audit: {
+              changesFile: 'changes-648.json',
+              rollbackFile: 'rollback-648.json',
+              currentValuesFile: 'current-648.json',
+              changesSha256: HASH,
+              rollbackSha256: HASH,
+              currentSnapshotSha256: HASH,
+              planHash: HASH,
+              expectedFieldCount: 1,
+              hasErrors: false,
+              hasWarnings: false,
+              diff: [{ field: 'rent1day', label: '1天', old: '20.00', new: '18.00', change: '-2.00', changePct: '-10.0%', issues: [] }],
+            },
+          }],
+        },
+        reason: 'x',
+      },
       dir,
       { rentalPriceClient: client(), ledgerContext: { outputDir: dir, runId: 'run-1', decisionId: 'dec-1' } },
     );

@@ -2,6 +2,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { buildAgentToolConfirmCard } from '../agentRuntime/approvalCard.js';
 import { recordOperationEvent } from '../agentRuntime/operationLedger.js';
+import type { FeishuCardPayload } from '../notify/feishuApp.js';
 import { runPublicTrafficReportCli } from '../cli/publicTrafficReport.js';
 import type { AgentToolConfirmRequest } from '../agentRuntime/approvalCard.js';
 import { loadConfig } from '../config/loadConfig.js';
@@ -71,13 +72,16 @@ import { buildLinkRegistryOverviewCard, formatLinkRegistryOverviewText } from '.
 import { buildQueryTextCard } from './queryCards.js';
 import {
   buildRentalOperationConfirmCard,
-  buildRentalPricePreviewCard,
   compactAuditReference,
   createRentalPriceSkillClient,
   parseRentPriceFieldsFromText,
   rentalPriceChangeRequestFromToolArguments,
+  rentalPriceExecutionAuditBlockReason,
   rentalPriceRollbackRequestFromToolArguments,
+  type RentalPriceAuditDiff,
   type RentalPriceAuditReference,
+  type PriceChangeArtifact,
+  type PerSpecPriceFieldMap,
   type RentalOperationConfirmRequest,
   type RentalSpecRemoveItemConfirmRequest,
   type RentalPriceChangeRequest,
@@ -950,6 +954,373 @@ function formatPricePreviewText(input: {
   ].filter((line): line is string => Boolean(line)).join('\n');
 }
 
+export function buildRentalPricePreviewProgressCard(productIds: string[], reason: string): FeishuCardPayload {
+  const scopeText = productIds.length ? `${productIds.length} 个端内ID` : '商品范围解析中';
+  return {
+    schema: '2.0',
+    config: { wide_screen_mode: true },
+    header: { title: { tag: 'plain_text', content: '租赁改价预览处理中' }, template: 'blue' },
+    body: {
+      elements: [
+        cardMarkdown([
+          '**已收到改价预览指令，当前不会写入商品。**',
+          '',
+          `指令：${reason}`,
+          `范围：${scopeText}`,
+          '当前阶段：解析指令 -> 解析商品范围 -> 读取 SaaS 价格 -> 生成逐规格计划 -> 运行审计规则 -> 渲染审批卡',
+          `进度：0/${productIds.length || '?'}，正在准备读取价格与审计预览`,
+        ].join('\n')),
+      ],
+    },
+  };
+}
+
+type PriceApplyPreviewItem = { productId: string; fields: Record<string, string>; audit?: RentalPriceAuditReference };
+
+function cardMarkdown(content: string): Record<string, unknown> {
+  return { tag: 'markdown', content };
+}
+
+function cardMetricColumn(label: string, value: string, note?: string): Record<string, unknown> {
+  return {
+    tag: 'column',
+    width: 'weighted',
+    weight: 1,
+    elements: [cardMarkdown(`**${label}**\n${value}${note ? `\n<font color=grey>${note}</font>` : ''}`)],
+  };
+}
+
+function cardTable(elementId: string, columns: Array<{ name: string; display_name: string }>, rows: Array<Record<string, string>>, pageSize = 10): Record<string, unknown> {
+  return {
+    tag: 'table',
+    element_id: elementId,
+    page_size: Math.max(1, Math.min(10, pageSize)),
+    row_height: 'low',
+    row_max_height: '140px',
+    freeze_first_column: true,
+    header_style: { background_style: 'grey', text_size: 'normal', text_align: 'left' },
+    columns: columns.map((column) => ({
+      ...column,
+      data_type: 'text',
+      horizontal_align: 'left',
+      width: 'auto',
+    })),
+    rows,
+  };
+}
+
+function auditDiffRows(item: PriceApplyPreviewItem): RentalPriceAuditDiff[] {
+  return item.audit?.diff ?? [];
+}
+
+function fieldDisplayName(field: string): string {
+  return field.replace(/^rent/, '').replace(/day$/i, '天') || field;
+}
+
+function diffDisplay(diff: RentalPriceAuditDiff): string {
+  const issue = diff.issues.some((item) => item.level === 'error' || item.level === 'warn' || item.level === 'warning');
+  const change = diff.changePct && diff.changePct !== '-' ? `${diff.change} / ${diff.changePct}` : diff.change;
+  const changeText = issue ? `<font color=red>**${change}**</font>` : change;
+  return `${diff.old} -> ${diff.new}\n${changeText}`;
+}
+
+function fieldOnlyDisplay(value: string): string {
+  return `-> ${value}`;
+}
+
+function parsePercent(value: string): number | null {
+  const match = value.match(/-?\d+(?:\.\d+)?/);
+  return match ? Number(match[0]) : null;
+}
+
+function parseSignedAmount(value: string): number | null {
+  const match = value.match(/-?\d+(?:\.\d+)?/);
+  return match ? Number(match[0]) : null;
+}
+
+function maxChangeText(diffs: RentalPriceAuditDiff[], fields: Record<string, string>): string {
+  if (diffs.length === 0) return Object.keys(fields).length ? '见字段新值' : '-';
+  let selected = diffs[0];
+  const firstMagnitude = parsePercent(selected.changePct) ?? Number(selected.change);
+  let selectedMagnitude = Math.abs(Number.isFinite(firstMagnitude) ? firstMagnitude : 0);
+  for (const diff of diffs.slice(1)) {
+    const rawMagnitude = parsePercent(diff.changePct) ?? Number(diff.change);
+    const magnitude = Math.abs(Number.isFinite(rawMagnitude) ? rawMagnitude : 0);
+    if (magnitude > selectedMagnitude) {
+      selected = diff;
+      selectedMagnitude = magnitude;
+    }
+  }
+  return selected.changePct && selected.changePct !== '-' ? `${selected.change} / ${selected.changePct}` : selected.change;
+}
+
+function maxDirectionalChangeText(items: PriceApplyPreviewItem[], direction: 'drop' | 'increase'): string {
+  const candidates = items.flatMap((item) => auditDiffRows(item).map((diff) => ({ item, diff, amount: parseSignedAmount(diff.change) })));
+  const filtered = candidates.filter((candidate): candidate is { item: PriceApplyPreviewItem; diff: RentalPriceAuditDiff; amount: number } => candidate.amount !== null && (direction === 'drop' ? candidate.amount < 0 : candidate.amount > 0));
+  if (!filtered.length) return '无';
+  const selected = filtered.reduce((best, candidate) => (direction === 'drop' ? candidate.amount < best.amount : candidate.amount > best.amount) ? candidate : best, filtered[0]);
+  const spec = selected.diff.specTitle || selected.diff.specId || '默认规格';
+  const pct = selected.diff.changePct && selected.diff.changePct !== '-' ? ` / ${selected.diff.changePct}` : '';
+  return `商品 ${selected.item.productId} / ${spec} / ${selected.diff.label || selected.diff.field}: ${selected.diff.change}${pct}`;
+}
+
+function pricePreviewSpecCount(items: PriceApplyPreviewItem[]): number {
+  let total = 0;
+  for (const item of items) {
+    const specIds = new Set(auditDiffRows(item).map((diff) => diff.specId || diff.specTitle).filter(Boolean));
+    total += Math.max(1, specIds.size);
+  }
+  return total;
+}
+
+function pricePreviewWriteMode(items: PriceApplyPreviewItem[]): string {
+  const hasMultiSpec = items.some((item) => {
+    const specIds = new Set(auditDiffRows(item).map((diff) => diff.specId || diff.specTitle).filter(Boolean));
+    return specIds.size > 1;
+  });
+  return hasMultiSpec ? '逐规格写入' : '单规格审计写入';
+}
+
+function pricePreviewOperationSemantics(items: PriceApplyPreviewItem[]): string {
+  const diffs = items.flatMap(auditDiffRows);
+  const amounts = [...new Set(diffs.map((diff) => diff.change).filter((value) => value && value !== '-'))];
+  if (amounts.length === 1) return `${pricePreviewWriteMode(items)}：每个涉及租金字段 ${amounts[0]} 元`;
+  return `${pricePreviewWriteMode(items)}：按审计 diff 写入目标租赁价`;
+}
+
+function countRiskThresholds(items: PriceApplyPreviewItem[]): string {
+  const percents = items.flatMap((item) => auditDiffRows(item).map((diff) => Math.abs(parsePercent(diff.changePct) ?? 0)));
+  return `>20% ${percents.filter((value) => value > 20).length}，>50% ${percents.filter((value) => value > 50).length}，>70% ${percents.filter((value) => value > 70).length}`;
+}
+
+function itemStatus(item: PriceApplyPreviewItem): string {
+  if (item.audit?.hasErrors) return '阻断';
+  if (item.audit?.hasWarnings || auditDiffRows(item).some((diff) => diff.issues.length > 0)) return '风险';
+  return '通过';
+}
+
+function itemSpecShape(item: PriceApplyPreviewItem): string {
+  const titles = new Set(auditDiffRows(item).map((diff) => diff.specTitle?.trim()).filter((value): value is string => Boolean(value)));
+  if (titles.size > 1) return '多规格';
+  if (titles.size === 1) return titles.values().next().value ?? '单规格';
+  return '单规格';
+}
+
+function itemRentTerms(item: PriceApplyPreviewItem): string {
+  const labels = auditDiffRows(item).map((diff) => diff.label || fieldDisplayName(diff.field));
+  const fallback = Object.keys(item.fields).map(fieldDisplayName);
+  const terms = [...new Set(labels.length ? labels : fallback)].slice(0, 5);
+  return `${terms.join(' / ')}${(labels.length || fallback.length) > terms.length ? ' / ...' : ''}`;
+}
+
+function buildPriceApplySummaryRows(items: PriceApplyPreviewItem[]): Array<Record<string, string>> {
+  return items.map((item) => {
+    const diffs = auditDiffRows(item);
+    return {
+      productId: item.productId,
+      productType: '租赁商品',
+      specShape: itemSpecShape(item),
+      rentTerms: itemRentTerms(item),
+      maxChange: maxChangeText(diffs, item.fields),
+      status: itemStatus(item),
+    };
+  });
+}
+
+function detailFieldKeys(items: PriceApplyPreviewItem[]): Array<{ key: string; label: string }> {
+  const entries: Array<{ key: string; label: string }> = [];
+  const seen = new Set<string>();
+  for (const item of items) {
+    for (const diff of auditDiffRows(item)) {
+      if (seen.has(diff.field)) continue;
+      seen.add(diff.field);
+      entries.push({ key: diff.field, label: diff.label || fieldDisplayName(diff.field) });
+      if (entries.length >= 5) return entries;
+    }
+    for (const field of Object.keys(item.fields)) {
+      if (seen.has(field)) continue;
+      seen.add(field);
+      entries.push({ key: field, label: fieldDisplayName(field) });
+      if (entries.length >= 5) return entries;
+    }
+  }
+  return entries;
+}
+
+function buildPriceApplyDetailRows(items: PriceApplyPreviewItem[], fields: Array<{ key: string; label: string }>): Array<Record<string, string>> {
+  const rows: Array<Record<string, string>> = [];
+  for (const item of items.slice(0, 3)) {
+    const diffs = auditDiffRows(item);
+    if (diffs.length > 0) {
+      const grouped = new Map<string, RentalPriceAuditDiff[]>();
+      for (const diff of diffs) {
+        const spec = diff.specTitle?.trim() || '默认规格';
+        grouped.set(spec, [...(grouped.get(spec) ?? []), diff]);
+      }
+      for (const [spec, specDiffs] of grouped) {
+        const row: Record<string, string> = { productId: item.productId, spec };
+        for (const field of fields) {
+          const diff = specDiffs.find((entry) => entry.field === field.key);
+          row[field.key] = diff ? diffDisplay(diff) : item.fields[field.key] ? fieldOnlyDisplay(item.fields[field.key]) : '-';
+        }
+        rows.push(row);
+      }
+    } else {
+      const row: Record<string, string> = { productId: item.productId, spec: '默认规格' };
+      for (const field of fields) row[field.key] = item.fields[field.key] ? fieldOnlyDisplay(item.fields[field.key]) : '-';
+      rows.push(row);
+    }
+    if (rows.length >= 8) break;
+  }
+  return rows;
+}
+
+function buildPriceApplyConfirmDisplayElements(items: PriceApplyPreviewItem[]): Record<string, unknown>[] {
+  const fieldCount = items.reduce((sum, item) => sum + Math.max(auditDiffRows(item).length, Object.keys(item.fields).length), 0);
+  const specCount = pricePreviewSpecCount(items);
+  const rollbackReadyCount = items.filter((item) => Boolean(item.audit?.rollbackFile)).length;
+  const riskyCount = items.filter((item) => itemStatus(item) !== '通过').length;
+  const fields = detailFieldKeys(items);
+  const detailRows = fields.length ? buildPriceApplyDetailRows(items, fields) : [];
+  return [
+    cardMarkdown([
+      "<text_tag color='orange'>预览已完成，尚未写入</text_tag>",
+      `**${pricePreviewOperationSemantics(items)}**`,
+      '点击“确认执行”后才会真实写入；执行会按审计 requestRef 串行处理，并在写入后逐商品回读校验。',
+      '本卡只展示业务摘要；最终执行范围以已保存的审计请求为准。',
+    ].join('\n')),
+    {
+      tag: 'column_set',
+      flex_mode: 'none',
+      background_style: 'grey',
+      columns: [
+        cardMetricColumn('写入模式', pricePreviewWriteMode(items), '禁止 broadcast'),
+        cardMetricColumn('范围', `${items.length} 链 / ${specCount} 规格 / ${fieldCount} 字段`),
+        cardMetricColumn('风险等级', riskyCount > 0 ? `<font color=orange>warn</font>` : '<font color=green>ok</font>'),
+        cardMetricColumn('验证合同', `${fieldCount}/${fieldCount}`, 'expected readback count'),
+      ],
+    },
+    {
+      tag: 'column_set',
+      flex_mode: 'none',
+      background_style: 'grey',
+      columns: [
+        cardMetricColumn('最大降幅', maxDirectionalChangeText(items, 'drop')),
+        cardMetricColumn('最大涨幅', maxDirectionalChangeText(items, 'increase')),
+        cardMetricColumn('回滚准备', `${rollbackReadyCount}/${items.length}`, rollbackReadyCount === items.length ? '逐规格回滚已生成' : '部分缺失'),
+        cardMetricColumn('风险阈值', countRiskThresholds(items)),
+      ],
+    },
+    cardMarkdown('**本次会写什么（链接汇总表）**'),
+    cardTable('rental_price_apply_summary', [
+      { name: 'productId', display_name: '商品ID' },
+      { name: 'productType', display_name: '商品类型' },
+      { name: 'specShape', display_name: '规格结构' },
+      { name: 'rentTerms', display_name: '涉及租期' },
+      { name: 'maxChange', display_name: '最大变化' },
+      { name: 'status', display_name: '状态' },
+    ], buildPriceApplySummaryRows(items)),
+    ...(detailRows.length ? [
+      cardMarkdown(`**价格变化明细：默认展开前 ${Math.min(items.length, 3)} 条链接**`),
+      cardTable('rental_price_apply_detail', [
+        { name: 'productId', display_name: '商品ID' },
+        { name: 'spec', display_name: '规格' },
+        ...fields.map((field) => ({ name: field.key, display_name: field.label })),
+      ], detailRows),
+    ] : []),
+    items.length > 3 ? cardMarkdown(`<font color=grey>还有 ${items.length - 3} 条链接未在明细表展开；完整范围见汇总表和审计文件。</font>`) : cardMarkdown('<font color=grey>完整 diff 来自审计预览；当前展示不改变执行范围。</font>'),
+  ];
+}
+
+function executionVerifyStatus(result: RentalPriceExecutionResult): string {
+  const joined = result.lines.join('\n').toLowerCase();
+  if (/verify:\s*ok|fields:\s*matched/.test(joined)) return '已回读匹配';
+  if (/verify/.test(joined)) return '需人工复核';
+  return result.ok ? '未返回验证详情' : '未验证';
+}
+
+function buildPriceApplyCompletionRows(results: RentalPriceExecutionResult[]): Array<Record<string, string>> {
+  return results.map((result) => ({
+    productId: result.productId,
+    status: result.ok ? '成功' : '失败',
+    verify: executionVerifyStatus(result),
+    taskId: result.audit?.taskId ?? '-',
+    rollback: result.ok && result.audit?.status === 'completed' && result.audit.taskId ? '可生成确认卡' : '不可用',
+    details: result.lines.slice(0, 3).join('\n') || '-',
+  }));
+}
+
+function rollbackButton(result: RentalPriceExecutionResult, index: number): Record<string, unknown> | null {
+  const taskId = result.audit?.taskId;
+  if (!result.ok || result.audit?.status !== 'completed' || !taskId) return null;
+  return {
+    tag: 'button',
+    text: { tag: 'plain_text', content: `生成回滚确认卡 ${result.productId}` },
+    type: 'default',
+    form_action_type: 'submit',
+    name: `rental_price_prepare_rollback_${index}`,
+    behaviors: [{ type: 'callback', value: { action: 'rental_price_prepare_rollback', taskId } }],
+  };
+}
+
+function buildPriceApplyCompletionCard(results: RentalPriceExecutionResult[]): FeishuCardPayload {
+  const success = results.filter((item) => item.ok);
+  const rollbackReady = results.filter((item) => item.ok && item.audit?.status === 'completed' && item.audit.taskId);
+  const buttons = results.map(rollbackButton).filter((item): item is Record<string, unknown> => Boolean(item));
+  return {
+    schema: '2.0',
+    config: { wide_screen_mode: true },
+    header: { title: { tag: 'plain_text', content: success.length === results.length ? '租赁改价执行完成' : 'Agent 操作失败' }, template: success.length === results.length ? 'green' : 'red' },
+    body: {
+      elements: [
+        cardMarkdown([
+          success.length === results.length ? "<text_tag color='green'>已写入并完成回读流程</text_tag>" : "<text_tag color='red'>存在失败项，勿重复提交</text_tag>",
+          `**成功 ${success.length}/${results.length}，可回滚 ${rollbackReady.length}/${results.length}**`,
+          '回滚不是一键执行。点击下方按钮只会生成二次确认卡，确认卡仍只使用 taskId 校验审计链路。',
+        ].join('\n')),
+        {
+          tag: 'column_set',
+          flex_mode: 'none',
+          background_style: 'grey',
+          columns: [
+            cardMetricColumn('执行结果', `${success.length}/${results.length}`, success.length === results.length ? '全部成功' : '存在失败'),
+            cardMetricColumn('回读状态', `${results.filter((item) => executionVerifyStatus(item) === '已回读匹配').length}/${results.length}`, 'matched/total'),
+            cardMetricColumn('回滚入口', `${rollbackReady.length}/${results.length}`, '生成确认卡，不直接回滚'),
+          ],
+        },
+        cardTable('rental_price_apply_completion', [
+          { name: 'productId', display_name: '商品ID' },
+          { name: 'status', display_name: '执行' },
+          { name: 'verify', display_name: '回读' },
+          { name: 'taskId', display_name: '审计任务' },
+          { name: 'rollback', display_name: '回滚' },
+          { name: 'details', display_name: '执行明细' },
+        ], buildPriceApplyCompletionRows(results)),
+        ...(buttons.length ? [{ tag: 'form', name: 'rental_price_rollback_prepare_form', elements: buttons }] : [cardMarkdown('<font color=grey>没有可自动生成回滚确认卡的成功任务。</font>')]),
+      ],
+    },
+  };
+}
+
+export async function buildRentalPriceRollbackConfirmCard(outputDir: string, value: unknown): Promise<FeishuCardPayload | null> {
+  if (!isRecord(value)) return null;
+  const taskId = readString(value.taskId);
+  if (!taskId) return null;
+  const request: AgentToolConfirmRequest = {
+    toolName: 'rental.priceRollback',
+    arguments: { taskId },
+    reason: `用户要求回滚已完成的租赁改价任务 ${taskId}`,
+  };
+  const requestRef = await saveAgentToolConfirmRequest(outputDir, request);
+  return buildAgentToolConfirmCard(request, {
+    requestRef,
+    summaryLines: [
+      '这是回滚二次确认卡；点击确认后才会执行回滚。',
+      '执行参数仅包含 taskId，系统会重新校验审计哈希、原执行状态和回读证据。',
+    ],
+  });
+}
+
 function moneyFixed(value: number): string {
   return value.toFixed(2);
 }
@@ -971,6 +1342,29 @@ function batchReadPricePreviewFields(
       : current + (input.adjustmentAmount ?? 0));
   }
   return fields;
+}
+
+function batchReadPricePreviewArtifact(
+  values: unknown,
+  input: { discount?: number; adjustmentAmount?: number },
+  displayFields: Record<string, string>,
+): PriceChangeArtifact {
+  if (!isRecord(values)) return displayFields;
+  const specFields: PerSpecPriceFieldMap = {};
+  for (const [specId, rawFields] of Object.entries(values)) {
+    if (!isRecord(rawFields)) continue;
+    const fields: Record<string, string> = {};
+    for (const [field, raw] of Object.entries(rawFields)) {
+      if (!isRentPriceField(field)) continue;
+      const current = Number(raw);
+      if (!Number.isFinite(current)) continue;
+      fields[field] = moneyFixed(input.discount !== undefined
+        ? current * input.discount
+        : current + (input.adjustmentAmount ?? 0));
+    }
+    if (Object.keys(fields).length) specFields[specId] = fields;
+  }
+  return Object.keys(specFields).length > 1 ? specFields : displayFields;
 }
 
 const BATCH_READ_AUDIT_CONCURRENCY = 12;
@@ -1021,13 +1415,14 @@ async function batchReadPricePreviewItems(
     }
     let audit: RentalPriceAuditReference | undefined;
     try {
-      const auditPreview = await auditPreviewFromRead(productId, result, fields);
+      const auditPreview = await auditPreviewFromRead(productId, result, fields, batchReadPricePreviewArtifact(result.values, input, fields));
       audit = compactAuditReference(auditPreview ?? undefined);
     } catch (error) {
       return { status: 'blocked', message: `商品 ${productId}：审计预览失败（${error instanceof Error ? error.message : String(error)}）` };
     }
-    if (audit?.hasErrors) {
-      return { status: 'blocked', message: `商品 ${productId}：审计错误，已阻断` };
+    const auditBlockReason = rentalPriceExecutionAuditBlockReason(audit);
+    if (auditBlockReason) {
+      return { status: 'blocked', message: `商品 ${productId}：${auditBlockReason}` };
     }
     return { status: 'ready', item: { productId, fields, ...(audit ? { audit } : {}) } };
   });
@@ -1064,6 +1459,7 @@ async function rentalPricePreviewResponse(
 ): Promise<BotResponse> {
   const productIds = readProductIdArray(args.productIds, RENTAL_PRICE_PREVIEW_MAX_PRODUCTS);
   if (!productIds) return { text: `改价预览参数无效：productIds 需要是 1 到 ${RENTAL_PRICE_PREVIEW_MAX_PRODUCTS} 个端内ID。`, metadata: { toolName: 'rental.pricePreview', ok: false } };
+  const progressCard = buildRentalPricePreviewProgressCard(productIds, reason);
 
   if (hasPriceAdjustmentConflict(args)) {
     return {
@@ -1129,8 +1525,9 @@ async function rentalPricePreviewResponse(
     try {
       const preview = await client.preview(rentalRequest);
       const audit = compactAuditReference(preview.audit);
-      if (audit?.hasErrors) {
-        blocked.push(`商品 ${productId}：审计错误，已阻断`);
+      const auditBlockReason = rentalPriceExecutionAuditBlockReason(audit);
+      if (auditBlockReason) {
+        blocked.push(`商品 ${productId}：${auditBlockReason}`);
         continue;
       }
       if (Object.keys(preview.fields).length === 0) {
@@ -1158,6 +1555,7 @@ async function rentalPricePreviewResponse(
   if (blocked.length > 0 || readyItems.length !== productIds.length) {
     return {
       text,
+      progressCard,
       metadata: { toolName: 'rental.pricePreview', ok: false, productIds, previewCount: readyItems.length },
     };
   }
@@ -1171,7 +1569,8 @@ async function rentalPricePreviewResponse(
   const requestRef = await saveAgentToolConfirmRequest(outputDir, confirmRequest);
   return {
     text,
-    card: buildAgentToolConfirmCard(confirmRequest, { requestRef }),
+    progressCard,
+    card: buildAgentToolConfirmCard(confirmRequest, { requestRef, displayElements: buildPriceApplyConfirmDisplayElements(readyItems) }),
     metadata: {
       toolName: 'rental.pricePreview',
       ok: true,
@@ -1235,6 +1634,11 @@ async function rentalPriceApplyResponse(
       ...(item.audit ? { audit: item.audit } : {}),
     };
     try {
+      const auditBlockReason = rentalPriceExecutionAuditBlockReason(item.audit);
+      if (auditBlockReason) {
+        results.push({ productId: item.productId, ok: false, lines: [auditBlockReason], audit: item.audit?.taskId || item.audit?.rollbackFile ? { ...(item.audit.taskId ? { taskId: item.audit.taskId } : {}), status: 'failed', ...(item.audit.rollbackFile ? { rollbackFile: item.audit.rollbackFile } : {}) } : undefined });
+        continue;
+      }
       await recordAgentToolWriteEvent(ledgerContext, 'execution_started', 'rental.priceApply', item.productId);
       const result = await client.execute(request);
       await recordAgentToolWriteEvent(ledgerContext, result.ok ? 'execution_succeeded' : 'execution_failed', 'rental.priceApply', item.productId);
@@ -1256,6 +1660,7 @@ async function rentalPriceApplyResponse(
       '',
       ...lines,
     ].join('\n'),
+    card: buildPriceApplyCompletionCard(results),
     metadata: {
       toolName: 'rental.priceApply',
       ok: success.length === results.length,
@@ -2779,9 +3184,12 @@ export async function executeAgentToolRequest(
         : request.arguments;
       const rentalRequest = rentalPriceChangeRequestFromToolArguments(priceArguments);
       if (!rentalRequest) throw new Error('租赁商品改价参数无效，请重新发起。');
-      const client = options.rentalPriceClient ?? createRentalPriceSkillClient();
-      const preview = await client.preview(rentalRequest);
-      return { text: `请确认商品 ${rentalRequest.productId} 改价`, card: buildRentalPricePreviewCard(preview, { reason: request.reason, continuation: request.continuation }) };
+      const previewArguments = rentalRequest.mode === 'explicit_fields'
+        ? { productIds: [rentalRequest.productId], fields: rentalRequest.fields }
+        : rentalRequest.mode === 'global_discount'
+          ? { productIds: [rentalRequest.productId], discount: rentalRequest.discount, scope: rentalRequest.scope }
+          : { productIds: [rentalRequest.productId], adjustmentAmount: rentalRequest.adjustmentAmount, scope: rentalRequest.scope };
+      return rentalPricePreviewResponse(previewArguments, request.reason, options.rentalPriceClient ?? createRentalPriceSkillClient(), outputDir, request.continuation);
     }
     case 'rental.pricePreview':
       return rentalPricePreviewResponse(request.arguments, request.reason, options.rentalPriceClient ?? createRentalPriceSkillClient(), outputDir, request.continuation);
@@ -2846,7 +3254,7 @@ export async function executeAgentToolRequest(
     }
     case 'rental.priceRollback': {
       const rollbackRequest = rentalPriceRollbackRequestFromToolArguments(request.arguments);
-      if (!rollbackRequest) throw new Error('租赁商品改价回滚参数无效，请提供 taskId 或 rollbackFile；productId 可选。');
+      if (!rollbackRequest?.taskId) throw new Error('租赁商品改价回滚参数无效，请提供带完整审计记录的 taskId；productId 可选。');
       const client = options.rentalPriceClient ?? createRentalPriceSkillClient();
       if (!client.rollback) throw new Error('当前租赁改价客户端不支持回滚。');
       const result = await client.rollback(rollbackRequest);
