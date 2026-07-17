@@ -87,8 +87,6 @@ describe('agent runtime tool registry', () => {
       'rental.specAddAndRefresh',
       'rental.specAddItem',
       'rental.specRefresh',
-      'rental.applyCurrent',
-      'rental.submitCurrent',
       'rental.specRemovePlan',
       'rental.priceChange',
       'rental.pricePreview',
@@ -391,8 +389,6 @@ describe('agent runtime tool registry', () => {
       'rental.specAddAndRefresh',
       'rental.specAddItem',
       'rental.specRefresh',
-      'rental.applyCurrent',
-      'rental.submitCurrent',
       'rental.specRemovePlan',
       'rental.priceChange',
       'rental.pricePreview',
@@ -471,7 +467,7 @@ describe('agent runtime tool registry', () => {
   it('locks high-risk rental schemas to current runtime guardrails', () => {
     expect(validateAgentToolArguments('rental.priceRollback', { productId: '648' })).toBe(false);
     expect(validateAgentToolArguments('rental.priceRollback', { taskId: 'task_123_abcd' })).toBe(true);
-    expect(validateAgentToolArguments('rental.priceRollback', { rollbackFile: 'output/rental/rollback.json' })).toBe(true);
+    expect(validateAgentToolArguments('rental.priceRollback', { rollbackFile: 'output/rental/rollback.json' })).toBe(false);
     expect(validateAgentToolArguments('rental.priceRollback', { taskId: 'task_123_abcd', rollbackFile: 'output/rental/rollback.json' })).toBe(false);
 
     expect(validateAgentToolArguments('rental.pricePreview', { productIds: ['648'], discount: 0.8, adjustmentAmount: -1 })).toBe(false);
@@ -692,14 +688,10 @@ describe('agent runtime tool registry', () => {
       additionalProperties: false,
     });
     expect(findAgentTool('rental.priceRollback')?.inputSchema).toMatchObject({
-      oneOf: [
-        { required: ['taskId'] },
-        { required: ['rollbackFile'] },
-      ],
+      required: ['taskId'],
       properties: {
         productId: { type: 'string', pattern: '^\\d+$' },
         taskId: { type: 'string', pattern: '^task_\\d+_[a-fA-F0-9]+$' },
-        rollbackFile: { type: 'string' },
       },
       additionalProperties: false,
     });
@@ -710,7 +702,9 @@ describe('agent runtime tool registry', () => {
       required: ['productId', 'specPrices'],
     });
     expect(findAgentTool('rental.perSpecPriceApply')?.inputSchema).toMatchObject({
-      required: ['productId', 'specFields'],
+      description: expect.stringContaining('Disabled execution placeholder'),
+      required: ['productId'],
+      additionalProperties: false,
     });
     expect(findAgentTool('rental.specDimPlan')?.inputSchema).toMatchObject({
       required: ['productId', 'action'],

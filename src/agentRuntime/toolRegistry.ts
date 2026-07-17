@@ -413,7 +413,7 @@ const rentalPriceChangeResultMetadataSchema = {
     ok: { type: 'boolean' },
     productId: { type: 'string' },
     taskId: { type: 'string', description: 'Audit task id that can be used by rental.priceRollback.' },
-    rollbackFile: { type: 'string', description: 'Rollback artifact path that can be used by rental.priceRollback.' },
+    rollbackFile: { type: 'string', description: 'Rollback artifact path retained for audit display only; rental.priceRollback requires taskId.' },
     resultFile: { type: 'string' },
   },
 };
@@ -891,11 +891,12 @@ const rentalPerSpecPricePlanArgumentsSchema = {
 };
 const rentalPerSpecPriceApplyArgumentsSchema = {
   type: 'object',
+  description: 'Disabled execution placeholder. Direct per-spec price writes are not accepted; use rental.priceApply with task-bound audit artifacts.',
   properties: {
     productId: { type: 'string' },
-    specFields: { type: 'object', description: 'Nested absolute price changes keyed by specId: { specId: { field: value } }.' },
+    disabledReason: { type: 'string', description: 'Optional human-readable note; ignored because this tool never writes.' },
   },
-  required: ['productId', 'specFields'],
+  required: ['productId'],
   additionalProperties: false,
 };
 const rentalSpecDimArgumentsSchema = {
@@ -911,14 +912,10 @@ const rentalSpecDimArgumentsSchema = {
 };
 const rentalPriceRollbackArgumentsSchema = {
   type: 'object',
-  oneOf: [
-    { required: ['taskId'] },
-    { required: ['rollbackFile'] },
-  ],
+  required: ['taskId'],
   properties: {
     productId: internalProductIdSchema,
     taskId: { type: 'string', pattern: '^task_\\d+_[a-fA-F0-9]+$' },
-    rollbackFile: { type: 'string' },
   },
   additionalProperties: false,
 };
@@ -1542,20 +1539,6 @@ const agentTools: AgentToolDefinition[] = [
     inputSchema: productIdArgumentsSchema,
   },
   {
-    name: 'rental.applyCurrent',
-    description: '高级表单态：在当前租赁商品表单页应用变更；必须显式绑定 expectedProductId，确认后发送 native apply-current。',
-    risk: 'high',
-    requiresConfirmation: true,
-    inputSchema: applyCurrentArgumentsSchema,
-  },
-  {
-    name: 'rental.submitCurrent',
-    description: '高级表单态：提交当前租赁商品未保存表单；必须显式绑定 expectedProductId，确认后发送 native submit。',
-    risk: 'high',
-    requiresConfirmation: true,
-    inputSchema: submitCurrentArgumentsSchema,
-  },
-  {
     name: 'rental.specRemovePlan',
     description: '按商品名/端内ID/多个端内ID/同款组和规格关键词生成规格项删除预览；只匹配规格项，不删除规格维度；命中明确后展示专用确认卡再执行。',
     risk: 'high',
@@ -1610,7 +1593,7 @@ const agentTools: AgentToolDefinition[] = [
   },
   {
     name: 'rental.priceRollback',
-    description: '按改价审计任务或回滚文件回滚租赁商品价格',
+    description: '按已完成改价审计任务 taskId 回滚租赁商品价格；不接受直接 rollbackFile 回滚',
     risk: 'high',
     requiresConfirmation: true,
     inputSchema: rentalPriceRollbackArgumentsSchema,
@@ -1641,7 +1624,7 @@ const agentTools: AgentToolDefinition[] = [
   },
   {
     name: 'rental.perSpecPriceApply',
-    description: '确认后按 specId 写入绝对价格字段；每次只调用 daemon nested apply 原子动作。',
+    description: '已停用：逐规格直接写入不执行；请重新生成审计预览并使用租赁改价确认卡。',
     risk: 'high',
     requiresConfirmation: true,
     plannerVisible: false,
