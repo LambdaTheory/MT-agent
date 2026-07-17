@@ -69,14 +69,22 @@ function main() {
   const isMultiSpec = typeof firstVal === "object" && firstVal !== null;
   const specMap = isMultiSpec ? rawValues : { "0": rawValues };
 
+  const isRecord = v => typeof v === "object" && v !== null && !Array.isArray(v);
+  const userChangeValues = userChanges.values || userChanges;
+  const firstChange = Object.values(userChangeValues)[0];
+  const userChangesNested = isRecord(firstChange);
+  if (isMultiSpec && !userChangesNested) die("Multi-spec current values require nested per-spec user changes; flat broadcast changes are not allowed");
+
   const diff = [];
-  const changes = {};
+  const changes = userChangesNested ? {} : { ...userChangeValues };
   let hasErrors = false, hasWarnings = false;
 
   for (const [specId, specValues] of Object.entries(specMap)) {
     const specTitle = specInfo.find(s => s.specId === specId)?.title || "规格" + specId;
+    const specUserChanges = userChangesNested ? (userChangeValues[specId] || {}) : userChangeValues;
+    if (userChangesNested) changes[specId] = { ...specUserChanges };
 
-    for (const [field, newVal] of Object.entries(userChanges)) {
+    for (const [field, newVal] of Object.entries(specUserChanges)) {
       const meta = FIELD_META[field] || { label: field, unit: "", isPrice: false, isInteger: false };
       const oldVal = specValues[field];
 
@@ -101,12 +109,6 @@ function main() {
         changePct, issues,
       });
     }
-  }
-
-  // Save changes.json (flat format, broadcast)
-  changes.__broadcast = true;
-  for (const [field, newVal] of Object.entries(userChanges)) {
-    changes[field] = newVal;
   }
 
   // Save generated preview artifacts next to the user intent file. MT-agent

@@ -1977,6 +1977,12 @@ async function applyFieldsOnPage(raw, specs) {
     }
   } else {
     delete raw.__broadcast;
+    if (specs.length > 1) {
+      result.requestedCount = Object.keys(raw).length * specs.length;
+      result.failures.push({ error: "Flat changes are not allowed on multi-spec pages; use nested per-spec changes" });
+      result.status = "error";
+      return result;
+    }
     for (const spec of specs) {
       result.applied[spec.specId] = {};
       for (const [field, newValue] of Object.entries(raw)) {

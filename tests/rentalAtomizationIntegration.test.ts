@@ -16,7 +16,7 @@ describe('rental atomization integration', () => {
     await rm(outputDir, { recursive: true, force: true });
   });
 
-  it('composes spec read, dimension add, and per-spec absolute price apply as separate atomic tools', async () => {
+  it('composes spec read and dimension add but blocks unaudited per-spec price apply', async () => {
     const calls: unknown[] = [];
     const client: RentalPriceSkillClient = {
       async preview() { throw new Error('preview should not run'); },
@@ -51,21 +51,18 @@ describe('rental atomization integration', () => {
       outputDir,
       { rentalPriceClient: client, ledgerContext },
     );
-    const price = await executeAgentToolRequest(
+    await expect(executeAgentToolRequest(
       { toolName: 'rental.perSpecPriceApply', arguments: { productId: '648', specFields: { '3863': { rent1day: '110.00' } } }, reason: '把母价+30后的绝对值写入新规格' },
       outputDir,
       { rentalPriceClient: client, ledgerContext },
-    );
+    )).rejects.toThrow('按规格直接改价执行入口已停用');
 
     expect(read.text).toContain('规格查看成功');
     expect(calls).toEqual([
       { action: 'specDiscover', productId: '648' },
       { action: 'specAddDim', productId: '648', title: '激光险' },
-      { action: 'applyPerSpec', productId: '648', specFields: { '3863': { rent1day: '110.00' } } },
     ]);
     expect(add.metadata).toMatchObject({ toolName: 'rental.specDimApply', ok: true, ledgerContext });
-    expect(price.metadata).toMatchObject({ toolName: 'rental.perSpecPriceApply', ok: true, ledgerContext });
     expect(add.metadata?.executionEvent).toMatchObject({ type: 'execution', toolName: 'rental.specDimApply', productId: '648', ok: true, action: 'add', ...ledgerContext });
-    expect(price.metadata?.executionEvent).toMatchObject({ type: 'execution', toolName: 'rental.perSpecPriceApply', productId: '648', ok: true, ...ledgerContext });
   });
 });
