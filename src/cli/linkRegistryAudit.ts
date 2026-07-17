@@ -2,10 +2,12 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { loadClosedOrderRegistryContext } from '../closedOrderFeedback/runtime.js';
+import { createLlmProviderFromEnv } from '../llm/openAiCompatibleProvider.js';
 import { buildLinkRegistryAudit, type LinkRegistryAudit } from '../linkRegistry/audit.js';
 import {
   renderLinkRegistryAuditReviewApprovalMarkdown,
   buildLinkRegistryAuditReviewReport,
+  enrichLinkRegistryAuditReviewReportWithLlmSuggestions,
   renderLinkRegistryAuditReviewCsv,
   renderLinkRegistryAuditReviewGuide,
   renderLinkRegistryAuditReviewMarkdown,
@@ -140,11 +142,15 @@ export async function runLinkRegistryAuditCli(argv = process.argv.slice(2)): Pro
   const reports = await buildReportsFromArgs(argv);
   const reportDate = readArg(argv, '--reference-date') ?? new Date().toISOString().slice(0, 10);
   const outputDir = readArg(argv, '--output-dir') ?? 'output';
-  const reviewReport = buildLinkRegistryAuditReviewReport({
+  let reviewReport = buildLinkRegistryAuditReviewReport({
     audit: reports.audit,
     maintenance: reports.maintenance,
     entries: reports.entries,
   });
+  if (hasFlag(argv, '--llm-suggestions')) {
+    const provider = createLlmProviderFromEnv(process.env);
+    if (provider) reviewReport = await enrichLinkRegistryAuditReviewReportWithLlmSuggestions(reviewReport, { provider });
+  }
   const artifacts = await writeArtifacts(
     outputDir,
     reportDate,
