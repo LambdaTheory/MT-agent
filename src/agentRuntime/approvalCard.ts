@@ -26,6 +26,7 @@ export interface AgentToolConfirmContinuation {
 export interface AgentToolConfirmCardOptions {
   requestRef?: string;
   summaryLines?: string[];
+  displayElements?: Record<string, unknown>[];
 }
 
 export interface AgentToolConfirmReference {
@@ -107,9 +108,17 @@ export function parseAgentToolConfirmContinuation(value: unknown): AgentToolConf
   return { goal, reason, steps, nextIndex, totalSteps, currentStepId, currentStepIndex, metadataStore, ...(clarificationDepth !== undefined ? { clarificationDepth } : {}) };
 }
 
-function compactJson(value: Record<string, unknown>): string {
-  const text = JSON.stringify(value);
-  return text.length > 240 ? `${text.slice(0, 237)}...` : text;
+function summarizeArgumentValue(value: unknown): string {
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (Array.isArray(value)) return `${value.length} 项`;
+  if (isRecord(value)) return `${Object.keys(value).length} 个字段`;
+  return '已提供';
+}
+
+function summarizeArguments(value: Record<string, unknown>): string {
+  const entries = Object.entries(value).slice(0, 5).map(([key, arg]) => `${key}=${summarizeArgumentValue(arg)}`);
+  if (!entries.length) return '无参数';
+  return `${entries.join('；')}${Object.keys(value).length > entries.length ? '；...' : ''}`;
 }
 
 const TOOL_DISPLAY_NAMES: Record<string, string> = {
@@ -172,6 +181,7 @@ export function buildAgentToolConfirmCard(request: AgentToolConfirmRequest, opti
   const tool = findAgentTool(request.toolName);
   const title = tool?.description ?? request.toolName;
   const key = confirmationKey(request);
+  const hasCustomDisplay = Boolean(options.displayElements?.length);
   const confirmValue = options.requestRef
     ? { action: 'agent_tool_confirm', requestRef: options.requestRef, confirmationKey: key }
     : buildAgentToolConfirmValue(request);
@@ -190,11 +200,12 @@ export function buildAgentToolConfirmCard(request: AgentToolConfirmRequest, opti
             `**是否要执行：${title}？**`,
             '',
             `操作：${displayToolName(request.toolName)}`,
-            `参数：${compactJson(request.arguments)}`,
+            ...(hasCustomDisplay ? ['参数摘要：见下方业务摘要与审计信息'] : [`参数摘要：${summarizeArguments(request.arguments)}`]),
             `LLM 理解原因：${request.reason}`,
             ...(options.summaryLines?.length ? ['', ...options.summaryLines] : []),
           ].join('\n'),
         },
+        ...(options.displayElements ?? []),
         {
           tag: 'form',
           name: 'agent_tool_confirm_form',

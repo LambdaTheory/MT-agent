@@ -20,6 +20,8 @@ describe('agent runtime approval card', () => {
     expect(JSON.stringify(card)).toContain('Agent 操作确认');
     expect(JSON.stringify(card)).toContain('agent_tool_confirm');
     expect(JSON.stringify(card)).toContain('操作：复制商品（rental.copy）');
+    expect(JSON.stringify(card)).toContain('参数摘要：productId=875');
+    expect(JSON.stringify(card)).not.toContain('参数：{"productId"');
     expect(JSON.stringify(card)).toContain('rental.copy');
     expect(JSON.stringify(card)).toContain('875');
   });
@@ -75,6 +77,40 @@ describe('agent runtime approval card', () => {
       confirmationKey: expect.stringMatching(/^[a-f0-9]{24}$/),
     });
     expect(JSON.stringify(value)).not.toContain('rent10day');
+  });
+
+  it('can add display-only elements without changing referenced confirmation payloads', () => {
+    const request = {
+      toolName: 'rental.priceApply',
+      arguments: {
+        items: [
+          { productId: '900', fields: { rent1day: '18.00' } },
+        ],
+      },
+      reason: 'confirmed price preview',
+    };
+    const card = buildAgentToolConfirmCard(request, {
+      requestRef: 'agent_tool_1782700000000_abcd1234abcd1234',
+      displayElements: [
+        {
+          tag: 'table',
+          element_id: 'price_diff_preview',
+          columns: [{ name: 'productId', display_name: '商品ID' }],
+          rows: [{ productId: '900' }],
+        },
+      ],
+    });
+    const value = readAgentToolConfirmValue(card);
+
+    expect(JSON.stringify(card)).toContain('price_diff_preview');
+    expect(JSON.stringify(card)).toContain('参数摘要：见下方业务摘要与审计信息');
+    expect(JSON.stringify(card)).not.toContain('参数：{"items"');
+    expect(parseAgentToolConfirmReference(value)).toEqual({
+      requestRef: 'agent_tool_1782700000000_abcd1234abcd1234',
+      confirmationKey: expect.stringMatching(/^[a-f0-9]{24}$/),
+    });
+    expect(JSON.stringify(value)).not.toContain('rent1day');
+    expect(JSON.stringify(value)).not.toContain('900');
   });
 
   it('rejects inline confirmations for planner-hidden tools', () => {
