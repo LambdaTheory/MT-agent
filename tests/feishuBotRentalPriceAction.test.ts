@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
@@ -5,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { buildAgentToolConfirmCard } from '../src/agentRuntime/approvalCard.js';
 import { createFeishuSdkBot } from '../src/feishuBot/sdkClient.js';
 import { clarificationConfirmationKey, saveClarificationContext } from '../src/feishuBot/clarificationStore.js';
-import { buildRentalOperationConfirmCard, buildRentalPricePreviewCard, createRentalPriceSkillClient, parseRentalOperationConfirmRequest, parseRentalPriceConfirmRequest, type RentalPriceSkillClient } from '../src/feishuBot/rentalPrice.js';
+import { buildRentalOperationConfirmCard, createRentalPriceSkillClient, parseRentalOperationConfirmRequest, parseRentalPriceConfirmRequest, type RentalPriceSkillClient } from '../src/feishuBot/rentalPrice.js';
 import { buildNewLinkBatchConfirmCard, type NewLinkBatchPlan } from '../src/newLinkWorkflow/batch.js';
 
 function fakeSdk(sent: unknown[], registered: Record<string, (data: unknown) => Promise<unknown>>, options: { failPatch?: boolean } = {}) {
@@ -54,6 +55,10 @@ function readButtonValue(card: unknown, buttonName: string): Record<string, unkn
   throw new Error(`${buttonName} value not found`);
 }
 
+function legacyPriceConfirmValue(request: Record<string, unknown>): Record<string, unknown> {
+  return { action: 'rental_price_confirm', request, confirmationKey: createHash('sha256').update(JSON.stringify(request)).digest('hex').slice(0, 24) };
+}
+
 function newLinkPlan(): NewLinkBatchPlan {
   return {
     status: 'ready',
@@ -73,7 +78,7 @@ function newLinkPlan(): NewLinkBatchPlan {
 }
 
 describe('rental price card action', () => {
-  it('executes the rental price skill only after confirmation', async () => {
+  it('rejects legacy rental price confirmation before execution', async () => {
     const executions: unknown[] = [];
     const rentalPriceClient: RentalPriceSkillClient = {
       async preview() {
@@ -102,12 +107,7 @@ describe('rental price card action', () => {
     const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
     const sent: unknown[] = [];
     const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', outputDir: await mkdtemp(join(tmpdir(), 'mt-agent-sdk-action-')), sdk: fakeSdk(sent, registered), rentalPriceClient });
-    const confirmValue = readButtonValue(buildRentalPricePreviewCard({
-      productId: '761',
-      fields: { rent1day: '22.00' },
-      lines: ['rent1day -> 22.00'],
-      warnings: [],
-    }), 'rental_price_confirm_submit');
+    const confirmValue = legacyPriceConfirmValue({ mode: 'explicit_fields', productId: '761', fields: { rent1day: '22.00' } });
     bot.start();
     await registered['card.action.trigger']({
       event: {
@@ -116,20 +116,13 @@ describe('rental price card action', () => {
       },
     });
 
-    await waitFor(() => executions.length === 1 && sent.some((item) => JSON.stringify(item).includes('租赁商品改价已完成')));
-    expect(executions).toEqual([{ mode: 'explicit_fields', productId: '761', fields: { rent1day: '22.00' } }]);
-    expect(sent.some((item) => JSON.stringify(item).includes('租赁商品改价处理中'))).toBe(true);
-    expect(sent.some((item) => JSON.stringify(item).includes('租赁商品改价已完成'))).toBe(true);
-    expect(sent.filter((item) => JSON.stringify(item).includes('租赁商品改价已完成')).every((item) => JSON.stringify(item).includes('"kind":"patch"'))).toBe(true);
+    await waitFor(() => sent.some((item) => JSON.stringify(item).includes('旧改价确认入口已停用')));
+    expect(executions).toEqual([]);
+    expect(sent.some((item) => JSON.stringify(item).includes('租赁商品改价处理中'))).toBe(false);
   });
 
   it('rejects forged confirmation fields before execution', () => {
-    const value = readButtonValue(buildRentalPricePreviewCard({
-      productId: '761',
-      fields: { rent1day: '22', script: 'evil' },
-      lines: ['rent1day -> 22'],
-      warnings: [],
-    }), 'rental_price_confirm_submit');
+    const value = legacyPriceConfirmValue({ mode: 'explicit_fields', productId: '761', fields: { rent1day: '22', script: 'evil' } });
 
     expect(parseRentalPriceConfirmRequest(value)).toEqual({ mode: 'explicit_fields', productId: '761', fields: { rent1day: '22.00' } });
     expect(parseRentalPriceConfirmRequest({ ...value, request: { ...(value.request as Record<string, unknown>), productId: '762' } })).toBeNull();
@@ -144,13 +137,7 @@ describe('rental price card action', () => {
       rollbackFile: 'C:/works/MT-agent/vendor/rental-price-agent/tasks/rollback.json',
       hasWarnings: true,
     };
-    const value = readButtonValue(buildRentalPricePreviewCard({
-      productId: '761',
-      fields: { rent1day: '22' },
-      lines: ['rent1day -> 22'],
-      warnings: [],
-      audit,
-    }), 'rental_price_confirm_submit');
+    const value = legacyPriceConfirmValue({ mode: 'explicit_fields', productId: '761', fields: { rent1day: '22' }, audit });
 
     expect(parseRentalPriceConfirmRequest(value)).toEqual({
       mode: 'explicit_fields',
@@ -610,9 +597,37 @@ describe('rental price card action', () => {
 
     try {
       const client = createRentalPriceSkillClient({ rootDir, daemonUrl: 'http://127.0.0.1:1' });
-      const result = await client.execute({ mode: 'explicit_fields', productId: '761', fields: { rent1day: '22.00' } });
+      const changesFile = join(rootDir, 'changes-761.json');
+      const rollbackFile = join(rootDir, 'rollback-761.json');
+      const currentValuesFile = join(rootDir, 'current-761.json');
+      await writeFile(changesFile, JSON.stringify({ rent1day: '22.00' }), 'utf8');
+      await writeFile(rollbackFile, JSON.stringify({ rent1day: '30.00' }), 'utf8');
+      await writeFile(currentValuesFile, JSON.stringify({ productId: '761', values: { rent1day: '30.00' }, specs: [] }), 'utf8');
+      const changesSha256 = createHash('sha256').update(await readFile(changesFile)).digest('hex');
+      const rollbackSha256 = createHash('sha256').update(await readFile(rollbackFile)).digest('hex');
+      const currentSnapshotSha256 = createHash('sha256').update(await readFile(currentValuesFile)).digest('hex');
+      const expectedFieldCount = 1;
+      const planHash = createHash('sha256').update(JSON.stringify({ productId: '761', changesSha256, rollbackSha256, currentSnapshotSha256, expectedFieldCount })).digest('hex');
+      const result = await client.execute({
+        mode: 'explicit_fields',
+        productId: '761',
+        fields: { rent1day: '22.00' },
+        audit: {
+          changesFile,
+          rollbackFile,
+          currentValuesFile,
+          changesSha256,
+          rollbackSha256,
+          currentSnapshotSha256,
+          planHash,
+          expectedFieldCount,
+          hasErrors: false,
+          hasWarnings: false,
+          diff: [{ field: 'rent1day', label: '1天', old: '30.00', new: '22.00', change: '-8.00', changePct: '-26.7%', issues: [] }],
+        },
+      });
 
-      expect(result).toEqual({ productId: '761', ok: false, lines: ['apply: partial', 'submit: skipped', 'verify: skipped'] });
+      expect(result).toMatchObject({ productId: '761', ok: false, lines: ['apply: partial', 'submit: skipped', 'verify: skipped', `rollbackFile: ${rollbackFile}`] });
       expect(commands).toEqual(['hello', 'apply']);
     } finally {
       globalThis.fetch = originalFetch;
@@ -655,7 +670,7 @@ describe('rental price card action', () => {
       expect(commands.find((command) => command.action === 'submit')).toMatchObject({ action: 'submit', expectedProductId: '761', _negotiation: { actionClass: 'mutation' } });
       expect(result.lines).toContain('item: removed');
       expect(result.audit?.resultFile).toContain('spec-remove-761-');
-      expect(result.audit?.resultFile).toContain(join(dataRoot, 'tasks'));
+      expect(result.audit?.resultFile).toContain(join(dataRoot, 'artifacts', 'mt-agent-audit'));
       expect(await readFile(result.audit!.resultFile!, 'utf8')).toContain('"itemTitle": "含手柄"');
     } finally {
       globalThis.fetch = originalFetch;

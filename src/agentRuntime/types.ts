@@ -20,6 +20,7 @@ export interface AgentRequest {
 
 export interface AgentResponse {
   text: string;
+  progressCard?: unknown;
   card?: unknown;
   skipped?: boolean;
   metadata?: Record<string, unknown>;

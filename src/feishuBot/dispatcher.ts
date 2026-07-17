@@ -168,9 +168,10 @@ function readClarificationDepth(value: unknown): number | undefined {
 
 function toBotResponse(response: AgentResponse): BotResponse {
   const base = response.metadata ? { text: response.text, metadata: response.metadata } : { text: response.text };
-  if (response.card === undefined) return base;
-  if (isRecord(response.card)) return { ...base, card: response.card };
-  return base;
+  const withProgress = isRecord(response.progressCard) ? { ...base, progressCard: response.progressCard } : base;
+  if (response.card === undefined) return withProgress;
+  if (isRecord(response.card)) return { ...withProgress, card: response.card };
+  return withProgress;
 }
 
 export function createFeishuMessageDispatcher(config: FeishuMessageDispatcherConfig = {}): FeishuMessageDispatcher {
