@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -17,7 +18,7 @@ import {
   type ActivityAutomationSkillClient,
   type ActivityPriceCallbackConfirmRequest,
 } from '../src/feishuBot/activityAutomation.js';
-import { buildRentalOperationConfirmCard, buildRentalPricePreviewCard, type RentalPriceSkillClient } from '../src/feishuBot/rentalPrice.js';
+import { buildRentalOperationConfirmCard, type RentalPriceSkillClient } from '../src/feishuBot/rentalPrice.js';
 import { buildNewLinkBatchConfirmCard, type NewLinkBatchPlan } from '../src/newLinkWorkflow/batch.js';
 import { saveAgentToolConfirmRequest } from '../src/feishuBot/agentToolConfirmStore.js';
 import { buildRefreshActivityStrategyCard } from '../src/feishuBot/refreshActivityCard.js';
@@ -60,6 +61,29 @@ const metric = {
   hasExposureData: true,
   hasDashboardData: true,
 };
+
+const AUDIT_HASH = 'a'.repeat(64);
+
+function completeAudit(productId: string, taskId = `task_${productId}_ref`) {
+  return {
+    taskId,
+    changesFile: `changes-${productId}.json`,
+    rollbackFile: `rollback-${productId}.json`,
+    currentValuesFile: `current-${productId}.json`,
+    changesSha256: AUDIT_HASH,
+    rollbackSha256: AUDIT_HASH,
+    currentSnapshotSha256: AUDIT_HASH,
+    planHash: AUDIT_HASH,
+    expectedFieldCount: 2,
+    hasErrors: false,
+    hasWarnings: false,
+    diff: [{ field: 'rent1day', label: '1天', old: '33.00', new: '29.85', change: '-3.15', changePct: '-9.5%', issues: [] }],
+  };
+}
+
+function legacyPriceConfirmValue(request: Record<string, unknown>): Record<string, unknown> {
+  return { action: 'rental_price_confirm', request, confirmationKey: createHash('sha256').update(JSON.stringify(request)).digest('hex').slice(0, 24) };
+}
 
 function fakeSdk(sent: unknown[], registered: Record<string, (data: unknown) => Promise<unknown>>) {
   class FakeClient {
@@ -853,7 +877,7 @@ describe('createFeishuSdkBot card.action.trigger', () => {
           {
             productId: '653',
             fields: { rent1day: '29.85', rent10day: '74.85' },
-            audit: { taskId: 'task_653_ref', rollbackFile: 'rollback-653.json' },
+            audit: completeAudit('653', 'task_653_ref'),
           },
         ],
       },
@@ -969,7 +993,7 @@ describe('createFeishuSdkBot card.action.trigger', () => {
           {
             productId: '653',
             fields: { rent1day: '29.85', rent10day: '74.85' },
-            audit: { taskId: 'task_653_ref', rollbackFile: 'rollback-653.json' },
+            audit: completeAudit('653', 'task_653_ref'),
           },
         ],
       },
@@ -1207,7 +1231,7 @@ describe('createFeishuSdkBot card.action.trigger', () => {
     expect(JSON.stringify((result as any).card.data)).toContain('新链批量复制确认异常');
   });
 
-  it('continues a planner sequence after a dedicated price confirmation succeeds', async () => {
+  it('rejects a legacy dedicated price confirmation before planner continuation', async () => {
     const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
     const sent: unknown[] = [];
     const outputDir = await writeContext();
@@ -1225,12 +1249,7 @@ describe('createFeishuSdkBot card.action.trigger', () => {
       async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
     };
     const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'x', outputDir, rentalPriceClient, sdk: fakeSdk(sent, registered) });
-    const confirmValue = readButtonValue(buildRentalPricePreviewCard({
-      productId: '761',
-      fields: { rent1day: '22.00' },
-      lines: ['rent1day -> 22.00'],
-      warnings: [],
-    }, { reason: 'test reason', continuation: query565Continuation('price', 0) }), 'rental_price_confirm_submit');
+    const confirmValue = legacyPriceConfirmValue({ mode: 'explicit_fields', productId: '761', fields: { rent1day: '22.00' }, reason: 'test reason', continuation: query565Continuation('price', 0) });
 
     bot.start();
     await registered['card.action.trigger']({
@@ -1244,14 +1263,13 @@ describe('createFeishuSdkBot card.action.trigger', () => {
       },
     });
 
-    for (let attempt = 0; attempt < 100 && !sent.some((item) => JSON.stringify(item).includes('端内ID 565')); attempt += 1) {
+    for (let attempt = 0; attempt < 100 && !sent.some((item) => JSON.stringify(item).includes('旧改价确认入口已停用')); attempt += 1) {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
 
-    expect(executions).toHaveLength(1);
-    const finalPatch = sent.map(patchedCard).find((card) => JSON.stringify(card).includes('端内ID 565'));
-    expect(JSON.stringify(finalPatch)).toContain('商品查询结果');
-    expect(JSON.stringify(finalPatch)).toContain('端内ID 565');
+    expect(executions).toHaveLength(0);
+    expect(JSON.stringify(sent)).toContain('旧改价确认入口已停用');
+    expect(JSON.stringify(sent)).not.toContain('端内ID 565');
   });
 
   it('continues a planner sequence after a dedicated rental operation confirmation succeeds', async () => {

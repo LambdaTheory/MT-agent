@@ -15,6 +15,7 @@ import { handleOperationsLearningFeedback, handleOperationsLearningStop } from '
 import { formatRuntimeLog, summarizeError, textPreview } from '../observability/runtimeLogger.js';
 import { findLatestReportContext } from './reportStore.js';
 import { createFeishuMessageDispatcher } from './dispatcher.js';
+import { buildRentalPricePreviewProgressCard, buildRentalPriceRollbackConfirmCard } from './agentToolExecutor.js';
 import { continueAgentPlannerStepsAfterResponse, executeAgentToolRequestWithContinuation } from './agentToolContinuation.js';
 import { agentExploreLedgerContextFromRequest } from './agentExploreAttribution.js';
 import { loadAgentToolConfirmRequestFromValue } from './agentToolConfirmStore.js';
@@ -25,10 +26,8 @@ import {
   agentRequestFromNewLinkBatchConfirm,
   agentRequestFromNewLinkBatchMultiConfirm,
   agentRequestFromRentalOperationConfirm,
-  agentRequestFromRentalPriceConfirm,
   botResponseFromNewLinkBatchResult,
   botResponseFromRentalOperationResult,
-  botResponseFromRentalPriceExecution,
 } from './agentSpecializedContinuation.js';
 import { resolveQueryFullListText } from './queryFullListAction.js';
 import { buildIdLookupCard } from './idLookupCard.js';
@@ -54,6 +53,11 @@ import type { LlmToolSelectionProvider } from './llmProvider.js';
 import type { LlmIntentProposalProvider } from './llmIntentProposal.js';
 import type { FeishuCardPayload } from '../notify/feishuApp.js';
 import type { FeishuBotDispatchResult, FeishuBotIncomingTextMessage } from './types.js';
+
+function shouldSendRentalPricePreviewProgress(text: string): boolean {
+  const compact = text.replace(/\s+/g, '');
+  return /(改价|pricePreview|pricechange|价格预览)/i.test(compact) && !/(回滚|rollback)/i.test(compact);
+}
 
 interface SdkMessageData {
   message?: {
@@ -557,6 +561,13 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
         textLength: message.text.length,
       }));
 
+      const sentPreviewProgress = shouldSendRentalPricePreviewProgress(message.text);
+      if (sentPreviewProgress) {
+        await replyCard(client, message.messageId, buildRentalPricePreviewProgressCard([], message.text)).catch((error) => {
+          logError(error, { messageId: message.messageId, phase: 'reply' });
+        });
+      }
+
       let response: FeishuBotDispatchResult;
       try {
         response = await dispatchMessage(message);
@@ -587,6 +598,7 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
       if (response.skipped) return;
 
       try {
+        if (response.progressCard && !sentPreviewProgress) await replyCard(client, message.messageId, response.progressCard);
         if (response.card) await replyCard(client, message.messageId, response.card);
         else await replyText(client, message.messageId, response.text);
         logInfo(formatRuntimeLog({
@@ -907,6 +919,12 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
             : replaceCard(client, messageId, statusCard('活跃度刷新策略已失效', response.text, 'red'));
         }
 
+        if (actionName === 'rental_price_prepare_rollback') {
+          const card = await buildRentalPriceRollbackConfirmCard(config.outputDir ?? 'output', value);
+          if (!card) return cardActionUpdateResponse(statusCard('改价回滚确认异常', '回滚确认参数无效，请从执行完成卡重新发起。', 'red'));
+          return replaceCard(client, messageId, card);
+        }
+
         if (actionName === 'agent_tool_cancel') {
           const referencedRequest = await loadAgentToolConfirmRequestFromValue(config.outputDir ?? 'output', value);
           if (readString(value?.requestRef) && !referencedRequest) {
@@ -1080,24 +1098,8 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
           if (!claim.claimed) {
             return cardActionUpdateResponse(claimStatusCard('租赁商品改价已处理', claim.claim));
           }
-          void (async () => {
-            await updateCard(client, messageId, statusCard('租赁商品改价处理中', `商品 ${request.productId} 改价已收到确认，正在执行。`, 'blue')).catch(() => false);
-            try {
-              const result = await rentalPriceClient.execute(request);
-              setRentalActionStatus(claim.key, result.ok ? 'completed' : 'failed');
-              await deliverContinuationResult(
-                messageId,
-                agentRequestFromRentalPriceConfirm(request),
-                botResponseFromRentalPriceExecution(result),
-                { success: '租赁商品改价已完成', failure: '租赁商品改价失败' },
-                result.ok,
-              );
-            } catch (error) {
-              setRentalActionStatus(claim.key, 'failed');
-              await updateCard(client, messageId, statusCard('租赁商品改价失败', `商品 ${request.productId}\n${error instanceof Error ? error.message : String(error)}`, 'red')).catch(() => false);
-              logError(error, { messageId, phase: 'reply' });
-            }
-          })();
+          setRentalActionStatus(claim.key, 'failed');
+          await updateCard(client, messageId, statusCard('旧改价确认入口已停用', `商品 ${request.productId} 未执行。请重新发起改价预览，并使用新的 Agent 审计确认卡。`, 'red')).catch(() => false);
           return;
         }
 
