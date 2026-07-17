@@ -165,22 +165,14 @@ describe('link registry maintenance report', () => {
         internalProductId: '703',
         reasonCodes: expect.arrayContaining(['classification_missing', 'recent_new_link']),
       }),
-      expect.objectContaining({
-        kind: 'entry',
-        internalProductId: '704',
-        reasonCodes: expect.arrayContaining(['platform_mapping_missing']),
-      }),
     ]));
+    expect(report.queue.some((item) => item.internalProductId === '704')).toBe(false);
   });
 
   it('exports readable chinese labels for maintenance reasons', () => {
     const report = buildLinkRegistryMaintenanceReport(entries, overrideRisks, { recentWindowDays: 7, referenceDate: '2026-06-24' });
 
     expect(report.queue).toEqual(expect.arrayContaining([
-      expect.objectContaining({
-        kind: 'same_sku_group',
-        reasonLabels: ['\u540c\u6b3e\u7ec4\u6837\u672c\u4e0d\u8db3'],
-      }),
       expect.objectContaining({
         kind: 'override_risk',
         reasonLabels: ['\u4eba\u5de5\u8986\u76d6\u98ce\u9669'],
@@ -189,9 +181,10 @@ describe('link registry maintenance report', () => {
     ]));
     expect(report.queue.some((item) => item.kind === 'override_risk' && item.shortName === 'pocket-unknown')).toBe(false);
     expect(report.queue.some((item) => item.kind === 'same_sku_group' && item.sameSkuGroupId === 'canon-ixus-210')).toBe(false);
+    expect(report.queue.some((item) => item.reasonCodes.includes('same_sku_group_sample_insufficient'))).toBe(false);
   });
 
-  it('prioritizes recent active items and group-level sample issues ahead of old removed links', () => {
+  it('prioritizes recent active items and override risks ahead of old removed links', () => {
     const report = buildLinkRegistryMaintenanceReport(entries, overrideRisks, { recentWindowDays: 7, referenceDate: '2026-06-24' });
 
     expect(report.queue[0]).toMatchObject({
@@ -201,15 +194,69 @@ describe('link registry maintenance report', () => {
     });
     expect(report.queue).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        kind: 'same_sku_group',
-        sameSkuGroupId: 'sony-zv1',
-        reasonCodes: expect.arrayContaining(['same_sku_group_sample_insufficient']),
-      }),
-      expect.objectContaining({
         kind: 'override_risk',
         priority: 'p1',
         reasonCodes: ['override_risk'],
       }),
+    ]));
+    expect(report.queue.some((item) => item.internalProductId === '704')).toBe(false);
+  });
+
+  it('auto-cleans low-value sample-only and historical items from human review', () => {
+    const lowValueEntries: LinkRegistryEntry[] = Array.from({ length: 30 }, (_, index) => ({
+      internalProductId: String(2000 + index),
+      productName: `Removed historical link ${index}`,
+      shortName: `History ${index}`,
+      sameSkuGroupId: `sample-only-${index}`,
+      categoryId: 'camera',
+      categoryName: '相机',
+      productType: 'camera',
+      status: 'removed',
+      source: ['goods_link_lifecycle'],
+    }));
+    const report = buildLinkRegistryMaintenanceReport([
+      ...lowValueEntries,
+      {
+        internalProductId: '3001',
+        productName: 'Active missing mapping',
+        shortName: 'Active gap',
+        sameSkuGroupId: 'active-gap',
+        categoryId: 'camera',
+        categoryName: '相机',
+        productType: 'camera',
+        status: 'active',
+        source: ['goods_snapshot'],
+      },
+      {
+        internalProductId: '3002',
+        platformProductId: 'platform-3002',
+        productName: 'Phone member',
+        shortName: 'Mixed group',
+        sameSkuGroupId: 'mixed-high-value',
+        categoryId: 'phone',
+        categoryName: '手机',
+        productType: 'smartphone',
+        status: 'active',
+        source: ['product_id_mapping'],
+      },
+      {
+        internalProductId: '3003',
+        platformProductId: 'platform-3003',
+        productName: 'Lens member',
+        shortName: 'Mixed group lens',
+        sameSkuGroupId: 'mixed-high-value',
+        categoryId: 'lens',
+        categoryName: '镜头',
+        productType: 'lens-accessory',
+        status: 'active',
+        source: ['product_id_mapping'],
+      },
+    ], [], { referenceDate: '2026-06-24' });
+
+    expect(report.queue).toHaveLength(2);
+    expect(report.queue).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'entry', internalProductId: '3001', reasonCodes: ['platform_mapping_missing'] }),
+      expect.objectContaining({ kind: 'same_sku_group', sameSkuGroupId: 'mixed-high-value', reasonCodes: ['mixed_product_type'] }),
     ]));
   });
 

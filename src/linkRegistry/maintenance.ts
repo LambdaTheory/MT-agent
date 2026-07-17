@@ -1,6 +1,5 @@
 import { buildLinkRegistryAudit } from './audit.js';
 import type { LinkRegistryOverrideRisk } from './overrides.js';
-import { MIN_SAME_SKU_GROUP_SAMPLE_SIZE } from './queryRegistry.js';
 import type { LinkRegistryEntry } from './types.js';
 
 export type LinkRegistryMaintenanceReasonCode =
@@ -181,6 +180,10 @@ function entryPriority(
   return 'p2';
 }
 
+function isHighValueEntryMaintenanceItem(entry: LinkRegistryEntry): boolean {
+  return entry.status === 'active';
+}
+
 function priorityScore(priority: LinkRegistryMaintenancePriority): number {
   if (priority === 'p0') return 0;
   if (priority === 'p1') return 1;
@@ -200,12 +203,6 @@ function queueSort(left: LinkRegistryMaintenanceQueueItem, right: LinkRegistryMa
 
 function labelsFor(reasons: LinkRegistryMaintenanceReasonCode[]): string[] {
   return reasons.map((reason) => REASON_LABELS[reason]);
-}
-
-function isNaturallySparseSameSkuGroup(groupId: string | undefined): boolean {
-  const trimmed = groupId?.trim() ?? '';
-  if (!trimmed) return false;
-  return /^canon-ixus-\d+(?:is|hs)?$/i.test(trimmed);
 }
 
 function entryQueueItem(
@@ -263,6 +260,7 @@ export function buildLinkRegistryMaintenanceReport(
   const audit = buildLinkRegistryAudit(entries, overrideRisks);
   const entryQueue = entries
     .filter((entry) => !isLinkRegistryMaintenanceIgnoredEntry(entry))
+    .filter(isHighValueEntryMaintenanceItem)
     .map((entry) => {
       const reasons = entryReasonCodes(entry, normalizedOptions);
       if (reasons.length === 0) return null;
@@ -283,10 +281,7 @@ export function buildLinkRegistryMaintenanceReport(
           return null;
         })
         .filter((reason): reason is Extract<LinkRegistryMaintenanceReasonCode, 'mixed_product_type' | 'promo_title_slug_leak' | 'group_classification_missing'> => reason !== null) ?? [];
-      const sampleReasonCodes = visibleEntries.length < MIN_SAME_SKU_GROUP_SAMPLE_SIZE && !isNaturallySparseSameSkuGroup(group.sameSkuGroupId)
-        ? ['same_sku_group_sample_insufficient' as const]
-        : [];
-      const reasonCodes = [...new Set([...governanceReasonCodes, ...sampleReasonCodes])];
+      const reasonCodes = [...new Set(governanceReasonCodes)];
       if (reasonCodes.length === 0) return null;
       const updatedAt = visibleEntries.find((entry) => entry.updatedAt)?.updatedAt;
       return {

@@ -172,7 +172,7 @@ function buildQueue(
         return {
           kind: 'same_sku_group' as const,
           title: item.sameSkuGroupId ?? '未命名同款组',
-          summary: '同款组样本不足，需要补齐这个组下的链接样本与归档信息。',
+          summary: item.reasonLabels.join('、') || '组级链接档案问题，需要人工确认。',
           sameSkuGroupId: item.sameSkuGroupId,
           updatedAt: item.updatedAt,
         };

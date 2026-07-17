@@ -47,6 +47,18 @@ const registryEntries: LinkRegistryEntry[] = [
     status: 'active',
     source: ['product_id_mapping'],
   },
+  {
+    internalProductId: '704',
+    platformProductId: 'platform-704',
+    productName: 'DJI Pocket 3 镜头配件',
+    shortName: 'Pocket 3 Lens',
+    sameSkuGroupId: 'dji-pocket-3',
+    categoryId: 'lens',
+    categoryName: '镜头',
+    productType: 'lens-accessory',
+    status: 'active',
+    source: ['product_id_mapping'],
+  },
 ];
 
 const overrideRisks: LinkRegistryOverrideRisk[] = [
@@ -64,9 +76,9 @@ describe('link registry governance session', () => {
     });
 
     expect(response).not.toBeNull();
-    expect(response?.text).toContain('发现 3 个组级治理问题');
+    expect(response?.text).toContain('发现 2 个组级治理问题');
     expect(JSON.stringify(response?.card)).toContain('开始治理');
-    expect(JSON.stringify(response?.card)).toContain('同款组样本不足');
+    expect(JSON.stringify(response?.card)).toContain('组内混类');
     expect(JSON.stringify(response?.card)).toContain('人工覆盖风险');
     const promptForms = ((response?.card as { body?: { elements?: Array<{ tag?: string; name?: string; elements?: Array<Record<string, unknown>> }> } }).body?.elements ?? [])
       .filter((element) => element.tag === 'form');
@@ -91,7 +103,7 @@ describe('link registry governance session', () => {
       date: '2026-06-24',
       action: 'start',
     });
-    expect(started.text).toContain('组级治理 1/3');
+    expect(started.text).toContain('组级治理 1/2');
     expect(JSON.stringify(started.card)).toContain('dji-pocket-3');
     expect(JSON.stringify(started.card)).toContain('link_registry_governance_submit');
     expect(JSON.stringify(started.card)).toContain('link_registry_governance_exit_submit');
@@ -110,24 +122,15 @@ describe('link registry governance session', () => {
       note: 'Pocket 3 组样本已补齐，后续继续观察新增链接。',
       reviewerId: 'ou_governance',
     });
-    expect(second.text).toContain('组级治理 2/3');
-    expect(JSON.stringify(second.card)).toContain('instax-wide300');
-
-    await handleLinkRegistryGovernanceCardAction(outputDir, {
-      date: '2026-06-24',
-      action: 'submit',
-      reviewIndex: 2,
-      decision: 'watch',
-      note: 'Wide300 组先记录为观察项。',
-      reviewerId: 'ou_governance',
-    });
+    expect(second.text).toContain('组级治理 2/2');
+    expect(JSON.stringify(second.card)).toContain('人工覆盖风险 999');
 
     const completed = await handleLinkRegistryGovernanceCardAction(outputDir, {
       date: '2026-06-24',
       action: 'submit',
-      reviewIndex: 3,
-      decision: 'ignored',
-      note: '本次 override 风险留待下轮统一处理。',
+      reviewIndex: 2,
+      decision: 'watch',
+      note: 'Override 风险先记录为观察项。',
       reviewerId: 'ou_governance',
     });
     expect(completed.text).toContain('组级治理已处理完成');
@@ -162,7 +165,7 @@ describe('link registry governance session', () => {
       overrideRisks: changedRisks,
     });
     expect(changed).not.toBeNull();
-    expect(changed?.text).toContain('发现 4 个组级治理问题');
+    expect(changed?.text).toContain('发现 3 个组级治理问题');
   });
 
   it('serializes concurrent governance submissions without losing review records', async () => {
@@ -199,7 +202,7 @@ describe('link registry governance session', () => {
     const session = JSON.parse(
       await readFile(join(outputDir, '2026-06-24', 'link-registry-governance-session.json'), 'utf8'),
     ) as { status: string; reviewRecords: Array<{ reviewIndex: number; decision: string }> };
-    expect(session.status).toBe('reviewing');
+    expect(session.status).toBe('completed');
     expect(session.reviewRecords.map((record) => record.reviewIndex).sort()).toEqual([1, 2]);
     expect(session.reviewRecords.map((record) => record.decision).sort()).toEqual(['resolved', 'watch']);
   });
@@ -266,7 +269,7 @@ describe('link registry governance session', () => {
       await readFile(join(outputDir, '2026-06-24', 'link-registry-governance-session.json'), 'utf8'),
     ) as { status: string; queue: unknown[]; reviewRecords: Array<{ reviewIndex: number }> };
     expect(session.status).toBe('reviewing');
-    expect(session.queue).toHaveLength(3);
+    expect(session.queue).toHaveLength(2);
     expect(session.reviewRecords.map((record) => record.reviewIndex)).toEqual([1]);
   });
 
