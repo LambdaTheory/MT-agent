@@ -175,6 +175,32 @@ const snapshot: InventoryStatusSnapshot = {
   ],
 };
 
+function snapshotForDate(date: string, pocketExposure7d: number, pocketVisits7d: number, pocketAmount7d: number): InventoryStatusSnapshot {
+  const pocket = snapshot.groups[0]!;
+  const sx70 = snapshot.groups[1]!;
+  return {
+    ...snapshot,
+    date,
+    sourceReportDate: date,
+    generationId: `generation-${date}`,
+    groups: [
+      {
+        ...pocket,
+        periods: {
+          ...pocket.periods,
+          '7d': {
+            ...pocket.periods['7d'],
+            exposure: pocketExposure7d,
+            publicVisits: pocketVisits7d,
+            amount: pocketAmount7d,
+          },
+        },
+      },
+      sx70,
+    ],
+  };
+}
+
 describe('inventoryStatusCard', () => {
   it('builds an overview card focused on link archive maintenance state', () => {
     const result: InventoryStatusOverviewResult = { status: 'overview', snapshot };
@@ -222,8 +248,9 @@ describe('inventoryStatusCard', () => {
     expect(serialized).toContain('访问贡献');
     expect(serialized).toContain('金额贡献');
     expect(serialized).toContain('访问-金额差');
+    expect(serialized).toContain('商品组建议');
     expect(serialized).toContain('缺数据链接');
-    expect(serialized).toContain('全盘贡献窗口对比');
+    expect(serialized).toContain('7天贡献趋势');
     expect(serialized).toContain('#2BA471');
     expect(serialized).toContain('#245BDB');
     expect(serialized).toContain('#F59A23');
@@ -232,6 +259,37 @@ describe('inventoryStatusCard', () => {
     expect(serialized).toContain('主力链接');
     expect(charts).toHaveLength(1);
     expect(panels).toHaveLength(2);
+  });
+
+  it('renders historical seven-day contribution trend points when history snapshots are available', () => {
+    const result: InventoryStatusDetailResult & { historySnapshots: InventoryStatusSnapshot[] } = {
+      status: 'detail',
+      query: 'pocket3',
+      matchedBy: 'alias',
+      sameSkuGroupId: 'dji-pocket-3',
+      snapshot,
+      group: snapshot.groups[0]!,
+      historySnapshots: [
+        snapshotForDate('2026-06-10', 1000, 100, 400),
+        snapshotForDate('2026-06-17', 1500, 120, 500),
+        snapshotForDate('2026-06-24', 2100, 210, 980),
+      ],
+    };
+
+    const card = buildInventoryStatusDetailCard(result);
+    const serialized = JSON.stringify(card);
+    const chart = (card.body as { elements: Array<Record<string, unknown>> }).elements.find((element) => element.element_id === 'inventory_status_detail_contribution_chart') as { chart_spec: { title: { text: string }; data: { values: Array<{ date: string; period?: string; metric: string; value: number }> }; xField: string } };
+
+    expect(chart.chart_spec.title.text).toBe('7天贡献趋势：曝光 / 访问 / 金额');
+    expect(chart.chart_spec.xField).toBe('date');
+    expect(chart.chart_spec.data.values.map((point) => point.date)).toEqual([
+      '06-10', '06-10', '06-10',
+      '06-17', '06-17', '06-17',
+      '06-24', '06-24', '06-24',
+    ]);
+    expect(chart.chart_spec.data.values.some((point) => point.period === '1日' || point.period === '7日' || point.period === '30日')).toBe(false);
+    expect(serialized).toContain('历史快照贡献趋势');
+    expect(serialized).not.toContain('贡献窗口口径');
   });
 
   it('renders missing metrics as dashes without turning true zero into missing data', () => {
@@ -314,7 +372,7 @@ describe('inventoryStatusCard', () => {
     expect(serialized).toContain('后链路缺失');
     expect(serialized).toContain('缺失周期的创建、发货和转化率按不可用处理');
     expect(serialized).toContain('`-` 表示未采集/不可用，不是 0');
-    expect(serialized.indexOf('后链路缺失')).toBeLessThan(serialized.indexOf('全盘贡献窗口对比'));
+    expect(serialized.indexOf('后链路缺失')).toBeLessThan(serialized.indexOf('7天贡献趋势'));
   });
 
   it('formats ambiguous and fallback text in Chinese', () => {

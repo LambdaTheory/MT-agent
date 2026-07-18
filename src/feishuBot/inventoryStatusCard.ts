@@ -23,8 +23,6 @@ interface SnapshotTotals {
   totalAmount30d: number;
 }
 
-type InventoryPeriodKey = '1d' | '7d' | '30d';
-
 const ZH = {
   inventory: '\u5e93\u5b58\u60c5\u51b5',
   overview: '\u94fe\u63a5\u7ef4\u62a4\u6982\u89c8',
@@ -177,33 +175,44 @@ function snapshotTotals(snapshot: InventoryStatusSnapshot): SnapshotTotals {
   };
 }
 
-function totalForPeriod(totals: SnapshotTotals, period: InventoryPeriodKey, metric: 'exposure' | 'visits' | 'amount'): number {
-  if (metric === 'exposure') {
-    if (period === '1d') return totals.totalExposure1d;
-    if (period === '7d') return totals.totalExposure7d;
-    return totals.totalExposure30d;
-  }
-  if (metric === 'visits') {
-    if (period === '1d') return totals.totalVisits1d;
-    if (period === '7d') return totals.totalVisits7d;
-    return totals.totalVisits30d;
-  }
-  if (period === '1d') return totals.totalAmount1d;
-  if (period === '7d') return totals.totalAmount7d;
-  return totals.totalAmount30d;
+function dateMs(date: string): number {
+  return Date.parse(`${date}T00:00:00.000Z`);
 }
 
-function contributionPoints(group: InventoryStatusGroupSnapshot, totals: SnapshotTotals): Array<{ period: string; metric: string; value: number }> {
-  const periods: Array<{ key: InventoryPeriodKey; label: string }> = [
-    { key: '1d', label: '1日' },
-    { key: '7d', label: '7日' },
-    { key: '30d', label: '30日' },
-  ];
-  return periods.flatMap(({ key, label }) => [
-    { period: label, metric: '曝光贡献', value: contributionValue(group.periods[key].exposure, totalForPeriod(totals, key, 'exposure')) },
-    { period: label, metric: '访问贡献', value: contributionValue(group.periods[key].publicVisits, totalForPeriod(totals, key, 'visits')) },
-    { period: label, metric: '金额贡献', value: contributionValue(group.periods[key].amount, totalForPeriod(totals, key, 'amount')) },
-  ]);
+function shortDate(date: string): string {
+  return /^\d{4}-\d{2}-\d{2}$/.test(date) ? date.slice(5) : date;
+}
+
+function selectSevenDaySnapshots(snapshots: InventoryStatusSnapshot[]): InventoryStatusSnapshot[] {
+  const sorted = snapshots
+    .filter((snapshot) => /^\d{4}-\d{2}-\d{2}$/.test(snapshot.date))
+    .sort((left, right) => left.date.localeCompare(right.date));
+  const selected: InventoryStatusSnapshot[] = [];
+  for (const snapshot of sorted) {
+    const previous = selected[selected.length - 1];
+    if (!previous || dateMs(snapshot.date) - dateMs(previous.date) >= 7 * 24 * 60 * 60 * 1000) selected.push(snapshot);
+  }
+  const latest = sorted[sorted.length - 1];
+  if (latest && selected[selected.length - 1]?.date !== latest.date) selected.push(latest);
+  return selected;
+}
+
+function historicalContributionPoints(input: InventoryStatusDetailResult): Array<{ date: string; metric: string; value: number }> {
+  const snapshotsByDate = new Map<string, InventoryStatusSnapshot>();
+  for (const snapshot of input.historySnapshots ?? []) snapshotsByDate.set(snapshot.date, snapshot);
+  snapshotsByDate.set(input.snapshot.date, input.snapshot);
+
+  return selectSevenDaySnapshots([...snapshotsByDate.values()]).flatMap((snapshot) => {
+    const group = snapshot.groups.find((candidate) => candidate.sameSkuGroupId === input.sameSkuGroupId);
+    if (!group) return [];
+    const totals = snapshotTotals(snapshot);
+    const date = shortDate(snapshot.date);
+    return [
+      { date, metric: '曝光贡献', value: contributionValue(group.periods['7d'].exposure, totals.totalExposure7d) },
+      { date, metric: '访问贡献', value: contributionValue(group.periods['7d'].publicVisits, totals.totalVisits7d) },
+      { date, metric: '金额贡献', value: contributionValue(group.periods['7d'].amount, totals.totalAmount7d) },
+    ];
+  });
 }
 
 function structureChart(snapshot: InventoryStatusSnapshot): CardElement {
@@ -233,7 +242,7 @@ function structureChart(snapshot: InventoryStatusSnapshot): CardElement {
   };
 }
 
-function contributionChart(group: InventoryStatusGroupSnapshot, totals: SnapshotTotals): CardElement {
+function contributionChart(result: InventoryStatusDetailResult): CardElement {
   return {
     tag: 'chart',
     element_id: 'inventory_status_detail_contribution_chart',
@@ -243,9 +252,9 @@ function contributionChart(group: InventoryStatusGroupSnapshot, totals: Snapshot
     height: '230px',
     chart_spec: {
       type: 'line',
-      title: { text: '全盘贡献窗口对比：曝光 / 访问 / 金额' },
-      data: { values: contributionPoints(group, totals) },
-      xField: 'period',
+      title: { text: '7天贡献趋势：曝光 / 访问 / 金额' },
+      data: { values: historicalContributionPoints(result) },
+      xField: 'date',
       yField: 'value',
       seriesField: 'metric',
       point: { visible: true },
@@ -428,8 +437,8 @@ export function buildInventoryStatusDetailCard(result: InventoryStatusDetailResu
           { label: ZH.missingLinks, value: String(group.missingMetricLinkCount), note: group.missingMetricLinkCount > 0 ? '需核对映射' : '已匹配齐', color: group.missingMetricLinkCount > 0 ? 'red' : 'green' },
           { label: ZH.activeLinks, value: `${group.activeLinkCount}/${group.totalLinkCount}`, note: ZH.periodNote, color: 'green' },
         ], 'inventory_status_detail_position_gap'),
-        contributionChart(group, totals),
-        markdown(`**看法**\n绿色看资源占位，蓝色看访问承接，橙色看成交结果。当前访问贡献 ${visitShare7d}、金额贡献 ${amountShare7d}；若蓝线长期高于橙线，说明流量位置高于结果位置，优先看价格、标题、主图和主力链接承接。`),
+        contributionChart(result),
+        markdown(`**商品组建议**\n绿色看资源占位，蓝色看访问承接，橙色看成交结果。当前访问贡献 ${visitShare7d}、金额贡献 ${amountShare7d}；若蓝线长期高于橙线，说明流量位置高于结果位置，优先看价格、标题、主图和主力链接承接。`),
         collapsiblePanel('inventory_status_detail_period_panel', '展开：周期数据与主力链接', [
           markdown(`**分周期明细**\n${periodBlock('1日', group.periods['1d'])}\n\n${periodBlock('7日', group.periods['7d'])}\n\n${periodBlock('30日', group.periods['30d'])}`),
           markdown(`**${ZH.missingExplainTitle}**\n${missingReportExplanation(group.missingMetricLinkCount)}`),
@@ -437,7 +446,7 @@ export function buildInventoryStatusDetailCard(result: InventoryStatusDetailResu
         ]),
         collapsiblePanel('inventory_status_detail_audit_panel', '展开：风险、口径与审计', [
           markdown(`**${ZH.riskTips}**\n${riskLines(group)}`),
-          markdown(`**数据口径**\n${sourceNote ? sourceNote.replace('**数据口径：后链路缺失**\n', '') : '当前未发现商品级创建/发货后链路缺失。'}\n贡献窗口口径：当前同款组指标 / 当前快照全盘同周期指标。`),
+          markdown(`**数据口径**\n${sourceNote ? sourceNote.replace('**数据口径：后链路缺失**\n', '') : '当前未发现商品级创建/发货后链路缺失。'}\n历史快照贡献趋势：按可用同款组经营快照每 7 天取点，指标为该同款组近 7 日指标 / 同快照全盘近 7 日指标。`),
           markdown(`**审计信息**\n${matchedByLabel(result)} | ${ZH.sameSkuGroup} ${result.sameSkuGroupId}\n快照日期 ${result.snapshot.date} | 日报口径 ${result.snapshot.sourceReportDate} | generationId ${result.snapshot.generationId}`),
           markdown(`**说明**\n${ZH.explanation}，不是单条链接结论；它更适合帮助判断这个组在全盘中的资源、流量和结果位置。`),
         ]),
