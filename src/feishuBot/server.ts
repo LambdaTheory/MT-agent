@@ -160,6 +160,7 @@ function expectedActionForButtonName(name: string | undefined): string | undefin
   const exact: Record<string, string> = {
     agent_tool_confirm_submit: 'agent_tool_confirm',
     inactive_refresh_execute_submit: 'inactive_refresh_execute_select',
+    inactive_refresh_execute_cancel_submit: 'inactive_refresh_execute_cancel',
     refresh_activity_delist_only_submit: 'refresh_activity_strategy_select',
     refresh_activity_delist_refill_submit: 'refresh_activity_strategy_select',
     agent_tool_cancel_submit: 'agent_tool_cancel',
@@ -270,6 +271,7 @@ function isSensitiveUnsignedCardAction(payload: FeishuCardActionEvent): boolean 
     || action === 'agent_tool_confirm'
     || action === 'agent_tool_cancel'
     || action === 'inactive_refresh_execute_select'
+    || action === 'inactive_refresh_execute_cancel'
     || action === 'refresh_activity_strategy_select'
     || action === 'new_link_batch_confirm'
     || action === 'new_link_batch_multi_confirm'
@@ -375,7 +377,7 @@ function refreshActivityStrategyClaimFamily(value: Record<string, unknown> | und
 
 function inactiveRefreshExecuteClaimFamily(value: Record<string, unknown> | undefined): string {
   const planRef = readString(value?.planRef);
-  return planRef ? `inactive_refresh_execute_select:${planRef}` : cardActionClaimFamily('inactive_refresh_execute_select', value);
+  return planRef ? `inactive_refresh_execute:${planRef}` : cardActionClaimFamily('inactive_refresh_execute', value);
 }
 
 function readActionFormValue(action: FeishuCardAction | undefined, name: string): string | undefined {
@@ -712,6 +714,15 @@ async function handleCardActionTrigger(
     if (response.card) await replyCard(replyConfig, response.card);
     else await replyText(replyConfig, response.text);
     return;
+  }
+
+  if (actionName === 'inactive_refresh_execute_cancel') {
+    const claim = claimServerCardAction(messageId, inactiveRefreshExecuteClaimFamily(value), actionName);
+    if (!claim.claimed) {
+      return claimStatusCard('失活刷新计划已处理', claim.claim);
+    }
+    setServerCardActionStatus(claim.key, 'cancelled');
+    return statusCard('失活刷新计划已取消', '已取消本次失活刷新计划，不会复制或下架商品。', 'grey');
   }
 
   if (actionName === 'rental_price_prepare_rollback') {

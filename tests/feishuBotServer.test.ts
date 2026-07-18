@@ -530,6 +530,35 @@ describe('startFeishuBotServer', () => {
     }
   });
 
+  it('rejects unsigned HTTP inactive refresh cancellation callbacks when no callback signature secret is configured', async () => {
+    const server = startFeishuBotServer({ port: 0, appId: 'app', appSecret: 'secret', verificationToken: 'token' });
+    try {
+      await new Promise<void>((resolve) => server.once('listening', resolve));
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+
+      const response = await fetch(`http://127.0.0.1:${address.port}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          header: { event_type: 'card.action.trigger' },
+          event: {
+            context: { open_message_id: 'mid-forged-inactive-refresh-cancel' },
+            action: {
+              name: 'inactive_refresh_execute_cancel_submit',
+              behaviors: [{ type: 'callback', value: { action: 'inactive_refresh_execute_cancel', planRef: 'inactive_refresh_1_deadbeefdeadbeef', confirmationKey: 'key' } }],
+            },
+          },
+        }),
+      });
+
+      expect(response.status).toBe(401);
+      await expect(response.json()).resolves.toEqual({ error: 'missing callback signature secret' });
+    } finally {
+      server.close();
+    }
+  });
+
   it('rejects unsigned HTTP card callbacks when callback signature secret is configured', async () => {
     const server = startFeishuBotServer({ port: 0, appId: 'app', appSecret: 'secret', verificationToken: 'token', callbackSignatureSecret: 'signature-secret' });
     try {
@@ -578,6 +607,46 @@ describe('startFeishuBotServer', () => {
       });
 
       expect(response.status).toBe(200);
+    } finally {
+      server.close();
+    }
+  });
+
+  it('returns a cancelled status card for signed HTTP inactive refresh plan cancellation', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-inactive-refresh-cancel-http-'));
+    const server = startFeishuBotServer({ port: 0, appId: 'app', appSecret: 'secret', verificationToken: 'token', callbackSignatureSecret: 'signature-secret', outputDir });
+    try {
+      await new Promise<void>((resolve) => server.once('listening', resolve));
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+      const body = JSON.stringify({
+        header: { event_type: 'card.action.trigger' },
+        event: {
+          context: { open_message_id: 'mid-signed-inactive-refresh-cancel' },
+          action: {
+            name: 'inactive_refresh_execute_cancel_submit',
+            behaviors: [{ type: 'callback', value: { action: 'inactive_refresh_execute_cancel', planRef: 'inactive_refresh_1_deadbeefdeadbeef', confirmationKey: 'key' } }],
+          },
+        },
+      });
+      const timestamp = String(Math.floor(Date.now() / 1000));
+      const nonce = 'nonce-inactive-refresh-cancel';
+
+      const response = await fetch(`http://127.0.0.1:${address.port}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Lark-Request-Timestamp': timestamp,
+          'X-Lark-Request-Nonce': nonce,
+          'X-Lark-Signature': buildFeishuSignature(timestamp, nonce, body, 'signature-secret'),
+        },
+        body,
+      });
+
+      expect(response.status).toBe(200);
+      const cardText = JSON.stringify(await response.json());
+      expect(cardText).toContain('失活刷新计划已取消');
+      expect(cardText).toContain('不会复制或下架商品');
     } finally {
       server.close();
     }

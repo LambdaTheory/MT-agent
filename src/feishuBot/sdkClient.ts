@@ -187,6 +187,7 @@ function expectedActionForButtonName(name: string | undefined): string | undefin
   const exact: Record<string, string> = {
     agent_tool_confirm_submit: 'agent_tool_confirm',
     inactive_refresh_execute_submit: 'inactive_refresh_execute_select',
+    inactive_refresh_execute_cancel_submit: 'inactive_refresh_execute_cancel',
     refresh_activity_delist_only_submit: 'refresh_activity_strategy_select',
     refresh_activity_delist_refill_submit: 'refresh_activity_strategy_select',
     agent_tool_cancel_submit: 'agent_tool_cancel',
@@ -330,6 +331,7 @@ const rentalActionClaims = new Map<string, RentalActionClaim>();
 
 function actionClaimFamily(actionName: string): string {
   if (actionName.startsWith('agent_tool_')) return 'agent_tool';
+  if (actionName.startsWith('inactive_refresh_execute_')) return 'inactive_refresh_execute';
   if (actionName.startsWith('new_link_batch_')) return 'new_link_batch';
   if (actionName.startsWith('rental_price_')) return 'rental_price';
   if (actionName.startsWith('rental_operation_')) return 'rental_operation';
@@ -346,7 +348,7 @@ function actionClaimFamily(actionName: string): string {
 
 function stableActionKey(messageId: string, actionName: string, value: Record<string, unknown>): string {
   const family = actionClaimFamily(actionName);
-  const planRef = actionName === 'refresh_activity_strategy_select' ? readString(value.planRef) : undefined;
+  const planRef = actionName === 'refresh_activity_strategy_select' || actionName.startsWith('inactive_refresh_execute_') ? readString(value.planRef) : undefined;
   if (planRef) return createHash('sha256').update(JSON.stringify({ messageId, family: `${family}:${planRef}` })).digest('hex');
   const confirmationKey = readString(value.confirmationKey);
   return createHash('sha256').update(JSON.stringify({ messageId, family: confirmationKey ? `${family}:${confirmationKey}` : family })).digest('hex');
@@ -962,6 +964,15 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
           return response.card
             ? replaceCard(client, messageId, response.card)
             : replaceCard(client, messageId, statusCard('失活刷新计划已失效', response.text, 'red'));
+        }
+
+        if (actionName === 'inactive_refresh_execute_cancel') {
+          const claim = claimRentalAction(messageId, actionName, value);
+          if (!claim.claimed) {
+            return cardActionUpdateResponse(claimStatusCard('失活刷新计划已处理', claim.claim));
+          }
+          setRentalActionStatus(claim.key, 'cancelled');
+          return replaceCard(client, messageId, statusCard('失活刷新计划已取消', '已取消本次失活刷新计划，不会复制或下架商品。', 'grey'));
         }
 
         if (actionName === 'rental_price_prepare_rollback') {

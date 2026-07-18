@@ -3,10 +3,16 @@ import { inactiveRefreshPlanConfirmationKey } from './planStore.js';
 import type { InactiveRefreshPlan, InactiveRefreshPlanSummary } from './types.js';
 
 export function buildInactiveRefreshPlanCard(input: { plan: InactiveRefreshPlan; planRef: string; summary: InactiveRefreshPlanSummary; lines: string[] }): FeishuCardPayload {
+  const confirmationKey = inactiveRefreshPlanConfirmationKey(input.plan);
   const value = {
     action: 'inactive_refresh_execute_select',
     planRef: input.planRef,
-    confirmationKey: inactiveRefreshPlanConfirmationKey(input.plan),
+    confirmationKey,
+  };
+  const cancelValue = {
+    action: 'inactive_refresh_execute_cancel',
+    planRef: input.planRef,
+    confirmationKey,
   };
   return {
     schema: '2.0',
@@ -22,6 +28,13 @@ export function buildInactiveRefreshPlanCard(input: { plan: InactiveRefreshPlan;
           type: 'primary',
           name: 'inactive_refresh_execute_submit',
           behaviors: [{ type: 'callback', value }],
+        },
+        {
+          tag: 'button',
+          text: { tag: 'plain_text', content: '取消' },
+          type: 'default',
+          name: 'inactive_refresh_execute_cancel_submit',
+          behaviors: [{ type: 'callback', value: cancelValue }],
         },
       ],
     },

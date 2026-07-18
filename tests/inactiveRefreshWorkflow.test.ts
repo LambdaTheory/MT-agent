@@ -128,14 +128,18 @@ describe('inactive refresh executable workflow', () => {
     const response = await handleBotIntent({ type: 'run_inactive_refresh' }, outputDir, { closedOrderRegistryPaths: registryPaths });
     const cardJson = JSON.stringify(response.card);
     const approveValue = readButtonValue(response.card, 'inactive_refresh_execute_submit');
+    const cancelValue = readButtonValue(response.card, 'inactive_refresh_execute_cancel_submit');
     const planFiles = await readdir(join(outputDir, 'latest', 'inactive-refresh-plans'));
 
     expect(response.metadata).toMatchObject({ toolName: 'operations.inactiveRefreshPlan', executableCount: 1 });
     expect(response.card).toBeDefined();
     expect(cardJson).toContain('失活刷新执行计划');
     expect(JSON.stringify(approveValue)).toContain('inactive_refresh_execute_select');
+    expect(JSON.stringify(cancelValue)).toContain('inactive_refresh_execute_cancel');
     expect(JSON.stringify(approveValue)).not.toContain('delistProductIds');
     expect(JSON.stringify(approveValue)).not.toContain('newLinkItems');
+    expect(JSON.stringify(cancelValue)).not.toContain('delistProductIds');
+    expect(JSON.stringify(cancelValue)).not.toContain('newLinkItems');
     expect(planFiles).toHaveLength(1);
   });
 
