@@ -9,6 +9,7 @@ export type BotIntent =
   | { type: 'differential_pricing_card' }
   | { type: 'cancel_differential_pricing_card' }
   | { type: 'run_public_traffic_report'; sendTo?: FeishuSendTo }
+  | { type: 'run_inactive_refresh'; date?: string }
   | { type: 'refresh_public_traffic_dashboard'; date?: string; sendTo?: FeishuSendTo }
   | { type: 'resend_latest_report'; sendTo?: FeishuSendTo; date?: string }
   | { type: 'push_latest_report_to_group'; date?: string }

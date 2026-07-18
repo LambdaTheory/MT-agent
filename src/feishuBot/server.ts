@@ -1,4 +1,7 @@
+import { createHash } from 'node:crypto';
+import { mkdir, open } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { join } from 'node:path';
 import { createActivityCancellationAssistant, type ActivityCancellationAssistant } from '../activityAutomation/cancelAssistance.js';
 import { updateActivitySubmitSessionStatus } from '../activityAutomation/submitSession.js';
 import { resolveDailyMissionApproval } from '../agentRuntime/dailyMissionApprovalCallback.js';
@@ -37,6 +40,7 @@ import { continueAgentPlannerStepsAfterResponse, executeAgentToolRequestWithCont
 import { agentExploreLedgerContextFromRequest } from './agentExploreAttribution.js';
 import { loadAgentToolConfirmRequestFromValue } from './agentToolConfirmStore.js';
 import { loadClarificationContext, verifyClarificationKey } from './clarificationStore.js';
+import { handleInactiveRefreshExecuteSelect } from './inactiveRefreshExecuteSelect.js';
 import { handleRefreshActivityStrategySelect } from './refreshActivityStrategySelect.js';
 import { executeOrConfirmAgentToolRequest } from './tools.js';
 import {
@@ -147,6 +151,7 @@ function expectedActionForButtonName(name: string | undefined): string | undefin
   if (!name) return undefined;
   const exact: Record<string, string> = {
     agent_tool_confirm_submit: 'agent_tool_confirm',
+    inactive_refresh_execute_submit: 'inactive_refresh_execute_select',
     refresh_activity_delist_only_submit: 'refresh_activity_strategy_select',
     refresh_activity_delist_refill_submit: 'refresh_activity_strategy_select',
     agent_tool_cancel_submit: 'agent_tool_cancel',
@@ -252,7 +257,53 @@ function cardActionValue(payload: FeishuCardActionEvent): Record<string, unknown
 
 function isSensitiveUnsignedCardAction(payload: FeishuCardActionEvent): boolean {
   const value = cardActionValue(payload);
-  return readString(value?.action) === 'query_full_list';
+  const action = readString(value?.action);
+  return action === 'query_full_list'
+    || action === 'agent_tool_confirm'
+    || action === 'agent_tool_cancel'
+    || action === 'inactive_refresh_execute_select'
+    || action === 'refresh_activity_strategy_select'
+    || action === 'new_link_batch_confirm'
+    || action === 'new_link_batch_multi_confirm'
+    || action === 'rental_operation_confirm'
+    || action === 'activity_automation_confirm'
+    || action === 'activity_price_callback_confirm';
+}
+
+function isFreshFeishuTimestamp(timestamp: string | undefined, nowMs = Date.now()): boolean {
+  if (!timestamp) return false;
+  const seconds = Number(timestamp);
+  if (!Number.isFinite(seconds)) return false;
+  return Math.abs(Math.floor(nowMs / 1000) - seconds) <= 300;
+}
+
+function persistentCardActionClaimKey(payload: FeishuCardActionEvent): string | null {
+  if (!isSensitiveUnsignedCardAction(payload)) return null;
+  const messageId = extractCardMessageId(payload);
+  const value = cardActionValue(payload);
+  const action = readString(value?.action);
+  if (!messageId || !action) return null;
+  const discriminator = readString(value?.requestRef)
+    ?? readString(value?.confirmationKey)
+    ?? readString(value?.planRef)
+    ?? JSON.stringify(value ?? {});
+  return createHash('sha256').update(JSON.stringify({ messageId, action, discriminator })).digest('hex');
+}
+
+async function claimPersistentSensitiveCardAction(outputDir: string | undefined, payload: FeishuCardActionEvent): Promise<boolean> {
+  const key = persistentCardActionClaimKey(payload);
+  if (!key) return true;
+  const dir = join(outputDir ?? 'output', 'latest', 'card-action-claims');
+  await mkdir(dir, { recursive: true });
+  try {
+    const handle = await open(join(dir, `${key}.json`), 'wx');
+    await handle.writeFile(JSON.stringify({ key, claimedAt: new Date().toISOString() }));
+    await handle.close();
+    return true;
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'EEXIST') return false;
+    throw error;
+  }
 }
 
 type ServerCardActionStatus = 'processing' | 'completed' | 'failed' | 'cancelled';
@@ -312,6 +363,11 @@ function cardActionClaimFamily(family: string, value: Record<string, unknown> | 
 function refreshActivityStrategyClaimFamily(value: Record<string, unknown> | undefined): string {
   const planRef = readString(value?.planRef);
   return planRef ? `refresh_activity_strategy_select:${planRef}` : cardActionClaimFamily('refresh_activity_strategy_select', value);
+}
+
+function inactiveRefreshExecuteClaimFamily(value: Record<string, unknown> | undefined): string {
+  const planRef = readString(value?.planRef);
+  return planRef ? `inactive_refresh_execute_select:${planRef}` : cardActionClaimFamily('inactive_refresh_execute_select', value);
 }
 
 function readActionFormValue(action: FeishuCardAction | undefined, name: string): string | undefined {
@@ -632,6 +688,18 @@ async function handleCardActionTrigger(
       return claimStatusCard('活跃度刷新策略已处理', claim.claim);
     }
     const response = await handleRefreshActivityStrategySelect(config.outputDir ?? 'output', value);
+    setServerCardActionStatus(claim.key, response.card ? 'completed' : 'failed');
+    if (response.card) await replyCard(replyConfig, response.card);
+    else await replyText(replyConfig, response.text);
+    return;
+  }
+
+  if (actionName === 'inactive_refresh_execute_select') {
+    const claim = claimServerCardAction(messageId, inactiveRefreshExecuteClaimFamily(value), actionName);
+    if (!claim.claimed) {
+      return claimStatusCard('失活刷新计划已处理', claim.claim);
+    }
+    const response = await handleInactiveRefreshExecuteSelect(config.outputDir ?? 'output', value);
     setServerCardActionStatus(claim.key, response.card ? 'completed' : 'failed');
     if (response.card) await replyCard(replyConfig, response.card);
     else await replyText(replyConfig, response.text);
@@ -987,6 +1055,11 @@ export function startFeishuBotServer(config: FeishuBotServerConfig) {
       });
       if (!config.callbackSignatureSecret && isSensitiveUnsignedCardAction(payload)) return writeJson(res, 401, { error: 'missing callback signature secret' });
       if (!validSignature) return writeJson(res, 401, { error: 'invalid signature' });
+      if (config.callbackSignatureSecret && !isFreshFeishuTimestamp(req.headers['x-lark-request-timestamp'] as string | undefined)) return writeJson(res, 401, { error: 'stale signature' });
+      if (!(await claimPersistentSensitiveCardAction(config.outputDir, payload))) {
+        writeJson(res, 200, statusCard('卡片操作已处理', '该卡片操作已经执行完成，请勿重复提交。', 'grey'));
+        return;
+      }
       const card = await handleCardActionTrigger(payload, config, dispatchMessage);
       writeJson(res, 200, card ?? { ok: true });
       return;

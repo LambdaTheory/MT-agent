@@ -811,6 +811,20 @@ const refreshActivityExecuteArgumentsSchema = {
   required: ['date', 'delistProductIds'],
   additionalProperties: false,
 };
+const inactiveRefreshPlanArgumentsSchema = {
+  type: 'object',
+  properties: { date: { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}$' } },
+  additionalProperties: false,
+};
+const inactiveRefreshExecuteArgumentsSchema = {
+  type: 'object',
+  properties: {
+    planRef: { type: 'string' },
+    confirmationKey: { type: 'string' },
+  },
+  required: ['planRef', 'confirmationKey'],
+  additionalProperties: false,
+};
 const rentalPriceChangeArgumentsSchema = {
   type: 'object',
   not: { required: ['discount', 'adjustmentAmount'] },
@@ -1273,6 +1287,21 @@ const agentTools: AgentToolDefinition[] = [
     plannerVisible: false,
     inputSchema: refreshActivityExecuteArgumentsSchema,
     resultMetadataSchema: refreshActivityExecuteResultMetadataSchema,
+  },
+  {
+    name: 'operations.inactiveRefreshPlan',
+    description: '生成 14 天失活刷新执行计划并返回飞书审批卡；确认前不复制、不下架。',
+    risk: 'read',
+    requiresConfirmation: false,
+    inputSchema: inactiveRefreshPlanArgumentsSchema,
+  },
+  {
+    name: 'operations.inactiveRefreshExecute',
+    description: '确认后按已持久化 planRef 执行失活刷新：先复制安全源补链，再下架失活原链接。',
+    risk: 'high',
+    requiresConfirmation: true,
+    plannerVisible: false,
+    inputSchema: inactiveRefreshExecuteArgumentsSchema,
   },
   {
     name: 'closedOrder.syncFeedback',

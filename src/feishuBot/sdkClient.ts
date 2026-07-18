@@ -20,6 +20,7 @@ import { continueAgentPlannerStepsAfterResponse, executeAgentToolRequestWithCont
 import { agentExploreLedgerContextFromRequest } from './agentExploreAttribution.js';
 import { loadAgentToolConfirmRequestFromValue } from './agentToolConfirmStore.js';
 import { loadClarificationContext, verifyClarificationKey } from './clarificationStore.js';
+import { handleInactiveRefreshExecuteSelect } from './inactiveRefreshExecuteSelect.js';
 import { handleRefreshActivityStrategySelect } from './refreshActivityStrategySelect.js';
 import { executeOrConfirmAgentToolRequest } from './tools.js';
 import {
@@ -189,6 +190,7 @@ function expectedActionForButtonName(name: string | undefined): string | undefin
   if (!name) return undefined;
   const exact: Record<string, string> = {
     agent_tool_confirm_submit: 'agent_tool_confirm',
+    inactive_refresh_execute_submit: 'inactive_refresh_execute_select',
     refresh_activity_delist_only_submit: 'refresh_activity_strategy_select',
     refresh_activity_delist_refill_submit: 'refresh_activity_strategy_select',
     agent_tool_cancel_submit: 'agent_tool_cancel',
@@ -917,6 +919,18 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
           return response.card
             ? replaceCard(client, messageId, response.card)
             : replaceCard(client, messageId, statusCard('活跃度刷新策略已失效', response.text, 'red'));
+        }
+
+        if (actionName === 'inactive_refresh_execute_select') {
+          const claim = claimRentalAction(messageId, actionName, value);
+          if (!claim.claimed) {
+            return cardActionUpdateResponse(claimStatusCard('失活刷新计划已处理', claim.claim));
+          }
+          const response = await handleInactiveRefreshExecuteSelect(config.outputDir ?? 'output', value);
+          setRentalActionStatus(claim.key, response.card ? 'completed' : 'failed');
+          return response.card
+            ? replaceCard(client, messageId, response.card)
+            : replaceCard(client, messageId, statusCard('失活刷新计划已失效', response.text, 'red'));
         }
 
         if (actionName === 'rental_price_prepare_rollback') {
