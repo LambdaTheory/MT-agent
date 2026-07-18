@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createFeishuSdkBot, extractSdkTextMessage } from '../src/feishuBot/sdkClient.js';
+import { createFeishuMessageDispatcher } from '../src/feishuBot/dispatcher.js';
 import type { AgentPlannerProvider } from '../src/agentRuntime/planner.js';
 import type { LlmToolSelectionProvider } from '../src/feishuBot/llmProvider.js';
 import type { FeishuBotIncomingTextMessage } from '../src/feishuBot/types.js';
@@ -111,7 +112,7 @@ describe('createFeishuSdkBot', () => {
       message: { message_id: 'mid-sdk-reply', chat_id: 'chat', message_type: 'text', content: JSON.stringify({ text: '帮助' }) },
     });
 
-    expect(dispatched).toEqual([{ messageId: 'mid-sdk-reply', text: '帮助', source: 'sdk', chatId: 'chat', senderOpenId: undefined }]);
+    expect(dispatched).toEqual([{ messageId: 'mid-sdk-reply', text: '帮助', source: 'sdk', chatId: 'chat', senderOpenId: undefined, metadata: { messageIdClaimed: true } }]);
     expect(sent).toEqual([
       { path: { message_id: 'mid-sdk-reply' }, data: { content: JSON.stringify({ text: 'reply:帮助' }), msg_type: 'text' } },
     ]);
@@ -156,6 +157,134 @@ describe('createFeishuSdkBot', () => {
     });
 
     expect(sent).toEqual([]);
+  });
+
+  it('passes a pre-claimed SDK message through a custom dispatcher delegate', async () => {
+    const registered: Record<string, (data: unknown) => Promise<void>> = {};
+    const sent: unknown[] = [];
+    const delegate = createFeishuMessageDispatcher({
+      resolveIntent: () => ({ type: 'help' }),
+      handleIntent: async () => ({ text: 'delegated reply' }),
+    });
+
+    class FakeClient {
+      im = { v1: { message: { reply: async (request: unknown) => sent.push(request) } } };
+    }
+
+    class FakeWSClient {
+      start() {
+        return undefined;
+      }
+    }
+
+    class FakeEventDispatcher {
+      register(handlers: Record<string, (data: unknown) => Promise<void>>) {
+        Object.assign(registered, handlers);
+        return this;
+      }
+    }
+
+    const bot = createFeishuSdkBot({
+      appId: 'app',
+      appSecret: 'secret',
+      dispatchMessage: (message) => delegate.dispatch(message),
+      sdk: { Client: FakeClient, WSClient: FakeWSClient, EventDispatcher: FakeEventDispatcher },
+    });
+
+    bot.start();
+    await registered['im.message.receive_v1']({
+      message: { message_id: 'mid-sdk-custom-delegate', message_type: 'text', content: JSON.stringify({ text: '帮助' }) },
+    });
+
+    expect(JSON.stringify(sent)).toContain('delegated reply');
+  });
+
+  it('does not send a second rental price progress card for a repeated SDK message id', async () => {
+    const registered: Record<string, (data: unknown) => Promise<void>> = {};
+    const sent: unknown[] = [];
+    const dispatched: FeishuBotIncomingTextMessage[] = [];
+
+    class FakeClient {
+      im = { v1: { message: { reply: async (request: unknown) => sent.push(request) } } };
+    }
+
+    class FakeWSClient {
+      start() {
+        return undefined;
+      }
+    }
+
+    class FakeEventDispatcher {
+      register(handlers: Record<string, (data: unknown) => Promise<void>>) {
+        Object.assign(registered, handlers);
+        return this;
+      }
+    }
+
+    const bot = createFeishuSdkBot({
+      appId: 'app',
+      appSecret: 'secret',
+      dispatchMessage: async (message) => {
+        dispatched.push(message);
+        return { text: 'final', skipped: false };
+      },
+      sdk: { Client: FakeClient, WSClient: FakeWSClient, EventDispatcher: FakeEventDispatcher },
+    });
+
+    bot.start();
+    const event = {
+      message: { message_id: 'mid-sdk-rental-progress-duplicate', message_type: 'text', content: JSON.stringify({ text: '761改价-15元' }) },
+    };
+    await registered['im.message.receive_v1'](event);
+    const sentAfterFirstDelivery = sent.length;
+    await registered['im.message.receive_v1'](event);
+
+    expect(dispatched).toHaveLength(1);
+    expect(sentAfterFirstDelivery).toBeGreaterThan(0);
+    expect(sent).toHaveLength(sentAfterFirstDelivery);
+    expect(JSON.stringify(sent)).toContain('租赁改价预览处理中');
+  });
+
+  it('does not send rental price progress before spec-keyword clarification', async () => {
+    const registered: Record<string, (data: unknown) => Promise<void>> = {};
+    const sent: unknown[] = [];
+
+    class FakeClient {
+      im = { v1: { message: { reply: async (request: unknown) => sent.push(request) } } };
+    }
+
+    class FakeWSClient {
+      start() {
+        return undefined;
+      }
+    }
+
+    class FakeEventDispatcher {
+      register(handlers: Record<string, (data: unknown) => Promise<void>>) {
+        Object.assign(registered, handlers);
+        return this;
+      }
+    }
+
+    const bot = createFeishuSdkBot({
+      appId: 'app',
+      appSecret: 'secret',
+      dispatchMessage: async () => ({
+        text: '需要澄清',
+        skipped: false,
+        card: { schema: '2.0', header: { title: { tag: 'plain_text', content: 'Agent 需要确认你的意图' }, template: 'blue' }, body: { elements: [] } },
+      }),
+      sdk: { Client: FakeClient, WSClient: FakeWSClient, EventDispatcher: FakeEventDispatcher },
+    });
+
+    bot.start();
+    await registered['im.message.receive_v1']({
+      message: { message_id: 'mid-sdk-spec-keyword-clarify', message_type: 'text', content: JSON.stringify({ text: '改价,sx70商品组的所有含有平日字样的规格,所有租期-5元' }) },
+    });
+
+    expect(sent).toHaveLength(1);
+    expect(JSON.stringify(sent)).toContain('Agent 需要确认你的意图');
+    expect(JSON.stringify(sent)).not.toContain('租赁改价预览处理中');
   });
 
   it('logs rejected SDK replies without rejecting the event handler', async () => {

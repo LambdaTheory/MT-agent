@@ -658,6 +658,79 @@ describe('createFeishuSdkBot card.action.trigger', () => {
     expect(JSON.stringify(finalCard)).not.toContain('Agent 澄清处理完成');
   });
 
+  it('returns immediately for selected clarified-message candidates and updates final card asynchronously', async () => {
+    const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
+    const sent: unknown[] = [];
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-sdk-clarify-select-async-'));
+    let finishDispatch: ((value: { text: string; card: Record<string, unknown>; skipped: false }) => void) | undefined;
+    const dispatchStarted: string[] = [];
+    const context = {
+      originalMessage: '761改价-15元',
+      question: '请确认改价范围',
+      reason: '范围不明确',
+      candidates: [{ toolName: 'agent.clarifiedMessage', arguments: { message: '761所有租期-15元' }, label: '所有租期' }],
+      depth: 1,
+      confidence: 0.4,
+    };
+    const clarificationRef = await saveClarificationContext(outputDir, context);
+    const bot = createFeishuSdkBot({
+      appId: 'app',
+      appSecret: 'secret',
+      outputDir,
+      dispatchMessage: async (message) => {
+        dispatchStarted.push(message.text);
+        return await new Promise((resolve) => {
+          finishDispatch = resolve;
+        });
+      },
+      sdk: fakeSdk(sent, registered),
+    });
+
+    bot.start();
+    const actionPromise = registered['card.action.trigger']({
+      event: {
+        context: { open_message_id: 'om-agent-clarify-select-async' },
+        operator: { open_id: 'ou_agent' },
+        action: {
+          tag: 'button',
+          name: 'agent_clarify_select_1',
+          behaviors: [{
+            type: 'callback',
+            value: {
+              action: 'agent_clarify_select',
+              clarificationRef,
+              candidateIndex: 0,
+              confirmationKey: clarificationConfirmationKey(context),
+            },
+          }],
+        },
+      },
+    });
+
+    const result = await Promise.race([
+      actionPromise,
+      new Promise((resolve) => setTimeout(() => resolve('timed-out'), 25)),
+    ]);
+
+    expect(result).not.toBe('timed-out');
+    expect(JSON.stringify(result)).toContain('Agent 已收到你的选择');
+    expect(dispatchStarted).toEqual(['761所有租期-15元']);
+    expect(sent).toHaveLength(1);
+    expect(JSON.stringify(patchedCard(sent[0]))).toContain('Agent 已收到你的选择');
+
+    finishDispatch?.({
+      text: '最终结果',
+      skipped: false,
+      card: { schema: '2.0', header: { title: { tag: 'plain_text', content: '最终审批卡' }, template: 'green' }, body: { elements: [] } },
+    });
+    await actionPromise;
+    for (let attempt = 0; attempt < 100 && sent.length < 2; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    expect(JSON.stringify(patchedCard(sent[sent.length - 1]))).toContain('最终审批卡');
+  });
+
   it('resumes a referenced SDK clarification candidate into the existing Agent confirmation path', async () => {
     const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
     const sent: unknown[] = [];

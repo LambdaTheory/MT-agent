@@ -14,8 +14,9 @@ import { handleLinkRegistryMaintenanceCardAction } from '../linkRegistry/mainten
 import { handleOperationsLearningFeedback, handleOperationsLearningStop } from '../operationsLearningLoop/session.js';
 import { formatRuntimeLog, summarizeError, textPreview } from '../observability/runtimeLogger.js';
 import { findLatestReportContext } from './reportStore.js';
-import { createFeishuMessageDispatcher } from './dispatcher.js';
+import { claimFeishuMessageId, createFeishuMessageDispatcher, MESSAGE_ID_CLAIMED_METADATA_KEY } from './dispatcher.js';
 import { buildRentalPricePreviewProgressCard, buildRentalPriceRollbackConfirmCard } from './agentToolExecutor.js';
+import { shouldSendRentalPricePreviewProgress } from './rentalPriceProgress.js';
 import { continueAgentPlannerStepsAfterResponse, executeAgentToolRequestWithContinuation } from './agentToolContinuation.js';
 import { agentExploreLedgerContextFromRequest } from './agentExploreAttribution.js';
 import { loadAgentToolConfirmRequestFromValue } from './agentToolConfirmStore.js';
@@ -53,11 +54,6 @@ import type { LlmToolSelectionProvider } from './llmProvider.js';
 import type { LlmIntentProposalProvider } from './llmIntentProposal.js';
 import type { FeishuCardPayload } from '../notify/feishuApp.js';
 import type { FeishuBotDispatchResult, FeishuBotIncomingTextMessage } from './types.js';
-
-function shouldSendRentalPricePreviewProgress(text: string): boolean {
-  const compact = text.replace(/\s+/g, '');
-  return /(改价|pricePreview|pricechange|价格预览)/i.test(compact) && !/(回滚|rollback)/i.test(compact);
-}
 
 interface SdkMessageData {
   message?: {
@@ -490,7 +486,7 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
   const client = new sdk.Client({ appId: config.appId, appSecret: config.appSecret });
   const wsClient = new sdk.WSClient({ appId: config.appId, appSecret: config.appSecret });
   const eventDispatcher = new sdk.EventDispatcher({});
-  const dispatchMessage = config.dispatchMessage ?? createFeishuMessageDispatcher({
+  const defaultDispatcher = createFeishuMessageDispatcher({
     outputDir: config.outputDir,
     botMentionOpenId: config.botMentionOpenId,
     botMentionName: config.botMentionName,
@@ -501,7 +497,11 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
     activityAutomationClient: config.activityAutomationClient,
     closedOrderFetchImpl: config.closedOrderFetchImpl,
     closedOrderRegistryPaths: config.closedOrderRegistryPaths,
-  }).dispatch;
+  });
+  const dispatchMessage = config.dispatchMessage ?? ((message: FeishuBotIncomingTextMessage) => defaultDispatcher.dispatch({
+    ...message,
+    metadata: { ...message.metadata, [MESSAGE_ID_CLAIMED_METADATA_KEY]: true },
+  }));
   const logError = config.logError ?? ((error: unknown, context: { messageId: string; phase: 'reply' | 'dispatch' }) => console.error(formatRuntimeLog({
     level: 'error',
     component: 'feishu-bot',
@@ -545,6 +545,10 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
     return error instanceof Error ? error.message : String(error);
   }
 
+  function withClaimedMessageId(message: FeishuBotIncomingTextMessage): FeishuBotIncomingTextMessage {
+    return { ...message, metadata: { ...message.metadata, [MESSAGE_ID_CLAIMED_METADATA_KEY]: true } };
+  }
+
   eventDispatcher.register({
     'im.message.receive_v1': async (data: unknown) => {
       const message = extractSdkTextMessage(data);
@@ -561,6 +565,19 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
         textLength: message.text.length,
       }));
 
+      if (!claimFeishuMessageId(message.messageId)) {
+        logInfo(formatRuntimeLog({
+          level: 'info',
+          component: 'feishu-bot',
+          event: 'message.dispatch.completed',
+          messageId: message.messageId,
+          skipped: true,
+          hasCard: false,
+          elapsedMs: Date.now() - startedAt,
+        }));
+        return;
+      }
+
       const sentPreviewProgress = shouldSendRentalPricePreviewProgress(message.text);
       if (sentPreviewProgress) {
         await replyCard(client, message.messageId, buildRentalPricePreviewProgressCard([], message.text)).catch((error) => {
@@ -570,7 +587,7 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
 
       let response: FeishuBotDispatchResult;
       try {
-        response = await dispatchMessage(message);
+        response = await dispatchMessage(withClaimedMessageId(message));
       } catch (error) {
         logError(error, { messageId: message.messageId, phase: 'dispatch' });
         await replyText(client, message.messageId, `处理失败：${formatErrorMessage(error)}`).catch((replyError) => {
@@ -748,16 +765,30 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
             label: candidate.label,
           }, messageId);
           if (candidate.toolName === 'agent.clarifiedMessage' && typeof candidate.arguments.message === 'string') {
-            const response = await dispatchMessage({
-              messageId: `${messageId}:clarify:${claim.key.slice(0, 16)}`,
-              text: candidate.arguments.message,
-              source: 'sdk',
-              chatType: 'p2p',
-              metadata: { clarificationDepth: context.depth },
-            });
-            setRentalActionStatus(claim.key, response.skipped ? 'failed' : 'completed');
-            if (response.card) return cardActionUpdateResponse(response.card);
-            return cardActionUpdateResponse(agentClarificationResultStatusCard(response));
+            const selectedMessage = candidate.arguments.message;
+            const processingCard = statusCard('Agent 已收到你的选择', `正在结合你的选择继续理解：${candidate.label}`, 'blue');
+            void updateCard(client, messageId, processingCard).catch(() => false);
+            void (async () => {
+              try {
+                const response = await dispatchMessage({
+                  messageId: `${messageId}:clarify:${claim.key.slice(0, 16)}`,
+                  text: selectedMessage,
+                  source: 'sdk',
+                  chatType: 'p2p',
+                  metadata: { clarificationDepth: context.depth },
+                });
+                setRentalActionStatus(claim.key, isFailedBotResponse(response) ? 'failed' : 'completed');
+                if (!response.skipped) {
+                  if (response.card) await deliverCard(client, messageId, response.card, logError);
+                  else await deliverCard(client, messageId, agentClarificationResultStatusCard(response), logError);
+                }
+              } catch (error) {
+                setRentalActionStatus(claim.key, 'failed');
+                await deliverCard(client, messageId, statusCard('Agent 澄清处理失败', error instanceof Error ? error.message : String(error), 'red'), logError);
+                logError(error, { messageId, phase: 'reply' });
+              }
+            })();
+            return cardActionUpdateResponse(processingCard);
           }
           const response = await executeOrConfirmAgentToolRequest({
             toolName: candidate.toolName,
