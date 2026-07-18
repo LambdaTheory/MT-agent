@@ -27,6 +27,7 @@ import type { LinkRegistryEntry } from '../linkRegistry/types.js';
 import { summarizeAgentLearning } from '../agentLearning/store.js';
 import { syncClosedOrderFeedbackFromApi } from '../closedOrderFeedback/sync.js';
 import { queryInventoryStatus } from '../inventoryStatus/query.js';
+import { readInventorySameSkuSnapshotHistory } from '../inventoryStatus/history.js';
 import { readInventorySameSkuSnapshot } from '../inventoryStatus/store.js';
 import {
   buildNewLinkBatchConfirmCard,
@@ -267,7 +268,8 @@ async function inventoryStatusToolResponse(
     return { text: formatInventoryStatusOverviewText(result), card: buildInventoryStatusOverviewCard(result) };
   }
   if (result.status === 'detail') {
-    return { text: formatInventoryStatusDetailText(result), card: buildInventoryStatusDetailCard(result) };
+    const historySnapshots = await readInventorySameSkuSnapshotHistory(outputDir, runDate);
+    return { text: formatInventoryStatusDetailText(result), card: buildInventoryStatusDetailCard({ ...result, historySnapshots }) };
   }
   if (result.status === 'ambiguous') return { text: formatInventoryStatusAmbiguousText(result) };
   return { text: formatInventoryStatusMissingText(result) };

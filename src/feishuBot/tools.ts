@@ -10,6 +10,7 @@ import { findAgentTool } from '../agentRuntime/toolRegistry.js';
 import { buildAgentLearningPlannerHints, summarizeAgentLearning } from '../agentLearning/store.js';
 import { loadClosedOrderRegistryContext, type ClosedOrderRegistryPathsInput } from '../closedOrderFeedback/runtime.js';
 import { queryInventoryStatus } from '../inventoryStatus/query.js';
+import { readInventorySameSkuSnapshotHistory } from '../inventoryStatus/history.js';
 import { readInventorySameSkuSnapshot } from '../inventoryStatus/store.js';
 import { openLinkRegistryGovernancePrompt } from '../linkRegistry/governanceSession.js';
 import { openLinkRegistryMaintenancePrompt } from '../linkRegistry/maintenanceSession.js';
@@ -588,7 +589,8 @@ async function handleInventoryStatusIntent(
     return { text: formatInventoryStatusOverviewText(result), card: buildInventoryStatusOverviewCard(result) };
   }
   if (result.status === 'detail') {
-    return { text: formatInventoryStatusDetailText(result), card: buildInventoryStatusDetailCard(result) };
+    const historySnapshots = await readInventorySameSkuSnapshotHistory(outputDir, runDate);
+    return { text: formatInventoryStatusDetailText(result), card: buildInventoryStatusDetailCard({ ...result, historySnapshots }) };
   }
   if (result.status === 'ambiguous') return { text: formatInventoryStatusAmbiguousText(result) };
   return { text: formatInventoryStatusMissingText(result) };
