@@ -836,6 +836,16 @@ export async function handleBotIntent(intent: BotIntent, outputDir = 'output', o
     return agentToolConfirmResponse('publicTraffic.runReport', {}, '明确飞书命令需要二次确认后才能生成并发送公域日报。');
   }
 
+  if (intent.type === 'run_inactive_refresh') {
+    return executeDirectAgentToolResponse(
+      'operations.inactiveRefreshPlan',
+      intent.date ? { date: intent.date } : {},
+      '明确飞书命令要求生成失活刷新执行计划；确认前不会复制或下架商品。',
+      outputDir,
+      options,
+    );
+  }
+
   if (intent.type === 'refresh_public_traffic_dashboard') {
     return agentToolConfirmResponse(
       'publicTraffic.refreshDashboard',

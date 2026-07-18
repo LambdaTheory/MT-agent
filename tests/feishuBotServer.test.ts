@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
@@ -478,7 +478,7 @@ describe('startFeishuBotServer', () => {
     }
   });
 
-  it('does not treat encrypt key as request signature secret for HTTP card callbacks', async () => {
+  it('rejects unsigned HTTP agent tool confirmations when no callback signature secret is configured', async () => {
     const server = startFeishuBotServer({ port: 0, appId: 'app', appSecret: 'secret', verificationToken: 'token', encryptKey: 'encrypt-key' });
     try {
       await new Promise<void>((resolve) => server.once('listening', resolve));
@@ -494,7 +494,37 @@ describe('startFeishuBotServer', () => {
         }),
       });
 
-      expect(response.status).toBe(200);
+      expect(response.status).toBe(401);
+      await expect(response.json()).resolves.toEqual({ error: 'missing callback signature secret' });
+    } finally {
+      server.close();
+    }
+  });
+
+  it('rejects unsigned HTTP inactive refresh execute-select callbacks when no callback signature secret is configured', async () => {
+    const server = startFeishuBotServer({ port: 0, appId: 'app', appSecret: 'secret', verificationToken: 'token' });
+    try {
+      await new Promise<void>((resolve) => server.once('listening', resolve));
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+
+      const response = await fetch(`http://127.0.0.1:${address.port}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          header: { event_type: 'card.action.trigger' },
+          event: {
+            context: { open_message_id: 'mid-forged-inactive-refresh' },
+            action: {
+              name: 'inactive_refresh_execute_submit',
+              behaviors: [{ type: 'callback', value: { action: 'inactive_refresh_execute_select', planRef: 'inactive_refresh_1_deadbeefdeadbeef', confirmationKey: 'key' } }],
+            },
+          },
+        }),
+      });
+
+      expect(response.status).toBe(401);
+      await expect(response.json()).resolves.toEqual({ error: 'missing callback signature secret' });
     } finally {
       server.close();
     }
@@ -533,7 +563,7 @@ describe('startFeishuBotServer', () => {
         header: { event_type: 'card.action.trigger' },
         event: { context: { open_message_id: 'mid-signed' }, action: { value: { action: 'unknown' } } },
       });
-      const timestamp = '1710000000';
+      const timestamp = String(Math.floor(Date.now() / 1000));
       const nonce = 'nonce';
 
       const response = await fetch(`http://127.0.0.1:${address.port}`, {
@@ -548,6 +578,36 @@ describe('startFeishuBotServer', () => {
       });
 
       expect(response.status).toBe(200);
+    } finally {
+      server.close();
+    }
+  });
+
+  it('rejects stale signed HTTP card callbacks when callback signature secret is configured', async () => {
+    const server = startFeishuBotServer({ port: 0, appId: 'app', appSecret: 'secret', verificationToken: 'token', callbackSignatureSecret: 'signature-secret' });
+    try {
+      await new Promise<void>((resolve) => server.once('listening', resolve));
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+      const body = JSON.stringify({
+        header: { event_type: 'card.action.trigger' },
+        event: { context: { open_message_id: 'mid-stale-signed' }, action: { value: { action: 'unknown' } } },
+      });
+      const timestamp = String(Math.floor(Date.now() / 1000) - 601);
+      const nonce = 'nonce-stale';
+      const response = await fetch(`http://127.0.0.1:${address.port}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Lark-Request-Timestamp': timestamp,
+          'X-Lark-Request-Nonce': nonce,
+          'X-Lark-Signature': buildFeishuSignature(timestamp, nonce, body, 'signature-secret'),
+        },
+        body,
+      });
+
+      expect(response.status).toBe(401);
+      await expect(response.json()).resolves.toEqual({ error: 'stale signature' });
     } finally {
       server.close();
     }
@@ -1688,6 +1748,73 @@ describe('startFeishuBotServer', () => {
       expect(rentalPriceClient.calls).toEqual(['875']);
       expect(replies).toHaveLength(1);
       expect(JSON.stringify(await second.json())).toContain('已经执行完成');
+    } finally {
+      server.close();
+    }
+  });
+
+  it('does not replay signed HTTP rental operation confirmations after restart', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-http-persistent-claim-'));
+    const replies: Array<{ messageId: string; text: string }> = [];
+    const rentalPriceClient = fakeRentalPriceClient();
+    const confirmValue = readButtonValue(buildRentalOperationConfirmCard({ action: 'copy', productId: '875' }, 'test reason'), 'rental_operation_confirm_submit');
+    const body = JSON.stringify({
+      header: { event_type: 'card.action.trigger' },
+      event: { context: { open_message_id: 'mid-http-rental-operation-replay' }, action: { value: confirmValue } },
+    });
+    const timestamp = String(Math.floor(Date.now() / 1000));
+    const nonce = 'nonce-rental-replay';
+    const headers = {
+      'Content-Type': 'application/json',
+      'X-Lark-Request-Timestamp': timestamp,
+      'X-Lark-Request-Nonce': nonce,
+      'X-Lark-Signature': buildFeishuSignature(timestamp, nonce, body, 'signature-secret'),
+    };
+
+    let server = startFeishuBotServer({
+      port: 0,
+      appId: 'app',
+      appSecret: 'secret',
+      outputDir,
+      callbackSignatureSecret: 'signature-secret',
+      rentalPriceClient,
+      replyText: async ({ messageId }, text) => {
+        replies.push({ messageId, text });
+        return { sent: true, channel: 'app' };
+      },
+    });
+    try {
+      await new Promise<void>((resolve) => server.once('listening', resolve));
+      const firstAddress = server.address();
+      if (!firstAddress || typeof firstAddress === 'string') throw new Error('Expected TCP server address');
+      const first = await fetch(`http://127.0.0.1:${firstAddress.port}`, { method: 'POST', headers, body });
+      expect(first.status).toBe(200);
+      await expect(readdir(join(outputDir, 'latest', 'card-action-claims'))).resolves.toHaveLength(1);
+    } finally {
+      server.close();
+    }
+
+    server = startFeishuBotServer({
+      port: 0,
+      appId: 'app',
+      appSecret: 'secret',
+      outputDir,
+      callbackSignatureSecret: 'signature-secret',
+      rentalPriceClient,
+      replyText: async ({ messageId }, text) => {
+        replies.push({ messageId, text });
+        return { sent: true, channel: 'app' };
+      },
+    });
+    try {
+      await new Promise<void>((resolve) => server.once('listening', resolve));
+      const secondAddress = server.address();
+      if (!secondAddress || typeof secondAddress === 'string') throw new Error('Expected TCP server address');
+      const replay = await fetch(`http://127.0.0.1:${secondAddress.port}`, { method: 'POST', headers, body });
+
+      expect(replay.status).toBe(200);
+      expect(rentalPriceClient.calls).toEqual(['875']);
+      expect(JSON.stringify(await replay.json())).toContain('已经执行完成');
     } finally {
       server.close();
     }

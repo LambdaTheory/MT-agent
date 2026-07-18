@@ -118,6 +118,10 @@ import { rentalPerSpecPriceApplyResponse, rentalPerSpecPricePlanResponse } from 
 import { rentalSpecDimApplyResponse, rentalSpecDimPlanResponse } from './rentalSpecDimHandlers.js';
 import { rentalBulkPriceApplyResponse, rentalBulkPricePlanResponse } from './rentalBulkPriceHandlers.js';
 import { buildRefreshActivityStrategyCard } from './refreshActivityCard.js';
+import { buildInactiveRefreshPlan } from '../operations/inactiveRefresh/planner.js';
+import { buildInactiveRefreshPlanCard } from '../operations/inactiveRefresh/card.js';
+import { executeInactiveRefreshPlan } from '../operations/inactiveRefresh/execute.js';
+import { saveInactiveRefreshPlan } from '../operations/inactiveRefresh/planStore.js';
 
 export interface AgentToolExecutionOptions {
   rentalPriceClient?: RentalPriceSkillClient;
@@ -2705,6 +2709,32 @@ function readSendTo(value: unknown): FeishuSendTo | undefined {
   throw new Error('sendTo must be personal, group, or both');
 }
 
+function readInactiveRefreshExecuteArgs(args: Record<string, unknown>): { planRef: string; confirmationKey: string } {
+  const { planRef, confirmationKey } = args;
+  if (typeof planRef !== 'string' || !planRef) throw new Error('planRef is required');
+  if (typeof confirmationKey !== 'string' || !confirmationKey) throw new Error('confirmationKey is required');
+  return { planRef, confirmationKey };
+}
+
+async function inactiveRefreshPlanResponse(outputDir: string, args: Record<string, unknown>, options: AgentToolExecutionOptions): Promise<BotResponse> {
+  const date = typeof args.date === 'string' ? args.date : (await findLatestReportContext(outputDir))?.context.date;
+  if (!date) return { text: '还没有找到公域日报上下文。', metadata: { toolName: 'operations.inactiveRefreshPlan', ok: false } };
+  const registryContext = await loadClosedOrderRegistryContext(options.closedOrderRegistryPaths);
+  const result = await buildInactiveRefreshPlan({ outputDir, date, registryEntries: registryContext.registry });
+  if (!result.plan) {
+    return {
+      text: [`失活刷新计划：${date}`, '没有可执行失活刷新项。', ...result.lines].join('\n'),
+      metadata: { toolName: 'operations.inactiveRefreshPlan', ok: true, executableCount: 0, summary: result.summary },
+    };
+  }
+  const planRef = await saveInactiveRefreshPlan(outputDir, result.plan);
+  return {
+    text: `失活刷新计划已生成：${date}，可执行 ${result.plan.executableCount} 条。`,
+    card: buildInactiveRefreshPlanCard({ plan: result.plan, planRef, summary: result.summary, lines: result.lines }),
+    metadata: { toolName: 'operations.inactiveRefreshPlan', ok: true, executableCount: result.plan.executableCount, planRef, summary: result.summary },
+  };
+}
+
 function currentShanghaiYear(): number {
   const year = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric' }).format(new Date());
   return Number(year);
@@ -3128,6 +3158,12 @@ export async function executeAgentToolRequest(
       return refreshActivityPlanResponse(outputDir, request.arguments, options, request.continuation);
     case 'operations.refreshActivityExecute':
       return refreshActivityExecuteResponse(outputDir, request.arguments, options.rentalPriceClient ?? createRentalPriceSkillClient(), options.ledgerContext);
+    case 'operations.inactiveRefreshPlan':
+      return inactiveRefreshPlanResponse(outputDir, request.arguments, options);
+    case 'operations.inactiveRefreshExecute': {
+      const { planRef, confirmationKey } = readInactiveRefreshExecuteArgs(request.arguments);
+      return executeInactiveRefreshPlan({ outputDir, planRef, confirmationKey, client: options.rentalPriceClient ?? createRentalPriceSkillClient(), ledgerContext: options.ledgerContext });
+    }
     case 'rental.daemonStatus':
     case 'rental.platformSearch':
     case 'rental.platformSearchAll':

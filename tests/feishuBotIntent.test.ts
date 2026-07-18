@@ -221,6 +221,8 @@ describe('parseAgentFirstBotIntent', () => {
     expect(parseAgentFirstBotIntent('运营学习历史')).toEqual({ type: 'operations_learning_history' });
     expect(parseAgentFirstBotIntent('差异化定价')).toEqual({ type: 'differential_pricing_card' });
     expect(parseAgentFirstBotIntent('取消差异化定价')).toEqual({ type: 'cancel_differential_pricing_card' });
+    expect(parseAgentFirstBotIntent('跑失活刷新')).toEqual({ type: 'run_inactive_refresh', date: undefined });
+    expect(parseAgentFirstBotIntent('跑失活刷新 2026-07-17')).toEqual({ type: 'run_inactive_refresh', date: '2026-07-17' });
   });
 
   it('keeps mixed read and write commands planner-first even when legacy parsing can match them', () => {
