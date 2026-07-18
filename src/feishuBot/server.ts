@@ -16,8 +16,9 @@ import { findLatestReportContext } from './reportStore.js';
 import { resolveQueryFullListText } from './queryFullListAction.js';
 import { buildIdLookupCard } from './idLookupCard.js';
 import { lookupProductId } from './idLookup.js';
-import { createFeishuMessageDispatcher } from './dispatcher.js';
+import { claimFeishuMessageId, createFeishuMessageDispatcher, MESSAGE_ID_CLAIMED_METADATA_KEY } from './dispatcher.js';
 import { buildRentalPricePreviewProgressCard, buildRentalPriceRollbackConfirmCard } from './agentToolExecutor.js';
+import { shouldSendRentalPricePreviewProgress } from './rentalPriceProgress.js';
 import {
   buildActivityCancelAssistanceCard,
   buildActivityCancelFailureCard,
@@ -51,11 +52,6 @@ import { createRentalPriceSkillClient, executeRentalOperationConfirmRequest, par
 import type { LlmIntentProposalProvider } from './llmIntentProposal.js';
 import type { BotIntent, BotResponse, FeishuBotDispatchResult, FeishuBotIncomingTextMessage, FeishuMessageEvent } from './types.js';
 import { handleUrlVerification, verifyFeishuSignature } from './verify.js';
-
-function shouldSendRentalPricePreviewProgress(text: string): boolean {
-  const compact = text.replace(/\s+/g, '');
-  return /(改价|pricePreview|pricechange|价格预览)/i.test(compact) && !/(回滚|rollback)/i.test(compact);
-}
 
 export interface FeishuBotServerConfig {
   port: number;
@@ -108,6 +104,18 @@ async function readBody(req: IncomingMessage): Promise<string> {
 function writeJson(res: ServerResponse, status: number, value: unknown): void {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
   res.end(JSON.stringify(value));
+}
+
+function formatErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function withClaimedMessageId(message: FeishuBotIncomingTextMessage): FeishuBotIncomingTextMessage {
+  return { ...message, metadata: { ...message.metadata, [MESSAGE_ID_CLAIMED_METADATA_KEY]: true } };
+}
+
+function logPostAckError(error: unknown, context: { messageId: string; phase: string }): void {
+  console.error(`飞书消息异步处理失败 ${context.messageId} ${context.phase}: ${formatErrorMessage(error)}`);
 }
 
 export function extractTextMessage(payload: FeishuMessageEvent): Omit<FeishuBotIncomingTextMessage, 'source'> | null {
@@ -966,7 +974,10 @@ export function startFeishuBotServer(config: FeishuBotServerConfig) {
     llmIntentProposalProvider: config.llmIntentProposalProvider,
     agentPlannerProvider: config.agentPlannerProvider,
   });
-  const dispatchMessage = config.dispatchMessage ?? dispatcher.dispatch;
+  const dispatchMessage = config.dispatchMessage ?? ((message: FeishuBotIncomingTextMessage) => dispatcher.dispatch({
+    ...message,
+    metadata: { ...message.metadata, [MESSAGE_ID_CLAIMED_METADATA_KEY]: true },
+  }));
 
   const server = createServer(async (req, res) => {
     if (req.method !== 'POST') return writeJson(res, 404, { error: 'not found' });
@@ -997,12 +1008,18 @@ export function startFeishuBotServer(config: FeishuBotServerConfig) {
 
     writeJson(res, 200, { ok: true });
 
+    if (!claimFeishuMessageId(textMessage.messageId)) return;
+
     const replyConfig = { appId: config.appId, appSecret: config.appSecret, messageId: textMessage.messageId };
     const replyCard = config.replyCard ?? replyFeishuMessageCard;
     const sentPreviewProgress = shouldSendRentalPricePreviewProgress(textMessage.text);
-    if (sentPreviewProgress) await replyCard(replyConfig, buildRentalPricePreviewProgressCard([], textMessage.text));
+    if (sentPreviewProgress) {
+      await replyCard(replyConfig, buildRentalPricePreviewProgressCard([], textMessage.text)).catch((error) => {
+        logPostAckError(error, { messageId: textMessage.messageId, phase: 'progress' });
+      });
+    }
 
-    const response = await dispatchMessage({ ...textMessage, source: 'http' });
+    const response = await dispatchMessage(withClaimedMessageId({ ...textMessage, source: 'http' }));
     if (!response.skipped) {
       if (response.progressCard && !sentPreviewProgress) await replyCard(replyConfig, response.progressCard);
       if (response.card) await replyCard(replyConfig, response.card);

@@ -10,6 +10,7 @@ import { createDailyMissionRun, saveDailyMissionRun, transitionDailyMissionRun }
 import { loadOperationLedgerJsonlEntries } from '../src/agentRuntime/operationLedger.js';
 import { agentExploreReason } from '../src/feishuBot/agentExploreAttribution.js';
 import type { AgentPlannerProvider } from '../src/agentRuntime/planner.js';
+import { createFeishuMessageDispatcher } from '../src/feishuBot/dispatcher.js';
 import { extractTextMessage, startFeishuBotServer } from '../src/feishuBot/server.js';
 import {
   buildActivityAutomationCard,
@@ -2541,6 +2542,162 @@ describe('startFeishuBotServer', () => {
       await dispatchCalled;
       await new Promise<void>((resolve) => setImmediate(resolve));
       expect(replies).toEqual([]);
+    } finally {
+      server.close();
+    }
+  });
+
+  it('does not send a second HTTP rental price progress card for a repeated message id', async () => {
+    const cards: Array<{ messageId: string; card: unknown }> = [];
+    const replies: Array<{ messageId: string; text: string }> = [];
+    const dispatched: FeishuBotIncomingTextMessage[] = [];
+    const server = startFeishuBotServer({
+      port: 0,
+      appId: 'app',
+      appSecret: 'secret',
+      dispatchMessage: async (message) => {
+        dispatched.push(message);
+        return { text: 'final', skipped: false };
+      },
+      replyCard: async ({ messageId }, card) => {
+        cards.push({ messageId, card });
+        return { sent: true, channel: 'app' };
+      },
+      replyText: async ({ messageId }, text) => {
+        replies.push({ messageId, text });
+        return { sent: true, channel: 'app' };
+      },
+    });
+    try {
+      await new Promise<void>((resolve) => server.once('listening', resolve));
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+      const body = { event: { message: { message_id: 'mid-http-rental-progress-duplicate', message_type: 'text', content: JSON.stringify({ text: '761改价-15元' }) } } };
+
+      const first = await fetch(`http://127.0.0.1:${address.port}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const second = await fetch(`http://127.0.0.1:${address.port}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      for (let attempt = 0; attempt < 100 && replies.length < 1; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+
+      expect(first.status).toBe(200);
+      expect(second.status).toBe(200);
+      expect(dispatched).toHaveLength(1);
+      expect(cards).toHaveLength(1);
+      expect(JSON.stringify(cards[0]?.card)).toContain('租赁改价预览处理中');
+      expect(replies).toEqual([{ messageId: 'mid-http-rental-progress-duplicate', text: 'final' }]);
+    } finally {
+      server.close();
+    }
+  });
+
+  it('does not send HTTP rental price progress before spec-keyword clarification', async () => {
+    const cards: Array<{ messageId: string; card: unknown }> = [];
+    const server = startFeishuBotServer({
+      port: 0,
+      appId: 'app',
+      appSecret: 'secret',
+      dispatchMessage: async () => ({
+        text: '需要澄清',
+        skipped: false,
+        card: { schema: '2.0', header: { title: { tag: 'plain_text', content: 'Agent 需要确认你的意图' }, template: 'blue' }, body: { elements: [] } },
+      }),
+      replyCard: async ({ messageId }, card) => {
+        cards.push({ messageId, card });
+        return { sent: true, channel: 'app' };
+      },
+    });
+    try {
+      await new Promise<void>((resolve) => server.once('listening', resolve));
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+
+      const response = await fetch(`http://127.0.0.1:${address.port}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ event: { message: { message_id: 'mid-http-spec-keyword-clarify', message_type: 'text', content: JSON.stringify({ text: '改价,sx70商品组的所有含有平日字样的规格,所有租期-5元' }) } } }),
+      });
+      for (let attempt = 0; attempt < 100 && cards.length < 1; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+
+      expect(response.status).toBe(200);
+      expect(cards).toHaveLength(1);
+      expect(JSON.stringify(cards)).toContain('Agent 需要确认你的意图');
+      expect(JSON.stringify(cards)).not.toContain('租赁改价预览处理中');
+    } finally {
+      server.close();
+    }
+  });
+
+  it('continues HTTP dispatch when the rental progress card fails to send', async () => {
+    const replies: Array<{ messageId: string; text: string }> = [];
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const server = startFeishuBotServer({
+      port: 0,
+      appId: 'app',
+      appSecret: 'secret',
+      dispatchMessage: async () => ({ text: 'final after progress failure', skipped: false }),
+      replyCard: async () => { throw new Error('progress card failed'); },
+      replyText: async ({ messageId }, text) => {
+        replies.push({ messageId, text });
+        return { sent: true, channel: 'app' };
+      },
+    });
+    try {
+      await new Promise<void>((resolve) => server.once('listening', resolve));
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+
+      const response = await fetch(`http://127.0.0.1:${address.port}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ event: { message: { message_id: 'mid-http-progress-fails', message_type: 'text', content: JSON.stringify({ text: '761改价-15元' }) } } }),
+      });
+      for (let attempt = 0; attempt < 100 && replies.length < 1; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+
+      expect(response.status).toBe(200);
+      expect(replies).toEqual([{ messageId: 'mid-http-progress-fails', text: 'final after progress failure' }]);
+    } finally {
+      logged.mockRestore();
+      server.close();
+    }
+  });
+
+  it('passes a pre-claimed HTTP message through a custom dispatcher delegate', async () => {
+    const replies: Array<{ messageId: string; text: string }> = [];
+    const delegate = createFeishuMessageDispatcher({
+      resolveIntent: () => ({ type: 'help' }),
+      handleIntent: async () => ({ text: 'delegated http reply' }),
+    });
+    const server = startFeishuBotServer({
+      port: 0,
+      appId: 'app',
+      appSecret: 'secret',
+      dispatchMessage: (message) => delegate.dispatch(message),
+      replyText: async ({ messageId }, text) => {
+        replies.push({ messageId, text });
+        return { sent: true, channel: 'app' };
+      },
+    });
+    try {
+      await new Promise<void>((resolve) => server.once('listening', resolve));
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+
+      const response = await fetch(`http://127.0.0.1:${address.port}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ event: { message: { message_id: 'mid-http-custom-delegate', message_type: 'text', content: JSON.stringify({ text: '帮助' }) } } }),
+      });
+      for (let attempt = 0; attempt < 100 && replies.length < 1; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+
+      expect(response.status).toBe(200);
+      expect(replies).toEqual([{ messageId: 'mid-http-custom-delegate', text: 'delegated http reply' }]);
     } finally {
       server.close();
     }
