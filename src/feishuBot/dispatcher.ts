@@ -33,6 +33,7 @@ export interface FeishuMessageDispatcher {
 
 export const MAX_SEEN_MESSAGE_IDS = 1000;
 const seenMessageIds = new Set<string>();
+export const MESSAGE_ID_CLAIMED_METADATA_KEY = 'messageIdClaimed';
 
 function rememberMessageId(messageId: string): void {
   seenMessageIds.add(messageId);
@@ -40,6 +41,12 @@ function rememberMessageId(messageId: string): void {
 
   const oldestMessageId = seenMessageIds.values().next().value;
   if (oldestMessageId !== undefined) seenMessageIds.delete(oldestMessageId);
+}
+
+export function claimFeishuMessageId(messageId: string): boolean {
+  if (seenMessageIds.has(messageId)) return false;
+  rememberMessageId(messageId);
+  return true;
 }
 
 function formatError(error: unknown): string {
@@ -180,8 +187,7 @@ export function createFeishuMessageDispatcher(config: FeishuMessageDispatcherCon
 
   return {
     async dispatch(message): Promise<FeishuBotDispatchResult> {
-      if (seenMessageIds.has(message.messageId)) return { text: '', skipped: true };
-      rememberMessageId(message.messageId);
+      if (message.metadata?.[MESSAGE_ID_CLAIMED_METADATA_KEY] !== true && !claimFeishuMessageId(message.messageId)) return { text: '', skipped: true };
       if (shouldSkipGroupMessage(message, config)) return { text: '', skipped: true };
 
       try {
