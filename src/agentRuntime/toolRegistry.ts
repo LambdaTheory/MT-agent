@@ -925,6 +925,17 @@ const rentalPriceSnapshotArgumentsSchema = {
   required: ['query'],
   additionalProperties: false,
 };
+const rentalSpecKeywordPricePlanArgumentsSchema = {
+  type: 'object',
+  properties: {
+    query: { type: 'string' },
+    keyword: { type: 'string' },
+    fields: { type: 'object', description: 'Absolute rental-period fields only, e.g. { rent1day: "99.00" }.' },
+    resolutionMode: { type: 'string', enum: ['single', 'sameSkuGroup'] },
+  },
+  required: ['query', 'keyword', 'fields'],
+  additionalProperties: false,
+};
 const newLinkBatchPlanArgumentsSchema = {
   type: 'object',
   properties: {
@@ -1567,6 +1578,14 @@ const agentTools: AgentToolDefinition[] = [
     risk: 'read',
     requiresConfirmation: false,
     inputSchema: rentalPriceSnapshotArgumentsSchema,
+  },
+  {
+    name: 'rental.specKeywordPricePlan',
+    description: '按商品名/端内ID/多个端内ID/同款组和规格关键词生成按规格租期改价审计预览；只接受绝对租金字段，如 fields { rent1day:"99.00" }；确认前不会改价，不能替代整链接 rental.pricePreview。',
+    risk: 'write',
+    requiresConfirmation: true,
+    inputSchema: rentalSpecKeywordPricePlanArgumentsSchema,
+    resultMetadataSchema: rentalPricePreviewResultMetadataSchema,
   },
   {
     name: 'rental.bulkPricePlan',

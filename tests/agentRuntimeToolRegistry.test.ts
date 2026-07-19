@@ -91,6 +91,7 @@ describe('agent runtime tool registry', () => {
       'rental.priceChange',
       'rental.pricePreview',
       'rental.priceSnapshot',
+      'rental.specKeywordPricePlan',
       'rental.bulkPricePlan',
       'rental.bulkPriceApply',
       'rental.newLinkBatchPlan',
@@ -393,6 +394,7 @@ describe('agent runtime tool registry', () => {
       'rental.priceChange',
       'rental.pricePreview',
       'rental.priceSnapshot',
+      'rental.specKeywordPricePlan',
       'rental.bulkPricePlan',
       'rental.newLinkBatchPlan',
       'rental.priceRollback',
@@ -656,6 +658,19 @@ describe('agent runtime tool registry', () => {
       required: ['query'],
       additionalProperties: false,
     });
+    expect(findAgentTool('rental.specKeywordPricePlan')).toMatchObject({ risk: 'write', requiresConfirmation: true });
+    expect(findAgentTool('rental.specKeywordPricePlan')?.inputSchema).toMatchObject({
+      properties: {
+        query: { type: 'string' },
+        keyword: { type: 'string' },
+        fields: { type: 'object' },
+        resolutionMode: { type: 'string', enum: ['single', 'sameSkuGroup'] },
+      },
+      required: ['query', 'keyword', 'fields'],
+      additionalProperties: false,
+    });
+    expect(validateAgentToolArguments('rental.specKeywordPricePlan', { query: 'ipod touch 6', keyword: '128g', fields: { rent1day: '99.00' }, resolutionMode: 'sameSkuGroup' })).toBe(true);
+    expect(validateAgentToolArguments('rental.specKeywordPricePlan', { query: 'ipod touch 6', keyword: '128g', fields: { rent1day: '99.00' }, extra: true })).toBe(false);
     expect(findAgentTool('rental.delistBatch')?.inputSchema).toMatchObject({
       properties: {
         productIds: { type: 'array' },
