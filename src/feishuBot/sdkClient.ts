@@ -22,6 +22,7 @@ import { agentExploreLedgerContextFromRequest } from './agentExploreAttribution.
 import { loadAgentToolConfirmRequestFromValue } from './agentToolConfirmStore.js';
 import { loadClarificationContext, verifyClarificationKey } from './clarificationStore.js';
 import { handleInactiveRefreshExecuteSelect } from './inactiveRefreshExecuteSelect.js';
+import { canApproveInactiveRefresh } from './inactiveRefreshAuthorization.js';
 import { handleRefreshActivityStrategySelect } from './refreshActivityStrategySelect.js';
 import { executeOrConfirmAgentToolRequest } from './tools.js';
 import {
@@ -150,6 +151,7 @@ export interface FeishuSdkBotConfig {
   closedOrderFetchImpl?: typeof fetch;
   closedOrderRegistryPaths?: ClosedOrderRegistryPathsInput;
   activityCancellationAssistant?: ActivityCancellationAssistant;
+  inactiveRefreshApproverIds?: readonly string[];
   sdk?: FeishuSdkModule;
 }
 
@@ -306,6 +308,15 @@ function extractCardAction(data: unknown): SdkCardAction | undefined {
 function extractCardReviewerId(data: unknown): string | undefined {
   if (!isSdkCardActionData(data)) return undefined;
   return readString(data.event?.operator?.open_id) ?? readString(data.event?.operator?.user_id);
+}
+
+function extractCardReviewerIds(data: unknown): string[] {
+  if (!isSdkCardActionData(data)) return [];
+  return [readString(data.event?.operator?.open_id), readString(data.event?.operator?.user_id)].filter((id): id is string => id !== undefined);
+}
+
+function inactiveRefreshUnauthorizedCard(): FeishuCardPayload {
+  return statusCard('失活刷新审批无权限', '你的飞书账号不在失活刷新审批白名单中，未执行任何复制或下架。', 'red');
 }
 
 function cardActionValue(data: unknown): Record<string, unknown> | undefined {
@@ -884,6 +895,9 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
             await replyText(client, messageId, 'Agent 操作确认参数无效，请重新发起。');
             return;
           }
+          if (request.toolName === 'operations.inactiveRefreshExecute' && !canApproveInactiveRefresh(extractCardReviewerIds(data), config.inactiveRefreshApproverIds)) {
+            return cardActionUpdateResponse(inactiveRefreshUnauthorizedCard());
+          }
           const claim = claimRentalAction(messageId, actionName, value);
           if (!claim.claimed) {
             return cardActionUpdateResponse(claimStatusCard('Agent 操作已处理', claim.claim));
@@ -955,6 +969,9 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
         }
 
         if (actionName === 'inactive_refresh_execute_select') {
+          if (!canApproveInactiveRefresh(extractCardReviewerIds(data), config.inactiveRefreshApproverIds)) {
+            return cardActionUpdateResponse(inactiveRefreshUnauthorizedCard());
+          }
           const claim = claimRentalAction(messageId, actionName, value);
           if (!claim.claimed) {
             return cardActionUpdateResponse(claimStatusCard('失活刷新计划已处理', claim.claim));

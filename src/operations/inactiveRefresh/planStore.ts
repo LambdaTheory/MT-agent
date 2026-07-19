@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { InactiveRefreshNewLinkItem, InactiveRefreshPlan } from './types.js';
+import type { InactiveRefreshGroupEvidence, InactiveRefreshLinkEvidence, InactiveRefreshMetricEvidence, InactiveRefreshNewLinkItem, InactiveRefreshPlan, InactiveRefreshPlanEvidence, InactiveRefreshSourceEvidence } from './types.js';
 
 interface StoredInactiveRefreshPlan {
   ref: string;
@@ -23,6 +23,112 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === 'string');
+}
+
+function readNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function parseMetricEvidence(value: unknown): InactiveRefreshMetricEvidence | null {
+  if (!isRecord(value)) return null;
+  const daysCovered = readNumber(value.daysCovered);
+  const dashboardDaysCovered = readNumber(value.dashboardDaysCovered);
+  const missingDashboardDays = readNumber(value.missingDashboardDays);
+  if (daysCovered === undefined || dashboardDaysCovered === undefined || missingDashboardDays === undefined) return null;
+  return {
+    daysCovered,
+    dashboardDaysCovered,
+    ...(readNumber(value.custodyDays) === undefined ? {} : { custodyDays: readNumber(value.custodyDays) }),
+    ...(readNumber(value.exposure14d) === undefined ? {} : { exposure14d: readNumber(value.exposure14d) }),
+    ...(readNumber(value.avgExposure14d) === undefined ? {} : { avgExposure14d: readNumber(value.avgExposure14d) }),
+    ...(readNumber(value.visits14d) === undefined ? {} : { visits14d: readNumber(value.visits14d) }),
+    ...(readNumber(value.visitRate) === undefined ? {} : { visitRate: readNumber(value.visitRate) }),
+    ...(readNumber(value.amount14d) === undefined ? {} : { amount14d: readNumber(value.amount14d) }),
+    ...(readNumber(value.dashboardAmount14d) === undefined ? {} : { dashboardAmount14d: readNumber(value.dashboardAmount14d) }),
+    missingDashboardDays,
+  };
+}
+
+function parseLinkEvidence(value: unknown): InactiveRefreshLinkEvidence | null {
+  if (!isRecord(value)) return null;
+  if (typeof value.productId !== 'string') return null;
+  if (typeof value.productName !== 'string') return null;
+  if (typeof value.groupId !== 'string') return null;
+  if (value.decision !== 'executable' && value.decision !== 'manual' && value.decision !== 'excluded') return null;
+  if (typeof value.reason !== 'string') return null;
+  const metrics = parseMetricEvidence(value.metrics);
+  if (!metrics) return null;
+  return {
+    productId: value.productId,
+    productName: value.productName,
+    groupId: value.groupId,
+    decision: value.decision,
+    reason: value.reason,
+    metrics,
+  };
+}
+
+function parseLinkEvidenceArray(value: unknown): InactiveRefreshLinkEvidence[] | null {
+  if (!Array.isArray(value)) return null;
+  const links: InactiveRefreshLinkEvidence[] = [];
+  for (const item of value) {
+    const parsed = parseLinkEvidence(item);
+    if (!parsed) return null;
+    links.push(parsed);
+  }
+  return links;
+}
+
+function parseSourceEvidence(value: unknown): InactiveRefreshSourceEvidence | null {
+  if (!isRecord(value)) return null;
+  if (typeof value.productId !== 'string') return null;
+  if (typeof value.productName !== 'string') return null;
+  if (typeof value.groupId !== 'string') return null;
+  if (typeof value.reason !== 'string') return null;
+  const metrics = parseMetricEvidence(value.metrics);
+  if (!metrics) return null;
+  return { productId: value.productId, productName: value.productName, groupId: value.groupId, reason: value.reason, metrics };
+}
+
+function parseGroupEvidence(value: unknown): InactiveRefreshGroupEvidence | null {
+  if (!isRecord(value)) return null;
+  if (typeof value.groupId !== 'string') return null;
+  const activeCount = readNumber(value.activeCount);
+  const limit = readNumber(value.limit);
+  if (activeCount === undefined || limit === undefined) return null;
+  if (!isStringArray(value.selectedProductIds)) return null;
+  if (!isStringArray(value.limitExcludedProductIds)) return null;
+  const source = value.source === undefined ? undefined : parseSourceEvidence(value.source);
+  if (value.source !== undefined && !source) return null;
+  return {
+    groupId: value.groupId,
+    activeCount,
+    limit,
+    selectedProductIds: value.selectedProductIds,
+    limitExcludedProductIds: value.limitExcludedProductIds,
+    ...(source ? { source } : {}),
+  };
+}
+
+function parseGroupEvidenceArray(value: unknown): InactiveRefreshGroupEvidence[] | null {
+  if (!Array.isArray(value)) return null;
+  const groups: InactiveRefreshGroupEvidence[] = [];
+  for (const item of value) {
+    const parsed = parseGroupEvidence(item);
+    if (!parsed) return null;
+    groups.push(parsed);
+  }
+  return groups;
+}
+
+function parsePlanEvidence(value: unknown): InactiveRefreshPlanEvidence | null {
+  if (!isRecord(value)) return null;
+  const executableLinks = parseLinkEvidenceArray(value.executableLinks);
+  const manualReviewLinks = parseLinkEvidenceArray(value.manualReviewLinks);
+  const excludedLinks = parseLinkEvidenceArray(value.excludedLinks);
+  const groups = parseGroupEvidenceArray(value.groups);
+  if (!executableLinks || !manualReviewLinks || !excludedLinks || !groups) return null;
+  return { executableLinks, manualReviewLinks, excludedLinks, groups };
 }
 
 function parseNewLinkItems(value: unknown): InactiveRefreshNewLinkItem[] | null {
@@ -54,12 +160,15 @@ function parseInactiveRefreshPlan(value: unknown): InactiveRefreshPlan | null {
   if (!newLinkItems) return null;
   if (!isStringArray(value.skippedGroups)) return null;
   if (typeof value.executableCount !== 'number' || !Number.isInteger(value.executableCount) || value.executableCount < 0) return null;
+  const evidence = value.evidence === undefined ? undefined : parsePlanEvidence(value.evidence);
+  if (value.evidence !== undefined && !evidence) return null;
   return {
     date: value.date,
     delistProductIds: value.delistProductIds,
     newLinkItems,
     skippedGroups: value.skippedGroups,
     executableCount: value.executableCount,
+    ...(evidence ? { evidence } : {}),
   };
 }
 

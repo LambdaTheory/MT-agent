@@ -26,6 +26,7 @@
     "daily-mission-run": "tsx src/cli/dailyMissionRun.ts",
     "daily-mission-audit": "tsx src/cli/dailyMissionAudit.ts",
     "daily-mission-daemon": "tsx src/cli/dailyMissionDaemon.ts",
+    "daily-mission:inactive-refresh-preview": "tsx src/cli/dailyMissionInactiveRefreshPreview.ts",
     "activity-automation:scout": "tsx src/cli/activityAutomation.ts",
     "capture-dashboard": "tsx src/cli/captureDashboard.ts",
     "capture-dashboard-batch": "tsx src/cli/captureDashboardBatch.ts",

@@ -2,6 +2,66 @@
   "version": 1,
   "entries": [
     {
+      "internalProductId": "1012",
+      "sameSkuGroupId": "fujifilm-instax-wide-400",
+      "categoryId": "camera",
+      "categoryName": "相机",
+      "productType": "instant-camera",
+      "shortName": "Wide 400",
+      "confidence": 0.95,
+      "updatedAt": "2026-07-16",
+      "reason": "approved_product_group_audit"
+    },
+    {
+      "internalProductId": "1013",
+      "sameSkuGroupId": "fujifilm-instax-wide-400",
+      "categoryId": "camera",
+      "categoryName": "相机",
+      "productType": "instant-camera",
+      "shortName": "Wide 400",
+      "confidence": 0.95,
+      "updatedAt": "2026-07-16",
+      "reason": "approved_product_group_audit"
+    },
+    {
+      "internalProductId": "1015",
+      "sameSkuGroupId": "fujifilm-instax-wide-400",
+      "categoryId": "camera",
+      "categoryName": "相机",
+      "productType": "instant-camera",
+      "shortName": "Wide 400",
+      "confidence": 0.95,
+      "updatedAt": "2026-07-16",
+      "reason": "approved_product_group_audit"
+    },
+    {
+      "internalProductId": "1030",
+      "sameSkuGroupId": "samsung-galaxy-s23-ultra",
+      "categoryId": "phone",
+      "categoryName": "手机",
+      "productType": "smartphone",
+      "shortName": "S23U",
+      "aliases": [
+        "S23U",
+        "s23u",
+        "Galaxy S23 Ultra"
+      ],
+      "confidence": 0.95,
+      "updatedAt": "2026-07-16",
+      "reason": "approved_product_group_audit"
+    },
+    {
+      "internalProductId": "1031",
+      "sameSkuGroupId": "vivo-x300-pro",
+      "categoryId": "phone",
+      "categoryName": "手机",
+      "productType": "smartphone",
+      "shortName": "vivo X300 Pro",
+      "confidence": 0.95,
+      "updatedAt": "2026-07-16",
+      "reason": "approved_product_group_audit"
+    },
+    {
       "internalProductId": "218",
       "sameSkuGroupId": "vivo-蔡司-2-35x增距镜-神器",
       "confidence": 0.95,
@@ -194,9 +254,13 @@
         "SX740"
       ],
       "confidence": 0.95,
-      "reason": "link_registry_group_review_approval",
+      "reason": "link_registry_maintenance_review",
       "maintainer": "group_review_csv",
-      "updatedAt": "2026-06-26"
+      "updatedAt": "2026-07-18",
+      "sameSkuGroupId": "canon-sx740",
+      "categoryId": "camera",
+      "categoryName": "相机",
+      "productType": "camera"
     },
     {
       "internalProductId": "298",
@@ -285,6 +349,28 @@
       "reason": "link_registry_merge_review_approval",
       "maintainer": "merge_review_csv",
       "updatedAt": "2026-06-26"
+    },
+    {
+      "internalProductId": "362",
+      "sameSkuGroupId": "vivo-x200-ultra",
+      "categoryId": "phone",
+      "categoryName": "手机",
+      "productType": "smartphone",
+      "shortName": "x200 u",
+      "confidence": 0.95,
+      "updatedAt": "2026-07-18",
+      "reason": "link_registry_maintenance_review"
+    },
+    {
+      "internalProductId": "365",
+      "sameSkuGroupId": "dji-pocket-3",
+      "categoryId": "camera",
+      "categoryName": "相机",
+      "productType": "gimbal-camera",
+      "shortName": "Pocket 3",
+      "confidence": 0.95,
+      "updatedAt": "2026-07-18",
+      "reason": "link_registry_maintenance_review"
     },
     {
       "internalProductId": "370",
@@ -582,16 +668,19 @@
     },
     {
       "internalProductId": "455",
-      "shortName": "wide 400",
+      "shortName": "Wide 400",
       "aliases": [
         "wide 400",
         "wide400"
       ],
       "sameSkuGroupId": "fujifilm-instax-wide-400",
       "confidence": 0.95,
-      "reason": "link_registry_group_review_approval",
+      "reason": "link_registry_maintenance_review",
       "maintainer": "group_review_csv",
-      "updatedAt": "2026-06-26"
+      "updatedAt": "2026-07-18",
+      "categoryId": "camera",
+      "categoryName": "相机",
+      "productType": "instant-camera"
     },
     {
       "internalProductId": "461",
@@ -1771,7 +1860,7 @@
       "confidence": 0.95,
       "reason": "link_registry_maintenance_review",
       "maintainer": "codex",
-      "updatedAt": "2026-07-01"
+      "updatedAt": "2026-07-18"
     },
     {
       "internalProductId": "762",
@@ -1803,7 +1892,7 @@
       "confidence": 0.95,
       "reason": "link_registry_maintenance_review",
       "maintainer": "codex",
-      "updatedAt": "2026-07-01"
+      "updatedAt": "2026-07-18"
     },
     {
       "internalProductId": "764",
@@ -2204,6 +2293,7 @@
     },
     {
       "internalProductId": "857",
+      "sameSkuGroupId": "vivo-x300-ultra",
       "shortName": "x300 u",
       "aliases": [
         "x 300u",
@@ -2717,66 +2807,6 @@
       "categoryName": "相机",
       "productType": "instant-camera",
       "shortName": "Wide 400",
-      "confidence": 0.95,
-      "updatedAt": "2026-07-16",
-      "reason": "approved_product_group_audit"
-    },
-    {
-      "internalProductId": "1012",
-      "sameSkuGroupId": "fujifilm-instax-wide-400",
-      "categoryId": "camera",
-      "categoryName": "相机",
-      "productType": "instant-camera",
-      "shortName": "Wide 400",
-      "confidence": 0.95,
-      "updatedAt": "2026-07-16",
-      "reason": "approved_product_group_audit"
-    },
-    {
-      "internalProductId": "1013",
-      "sameSkuGroupId": "fujifilm-instax-wide-400",
-      "categoryId": "camera",
-      "categoryName": "相机",
-      "productType": "instant-camera",
-      "shortName": "Wide 400",
-      "confidence": 0.95,
-      "updatedAt": "2026-07-16",
-      "reason": "approved_product_group_audit"
-    },
-    {
-      "internalProductId": "1015",
-      "sameSkuGroupId": "fujifilm-instax-wide-400",
-      "categoryId": "camera",
-      "categoryName": "相机",
-      "productType": "instant-camera",
-      "shortName": "Wide 400",
-      "confidence": 0.95,
-      "updatedAt": "2026-07-16",
-      "reason": "approved_product_group_audit"
-    },
-    {
-      "internalProductId": "1030",
-      "sameSkuGroupId": "samsung-galaxy-s23-ultra",
-      "categoryId": "phone",
-      "categoryName": "手机",
-      "productType": "smartphone",
-      "shortName": "S23U",
-      "aliases": [
-        "S23U",
-        "s23u",
-        "Galaxy S23 Ultra"
-      ],
-      "confidence": 0.95,
-      "updatedAt": "2026-07-16",
-      "reason": "approved_product_group_audit"
-    },
-    {
-      "internalProductId": "1031",
-      "sameSkuGroupId": "vivo-x300-pro",
-      "categoryId": "phone",
-      "categoryName": "手机",
-      "productType": "smartphone",
-      "shortName": "vivo X300 Pro",
       "confidence": 0.95,
       "updatedAt": "2026-07-16",
       "reason": "approved_product_group_audit"

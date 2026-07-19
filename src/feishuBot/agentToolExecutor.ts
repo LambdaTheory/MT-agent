@@ -102,7 +102,7 @@ import { executeRentalImageTool } from './rentalImageHandlers.js';
 import { executeRentalMirrorTool } from './rentalMirrorHandlers.js';
 import { executeRentalVasTool } from './rentalVasHandlers.js';
 import { findReadOnlyTool } from './readOnlyToolRegistry.js';
-import { inferPriceAdjustmentAmountFromText, readPriceAdjustmentAmountArgument } from './priceAdjustment.js';
+import { hasExplicitRentAdjustmentScope, inferPriceAdjustmentAmountFromText, readPriceAdjustmentAmountArgument } from './priceAdjustment.js';
 import {
   hasPriceAdjustmentConflict,
   INVALID_DISCOUNT_ARGUMENT_MESSAGE,
@@ -1238,6 +1238,31 @@ function buildPriceApplyConfirmDisplayElements(items: PriceApplyPreviewItem[]): 
   ];
 }
 
+function buildRentalPricePreviewTerminalCard(input: { title: string; text: string; template?: 'orange' | 'red' | 'green' }): FeishuCardPayload {
+  return {
+    schema: '2.0',
+    config: { wide_screen_mode: true },
+    header: { title: { tag: 'plain_text', content: input.title }, template: input.template ?? 'orange' },
+    body: {
+      elements: [cardMarkdown(input.text)],
+    },
+  };
+}
+
+function ambiguousAmountScopeMessage(productIds: string[], reason: string): string {
+  return [
+    '改价范围不明确，已阻断，未读取/未写入商品。',
+    '',
+    `原始指令：${reason}`,
+    `端内ID：${productIds.join('、')}`,
+    '',
+    '请明确你要改哪一类租金：',
+    `- 所有租期都减 15 元：${productIds[0]}所有租期改价-15元`,
+    `- 只改指定租期：${productIds[0]}改价1天88 2天188`,
+    '- 多规格商品请明确规格，避免把同一个价格广播到所有规格。',
+  ].join('\n');
+}
+
 function executionVerifyStatus(result: RentalPriceExecutionResult): string {
   const joined = result.lines.join('\n').toLowerCase();
   if (/verify:\s*ok|fields:\s*matched/.test(joined)) return '已回读匹配';
@@ -1501,6 +1526,15 @@ async function rentalPricePreviewResponse(
   if (!hasExplicitFields && adjustmentAmount === null && discount === null) {
     return { text: '改价预览参数无效：需要提供 fields、discount 折扣倍数，或 adjustmentAmount 金额增减（例如 -1 表示每个租金字段减 1 元）。', metadata: { toolName: 'rental.pricePreview', ok: false, productIds } };
   }
+  if (!hasExplicitFields && adjustmentAmount !== null && productIds.length === 1 && !hasExplicitRentAdjustmentScope(reason)) {
+    const text = ambiguousAmountScopeMessage(productIds, reason);
+    return {
+      text,
+      progressCard,
+      card: buildRentalPricePreviewTerminalCard({ title: '租赁改价需要确认范围', text }),
+      metadata: { toolName: 'rental.pricePreview', ok: false, productIds, needsClarification: true },
+    };
+  }
   const scope = hasExplicitFields ? undefined : readPriceChangeScope(priceArgs.scope);
 
   const blocked: string[] = [];
@@ -1562,6 +1596,7 @@ async function rentalPricePreviewResponse(
     return {
       text,
       progressCard,
+      card: buildRentalPricePreviewTerminalCard({ title: '租赁改价预览已阻断', text }),
       metadata: { toolName: 'rental.pricePreview', ok: false, productIds, previewCount: readyItems.length },
     };
   }
