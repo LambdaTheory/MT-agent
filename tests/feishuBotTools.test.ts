@@ -975,6 +975,21 @@ async function rewriteInventoryStatusSnapshot(
   await writeFile(path, JSON.stringify(snapshot), 'utf8');
 }
 
+async function writeInventoryStatusHistorySnapshot(outputDir: string, date: string, pocketSevenDayAmount: number): Promise<void> {
+  const sourcePath = join(outputDir, '2026-06-24', '同款组经营快照_2026-06-24.json');
+  const snapshot = JSON.parse(await readFile(sourcePath, 'utf8')) as Record<string, unknown>;
+  const groups = snapshot.groups as Array<Record<string, unknown>>;
+  const pocket = groups.find((group) => group.sameSkuGroupId === 'dji-pocket-3')!;
+  const periods = pocket.periods as Record<string, Record<string, unknown>>;
+  periods['7d'] = { ...periods['7d'], amount: pocketSevenDayAmount };
+  snapshot.date = date;
+  snapshot.sourceReportDate = date;
+  snapshot.generationId = `inventory-status-generation-${date}`;
+  const dir = join(outputDir, date);
+  await mkdir(dir, { recursive: true });
+  await writeFile(join(dir, `同款组经营快照_${date}.json`), JSON.stringify(snapshot), 'utf8');
+}
+
 async function writeNewLinkWorkflowContext(): Promise<{
   outputDir: string;
   registryPaths: TestRegistryPaths;
@@ -1258,6 +1273,8 @@ describe('handleBotIntent', () => {
   it('returns an inventory status detail card for a unique alias query', async () => {
     const rootDir = await mkdtemp(join(tmpdir(), 'mt-agent-inventory-status-detail-'));
     const fixtures = await writeInventoryStatusFixtures(rootDir);
+    await writeInventoryStatusHistorySnapshot(fixtures.outputDir, '2026-06-10', 400);
+    await writeInventoryStatusHistorySnapshot(fixtures.outputDir, '2026-06-17', 500);
 
     const response = await handleBotIntent(
       { type: 'inventory_status_query', query: 'pocket3' },
@@ -1272,6 +1289,11 @@ describe('handleBotIntent', () => {
     expect(cardText).toContain('DJI Pocket 3');
     expect(cardText).toContain('主力链接');
     expect(cardText).toContain('1日');
+    expect(cardText).toContain('7天贡献趋势');
+    expect(cardText).toContain('06-10');
+    expect(cardText).toContain('06-17');
+    expect(cardText).toContain('06-24');
+    expect(cardText).not.toContain('全盘贡献窗口对比');
   });
 
   it('returns missing text and no card when the inventory status snapshot generation is stale', async () => {

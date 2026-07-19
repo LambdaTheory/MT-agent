@@ -197,6 +197,7 @@ export function parseExactBotIntent(input: string): BotIntent {
   const canonicalText = stripTrailingHarmlessPunctuation(text);
   if (!canonicalText) return { type: 'help' };
   if (/^(帮助|help|\/help)$/i.test(canonicalText)) return { type: 'help' };
+  if (/^(跑|生成|执行).*(失活刷新|失活链接刷新)/.test(canonicalText)) return { type: 'run_inactive_refresh', ...(parseDateHint(canonicalText)?.date ? { date: parseDateHint(canonicalText)!.date } : {}) };
   if (/^(跑|生成|执行).*(公域)?日报/.test(canonicalText)) return { type: 'run_public_traffic_report', sendTo: sendTo(canonicalText) };
   if (/^(抓取|补抓|刷新|更新).*(访问页|后链路|访问数据)/.test(canonicalText)) {
     const date = parseDashboardRefreshDateHint(canonicalText)?.date;
@@ -310,6 +311,7 @@ function isAgentFirstLocalDirectIntent(intent: BotIntent): boolean {
     case 'inventory_status_overview':
     case 'differential_pricing_card':
     case 'cancel_differential_pricing_card':
+    case 'run_inactive_refresh':
       return true;
     default:
       return false;

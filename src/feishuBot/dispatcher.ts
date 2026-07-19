@@ -125,6 +125,8 @@ function canonicalizeIntent(intent: BotIntent): BotIntent {
       return { type: intent.type, ...(intent.date ? { date: intent.date } : {}) };
     case 'run_public_traffic_report':
       return { type: intent.type, sendTo: intent.sendTo };
+    case 'run_inactive_refresh':
+      return { type: intent.type, ...(intent.date ? { date: intent.date } : {}) };
     case 'refresh_public_traffic_dashboard':
       return { type: intent.type, ...(intent.date ? { date: intent.date } : {}), sendTo: intent.sendTo };
     case 'resend_latest_report':

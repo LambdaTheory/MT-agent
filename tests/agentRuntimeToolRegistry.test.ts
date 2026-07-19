@@ -51,6 +51,8 @@ describe('agent runtime tool registry', () => {
       'publicTraffic.refreshDashboard',
       'operations.refreshActivityPlan',
       'operations.refreshActivityExecute',
+      'operations.inactiveRefreshPlan',
+      'operations.inactiveRefreshExecute',
       'closedOrder.syncFeedback',
       'closedOrder.runObservationReport',
       'rental.daemonStatus',
@@ -320,6 +322,10 @@ describe('agent runtime tool registry', () => {
     });
   });
 
+  it('accepts explicit YYYY-MM-DD dates for inactive refresh planning', () => {
+    expect(validateAgentToolArguments('operations.inactiveRefreshPlan', { date: '2026-07-17' })).toBe(true);
+  });
+
   it('exposes fine-grained rental operation tools to the planner', () => {
     const plannerToolNames = listAgentPlannerTools().map((tool) => tool.name);
 
@@ -365,6 +371,7 @@ describe('agent runtime tool registry', () => {
       'publicTraffic.pushLatestReportToGroup',
       'publicTraffic.refreshDashboard',
       'operations.refreshActivityPlan',
+      'operations.inactiveRefreshPlan',
       'closedOrder.syncFeedback',
       'closedOrder.runObservationReport',
       'rental.daemonStatus',

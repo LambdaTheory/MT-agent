@@ -471,6 +471,34 @@ describe('dashboard refresh SDK card delivery contract', () => {
 });
 
 describe('createFeishuSdkBot card.action.trigger', () => {
+  it('returns a replacement status card when cancelling an inactive refresh plan', async () => {
+    const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
+    const sent: unknown[] = [];
+    const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', outputDir: 'output', sdk: fakeSdk(sent, registered) });
+
+    bot.start();
+    const event = {
+      event: {
+        context: { open_message_id: 'om-inactive-refresh-cancel' },
+        operator: { open_id: 'ou_cancel' },
+        action: {
+          tag: 'button',
+          name: 'inactive_refresh_execute_cancel_submit',
+          behaviors: [{ type: 'callback', value: { action: 'inactive_refresh_execute_cancel', planRef: 'inactive_refresh_1_deadbeefdeadbeef', confirmationKey: 'key' } }],
+        },
+      },
+    };
+
+    const first = await registered['card.action.trigger'](event);
+    const second = await registered['card.action.trigger'](event);
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({ kind: 'patch', request: { path: { message_id: 'om-inactive-refresh-cancel' } } });
+    expect(JSON.stringify((first as any).card.data)).toContain('失活刷新计划已取消');
+    expect(JSON.stringify((first as any).card.data)).toContain('不会复制或下架商品');
+    expect(JSON.stringify((second as any).card.data)).toContain('已经取消');
+  });
+
   it('returns a replacement status card when cancelling an Agent clarification and suppresses duplicate text replies', async () => {
     const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
     const sent: unknown[] = [];

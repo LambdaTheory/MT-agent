@@ -21,6 +21,7 @@ export type InventoryStatusDetailResult = {
   sameSkuGroupId: string;
   snapshot: InventoryStatusSnapshot;
   group: InventoryStatusGroupSnapshot;
+  historySnapshots?: InventoryStatusSnapshot[];
 };
 
 export type InventoryStatusAmbiguousResult = {

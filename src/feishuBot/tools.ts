@@ -10,6 +10,7 @@ import { findAgentTool } from '../agentRuntime/toolRegistry.js';
 import { buildAgentLearningPlannerHints, summarizeAgentLearning } from '../agentLearning/store.js';
 import { loadClosedOrderRegistryContext, type ClosedOrderRegistryPathsInput } from '../closedOrderFeedback/runtime.js';
 import { queryInventoryStatus } from '../inventoryStatus/query.js';
+import { readInventorySameSkuSnapshotHistory } from '../inventoryStatus/history.js';
 import { readInventorySameSkuSnapshot } from '../inventoryStatus/store.js';
 import { openLinkRegistryGovernancePrompt } from '../linkRegistry/governanceSession.js';
 import { openLinkRegistryMaintenancePrompt } from '../linkRegistry/maintenanceSession.js';
@@ -588,7 +589,8 @@ async function handleInventoryStatusIntent(
     return { text: formatInventoryStatusOverviewText(result), card: buildInventoryStatusOverviewCard(result) };
   }
   if (result.status === 'detail') {
-    return { text: formatInventoryStatusDetailText(result), card: buildInventoryStatusDetailCard(result) };
+    const historySnapshots = await readInventorySameSkuSnapshotHistory(outputDir, runDate);
+    return { text: formatInventoryStatusDetailText(result), card: buildInventoryStatusDetailCard({ ...result, historySnapshots }) };
   }
   if (result.status === 'ambiguous') return { text: formatInventoryStatusAmbiguousText(result) };
   return { text: formatInventoryStatusMissingText(result) };
@@ -834,6 +836,16 @@ export async function handleBotIntent(intent: BotIntent, outputDir = 'output', o
 
   if (intent.type === 'run_public_traffic_report') {
     return agentToolConfirmResponse('publicTraffic.runReport', {}, '明确飞书命令需要二次确认后才能生成并发送公域日报。');
+  }
+
+  if (intent.type === 'run_inactive_refresh') {
+    return executeDirectAgentToolResponse(
+      'operations.inactiveRefreshPlan',
+      intent.date ? { date: intent.date } : {},
+      '明确飞书命令要求生成失活刷新执行计划；确认前不会复制或下架商品。',
+      outputDir,
+      options,
+    );
   }
 
   if (intent.type === 'refresh_public_traffic_dashboard') {
