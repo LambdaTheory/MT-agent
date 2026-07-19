@@ -20,7 +20,7 @@ import { resolveQueryFullListText } from './queryFullListAction.js';
 import { buildIdLookupCard } from './idLookupCard.js';
 import { lookupProductId } from './idLookup.js';
 import { claimFeishuMessageId, createFeishuMessageDispatcher, MESSAGE_ID_CLAIMED_METADATA_KEY } from './dispatcher.js';
-import { buildRentalPricePreviewProgressCard, buildRentalPriceRollbackConfirmCard } from './agentToolExecutor.js';
+import { buildRentalPriceCompletionAcknowledgedCard, buildRentalPricePreviewProgressCard, buildRentalPriceRollbackConfirmCard, buildRentalPriceRollbackSelectCard, selectedRollbackValue } from './agentToolExecutor.js';
 import { shouldSendRentalPricePreviewProgress } from './rentalPriceProgress.js';
 import {
   buildActivityCancelAssistanceCard,
@@ -174,6 +174,10 @@ function expectedActionForButtonName(name: string | undefined): string | undefin
     new_link_batch_cancel_form: 'new_link_batch_cancel',
     rental_price_confirm_submit: 'rental_price_confirm',
     rental_price_cancel_submit: 'rental_price_cancel',
+    rental_price_acknowledge_completion_submit: 'rental_price_acknowledge_completion',
+    rental_price_select_rollback_submit: 'rental_price_select_rollback',
+    rental_price_prepare_rollback_all_submit: 'rental_price_prepare_rollback_all',
+    rental_price_prepare_selected_rollback_submit: 'rental_price_prepare_selected_rollback',
     rental_operation_confirm_submit: 'rental_operation_confirm',
     rental_operation_cancel_submit: 'rental_operation_cancel',
     activity_automation_confirm_submit: 'activity_automation_confirm',
@@ -761,6 +765,34 @@ async function handleCardActionTrigger(
     if (!card) return statusCard('改价回滚确认异常', '回滚确认参数无效，请从执行完成卡重新发起。', 'red');
     await replyCard(replyConfig, card);
     return;
+  }
+
+  if (actionName === 'rental_price_prepare_rollback_all') {
+    const card = await buildRentalPriceRollbackConfirmCard(config.outputDir ?? 'output', value);
+    if (!card) return statusCard('改价回滚确认异常', '回滚确认参数无效，请从执行完成卡重新发起。', 'red');
+    await replyCard(replyConfig, card);
+    return;
+  }
+
+  if (actionName === 'rental_price_select_rollback') {
+    const card = await buildRentalPriceRollbackSelectCard(config.outputDir ?? 'output', value);
+    if (!card) return statusCard('选择回滚异常', '选择回滚参数无效，请从执行完成卡重新发起。', 'red');
+    await replyCard(replyConfig, card);
+    return;
+  }
+
+  if (actionName === 'rental_price_prepare_selected_rollback') {
+    const selectedValue = await selectedRollbackValue(config.outputDir ?? 'output', value, readActionForm(payload.event?.action));
+    const card = selectedValue ? await buildRentalPriceRollbackConfirmCard(config.outputDir ?? 'output', selectedValue) : null;
+    if (!card) return statusCard('选择回滚异常', '请选择至少一个有效的回滚任务。', 'red');
+    await replyCard(replyConfig, card);
+    return;
+  }
+
+  if (actionName === 'rental_price_acknowledge_completion') {
+    const card = buildRentalPriceCompletionAcknowledgedCard(value, actorId);
+    if (!card) return statusCard('认可完成异常', '认可完成参数无效，请从执行完成卡重新发起。', 'red');
+    return card;
   }
 
   if (actionName === 'agent_tool_cancel') {

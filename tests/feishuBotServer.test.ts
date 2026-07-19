@@ -2296,8 +2296,10 @@ describe('startFeishuBotServer', () => {
       expect(cards).toHaveLength(1);
       const cardText = JSON.stringify(cards[0].card);
       expect(cardText).toContain('租赁改价执行完成');
-      expect(cardText).toContain('生成回滚确认卡');
-      expect(cardText).toContain('rental_price_prepare_rollback');
+      expect(cardText).toContain('认可本次操作完成');
+      expect(cardText).toContain('选择回滚链接');
+      expect(cardText).toContain('回滚本次全部');
+      expect(cardText).toContain('rental_price_prepare_rollback_all');
     } finally {
       server.close();
     }
