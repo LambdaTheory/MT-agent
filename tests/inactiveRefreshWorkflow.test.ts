@@ -9,7 +9,7 @@ import { parseBotIntent } from '../src/feishuBot/intent.js';
 import { handleBotIntent } from '../src/feishuBot/tools.js';
 import { handleInactiveRefreshExecuteSelect } from '../src/feishuBot/inactiveRefreshExecuteSelect.js';
 import type { RentalPriceSkillClient } from '../src/feishuBot/rentalPrice.js';
-import { inactiveRefreshPlanConfirmationKey, saveInactiveRefreshPlan, type InactiveRefreshPlan } from '../src/operations/inactiveRefresh/planStore.js';
+import { inactiveRefreshPlanConfirmationKey, loadInactiveRefreshPlan, saveInactiveRefreshPlan, type InactiveRefreshPlan } from '../src/operations/inactiveRefresh/planStore.js';
 
 type CardElement = {
   name?: string;
@@ -20,7 +20,15 @@ type CardElement = {
 function collectElements(value: unknown): CardElement[] {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return [];
   const element = value as CardElement;
-  return [element, ...(element.elements ?? []).flatMap((child) => collectElements(child))];
+  return [element, ...Object.values(element).flatMap((child) => {
+    if (Array.isArray(child)) return child.flatMap((item) => collectElements(item));
+    return collectElements(child);
+  })];
+}
+
+function collectElementsByTag(card: unknown, tag: string): CardElement[] {
+  const body = (card as { body?: { elements?: unknown[] } }).body;
+  return (body?.elements ?? []).flatMap((element) => collectElements(element)).filter((element) => (element as { tag?: string }).tag === tag);
 }
 
 function readButtonValue(card: unknown, buttonName: string): unknown {
@@ -129,11 +137,54 @@ describe('inactive refresh executable workflow', () => {
     const cardJson = JSON.stringify(response.card);
     const approveValue = readButtonValue(response.card, 'inactive_refresh_execute_submit');
     const cancelValue = readButtonValue(response.card, 'inactive_refresh_execute_cancel_submit');
+    const chart = collectElementsByTag(response.card, 'chart')[0] as { element_id?: string; chart_spec?: { type?: string; title?: { text?: string }; valueField?: string; categoryField?: string } } | undefined;
+    const panels = collectElementsByTag(response.card, 'collapsible_panel') as Array<{ element_id?: string; expanded?: boolean }>;
     const planFiles = await readdir(join(outputDir, 'latest', 'inactive-refresh-plans'));
 
     expect(response.metadata).toMatchObject({ toolName: 'operations.inactiveRefreshPlan', executableCount: 1 });
     expect(response.card).toBeDefined();
     expect(cardJson).toContain('失活刷新执行计划');
+    expect(cardJson).toContain('审批摘要');
+    expect(cardJson).toContain('本次只审批下架补链 **1** 条');
+    expect(cardJson).toContain('修改 Diff 摘要');
+    expect(chart).toMatchObject({
+      element_id: 'inactive_refresh_group_modification_ratio_chart',
+      chart_spec: { type: 'pie', valueField: 'value', categoryField: 'label' },
+    });
+    expect(chart?.chart_spec?.title?.text).toContain('本次下架补链商品占比（共 1 条）');
+    expect(cardJson).toContain('dji-pocket-3');
+    expect(panels).toHaveLength(4);
+    expect(panels.every((panel) => panel.expanded === false)).toBe(true);
+    expect(cardJson).toContain('展开：补链商品组');
+    expect(cardJson).toContain('展开：判定证据');
+    expect(cardJson).toContain('展开：数据异常/未执行原因');
+    expect(cardJson).toContain('展开：固定规则与审计口径');
+    expect(cardJson).toContain('可执行链接判定');
+    expect(cardJson).toContain('901 Pocket 3');
+    expect(cardJson).toContain('上线 45天');
+    expect(cardJson).toContain('曝光 280');
+    expect(cardJson).toContain('日均曝光 20');
+    expect(cardJson).toContain('访问 14');
+    expect(cardJson).toContain('金额 0');
+    expect(cardJson).toContain('上线满 14 天');
+    expect(cardJson).toContain('补链来源');
+    expect(cardJson).toContain('安全源 900 Pocket 3');
+    expect(cardJson).toContain('金额 7000');
+    expect(cardJson).toContain('同款组上限');
+    expect(cardJson).toContain('active 3');
+    expect(cardJson).toContain('本组上限 1');
+    expect(cardJson).toContain('排除样例');
+    expect(cardJson).toContain('902 Pocket 3');
+    expect(cardJson).toContain('不满 14 天新链保护');
+    expect(cardJson).not.toContain('daily_mission_inactive_refresh_preview_noop');
+    expect(cardJson).not.toContain('批准可执行项');
+    expect(cardJson).not.toContain('仅低风险');
+    expect(cardJson).not.toContain('转人工复核');
+    expect(cardJson).not.toContain('拒绝本次计划');
+    expect(cardJson).not.toContain('Daily Mission');
+    expect(cardJson).not.toContain('Run ');
+    expect(Object.keys(approveValue as Record<string, unknown>).sort()).toEqual(['action', 'confirmationKey', 'planRef']);
+    expect(Object.keys(cancelValue as Record<string, unknown>).sort()).toEqual(['action', 'confirmationKey', 'planRef']);
     expect(JSON.stringify(approveValue)).toContain('inactive_refresh_execute_select');
     expect(JSON.stringify(cancelValue)).toContain('inactive_refresh_execute_cancel');
     expect(JSON.stringify(approveValue)).not.toContain('delistProductIds');
@@ -206,6 +257,55 @@ describe('inactive refresh executable workflow', () => {
       toolName: 'operations.inactiveRefreshExecute',
       arguments: { planRef, confirmationKey: inactiveRefreshPlanConfirmationKey(plan) },
     });
+  });
+
+  it('keeps evidence-bearing plan keys valid after persistence', async () => {
+    const { outputDir } = await writeInactiveRefreshFixtures();
+    const plan: InactiveRefreshPlan = {
+      date: '2026-07-17',
+      delistProductIds: ['901'],
+      newLinkItems: [{ keyword: 'Pocket 3', count: 1, sourceProductId: '900', sourceProductName: 'Pocket3 健康源', sameSkuGroupId: 'dji-pocket-3' }],
+      skippedGroups: [],
+      executableCount: 1,
+      evidence: {
+        executableLinks: [{
+          productId: '901',
+          productName: 'Pocket 3',
+          groupId: 'dji-pocket-3',
+          decision: 'executable',
+          reason: 'fixture evidence',
+          metrics: { daysCovered: 14, dashboardDaysCovered: 14, custodyDays: 45, exposure14d: 280, avgExposure14d: 20, visits14d: 14, visitRate: 0.05, amount14d: 0, dashboardAmount14d: 0, missingDashboardDays: 0 },
+        }],
+        manualReviewLinks: [],
+        excludedLinks: [],
+        groups: [{
+          groupId: 'dji-pocket-3',
+          activeCount: 3,
+          limit: 1,
+          selectedProductIds: ['901'],
+          limitExcludedProductIds: [],
+          source: {
+            productId: '900',
+            productName: 'Pocket 3',
+            groupId: 'dji-pocket-3',
+            reason: 'healthy source',
+            metrics: { daysCovered: 14, dashboardDaysCovered: 14, custodyDays: 60, exposure14d: 11200, avgExposure14d: 800, visits14d: 1120, visitRate: 0.1, amount14d: 7000, dashboardAmount14d: 7000, missingDashboardDays: 0 },
+          },
+        }],
+      },
+    };
+    const planRef = await saveInactiveRefreshPlan(outputDir, plan);
+    const loadedPlan = await loadInactiveRefreshPlan(outputDir, planRef);
+
+    const response = await handleInactiveRefreshExecuteSelect(outputDir, {
+      action: 'inactive_refresh_execute_select',
+      planRef,
+      confirmationKey: inactiveRefreshPlanConfirmationKey(plan),
+    });
+
+    expect(loadedPlan?.evidence?.executableLinks[0]?.metrics.exposure14d).toBe(280);
+    expect(response.text).toBe('请确认失活刷新执行内容。');
+    expect(JSON.stringify(response.card)).toContain('agent_tool_confirm');
   });
 
   it('does not use another stale candidate as the refill safety source', async () => {
