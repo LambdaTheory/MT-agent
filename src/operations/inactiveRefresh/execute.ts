@@ -4,6 +4,7 @@ import { recordOperationEvent } from '../../agentRuntime/operationLedger.js';
 import type { BotResponse } from '../../feishuBot/types.js';
 import type { RentalPriceCopyResult, RentalPriceDelistResult, RentalPriceSkillClient } from '../../feishuBot/rentalPrice.js';
 import type { RentalWriteLedgerContext } from '../../feishuBot/rentalWriteOperationHandlers.js';
+import { recordInactiveRefreshObservations } from '../../operationObservations/store.js';
 import { isInactiveRefreshPlanRef, loadInactiveRefreshPlan, verifyInactiveRefreshPlanKey } from './planStore.js';
 
 export async function executeInactiveRefreshPlan(input: { outputDir: string; planRef: string; confirmationKey: string; client: RentalPriceSkillClient; ledgerContext?: RentalWriteLedgerContext }): Promise<BotResponse> {
@@ -24,6 +25,10 @@ export async function executeInactiveRefreshPlan(input: { outputDir: string; pla
         await writeAudit(input.outputDir, input.planRef, { plan, copyResults, delistResults, ok: false });
         return { text: `失活刷新执行中断：补链源 ${item.sourceProductId} 复制失败，未下架原链接。`, metadata: { toolName: 'operations.inactiveRefreshExecute', ok: false, newProductIds: copyResults.flatMap((copy) => copy.newProductId ? [copy.newProductId] : []), delistedProductIds: [] } };
       }
+      if (!result.newProductId) {
+        await writeAudit(input.outputDir, input.planRef, { plan, copyResults, delistResults, ok: false });
+        return { text: `失活刷新执行中断：补链源 ${item.sourceProductId} 复制未返回新链接 ID，未下架原链接。`, metadata: { toolName: 'operations.inactiveRefreshExecute', ok: false, newProductIds: copyResults.flatMap((copy) => copy.newProductId ? [copy.newProductId] : []), delistedProductIds: [] } };
+      }
     }
   }
   for (const productId of plan.delistProductIds) {
@@ -35,6 +40,15 @@ export async function executeInactiveRefreshPlan(input: { outputDir: string; pla
   }
   const ok = copyResults.every((result) => result.ok) && delistResults.length === plan.delistProductIds.length && delistResults.every((result) => result.ok);
   const auditPath = await writeAudit(input.outputDir, input.planRef, { plan, copyResults, delistResults, ok });
+  if (ok) {
+    await recordInactiveRefreshObservationsBestEffort(input.outputDir, {
+      planRef: input.planRef,
+      auditPath,
+      newProductIds: copyResults.flatMap((copy) => copy.newProductId ? [copy.newProductId] : []),
+      delistedProductIds: delistResults.filter((result) => result.ok).map((result) => result.productId),
+      sourceProductIds: plan.newLinkItems.flatMap((item) => Array.from({ length: item.count }, () => item.sourceProductId)),
+    });
+  }
   return {
     text: [
       ok ? '失活刷新执行完成' : '失活刷新执行中断',
@@ -50,6 +64,14 @@ export async function executeInactiveRefreshPlan(input: { outputDir: string; pla
       delistedProductIds: delistResults.filter((result) => result.ok).map((result) => result.productId),
     },
   };
+}
+
+async function recordInactiveRefreshObservationsBestEffort(outputDir: string, input: { planRef: string; auditPath: string; newProductIds: string[]; delistedProductIds: string[]; sourceProductIds: string[] }): Promise<void> {
+  try {
+    await recordInactiveRefreshObservations(outputDir, input);
+  } catch (error) {
+    console.warn(`操作观察写入失败：operations.inactiveRefreshExecute ${input.planRef}：${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 function invalidPlanResponse(): BotResponse {

@@ -2,7 +2,7 @@
 
 > 本文面向接手 MT-agent 的开发 Agent 与维护人员，说明模块现状、文件边界、主链路、开发方向、安全约束和验证方式。
 >
-> **最后核对基线：2026-07-18；当前稳定集成分支：`master`。** 文档描述应优先以当前代码和测试为准，阶段性审计文档仅用于理解历史决策和剩余运行边界。
+> **最后核对基线：2026-07-19；当前稳定集成分支：`master`。** 文档描述应优先以当前代码和测试为准，阶段性审计文档仅用于理解历史决策和剩余运行边界。
 
 ---
 
@@ -331,6 +331,17 @@ MT-agent/
 - `inactive_refresh_execute_select` 只负责加载计划、校验 key 并创建标准高风险确认卡；真正复制/下架只发生在标准 `agent_tool_confirm` 之后。
 - HTTP 高风险 card action 需要 callback signature；签名带 5 分钟新鲜度校验，敏感 action 有持久 claim 防进程重启后重放。
 
+链接状态与幂等边界：
+
+- 失活刷新名单是在触发 `operations.inactiveRefreshPlan` 时即时生成，不是 Daily Mission 或 daemon 预先固定的日名单。
+- 计划阶段依赖当前 link registry；daemon catalog / 商品总表 / 生命周期已把旧链判为 `delisted` 或 `gone` 时，最终会派生为 `status=removed`，不会进入候选。
+- 补链源也从 link registry 同款组里选取 `status=active` 且非本次候选的链接，并要求 14 天金额 > 0、上线满 14 天。
+- 执行阶段只按已持久化 plan 顺序执行：先 `copy(sourceProductId)`，每次 copy 成功且返回 `newProductId` 后，才开始下架 `delistProductIds`；copy 失败或不返回新 ID 会中断且不下架旧链。
+- 同一个 `planRef` 有本地执行锁，不能通过重复点击同一张卡二次执行同一计划。
+- 当前执行前不会重新拉取 daemon catalog，不会 live preflight 校验旧链仍在架、源链仍可复制，也不会读取 `operation-observations.json` 主动排除 14 天内刚失活刷新的旧链。
+- 因此如果执行后未刷新 daemon/link registry，本地仍误认为旧链 active，第二天重新生成计划时理论上可能再次进入候选；真实下架调用通常会在 daemon/SaaS 层返回失败或不可操作，但这是被动失败，不是计划阶段主动规避。
+- 后续补强优先级：计划前强制刷新 daemon catalog；执行前对 `delistProductIds + sourceProductIds` 做 live preflight；把成功执行过的 `delisted_old_link` 在观察期内排除出候选，即使 registry 还未刷新。
+
 业务筛选口径：
 
 - 固定近 14 天窗口；active 链接；上线不足 14 天排除；上线天数缺失进入人工/不可执行。
@@ -407,6 +418,13 @@ Daily Mission 失活刷新富卡片目前是独立预览模块，入口为 `npm 
 | `gone` | — | 商品已经从总表生命周期消失 |
 
 `delisted` 和 `gone` 都派生为 `status=removed`，不得进入改价、补链、规格删除和活动刷新等可操作候选。前端/飞书展示要区分「已下架」和「链接不存在」，不能混淆。
+
+daemon 状态同步边界：
+
+- `src/linkRegistry/promptRefresh.ts` 会调用 `fetchDaemonCatalogSnapshot()`，优先通过 daemon HTTP `platformSearchAll` 读取 SaaS 当前商品目录，失败时 fallback 到 CLI `platform-search ''`。
+- daemon catalog 快照保存到 `output/state/link-registry-daemon-catalog.json`，再参与 `buildLinkRegistry()` 的 `listingState` 仲裁；`daemon_catalog` 是高可信状态来源。
+- 这是 daemon/SaaS 到 MT-agent 的单向读入：MT-agent 不会把 link registry 的 `listingState` 回写到 daemon，也不会把本地状态判断回写到 SaaS。
+- MT-agent 通过 daemon 执行 `copy`、`delist`、`priceApply` 等是真实写操作；写成功后仍需要后续 read/refresh，才能让 link registry 反映 SaaS 最新状态。
 
 下架原因归因是 `listingState === 'delisted'` 之后的解释层，不参与状态仲裁。平台证据来自商品总表的「审核不通过原因」和「冻结原因」，分别归因为 `platform_review_rejected` / `platform_frozen`，其他平台限制归为 `platform_restricted`；仅在同一商品快照明确已下架、状态文本非空、观察时间新鲜且内外时间一致时确认。Agent 主动下架证据来自 operation ledger 中成功的 `delist` 执行，并要求后续严格更晚的已下架回读；没有平台或 Agent 证据时只能写 `external_manual_off_shelf_pending_confirmation`（外部人工下架，待确认），不得推断具体同事。刷新健康门禁（如 daemon 空结果或商品快照异常掉数）会抑制全部下架归因，并按日期持久化供同日 runtime 复用。
 

@@ -9,6 +9,7 @@ import { parseBotIntent } from '../src/feishuBot/intent.js';
 import { handleBotIntent } from '../src/feishuBot/tools.js';
 import { handleInactiveRefreshExecuteSelect } from '../src/feishuBot/inactiveRefreshExecuteSelect.js';
 import type { RentalPriceSkillClient } from '../src/feishuBot/rentalPrice.js';
+import { loadOperationObservations } from '../src/operationObservations/store.js';
 import { inactiveRefreshPlanConfirmationKey, loadInactiveRefreshPlan, saveInactiveRefreshPlan, type InactiveRefreshPlan } from '../src/operations/inactiveRefresh/planStore.js';
 
 type CardElement = {
@@ -112,6 +113,24 @@ function fakeRentalClient(events: string[]): RentalPriceSkillClient {
     async copy(productId) {
       events.push(`copy:${productId}`);
       return { productId, ok: true, newProductId: `new-${productId}`, lines: [`copied ${productId}`], status: 'completed' };
+    },
+    async delist(productId) {
+      events.push(`delist:${productId}`);
+      return { productId, ok: true, lines: [`delisted ${productId}`] };
+    },
+    async tenancySet() { throw new Error('tenancySet should not run'); },
+    async specDiscover() { throw new Error('specDiscover should not run'); },
+    async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+  };
+}
+
+function fakeCopyWithoutNewProductIdClient(events: string[]): RentalPriceSkillClient {
+  return {
+    async preview() { throw new Error('preview should not run'); },
+    async execute() { throw new Error('execute should not run'); },
+    async copy(productId) {
+      events.push(`copy:${productId}`);
+      return { productId, ok: true, newProductId: null, lines: [`copied ${productId} without new id`], status: 'completed' };
     },
     async delist(productId) {
       events.push(`delist:${productId}`);
@@ -349,6 +368,91 @@ describe('inactive refresh executable workflow', () => {
     expect(events).toEqual(['copy:900', 'delist:901']);
     expect(response.text).toContain('失活刷新执行完成');
     expect(response.metadata).toMatchObject({ toolName: 'operations.inactiveRefreshExecute', ok: true, delistedProductIds: ['901'], newProductIds: ['new-900'] });
+  });
+
+  it('records an inactive_refresh operation observation for successful executions', async () => {
+    const { outputDir } = await writeInactiveRefreshFixtures();
+    const plan: InactiveRefreshPlan = {
+      date: '2026-07-17',
+      delistProductIds: ['901'],
+      newLinkItems: [{ keyword: 'Pocket 3', count: 1, sourceProductId: '900', sourceProductName: 'Pocket3 健康源', sameSkuGroupId: 'dji-pocket-3' }],
+      skippedGroups: [],
+      executableCount: 1,
+    };
+    const planRef = await saveInactiveRefreshPlan(outputDir, plan);
+    const events: string[] = [];
+
+    const response = await executeAgentToolRequest(
+      { toolName: 'operations.inactiveRefreshExecute', arguments: { planRef, confirmationKey: inactiveRefreshPlanConfirmationKey(plan) }, reason: 'execute inactive refresh' },
+      outputDir,
+      { rentalPriceClient: fakeRentalClient(events) },
+    );
+    const store = await loadOperationObservations(outputDir);
+
+    expect(response.metadata).toMatchObject({ toolName: 'operations.inactiveRefreshExecute', ok: true, newProductIds: ['new-900'], delistedProductIds: ['901'] });
+    expect(store.observations).toHaveLength(1);
+    expect(store.observations[0]).toMatchObject({
+      operationType: 'inactive_refresh',
+      status: 'observing',
+      source: { toolName: 'operations.inactiveRefreshExecute', planRef },
+      subjects: [
+        { role: 'new_link', productId: 'new-900', relatedProductId: '901', sourceProductId: '900' },
+        { role: 'delisted_old_link', productId: '901', relatedProductId: 'new-900', sourceProductId: '900' },
+      ],
+      metricsToWatch: ['exposure', 'visits', 'orders', 'amount'],
+    });
+    expect(store.observations[0]?.source.auditPath).toContain(`${planRef}.json`);
+    expect(Date.parse(store.observations[0]!.observeUntil) - Date.parse(store.observations[0]!.createdAt)).toBe(14 * 24 * 60 * 60 * 1000);
+  });
+
+  it('keeps successful inactive refresh responses when operation observation storage is corrupt', async () => {
+    const { outputDir } = await writeInactiveRefreshFixtures();
+    await mkdir(join(outputDir, 'latest'), { recursive: true });
+    await writeFile(join(outputDir, 'latest', 'operation-observations.json'), '{bad json', 'utf8');
+    const plan: InactiveRefreshPlan = {
+      date: '2026-07-17',
+      delistProductIds: ['901'],
+      newLinkItems: [{ keyword: 'Pocket 3', count: 1, sourceProductId: '900', sourceProductName: 'Pocket3 健康源', sameSkuGroupId: 'dji-pocket-3' }],
+      skippedGroups: [],
+      executableCount: 1,
+    };
+    const planRef = await saveInactiveRefreshPlan(outputDir, plan);
+    const events: string[] = [];
+
+    const response = await executeAgentToolRequest(
+      { toolName: 'operations.inactiveRefreshExecute', arguments: { planRef, confirmationKey: inactiveRefreshPlanConfirmationKey(plan) }, reason: 'execute inactive refresh with corrupt observation store' },
+      outputDir,
+      { rentalPriceClient: fakeRentalClient(events) },
+    );
+
+    expect(events).toEqual(['copy:900', 'delist:901']);
+    expect(response.metadata).toMatchObject({ toolName: 'operations.inactiveRefreshExecute', ok: true, newProductIds: ['new-900'], delistedProductIds: ['901'] });
+    expect(response.text).toContain('失活刷新执行完成');
+  });
+
+  it('stops before delisting when copy reports success without a new product id', async () => {
+    const { outputDir } = await writeInactiveRefreshFixtures();
+    const plan: InactiveRefreshPlan = {
+      date: '2026-07-17',
+      delistProductIds: ['901'],
+      newLinkItems: [{ keyword: 'Pocket 3', count: 1, sourceProductId: '900', sourceProductName: 'Pocket3 健康源', sameSkuGroupId: 'dji-pocket-3' }],
+      skippedGroups: [],
+      executableCount: 1,
+    };
+    const planRef = await saveInactiveRefreshPlan(outputDir, plan);
+    const events: string[] = [];
+
+    const response = await executeAgentToolRequest(
+      { toolName: 'operations.inactiveRefreshExecute', arguments: { planRef, confirmationKey: inactiveRefreshPlanConfirmationKey(plan) }, reason: 'execute inactive refresh without new id' },
+      outputDir,
+      { rentalPriceClient: fakeCopyWithoutNewProductIdClient(events) },
+    );
+    const store = await loadOperationObservations(outputDir);
+
+    expect(events).toEqual(['copy:900']);
+    expect(response.metadata).toMatchObject({ toolName: 'operations.inactiveRefreshExecute', ok: false, newProductIds: [], delistedProductIds: [] });
+    expect(response.text).toContain('复制未返回新链接 ID');
+    expect(store.observations).toEqual([]);
   });
 
   it('copies each planned refill count before delisting stale links', async () => {
