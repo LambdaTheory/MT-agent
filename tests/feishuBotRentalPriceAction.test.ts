@@ -4,7 +4,9 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { buildAgentToolConfirmCard } from '../src/agentRuntime/approvalCard.js';
+import { executeAgentToolRequest } from '../src/feishuBot/agentToolExecutor.js';
 import { createFeishuSdkBot } from '../src/feishuBot/sdkClient.js';
+import { loadAgentToolConfirmRequestFromValue } from '../src/feishuBot/agentToolConfirmStore.js';
 import { clarificationConfirmationKey, saveClarificationContext } from '../src/feishuBot/clarificationStore.js';
 import { buildRentalOperationConfirmCard, createRentalPriceSkillClient, parseRentalOperationConfirmRequest, parseRentalPriceConfirmRequest, type RentalPriceSkillClient } from '../src/feishuBot/rentalPrice.js';
 import { buildNewLinkBatchConfirmCard, type NewLinkBatchPlan } from '../src/newLinkWorkflow/batch.js';
@@ -57,6 +59,52 @@ function readButtonValue(card: unknown, buttonName: string): Record<string, unkn
 
 function legacyPriceConfirmValue(request: Record<string, unknown>): Record<string, unknown> {
   return { action: 'rental_price_confirm', request, confirmationKey: createHash('sha256').update(JSON.stringify(request)).digest('hex').slice(0, 24) };
+}
+
+function completeAudit(productId: string, taskId = `task_${productId}_preview`) {
+  const hash = 'a'.repeat(64);
+  return {
+    taskId,
+    changesFile: `changes-${productId}.json`,
+    rollbackFile: `rollback-${productId}.json`,
+    currentValuesFile: `current-${productId}.json`,
+    changesSha256: hash,
+    rollbackSha256: hash,
+    currentSnapshotSha256: hash,
+    planHash: hash,
+    expectedFieldCount: 1,
+    hasErrors: false,
+    hasWarnings: false,
+    diff: [{ field: 'rent1day', label: '1天', old: '88.00', new: '99.00', change: '+11.00', changePct: '+12.5%', issues: [] }],
+  };
+}
+
+async function priceApplyCompletionCard(outputDir: string): Promise<unknown> {
+  const taskIds: Record<string, string> = { '841': 'task_1782451929574_841a5f62', '842': 'task_1782451929574_842a5f62' };
+  const rentalPriceClient: RentalPriceSkillClient = {
+    async preview() { throw new Error('preview should not run'); },
+    async execute(request) {
+      return { productId: request.productId, ok: true, lines: ['apply: ok', 'submit: ok', 'verify: ok'], audit: { taskId: taskIds[request.productId]!, status: 'completed', rollbackFile: `rollback-${request.productId}.json` } };
+    },
+    async copy() { throw new Error('copy should not run'); },
+    async delist() { throw new Error('delist should not run'); },
+    async tenancySet() { throw new Error('tenancySet should not run'); },
+    async specDiscover() { throw new Error('specDiscover should not run'); },
+    async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+  };
+  const response = await executeAgentToolRequest(
+    {
+      toolName: 'rental.priceApply',
+      arguments: { items: [
+        { productId: '841', fields: { rent1day: '99.00' }, audit: completeAudit('841') },
+        { productId: '842', fields: { rent1day: '99.00' }, audit: completeAudit('842') },
+      ] },
+      reason: 'confirmed preview',
+    },
+    outputDir,
+    { rentalPriceClient },
+  );
+  return response.card;
 }
 
 function newLinkPlan(): NewLinkBatchPlan {
@@ -797,5 +845,159 @@ describe('rental price card action', () => {
     } finally {
       globalThis.fetch = originalFetch;
     }
+  });
+
+  it('turns rollback all from a price completion card into an audit confirmation card without rollback execution', async () => {
+    const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
+    const sent: unknown[] = [];
+    const rollbackCalls: unknown[] = [];
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-sdk-rollback-all-'));
+    const bot = createFeishuSdkBot({
+      appId: 'app',
+      appSecret: 'secret',
+      outputDir,
+      sdk: fakeSdk(sent, registered),
+      rentalPriceClient: {
+        async preview() { throw new Error('preview should not run'); },
+        async execute() { throw new Error('execute should not run'); },
+        async rollback(request) { rollbackCalls.push(request); return { productId: '841', ok: true, lines: ['rollbackApply: ok'] }; },
+        async copy() { throw new Error('copy should not run'); },
+        async delist() { throw new Error('delist should not run'); },
+        async tenancySet() { throw new Error('tenancySet should not run'); },
+        async specDiscover() { throw new Error('specDiscover should not run'); },
+        async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+      },
+    });
+    const value = readButtonValue(await priceApplyCompletionCard(outputDir), 'rental_price_prepare_rollback_all_submit');
+
+    bot.start();
+    const result = await registered['card.action.trigger']({ event: { context: { open_message_id: 'om-rollback-all' }, action: { name: 'rental_price_prepare_rollback_all_submit', value } } });
+
+    expect(rollbackCalls).toEqual([]);
+    expect(JSON.stringify(result)).toContain('agent_tool_confirm');
+    expect(JSON.stringify(result)).toContain('rental.priceRollbackBatch');
+    expect(JSON.stringify(result)).toContain('task_1782451929574_841a5f62');
+    expect(JSON.stringify(result)).toContain('task_1782451929574_842a5f62');
+  });
+
+  it('rejects forged rollback-all callbacks that were not created by the completion card', async () => {
+    const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
+    const sent: unknown[] = [];
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-sdk-rollback-forged-'));
+    const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', outputDir, sdk: fakeSdk(sent, registered), rentalPriceClient: {
+      async preview() { throw new Error('preview should not run'); },
+      async execute() { throw new Error('execute should not run'); },
+      async rollback() { throw new Error('rollback should not run'); },
+      async copy() { throw new Error('copy should not run'); },
+      async delist() { throw new Error('delist should not run'); },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    } });
+
+    bot.start();
+    const result = await registered['card.action.trigger']({ event: { context: { open_message_id: 'om-rollback-forged' }, action: { name: 'rental_price_prepare_rollback_all_submit', value: { action: 'rental_price_prepare_rollback_all', taskIds: ['task_1782451929574_999a5f62'], confirmationKey: createHash('sha256').update(JSON.stringify({ taskIds: ['task_1782451929574_999a5f62'] })).digest('hex').slice(0, 24) } } } });
+
+    expect(JSON.stringify(result)).toContain('改价回滚确认异常');
+    expect(JSON.stringify(result)).not.toContain('agent_tool_confirm');
+  });
+
+  it('rejects legacy bare rollback callbacks that only carry a task id', async () => {
+    const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
+    const sent: unknown[] = [];
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-sdk-rollback-legacy-'));
+    const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', outputDir, sdk: fakeSdk(sent, registered) });
+
+    bot.start();
+    const result = await registered['card.action.trigger']({ event: { context: { open_message_id: 'om-rollback-legacy' }, action: { name: 'rental_price_prepare_rollback_submit', value: { action: 'rental_price_prepare_rollback', taskId: 'task_1782451929574_841a5f62' } } } });
+
+    expect(JSON.stringify(result)).toContain('改价回滚确认异常');
+    expect(JSON.stringify(result)).not.toContain('agent_tool_confirm');
+  });
+
+  it('turns selected rollback links into an audit confirmation card for only selected task ids', async () => {
+    const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
+    const sent: unknown[] = [];
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-sdk-rollback-selected-'));
+    const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', outputDir, sdk: fakeSdk(sent, registered), rentalPriceClient: {
+      async preview() { throw new Error('preview should not run'); },
+      async execute() { throw new Error('execute should not run'); },
+      async rollback() { throw new Error('rollback should not run before confirmation'); },
+      async copy() { throw new Error('copy should not run'); },
+      async delist() { throw new Error('delist should not run'); },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    } });
+    const completionCard = await priceApplyCompletionCard(outputDir);
+    const selectValue = readButtonValue(completionCard, 'rental_price_select_rollback_submit');
+
+    bot.start();
+    const selectResult = await registered['card.action.trigger']({ event: { context: { open_message_id: 'om-rollback-selected' }, action: { name: 'rental_price_select_rollback_submit', value: selectValue } } });
+    expect(JSON.stringify(selectResult)).toContain('rental_price_prepare_selected_rollback_submit');
+    expect(JSON.stringify(selectResult)).toContain('multi_select_static');
+
+    const submitValue = readButtonValue((selectResult as { card: { data: unknown } }).card.data, 'rental_price_prepare_selected_rollback_submit');
+    const confirmResult = await registered['card.action.trigger']({ event: { context: { open_message_id: 'om-rollback-selected' }, action: { name: 'rental_price_prepare_selected_rollback_submit', value: submitValue, form_value: { selected_task_ids: ['task_1782451929574_842a5f62'] } } } });
+
+    const confirmJson = JSON.stringify(confirmResult);
+    expect(confirmJson).toContain('agent_tool_confirm');
+    expect(confirmJson).toContain('rental.priceRollbackBatch');
+    expect(confirmJson).toContain('task_1782451929574_842a5f62');
+    expect(confirmJson).not.toContain('task_1782451929574_841a5f62');
+    const request = await loadAgentToolConfirmRequestFromValue(outputDir, readButtonValue((confirmResult as { card: { data: unknown } }).card.data, 'agent_tool_confirm_submit'));
+    expect(request?.arguments.taskIds).toEqual(['task_1782451929574_842a5f62']);
+  });
+
+  it('acknowledges a price completion card and removes rollback actions', async () => {
+    const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
+    const sent: unknown[] = [];
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-sdk-ack-price-'));
+    const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', outputDir, sdk: fakeSdk(sent, registered), rentalPriceClient: {
+      async preview() { throw new Error('preview should not run'); },
+      async execute() { throw new Error('execute should not run'); },
+      async rollback() { throw new Error('rollback should not run'); },
+      async copy() { throw new Error('copy should not run'); },
+      async delist() { throw new Error('delist should not run'); },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    } });
+    const value = readButtonValue(await priceApplyCompletionCard(outputDir), 'rental_price_acknowledge_completion_submit');
+
+    bot.start();
+    const result = await registered['card.action.trigger']({ event: { context: { open_message_id: 'om-price-ack' }, operator: { open_id: 'ou_ack' }, action: { name: 'rental_price_acknowledge_completion_submit', value } } });
+    const json = JSON.stringify(result);
+
+    expect(json).toContain('租赁改价已认可完成');
+    expect(json).toContain('ou_ack');
+    expect(json).not.toContain('rental_price_prepare_rollback');
+    expect(json).not.toContain('rental_price_select_rollback');
+  });
+
+  it('keeps the acknowledge action when a completion card has no rollback-ready tasks', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-sdk-ack-only-'));
+    const response = await executeAgentToolRequest(
+      {
+        toolName: 'rental.priceApply',
+        arguments: { items: [{ productId: '841', fields: { rent1day: '99.00' }, audit: completeAudit('841') }] },
+        reason: 'confirmed preview',
+      },
+      outputDir,
+      { rentalPriceClient: {
+        async preview() { throw new Error('preview should not run'); },
+        async execute(request) { return { productId: request.productId, ok: false, lines: ['apply failed'] }; },
+        async copy() { throw new Error('copy should not run'); },
+        async delist() { throw new Error('delist should not run'); },
+        async tenancySet() { throw new Error('tenancySet should not run'); },
+        async specDiscover() { throw new Error('specDiscover should not run'); },
+        async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+      } },
+    );
+
+    const json = JSON.stringify(response.card);
+    expect(json).toContain('rental_price_acknowledge_completion_submit');
+    expect(json).not.toContain('rental_price_select_rollback_submit');
+    expect(json).not.toContain('rental_price_prepare_rollback_all_submit');
   });
 });
