@@ -114,10 +114,16 @@ FEISHU_APP_SECRET=replace-with-your-secret
 FEISHU_BOT_PORT=8787
 FEISHU_BOT_VERIFICATION_TOKEN=replace-with-event-verification-token
 FEISHU_BOT_ENCRYPT_KEY=
+FEISHU_BOT_CALLBACK_SIGNATURE_SECRET=replace-with-card-action-signature-secret
+MT_AGENT_INACTIVE_REFRESH_APPROVER_IDS=ou_allowed_1,ou_allowed_2
 MT_AGENT_OUTPUT_DIR=output
 ```
 
 Phase 1 expects Feishu event callbacks as plaintext JSON. If Feishu Encrypt Key is enabled in the Open Platform, disable it or leave `FEISHU_BOT_ENCRYPT_KEY` empty until encrypted event decryption is implemented.
+
+For HTTP callback mode, sensitive card actions fail closed unless `FEISHU_BOT_CALLBACK_SIGNATURE_SECRET` is configured with the Feishu request-signature secret. Do not use `FEISHU_BOT_ENCRYPT_KEY` for this value.
+
+For executable inactive-refresh approval cards, configure `MT_AGENT_INACTIVE_REFRESH_APPROVER_IDS` with the Feishu `open_id` or `user_id` values that may approve execution. Values may be comma, semicolon, or whitespace separated. If this variable is empty, inactive-refresh execution approval fails closed and nobody can approve execution.
 
 Start locally:
 
@@ -186,9 +192,12 @@ Required environment:
 FEISHU_APP_ID=cli_xxxxxxxxxxxxxxxx
 FEISHU_APP_SECRET=replace-with-your-secret
 FEISHU_BOT_USE_SDK=true
+MT_AGENT_INACTIVE_REFRESH_APPROVER_IDS=ou_allowed_1,ou_allowed_2
 MT_AGENT_OUTPUT_DIR=output
 ```
 
 In Feishu Open Platform, configure event subscription to receive events through persistent connection, and subscribe to `im.message.receive_v1`.
 
 The SDK mode still uses deterministic command parsing. LLM intent resolving, approval buttons, and product mutation are only future extension points.
+
+SDK card-action events are received over the authenticated Feishu long connection. `MT_AGENT_INACTIVE_REFRESH_APPROVER_IDS` still applies to executable inactive-refresh approval cards in SDK mode; leave it empty only when you intentionally want inactive-refresh execution approval to be disabled.
