@@ -98,6 +98,7 @@ describe('agent runtime tool registry', () => {
       'rental.bulkPriceApply',
       'rental.newLinkBatchPlan',
       'rental.priceRollback',
+      'rental.priceRollbackBatch',
       'rental.priceApply',
       'rental.operationConfirmRequest',
       'rental.perSpecPricePlan',

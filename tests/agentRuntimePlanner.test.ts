@@ -227,7 +227,7 @@ describe('agent runtime planner proposal validation', () => {
 
   it('rejects all planner-hidden tools even when they exist in the internal registry', () => {
     const hiddenTools = listAgentTools().filter((tool) => tool.plannerVisible === false);
-    expect(hiddenTools.map((tool) => tool.name)).toEqual(['operations.refreshActivityExecute', 'operations.inactiveRefreshExecute', 'rental.mirrorWritebackState', 'rental.imageRead', 'rental.imageUpload', 'rental.imagePick', 'rental.imageOrder', 'rental.whiteImageSet', 'rental.imageVerify', 'rental.vasRead', 'rental.vasCatalogRead', 'rental.vasApply', 'rental.vasVerify', 'rental.bulkPriceApply', 'rental.priceApply', 'rental.operationConfirmRequest', 'rental.perSpecPriceApply', 'rental.specDimApply']);
+    expect(hiddenTools.map((tool) => tool.name)).toEqual(['operations.refreshActivityExecute', 'operations.inactiveRefreshExecute', 'rental.mirrorWritebackState', 'rental.imageRead', 'rental.imageUpload', 'rental.imagePick', 'rental.imageOrder', 'rental.whiteImageSet', 'rental.imageVerify', 'rental.vasRead', 'rental.vasCatalogRead', 'rental.vasApply', 'rental.vasVerify', 'rental.bulkPriceApply', 'rental.priceRollbackBatch', 'rental.priceApply', 'rental.operationConfirmRequest', 'rental.perSpecPriceApply', 'rental.specDimApply']);
     expect(listAgentTools().filter((tool) => /image/i.test(tool.name) && tool.plannerVisible !== false)).toEqual([]);
 
     for (const tool of hiddenTools) {

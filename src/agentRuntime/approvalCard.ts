@@ -133,6 +133,7 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   'rental.bulkPriceApply': '执行批量改价',
   'rental.newLinkBatchPlan': '新链批量复制计划',
   'rental.priceRollback': '改价回滚',
+  'rental.priceRollbackBatch': '批量改价回滚',
   'publicTraffic.refreshDashboard': '补抓访问页',
   'operations.refreshActivityPlan': '活跃度刷新计划',
   'operations.refreshActivityExecute': '执行活跃度刷新',

@@ -933,6 +933,19 @@ const rentalPriceRollbackArgumentsSchema = {
   },
   additionalProperties: false,
 };
+const rentalPriceRollbackBatchArgumentsSchema = {
+  type: 'object',
+  required: ['taskIds'],
+  properties: {
+    taskIds: {
+      type: 'array',
+      minItems: 1,
+      maxItems: 60,
+      items: { type: 'string', pattern: '^task_\\d+_[a-fA-F0-9]+$' },
+    },
+  },
+  additionalProperties: false,
+};
 const rentalPriceSnapshotArgumentsSchema = {
   type: 'object',
   properties: { query: { type: 'string' } },
@@ -1645,6 +1658,15 @@ const agentTools: AgentToolDefinition[] = [
     risk: 'high',
     requiresConfirmation: true,
     inputSchema: rentalPriceRollbackArgumentsSchema,
+    resultMetadataSchema: rentalPriceRollbackResultMetadataSchema,
+  },
+  {
+    name: 'rental.priceRollbackBatch',
+    description: '确认后按多个已完成改价审计 taskId 串行回滚租赁商品价格。仅供执行结果卡生成的二次确认使用。',
+    risk: 'high',
+    requiresConfirmation: true,
+    plannerVisible: false,
+    inputSchema: rentalPriceRollbackBatchArgumentsSchema,
     resultMetadataSchema: rentalPriceRollbackResultMetadataSchema,
   },
   {
