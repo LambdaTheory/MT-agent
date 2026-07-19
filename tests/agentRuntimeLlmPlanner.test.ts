@@ -73,6 +73,10 @@ describe('agent runtime LLM planner', () => {
     expect(system).toContain('use rental.priceSnapshot');
     expect(system).toContain('linkRegistry.resolveProducts');
     expect(system).toContain('rental.pricePreview');
+    expect(system).toContain('rental.specKeywordPricePlan');
+    expect(system).toContain('Do not use rental.pricePreview for spec-keyword changes');
+    expect(system).toContain('Use rental.perSpecPricePlan only when exact productId, exact specId, and absolute target prices are already supplied');
+    expect(system).toContain('Ask for clarification for relative spec-keyword changes');
     expect(system).toContain('use rental.specRemovePlan');
     expect(system).toContain('should normally be the final step');
     expect(system).not.toContain('For composite flows, return selectedWorkflow');
@@ -85,6 +89,7 @@ describe('agent runtime LLM planner', () => {
     expect(user.tools.map((tool) => tool.name)).toContain('strategy.safeSourceResolve');
     expect(user.tools.map((tool) => tool.name)).toContain('linkRegistry.resolveProducts');
     expect(user.tools.map((tool) => tool.name)).toContain('rental.pricePreview');
+    expect(user.tools.map((tool) => tool.name)).toContain('rental.specKeywordPricePlan');
     expect(user.tools.find((tool) => tool.name === 'product.rankBestSameSku')?.resultMetadataSchema).toMatchObject({
       properties: { bestProductId: { type: 'string' } },
     });
