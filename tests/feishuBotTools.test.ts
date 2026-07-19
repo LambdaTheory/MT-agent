@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -13,6 +13,7 @@ import { executeAgentToolRequest } from '../src/feishuBot/agentToolExecutor.js';
 import { loadAgentToolConfirmRequestFromValue } from '../src/feishuBot/agentToolConfirmStore.js';
 import { handleRefreshActivityStrategySelect } from '../src/feishuBot/refreshActivityStrategySelect.js';
 import { handleBotIntent } from '../src/feishuBot/tools.js';
+import { loadOperationObservations } from '../src/operationObservations/store.js';
 
 const mocks = vi.hoisted(() => ({
   runPublicTrafficReportCli: vi.fn(),
@@ -4452,6 +4453,7 @@ describe('handleBotIntent', () => {
   });
 
   it('executes atomic rental.priceApply after confirmation and returns audit references', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-price-observation-'));
     const calls: unknown[] = [];
     const rentalPriceClient: RentalPriceSkillClient = {
       async preview() { throw new Error('preview should not run after confirmation'); },
@@ -4482,9 +4484,10 @@ describe('handleBotIntent', () => {
         },
         reason: '用户确认对 Ace Pro 2 商品组整体打九折',
       },
-      'output',
+      outputDir,
       { rentalPriceClient },
     );
+    const store = await loadOperationObservations(outputDir);
 
     expect(calls).toEqual([
       { mode: 'explicit_fields', productId: '841', fields: { rent1day: '90.00' }, audit: completeAudit('841', { diff: [{ field: 'rent1day', label: '1天', old: '100.00', new: '90.00', change: '-10.00', changePct: '-10.0%', issues: [] }] }) },
@@ -4506,6 +4509,20 @@ describe('handleBotIntent', () => {
     expect(cardText).toContain('选择回滚链接');
     expect(cardText).not.toContain('rental_price_prepare_rollback_0');
     expect(cardText).not.toContain('生成回滚确认卡 841');
+    expect(store.observations).toHaveLength(2);
+    expect(store.observations.map((item) => item.operationType)).toEqual(['price_change', 'price_change']);
+    expect(store.observations.map((item) => item.subjects[0])).toEqual([
+      { role: 'price_changed_product', productId: '841' },
+      { role: 'price_changed_product', productId: '842' },
+    ]);
+    expect(store.observations[0]).toMatchObject({
+      status: 'observing',
+      source: { toolName: 'rental.priceApply', taskId: 'task_841_done' },
+      priceChange: { fields: ['rent1day'], changesFile: 'changes-841.json', rollbackFile: 'rollback-841.json', currentValuesFile: 'current-841.json' },
+      metricsToWatch: ['visits', 'orders', 'amount', 'conversion_rate'],
+    });
+    expect(Date.parse(store.observations[0]!.observeUntil) - Date.parse(store.observations[0]!.createdAt)).toBe(14 * 24 * 60 * 60 * 1000);
+    await rm(outputDir, { recursive: true, force: true });
   });
 
   it('executes batch rental.priceRollback serially after confirmation', async () => {
@@ -4533,6 +4550,82 @@ describe('handleBotIntent', () => {
     expect(calls).toEqual([{ taskId: 'task_123_abcd1234' }, { taskId: 'task_456_abcd5678' }]);
     expect(response.text).toContain('批量改价回滚完成：成功 2/2');
     expect(response.metadata).toMatchObject({ toolName: 'rental.priceRollbackBatch', ok: true, taskIds: ['task_123_abcd1234', 'task_456_abcd5678'] });
+  });
+
+  it('records operation observations only for successful rental.priceApply items', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-price-observation-partial-'));
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run after confirmation'); },
+      async execute(request) {
+        return {
+          productId: request.productId,
+          ok: request.productId === '841',
+          lines: request.productId === '841' ? ['apply: ok'] : ['apply: failed'],
+          audit: { taskId: `task_${request.productId}_done`, status: request.productId === '841' ? 'completed' : 'failed', rollbackFile: `rollback-${request.productId}.json` },
+        };
+      },
+      async copy() { throw new Error('copy should not run'); },
+      async delist() { throw new Error('delist should not run'); },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+
+    const response = await executeAgentToolRequest(
+      {
+        toolName: 'rental.priceApply',
+        arguments: {
+          items: [
+            { productId: '841', fields: { rent1day: '90.00' }, audit: completeAudit('841') },
+            { productId: '842', fields: { rent1day: '81.00' }, audit: completeAudit('842') },
+          ],
+        },
+        reason: 'partial price apply',
+      },
+      outputDir,
+      { rentalPriceClient },
+    );
+    const store = await loadOperationObservations(outputDir);
+
+    expect(response.metadata).toMatchObject({ toolName: 'rental.priceApply', ok: false, successProductIds: ['841'] });
+    expect(store.observations.map((item) => item.subjects[0]?.productId)).toEqual(['841']);
+    await rm(outputDir, { recursive: true, force: true });
+  });
+
+  it('keeps successful rental.priceApply responses when operation observation storage is corrupt', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-price-observation-corrupt-'));
+    await mkdir(join(outputDir, 'latest'), { recursive: true });
+    await writeFile(join(outputDir, 'latest', 'operation-observations.json'), '{bad json', 'utf8');
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run after confirmation'); },
+      async execute(request) {
+        return {
+          productId: request.productId,
+          ok: true,
+          lines: ['apply: ok', 'submit: ok', 'verify: ok'],
+          audit: { taskId: `task_${request.productId}_done`, status: 'completed', rollbackFile: `rollback-${request.productId}.json` },
+        };
+      },
+      async copy() { throw new Error('copy should not run'); },
+      async delist() { throw new Error('delist should not run'); },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+
+    const response = await executeAgentToolRequest(
+      {
+        toolName: 'rental.priceApply',
+        arguments: { items: [{ productId: '841', fields: { rent1day: '90.00' }, audit: completeAudit('841') }] },
+        reason: 'price apply with corrupt observation store',
+      },
+      outputDir,
+      { rentalPriceClient },
+    );
+
+    expect(response.metadata).toMatchObject({ toolName: 'rental.priceApply', ok: true, successProductIds: ['841'] });
+    expect(response.text).toContain('改价执行完成：成功 1/1');
+    await rm(outputDir, { recursive: true, force: true });
   });
 
   it('rejects rental.priceApply without complete audit proof before execution', async () => {

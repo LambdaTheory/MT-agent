@@ -55,6 +55,7 @@ import { buildDashboardRefreshResultCard, formatDashboardRefreshResultText } fro
 import { buildPublicTrafficPaths } from '../publicTraffic/paths.js';
 import type { PublicTrafficDataReportContext, PublicTrafficPeriodMetrics, PublicTrafficProductDataRow } from '../publicTraffic/types.js';
 import { startOperationsLearningSession } from '../operationsLearningLoop/session.js';
+import { recordPriceChangeObservation } from '../operationObservations/store.js';
 import type { BotResponse } from './types.js';
 import type { FeishuSendTo } from './types.js';
 import { buildActivityAutomationCard, buildCancelDifferentialPricingCardResult } from './activityAutomation.js';
@@ -1867,6 +1868,9 @@ async function rentalPriceApplyResponse(
       await recordAgentToolWriteEvent(ledgerContext, 'execution_started', 'rental.priceApply', item.productId);
       const result = await client.execute(request);
       await recordAgentToolWriteEvent(ledgerContext, result.ok ? 'execution_succeeded' : 'execution_failed', 'rental.priceApply', item.productId);
+      if (result.ok) {
+        await recordPriceChangeObservationBestEffort(outputDir, item, result);
+      }
       results.push(result);
     } catch (error) {
       await recordAgentToolWriteEvent(ledgerContext, 'execution_failed', 'rental.priceApply', item.productId);
@@ -1895,6 +1899,28 @@ async function rentalPriceApplyResponse(
       rollbackFiles: results.map((item) => item.audit?.rollbackFile).filter((value): value is string => Boolean(value)),
     },
   };
+}
+
+async function recordPriceChangeObservationBestEffort(
+  outputDir: string,
+  item: { productId: string; fields: Record<string, string>; audit?: RentalPriceAuditReference },
+  result: RentalPriceExecutionResult,
+): Promise<void> {
+  try {
+    await recordPriceChangeObservation(outputDir, {
+      productId: item.productId,
+      fields: item.fields,
+      audit: {
+        ...(result.audit?.taskId ? { taskId: result.audit.taskId } : item.audit?.taskId ? { taskId: item.audit.taskId } : {}),
+        ...(item.audit?.changesFile ? { changesFile: item.audit.changesFile } : {}),
+        ...(result.audit?.rollbackFile ? { rollbackFile: result.audit.rollbackFile } : item.audit?.rollbackFile ? { rollbackFile: item.audit.rollbackFile } : {}),
+        ...(item.audit?.currentValuesFile ? { currentValuesFile: item.audit.currentValuesFile } : {}),
+        ...(item.audit?.planHash ? { planHash: item.audit.planHash } : {}),
+      },
+    });
+  } catch (error) {
+    console.warn(`操作观察写入失败：rental.priceApply 商品 ${item.productId}：${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 function normalizeMatchText(value: string): string {
