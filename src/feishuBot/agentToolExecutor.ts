@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { buildAgentToolConfirmCard } from '../agentRuntime/approvalCard.js';
@@ -113,6 +114,7 @@ import { runPublicTrafficReportDateComparison, runPublicTrafficReportQuery, type
 import { runProductLinkQuery, type ProductLinkQueryArguments } from './productLinkQuery.js';
 import { findLatestReportContext, findReportContextByDate, formatConversionSummary, formatLatestSummary, formatProductRows, parseNumericProductIdList } from './reportStore.js';
 import { saveAgentToolConfirmRequest } from './agentToolConfirmStore.js';
+import { loadRentalPriceRollbackAction, saveRentalPriceRollbackAction } from './rentalPriceRollbackActionStore.js';
 import { refreshActivityPlanConfirmationKey, saveRefreshActivityPlan, type RefreshActivityPlan } from './refreshActivityPlanStore.js';
 import type { RentalWriteLedgerContext } from './rentalWriteOperationHandlers.js';
 import { rentalPerSpecPriceApplyResponse, rentalPerSpecPricePlanResponse } from './rentalPerSpecPriceHandlers.js';
@@ -180,6 +182,10 @@ function formatPublicTrafficReportRunSuccess(result: Awaited<ReturnType<typeof r
 
 function readString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function confirmationKey(value: Record<string, unknown>): string {
+  return createHash('sha256').update(JSON.stringify(value)).digest('hex').slice(0, 24);
 }
 
 function readLinkRegistryResolutionMode(value: unknown): 'single' | 'sameSkuGroup' | null {
@@ -1281,7 +1287,36 @@ function buildPriceApplyCompletionRows(results: RentalPriceExecutionResult[]): A
   }));
 }
 
-function rollbackButton(result: RentalPriceExecutionResult, index: number): Record<string, unknown> | null {
+interface RollbackReadyItem {
+  productId: string;
+  taskId: string;
+}
+
+function rollbackReadyItems(results: RentalPriceExecutionResult[]): RollbackReadyItem[] {
+  return results
+    .filter((result) => result.ok && result.audit?.status === 'completed' && result.audit.taskId)
+    .map((result) => ({ productId: result.productId, taskId: result.audit!.taskId! }));
+}
+
+function rollbackActionKey(taskIds: string[]): string {
+  return confirmationKey({ taskIds } as Record<string, unknown>);
+}
+
+function rollbackActionValue(action: string, items: RollbackReadyItem[]): Record<string, unknown> {
+  const taskIds = items.map((item) => item.taskId);
+  return { action, taskIds, products: items, confirmationKey: rollbackActionKey(taskIds) };
+}
+
+function storedRollbackActionValue(action: string, storedAction: { rollbackRef: string; confirmationKey: string }): Record<string, unknown> {
+  return { action, rollbackRef: storedAction.rollbackRef, confirmationKey: storedAction.confirmationKey };
+}
+
+function completionActionValue(action: string, results: RentalPriceExecutionResult[]): Record<string, unknown> {
+  const productIds = results.map((result) => result.productId);
+  return { action, productIds, confirmationKey: confirmationKey({ productIds } as Record<string, unknown>) };
+}
+
+function legacyRollbackButton(result: RentalPriceExecutionResult, index: number): Record<string, unknown> | null {
   const taskId = result.audit?.taskId;
   if (!result.ok || result.audit?.status !== 'completed' || !taskId) return null;
   return {
@@ -1294,10 +1329,40 @@ function rollbackButton(result: RentalPriceExecutionResult, index: number): Reco
   };
 }
 
-function buildPriceApplyCompletionCard(results: RentalPriceExecutionResult[]): FeishuCardPayload {
+async function buildPriceApplyCompletionCard(results: RentalPriceExecutionResult[], outputDir: string): Promise<FeishuCardPayload> {
   const success = results.filter((item) => item.ok);
-  const rollbackReady = results.filter((item) => item.ok && item.audit?.status === 'completed' && item.audit.taskId);
-  const buttons = results.map(rollbackButton).filter((item): item is Record<string, unknown> => Boolean(item));
+  const rollbackReady = rollbackReadyItems(results);
+  const rollbackAction = rollbackReady.length ? await saveRentalPriceRollbackAction(outputDir, rollbackReady) : null;
+  const actionElements: Record<string, unknown>[] = [
+    {
+      tag: 'button',
+      text: { tag: 'plain_text', content: '认可本次操作完成' },
+      type: 'primary',
+      form_action_type: 'submit',
+      name: 'rental_price_acknowledge_completion_submit',
+      behaviors: [{ type: 'callback', value: completionActionValue('rental_price_acknowledge_completion', results) }],
+    },
+  ];
+  if (rollbackAction) {
+    actionElements.push(
+      {
+        tag: 'button',
+        text: { tag: 'plain_text', content: '选择回滚链接' },
+        type: 'default',
+        form_action_type: 'submit',
+        name: 'rental_price_select_rollback_submit',
+        behaviors: [{ type: 'callback', value: storedRollbackActionValue('rental_price_select_rollback', rollbackAction) }],
+      },
+      {
+        tag: 'button',
+        text: { tag: 'plain_text', content: '回滚本次全部' },
+        type: 'danger',
+        form_action_type: 'submit',
+        name: 'rental_price_prepare_rollback_all_submit',
+        behaviors: [{ type: 'callback', value: storedRollbackActionValue('rental_price_prepare_rollback_all', rollbackAction) }],
+      },
+    );
+  }
   return {
     schema: '2.0',
     config: { wide_screen_mode: true },
@@ -1307,7 +1372,7 @@ function buildPriceApplyCompletionCard(results: RentalPriceExecutionResult[]): F
         cardMarkdown([
           success.length === results.length ? "<text_tag color='green'>已写入并完成回读流程</text_tag>" : "<text_tag color='red'>存在失败项，勿重复提交</text_tag>",
           `**成功 ${success.length}/${results.length}，可回滚 ${rollbackReady.length}/${results.length}**`,
-          '回滚不是一键执行。点击下方按钮只会生成二次确认卡，确认卡仍只使用 taskId 校验审计链路。',
+          '回滚不是一键执行。选择回滚或全部回滚都只会生成二次确认卡，确认后才按 taskId 校验审计链路并执行。',
         ].join('\n')),
         {
           tag: 'column_set',
@@ -1327,29 +1392,143 @@ function buildPriceApplyCompletionCard(results: RentalPriceExecutionResult[]): F
           { name: 'rollback', display_name: '回滚' },
           { name: 'details', display_name: '执行明细' },
         ], buildPriceApplyCompletionRows(results)),
-        ...(buttons.length ? [{ tag: 'form', name: 'rental_price_rollback_prepare_form', elements: buttons }] : [cardMarkdown('<font color=grey>没有可自动生成回滚确认卡的成功任务。</font>')]),
+        {
+          tag: 'form',
+          name: 'rental_price_completion_actions_form',
+          elements: actionElements,
+        },
+        ...(rollbackReady.length ? [] : [cardMarkdown('<font color=grey>没有可自动生成回滚确认卡的成功任务。</font>')]),
       ],
+    },
+  };
+}
+
+function readTaskIdArray(value: unknown): string[] | null {
+  if (!Array.isArray(value) || value.length === 0 || value.length > RENTAL_PRICE_PREVIEW_MAX_PRODUCTS) return null;
+  const taskIds = value.map((item) => readString(item)).filter((item): item is string => Boolean(item));
+  if (taskIds.length !== value.length || taskIds.some((taskId) => !/^task_\d+_[a-f0-9]+$/i.test(taskId))) return null;
+  return [...new Set(taskIds)];
+}
+
+function readRollbackProducts(value: unknown): RollbackReadyItem[] {
+  if (!Array.isArray(value)) return [];
+  const items: RollbackReadyItem[] = [];
+  for (const item of value) {
+    if (!isRecord(item)) continue;
+    const productId = readString(item.productId);
+    const taskId = readString(item.taskId);
+    if (productId && taskId && /^task_\d+_[a-f0-9]+$/i.test(taskId)) items.push({ productId, taskId });
+  }
+  return items;
+}
+
+function readSignedRollbackTaskIds(value: Record<string, unknown>, allowedTaskIds: string[]): string[] | null {
+  const taskIds = readTaskIdArray(value.taskIds);
+  if (!taskIds || readString(value.confirmationKey) !== rollbackActionKey(taskIds)) return null;
+  return taskIds.every((taskId) => allowedTaskIds.includes(taskId)) ? taskIds : null;
+}
+
+export async function buildRentalPriceRollbackSelectCard(outputDir: string, value: unknown): Promise<FeishuCardPayload | null> {
+  if (!isRecord(value)) return null;
+  const products = await loadRentalPriceRollbackAction(outputDir, value);
+  if (!products) return null;
+  const taskIds = products.map((item) => item.taskId);
+  const options = taskIds.map((taskId) => {
+    const product = products.find((item) => item.taskId === taskId);
+    return {
+      text: { tag: 'plain_text', content: product ? `商品 ${product.productId} / ${taskId}` : taskId },
+      value: taskId,
+    };
+  });
+  return {
+    schema: '2.0',
+    config: { wide_screen_mode: true },
+    header: { title: { tag: 'plain_text', content: '选择要回滚的改价任务' }, template: 'orange' },
+    body: {
+      elements: [
+        cardMarkdown([
+          '<text_tag color=orange>选择范围，不会直接回滚</text_tag>',
+          `可选回滚任务：${taskIds.length} 个。提交后会生成回滚审计确认卡，确认后才执行。`,
+          '如果卡片端不支持多选，请重新点击“回滚本次全部”，或用文字指定要回滚的 taskId。',
+        ].join('\n')),
+        {
+          tag: 'form',
+          name: 'rental_price_selected_rollback_form',
+          elements: [
+            {
+              tag: 'multi_select_static',
+              name: 'selected_task_ids',
+              placeholder: { tag: 'plain_text', content: '选择要回滚的链接/任务' },
+              options,
+            },
+            {
+              tag: 'button',
+              text: { tag: 'plain_text', content: '生成回滚审计卡' },
+              type: 'primary',
+              form_action_type: 'submit',
+              name: 'rental_price_prepare_selected_rollback_submit',
+              behaviors: [{ type: 'callback', value: { action: 'rental_price_prepare_selected_rollback', rollbackRef: value.rollbackRef, confirmationKey: value.confirmationKey } }],
+            },
+          ],
+        },
+      ],
+    },
+  };
+}
+
+export function buildRentalPriceCompletionAcknowledgedCard(value: unknown, reviewerId?: string): FeishuCardPayload | null {
+  if (!isRecord(value)) return null;
+  const productIds = readTaskIdArray(value.productIds) ?? (Array.isArray(value.productIds) ? value.productIds.map((item) => readString(item)).filter((item): item is string => Boolean(item)) : null);
+  if (!productIds || readString(value.confirmationKey) !== confirmationKey({ productIds } as Record<string, unknown>)) return null;
+  return {
+    schema: '2.0',
+    config: { wide_screen_mode: true },
+    header: { title: { tag: 'plain_text', content: '租赁改价已认可完成' }, template: 'green' },
+    body: {
+      elements: [cardMarkdown([
+        '<text_tag color=green>已认可完成</text_tag>',
+        `商品：${productIds.join('、')}`,
+        reviewerId ? `认可人：${reviewerId}` : undefined,
+        '本卡已收口；如后续仍需回滚，请重新发起回滚指令并走审计确认。',
+      ].filter((line): line is string => Boolean(line)).join('\n'))],
     },
   };
 }
 
 export async function buildRentalPriceRollbackConfirmCard(outputDir: string, value: unknown): Promise<FeishuCardPayload | null> {
   if (!isRecord(value)) return null;
-  const taskId = readString(value.taskId);
-  if (!taskId) return null;
-  const request: AgentToolConfirmRequest = {
-    toolName: 'rental.priceRollback',
-    arguments: { taskId },
-    reason: `用户要求回滚已完成的租赁改价任务 ${taskId}`,
-  };
-  const requestRef = await saveAgentToolConfirmRequest(outputDir, request);
-  return buildAgentToolConfirmCard(request, {
-    requestRef,
-    summaryLines: [
-      '这是回滚二次确认卡；点击确认后才会执行回滚。',
-      '执行参数仅包含 taskId，系统会重新校验审计哈希、原执行状态和回读证据。',
-    ],
-  });
+  const allowedItems = await loadRentalPriceRollbackAction(outputDir, value);
+  const allowedTaskIds = allowedItems?.map((item) => item.taskId) ?? [];
+  const signedTaskIds = allowedItems ? (readSignedRollbackTaskIds(value, allowedTaskIds) ?? allowedTaskIds) : null;
+  if (signedTaskIds) {
+    const request: AgentToolConfirmRequest = {
+      toolName: 'rental.priceRollbackBatch',
+      arguments: { taskIds: signedTaskIds },
+      reason: `用户要求回滚 ${signedTaskIds.length} 个已完成的租赁改价任务`,
+    };
+    const requestRef = await saveAgentToolConfirmRequest(outputDir, request);
+    return buildAgentToolConfirmCard(request, {
+      requestRef,
+      summaryLines: [
+        '这是回滚二次确认卡；点击确认后才会执行回滚。',
+        `回滚范围：${signedTaskIds.length} 个审计任务。`,
+        `审计任务：${signedTaskIds.join('、')}`,
+        '每个任务都会重新校验审计哈希、原执行状态和回读证据。',
+      ],
+    });
+  }
+  return null;
+}
+
+export async function selectedRollbackValue(outputDir: string, value: unknown, formValue: unknown): Promise<Record<string, unknown> | null> {
+  if (!isRecord(value)) return null;
+  const allowedItems = await loadRentalPriceRollbackAction(outputDir, value);
+  const allowedTaskIds = allowedItems?.map((item) => item.taskId) ?? null;
+  if (!allowedTaskIds || !isRecord(formValue)) return null;
+  const rawSelected = formValue.selected_task_ids;
+  const selected = readTaskIdArray(Array.isArray(rawSelected) ? rawSelected : typeof rawSelected === 'string' ? rawSelected.split(/[\s,，、;；]+/).filter(Boolean) : rawSelected);
+  if (!selected || selected.some((taskId) => !allowedTaskIds.includes(taskId))) return null;
+  return { action: 'rental_price_prepare_selected_rollback', rollbackRef: value.rollbackRef, contextConfirmationKey: value.confirmationKey, taskIds: selected, confirmationKey: rollbackActionKey(selected) };
 }
 
 function moneyFixed(value: number): string {
@@ -1469,6 +1648,10 @@ function readProductIdArray(value: unknown, maxItems: number): string[] | null {
   const ids = value.map((item) => typeof item === 'string' ? item.trim() : '').filter(Boolean);
   if (ids.length !== value.length || ids.some((id) => !/^\d+$/.test(id))) return null;
   return [...new Set(ids)];
+}
+
+function readRollbackTaskIdsArgument(value: unknown): string[] | null {
+  return readTaskIdArray(value);
 }
 
 function readDelistProductIds(args: Record<string, unknown>): string[] | null {
@@ -1662,6 +1845,7 @@ async function recordAgentToolWriteEvent(
 async function rentalPriceApplyResponse(
   args: Record<string, unknown>,
   client: RentalPriceSkillClient,
+  outputDir: string,
   ledgerContext?: RentalWriteLedgerContext,
 ): Promise<BotResponse> {
   const items = readPriceApplyItems(args.items);
@@ -1701,7 +1885,7 @@ async function rentalPriceApplyResponse(
       '',
       ...lines,
     ].join('\n'),
-    card: buildPriceApplyCompletionCard(results),
+    card: await buildPriceApplyCompletionCard(results, outputDir),
     metadata: {
       toolName: 'rental.priceApply',
       ok: success.length === results.length,
@@ -3394,7 +3578,7 @@ export async function executeAgentToolRequest(
     case 'rental.pricePreview':
       return rentalPricePreviewResponse(request.arguments, request.reason, options.rentalPriceClient ?? createRentalPriceSkillClient(), outputDir, request.continuation);
     case 'rental.priceApply':
-      return rentalPriceApplyResponse(request.arguments, options.rentalPriceClient ?? createRentalPriceSkillClient(), options.ledgerContext);
+      return rentalPriceApplyResponse(request.arguments, options.rentalPriceClient ?? createRentalPriceSkillClient(), outputDir, options.ledgerContext);
     case 'rental.bulkPricePlan':
       return rentalBulkPricePlanResponse(request.arguments, request.reason, options.rentalPriceClient ?? createRentalPriceSkillClient(), outputDir, request.continuation);
     case 'rental.bulkPriceApply':
@@ -3459,6 +3643,34 @@ export async function executeAgentToolRequest(
       if (!client.rollback) throw new Error('当前租赁改价客户端不支持回滚。');
       const result = await client.rollback(rollbackRequest);
       return { text: `${result.ok ? '改价回滚成功' : '改价回滚失败'}：商品 ${result.productId}\n${result.lines.join('\n')}`, metadata: { toolName: 'rental.priceRollback', ok: result.ok, productId: result.productId, taskId: result.audit?.taskId, rollbackFile: result.audit?.rollbackFile } };
+    }
+    case 'rental.priceRollbackBatch': {
+      const taskIds = readRollbackTaskIdsArgument(request.arguments.taskIds);
+      if (!taskIds) throw new Error('批量改价回滚参数无效，请提供 1 到 60 个 taskId。');
+      const client = options.rentalPriceClient ?? createRentalPriceSkillClient();
+      if (!client.rollback) throw new Error('当前租赁改价客户端不支持回滚。');
+      const results = [];
+      for (const taskId of taskIds) {
+        try {
+          results.push(await client.rollback({ taskId }));
+        } catch (error) {
+          results.push({ productId: 'unknown', ok: false, lines: [error instanceof Error ? error.message : String(error)], audit: { taskId, status: 'rollback_failed' as const } });
+        }
+      }
+      const success = results.filter((result) => result.ok);
+      const lines = results.flatMap((result, index) => [
+        `${index + 1}. 任务 ${taskIds[index]} / 商品 ${result.productId}：${result.ok ? '成功' : '失败'}`,
+        ...result.lines.slice(0, 8).map((line) => `   ${line}`),
+      ]);
+      return {
+        text: [`批量改价回滚完成：成功 ${success.length}/${results.length}`, '', ...lines].join('\n'),
+        metadata: {
+          toolName: 'rental.priceRollbackBatch',
+          ok: success.length === results.length,
+          taskIds,
+          productIds: results.map((result) => result.productId),
+        },
+      };
     }
     case 'rental.batchPreview':
     case 'rental.batchExecute':

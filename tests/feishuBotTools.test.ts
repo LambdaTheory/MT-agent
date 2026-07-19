@@ -4498,6 +4498,41 @@ describe('handleBotIntent', () => {
       taskIds: ['task_841_done', 'task_842_done'],
       rollbackFiles: ['rollback-841.json', 'rollback-842.json'],
     });
+    const cardText = JSON.stringify(response.card);
+    expect(cardText).toContain('rental_price_acknowledge_completion_submit');
+    expect(cardText).toContain('rental_price_select_rollback_submit');
+    expect(cardText).toContain('rental_price_prepare_rollback_all_submit');
+    expect(cardText).toContain('回滚本次全部');
+    expect(cardText).toContain('选择回滚链接');
+    expect(cardText).not.toContain('rental_price_prepare_rollback_0');
+    expect(cardText).not.toContain('生成回滚确认卡 841');
+  });
+
+  it('executes batch rental.priceRollback serially after confirmation', async () => {
+    const calls: unknown[] = [];
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run for rollback batch'); },
+      async execute() { throw new Error('execute should not run for rollback batch'); },
+      async rollback(request) {
+        calls.push(request);
+        return { productId: request.taskId === 'task_123_abcd1234' ? '761' : '762', ok: true, lines: ['rollbackApply: ok', 'submit: ok', 'verify: ok'], audit: { taskId: request.taskId, status: 'rolled_back' } };
+      },
+      async copy() { throw new Error('copy should not run'); },
+      async delist() { throw new Error('delist should not run'); },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+
+    const response = await executeAgentToolRequest(
+      { toolName: 'rental.priceRollbackBatch', arguments: { taskIds: ['task_123_abcd1234', 'task_456_abcd5678'] }, reason: '用户确认回滚所选改价任务' },
+      'output',
+      { rentalPriceClient },
+    );
+
+    expect(calls).toEqual([{ taskId: 'task_123_abcd1234' }, { taskId: 'task_456_abcd5678' }]);
+    expect(response.text).toContain('批量改价回滚完成：成功 2/2');
+    expect(response.metadata).toMatchObject({ toolName: 'rental.priceRollbackBatch', ok: true, taskIds: ['task_123_abcd1234', 'task_456_abcd5678'] });
   });
 
   it('rejects rental.priceApply without complete audit proof before execution', async () => {
