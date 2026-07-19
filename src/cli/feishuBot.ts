@@ -2,6 +2,7 @@ import { pathToFileURL } from 'node:url';
 import { createAgentPlannerProvider } from '../agentRuntime/llmPlanner.js';
 import { startClosedOrderPriceAlertMonitor } from '../closedOrderFeedback/priceAlertMonitor.js';
 import { loadEnv } from '../config/loadEnv.js';
+import { parseInactiveRefreshApproverIds } from '../feishuBot/inactiveRefreshAuthorization.js';
 import { startFeishuBotServer } from '../feishuBot/server.js';
 import { createLlmProviderFromEnv, formatLlmProviderEnvSummary, summarizeLlmProviderEnv } from '../llm/openAiCompatibleProvider.js';
 
@@ -21,6 +22,7 @@ export async function runFeishuBotCli(): Promise<void> {
     encryptKey: process.env.FEISHU_BOT_ENCRYPT_KEY,
     callbackSignatureSecret: process.env.FEISHU_BOT_CALLBACK_SIGNATURE_SECRET,
     outputDir: process.env.MT_AGENT_OUTPUT_DIR ?? 'output',
+    inactiveRefreshApproverIds: parseInactiveRefreshApproverIds(process.env.MT_AGENT_INACTIVE_REFRESH_APPROVER_IDS),
     ...(llmProvider ? { agentPlannerProvider: createAgentPlannerProvider(llmProvider) } : {}),
   });
   startClosedOrderPriceAlertMonitor({

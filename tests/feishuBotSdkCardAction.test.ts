@@ -23,6 +23,7 @@ import { buildNewLinkBatchConfirmCard, type NewLinkBatchPlan } from '../src/newL
 import { saveAgentToolConfirmRequest } from '../src/feishuBot/agentToolConfirmStore.js';
 import { buildRefreshActivityStrategyCard } from '../src/feishuBot/refreshActivityCard.js';
 import { refreshActivityPlanConfirmationKey, saveRefreshActivityPlan, type RefreshActivityPlan } from '../src/feishuBot/refreshActivityPlanStore.js';
+import { inactiveRefreshPlanConfirmationKey, saveInactiveRefreshPlan, type InactiveRefreshPlan } from '../src/operations/inactiveRefresh/planStore.js';
 import { openLinkRegistryGovernancePrompt } from '../src/linkRegistry/governanceSession.js';
 import type { LinkRegistryEntry } from '../src/linkRegistry/types.js';
 import { openLinkRegistryMaintenancePrompt } from '../src/linkRegistry/maintenanceSession.js';
@@ -471,6 +472,139 @@ describe('dashboard refresh SDK card delivery contract', () => {
 });
 
 describe('createFeishuSdkBot card.action.trigger', () => {
+  it('rejects unauthorized SDK inactive refresh plan selection before creating a confirm card', async () => {
+    const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
+    const sent: unknown[] = [];
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-sdk-inactive-select-auth-'));
+    const plan: InactiveRefreshPlan = {
+      date: '2026-07-17',
+      delistProductIds: ['901'],
+      newLinkItems: [{ keyword: 'Pocket 3', count: 1, sourceProductId: '900', sourceProductName: 'Pocket3 健康源', sameSkuGroupId: 'dji-pocket-3' }],
+      skippedGroups: [],
+      executableCount: 1,
+    };
+    const planRef = await saveInactiveRefreshPlan(outputDir, plan);
+    const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', outputDir, inactiveRefreshApproverIds: ['ou_allowed'], sdk: fakeSdk(sent, registered) });
+
+    bot.start();
+    const result = await registered['card.action.trigger']({
+      event: {
+        context: { open_message_id: 'om-inactive-refresh-select-auth' },
+        operator: { open_id: 'ou_intruder' },
+        action: {
+          tag: 'button',
+          name: 'inactive_refresh_execute_submit',
+          behaviors: [{ type: 'callback', value: { action: 'inactive_refresh_execute_select', planRef, confirmationKey: inactiveRefreshPlanConfirmationKey(plan) } }],
+        },
+      },
+    });
+
+    expect(JSON.stringify(result)).toContain('失活刷新审批无权限');
+    expect(JSON.stringify(result)).not.toContain('agent_tool_confirm');
+  });
+
+  it('rejects SDK inactive refresh plan selection when no approver allowlist is configured', async () => {
+    const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
+    const sent: unknown[] = [];
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-sdk-inactive-no-allowlist-auth-'));
+    const plan: InactiveRefreshPlan = {
+      date: '2026-07-17',
+      delistProductIds: ['901'],
+      newLinkItems: [{ keyword: 'Pocket 3', count: 1, sourceProductId: '900', sourceProductName: 'Pocket3 健康源', sameSkuGroupId: 'dji-pocket-3' }],
+      skippedGroups: [],
+      executableCount: 1,
+    };
+    const planRef = await saveInactiveRefreshPlan(outputDir, plan);
+    const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', outputDir, sdk: fakeSdk(sent, registered) });
+
+    bot.start();
+    const result = await registered['card.action.trigger']({
+      event: {
+        context: { open_message_id: 'om-inactive-refresh-no-allowlist-auth' },
+        operator: { open_id: 'ou_anyone' },
+        action: {
+          tag: 'button',
+          name: 'inactive_refresh_execute_submit',
+          behaviors: [{ type: 'callback', value: { action: 'inactive_refresh_execute_select', planRef, confirmationKey: inactiveRefreshPlanConfirmationKey(plan) } }],
+        },
+      },
+    });
+
+    expect(JSON.stringify(result)).toContain('失活刷新审批无权限');
+    expect(JSON.stringify(result)).not.toContain('agent_tool_confirm');
+  });
+
+  it('rejects unauthorized SDK inactive refresh final confirmation before execution', async () => {
+    const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
+    const sent: unknown[] = [];
+    const events: string[] = [];
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-sdk-inactive-confirm-auth-'));
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run'); },
+      async execute() { throw new Error('execute should not run'); },
+      async copy(productId) { events.push(`copy:${productId}`); return { productId, ok: true, newProductId: `new-${productId}`, lines: ['copied'], status: 'completed' }; },
+      async delist(productId) { events.push(`delist:${productId}`); return { productId, ok: true, lines: ['delisted'] }; },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+    const plan: InactiveRefreshPlan = {
+      date: '2026-07-17',
+      delistProductIds: ['901'],
+      newLinkItems: [{ keyword: 'Pocket 3', count: 1, sourceProductId: '900', sourceProductName: 'Pocket3 健康源', sameSkuGroupId: 'dji-pocket-3' }],
+      skippedGroups: [],
+      executableCount: 1,
+    };
+    const planRef = await saveInactiveRefreshPlan(outputDir, plan);
+    const request = { toolName: 'operations.inactiveRefreshExecute', arguments: { planRef, confirmationKey: inactiveRefreshPlanConfirmationKey(plan) }, reason: 'execute inactive refresh' };
+    const requestRef = await saveAgentToolConfirmRequest(outputDir, request);
+    const confirmValue = agentToolConfirmActionValue(buildAgentToolConfirmCard(request, { requestRef }));
+    const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', outputDir, rentalPriceClient, inactiveRefreshApproverIds: ['ou_allowed'], sdk: fakeSdk(sent, registered) });
+
+    bot.start();
+    const result = await registered['card.action.trigger']({
+      event: {
+        context: { open_message_id: 'om-inactive-refresh-confirm-auth' },
+        operator: { open_id: 'ou_intruder' },
+        action: { tag: 'button', name: 'agent_tool_confirm_submit', behaviors: [{ type: 'callback', value: confirmValue }] },
+      },
+    });
+
+    expect(JSON.stringify(result)).toContain('失活刷新审批无权限');
+    expect(events).toEqual([]);
+  });
+
+  it('accepts SDK inactive refresh approval when allowlist matches user_id while open_id differs', async () => {
+    const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
+    const sent: unknown[] = [];
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-sdk-inactive-user-id-auth-'));
+    const plan: InactiveRefreshPlan = {
+      date: '2026-07-17',
+      delistProductIds: ['901'],
+      newLinkItems: [{ keyword: 'Pocket 3', count: 1, sourceProductId: '900', sourceProductName: 'Pocket3 健康源', sameSkuGroupId: 'dji-pocket-3' }],
+      skippedGroups: [],
+      executableCount: 1,
+    };
+    const planRef = await saveInactiveRefreshPlan(outputDir, plan);
+    const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', outputDir, inactiveRefreshApproverIds: ['user_allowed'], sdk: fakeSdk(sent, registered) });
+
+    bot.start();
+    const result = await registered['card.action.trigger']({
+      event: {
+        context: { open_message_id: 'om-inactive-refresh-user-id-auth' },
+        operator: { open_id: 'ou_different', user_id: 'user_allowed' },
+        action: {
+          tag: 'button',
+          name: 'inactive_refresh_execute_submit',
+          behaviors: [{ type: 'callback', value: { action: 'inactive_refresh_execute_select', planRef, confirmationKey: inactiveRefreshPlanConfirmationKey(plan) } }],
+        },
+      },
+    });
+
+    expect(JSON.stringify(result)).toContain('agent_tool_confirm');
+    expect(JSON.stringify(result)).not.toContain('失活刷新审批无权限');
+  });
+
   it('returns a replacement status card when cancelling an inactive refresh plan', async () => {
     const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
     const sent: unknown[] = [];
@@ -2260,7 +2394,8 @@ describe('createFeishuSdkBot card.action.trigger', () => {
     expect(sent).toHaveLength(1);
     expect(sent[0]).toMatchObject({ kind: 'patch', request: { path: { message_id: 'om-link-governance-submit' } } });
     expect(result).toMatchObject({ card: { type: 'raw', data: { schema: '2.0' } } });
-    expect(JSON.stringify((result as any).card.data)).toContain('link_registry_governance_form');
+    expect(JSON.stringify((result as any).card.data)).toContain('组级治理已处理完成');
+    expect(JSON.stringify((result as any).card.data)).not.toContain('link_registry_governance_form');
     await expect(readFile(join(outputDir, '2026-06-24', 'link-registry-governance-session.json'), 'utf8')).resolves.toContain('Pocket 3 sample backlog reviewed');
     await expect(readFile(join(outputDir, '2026-06-24', 'link-registry-governance-session.json'), 'utf8')).resolves.toContain('ou_link_governance');
   });

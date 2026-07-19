@@ -28,6 +28,7 @@ import type { LinkRegistryEntry } from '../src/linkRegistry/types.js';
 import { buildRentalOperationConfirmCard, type RentalPriceSkillClient } from '../src/feishuBot/rentalPrice.js';
 import { buildRefreshActivityStrategyCard } from '../src/feishuBot/refreshActivityCard.js';
 import { refreshActivityPlanConfirmationKey, saveRefreshActivityPlan, type RefreshActivityPlan } from '../src/feishuBot/refreshActivityPlanStore.js';
+import { inactiveRefreshPlanConfirmationKey, saveInactiveRefreshPlan, type InactiveRefreshPlan } from '../src/operations/inactiveRefresh/planStore.js';
 import type { FeishuBotIncomingTextMessage } from '../src/feishuBot/types.js';
 import { buildFeishuSignature } from '../src/feishuBot/verify.js';
 
@@ -67,6 +68,25 @@ function readButtonValue(card: unknown, buttonName: string): Record<string, unkn
     }
   }
   throw new Error(`${buttonName} value not found`);
+}
+
+function signedCardActionHeaders(body: string, nonce = 'nonce'): Record<string, string> {
+  const timestamp = String(Math.floor(Date.now() / 1000));
+  return {
+    'Content-Type': 'application/json',
+    'X-Lark-Request-Timestamp': timestamp,
+    'X-Lark-Request-Nonce': nonce,
+    'X-Lark-Signature': buildFeishuSignature(timestamp, nonce, body, 'signature-secret'),
+  };
+}
+
+function postSignedCardAction(port: number, payload: unknown, nonce = 'nonce'): Promise<Response> {
+  const body = JSON.stringify(payload);
+  return fetch(`http://127.0.0.1:${port}`, {
+    method: 'POST',
+    headers: signedCardActionHeaders(body, nonce),
+    body,
+  });
 }
 
 const metric = {
@@ -394,6 +414,7 @@ describe('dashboard refresh HTTP card delivery contract', () => {
       appId: 'app',
       appSecret: 'secret',
       outputDir,
+      callbackSignatureSecret: 'signature-secret',
       replyCard: async ({ messageId }, card) => {
         cards.push({ messageId, card });
         return { sent: true, channel: 'app' };
@@ -413,14 +434,10 @@ describe('dashboard refresh HTTP card delivery contract', () => {
         reason: '补抓 2026-06-24 访问页',
       }));
 
-      const response = await fetch(`http://127.0.0.1:${address.port}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          header: { event_type: 'card.action.trigger' },
-          event: { context: { open_message_id: 'mid-http-dashboard-refresh-card' }, action: { value: confirmValue } },
-        }),
-      });
+      const response = await postSignedCardAction(address.port, {
+        header: { event_type: 'card.action.trigger' },
+        event: { context: { open_message_id: 'mid-http-dashboard-refresh-card' }, action: { value: confirmValue } },
+      }, 'nonce-dashboard-refresh-card');
 
       expect(response.status).toBe(200);
       expect(dashboardRefreshMocks.runDashboardRefresh).toHaveBeenCalledWith({ config, dataDate: '2026-06-24', sendTo: undefined });
@@ -652,6 +669,245 @@ describe('startFeishuBotServer', () => {
     }
   });
 
+  it('rejects unauthorized HTTP inactive refresh plan selection before creating a confirm card', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-inactive-refresh-select-auth-http-'));
+    const plan: InactiveRefreshPlan = {
+      date: '2026-07-17',
+      delistProductIds: ['901'],
+      newLinkItems: [{ keyword: 'Pocket 3', count: 1, sourceProductId: '900', sourceProductName: 'Pocket3 健康源', sameSkuGroupId: 'dji-pocket-3' }],
+      skippedGroups: [],
+      executableCount: 1,
+    };
+    const planRef = await saveInactiveRefreshPlan(outputDir, plan);
+    const server = startFeishuBotServer({
+      port: 0,
+      appId: 'app',
+      appSecret: 'secret',
+      callbackSignatureSecret: 'signature-secret',
+      outputDir,
+      inactiveRefreshApproverIds: ['ou_allowed'],
+    });
+    try {
+      await new Promise<void>((resolve) => server.once('listening', resolve));
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+      const body = JSON.stringify({
+        header: { event_type: 'card.action.trigger' },
+        event: {
+          context: { open_message_id: 'mid-inactive-refresh-select-unauthorized' },
+          operator: { open_id: 'ou_intruder' },
+          action: {
+            name: 'inactive_refresh_execute_submit',
+            behaviors: [{ type: 'callback', value: { action: 'inactive_refresh_execute_select', planRef, confirmationKey: inactiveRefreshPlanConfirmationKey(plan) } }],
+          },
+        },
+      });
+      const timestamp = String(Math.floor(Date.now() / 1000));
+      const nonce = 'nonce-inactive-refresh-select-unauthorized';
+
+      const response = await fetch(`http://127.0.0.1:${address.port}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Lark-Request-Timestamp': timestamp,
+          'X-Lark-Request-Nonce': nonce,
+          'X-Lark-Signature': buildFeishuSignature(timestamp, nonce, body, 'signature-secret'),
+        },
+        body,
+      });
+
+      expect(response.status).toBe(200);
+      const cardText = JSON.stringify(await response.json());
+      expect(cardText).toContain('失活刷新审批无权限');
+      expect(cardText).not.toContain('agent_tool_confirm');
+    } finally {
+      server.close();
+    }
+  });
+
+  it('rejects HTTP inactive refresh plan selection when no approver allowlist is configured', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-inactive-refresh-select-no-auth-http-'));
+    const plan: InactiveRefreshPlan = {
+      date: '2026-07-17',
+      delistProductIds: ['901'],
+      newLinkItems: [{ keyword: 'Pocket 3', count: 1, sourceProductId: '900', sourceProductName: 'Pocket3 健康源', sameSkuGroupId: 'dji-pocket-3' }],
+      skippedGroups: [],
+      executableCount: 1,
+    };
+    const planRef = await saveInactiveRefreshPlan(outputDir, plan);
+    const server = startFeishuBotServer({
+      port: 0,
+      appId: 'app',
+      appSecret: 'secret',
+      callbackSignatureSecret: 'signature-secret',
+      outputDir,
+    });
+    try {
+      await new Promise<void>((resolve) => server.once('listening', resolve));
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+      const body = JSON.stringify({
+        header: { event_type: 'card.action.trigger' },
+        event: {
+          context: { open_message_id: 'mid-inactive-refresh-select-no-allowlist' },
+          operator: { open_id: 'ou_anyone' },
+          action: {
+            name: 'inactive_refresh_execute_submit',
+            behaviors: [{ type: 'callback', value: { action: 'inactive_refresh_execute_select', planRef, confirmationKey: inactiveRefreshPlanConfirmationKey(plan) } }],
+          },
+        },
+      });
+      const timestamp = String(Math.floor(Date.now() / 1000));
+      const nonce = 'nonce-inactive-refresh-select-no-allowlist';
+
+      const response = await fetch(`http://127.0.0.1:${address.port}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Lark-Request-Timestamp': timestamp,
+          'X-Lark-Request-Nonce': nonce,
+          'X-Lark-Signature': buildFeishuSignature(timestamp, nonce, body, 'signature-secret'),
+        },
+        body,
+      });
+
+      expect(response.status).toBe(200);
+      const cardText = JSON.stringify(await response.json());
+      expect(cardText).toContain('失活刷新审批无权限');
+      expect(cardText).not.toContain('agent_tool_confirm');
+    } finally {
+      server.close();
+    }
+  });
+
+  it('rejects unauthorized HTTP inactive refresh final confirmation before execution', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-inactive-refresh-confirm-auth-http-'));
+    const events: string[] = [];
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async preview() { throw new Error('preview should not run'); },
+      async execute() { throw new Error('execute should not run'); },
+      async copy(productId) { events.push(`copy:${productId}`); return { productId, ok: true, newProductId: `new-${productId}`, lines: ['copied'], status: 'completed' }; },
+      async delist(productId) { events.push(`delist:${productId}`); return { productId, ok: true, lines: ['delisted'] }; },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+    const plan: InactiveRefreshPlan = {
+      date: '2026-07-17',
+      delistProductIds: ['901'],
+      newLinkItems: [{ keyword: 'Pocket 3', count: 1, sourceProductId: '900', sourceProductName: 'Pocket3 健康源', sameSkuGroupId: 'dji-pocket-3' }],
+      skippedGroups: [],
+      executableCount: 1,
+    };
+    const planRef = await saveInactiveRefreshPlan(outputDir, plan);
+    const request = { toolName: 'operations.inactiveRefreshExecute', arguments: { planRef, confirmationKey: inactiveRefreshPlanConfirmationKey(plan) }, reason: 'execute inactive refresh' };
+    const requestRef = await saveAgentToolConfirmRequest(outputDir, request);
+    const confirmValue = readAgentToolConfirmValue(buildAgentToolConfirmCard(request, { requestRef }));
+    const server = startFeishuBotServer({
+      port: 0,
+      appId: 'app',
+      appSecret: 'secret',
+      callbackSignatureSecret: 'signature-secret',
+      outputDir,
+      rentalPriceClient,
+      inactiveRefreshApproverIds: ['ou_allowed'],
+    });
+    try {
+      await new Promise<void>((resolve) => server.once('listening', resolve));
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+      const body = JSON.stringify({
+        header: { event_type: 'card.action.trigger' },
+        event: {
+          context: { open_message_id: 'mid-inactive-refresh-confirm-unauthorized' },
+          operator: { open_id: 'ou_intruder' },
+          action: { name: 'agent_tool_confirm_submit', behaviors: [{ type: 'callback', value: confirmValue }] },
+        },
+      });
+      const timestamp = String(Math.floor(Date.now() / 1000));
+      const nonce = 'nonce-inactive-refresh-confirm-unauthorized';
+
+      const response = await fetch(`http://127.0.0.1:${address.port}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Lark-Request-Timestamp': timestamp,
+          'X-Lark-Request-Nonce': nonce,
+          'X-Lark-Signature': buildFeishuSignature(timestamp, nonce, body, 'signature-secret'),
+        },
+        body,
+      });
+
+      expect(response.status).toBe(200);
+      expect(JSON.stringify(await response.json())).toContain('失活刷新审批无权限');
+      expect(events).toEqual([]);
+    } finally {
+      server.close();
+    }
+  });
+
+  it('accepts HTTP inactive refresh approval when allowlist matches user_id while open_id differs', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-inactive-refresh-user-id-auth-http-'));
+    const cards: unknown[] = [];
+    const plan: InactiveRefreshPlan = {
+      date: '2026-07-17',
+      delistProductIds: ['901'],
+      newLinkItems: [{ keyword: 'Pocket 3', count: 1, sourceProductId: '900', sourceProductName: 'Pocket3 健康源', sameSkuGroupId: 'dji-pocket-3' }],
+      skippedGroups: [],
+      executableCount: 1,
+    };
+    const planRef = await saveInactiveRefreshPlan(outputDir, plan);
+    const server = startFeishuBotServer({
+      port: 0,
+      appId: 'app',
+      appSecret: 'secret',
+      callbackSignatureSecret: 'signature-secret',
+      outputDir,
+      inactiveRefreshApproverIds: ['user_allowed'],
+      replyCard: async (_config, card) => {
+        cards.push(card);
+        return { sent: true, channel: 'app' };
+      },
+    });
+    try {
+      await new Promise<void>((resolve) => server.once('listening', resolve));
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+      const body = JSON.stringify({
+        header: { event_type: 'card.action.trigger' },
+        event: {
+          context: { open_message_id: 'mid-inactive-refresh-user-id-authorized' },
+          operator: { open_id: 'ou_different', user_id: 'user_allowed' },
+          action: {
+            name: 'inactive_refresh_execute_submit',
+            behaviors: [{ type: 'callback', value: { action: 'inactive_refresh_execute_select', planRef, confirmationKey: inactiveRefreshPlanConfirmationKey(plan) } }],
+          },
+        },
+      });
+      const timestamp = String(Math.floor(Date.now() / 1000));
+      const nonce = 'nonce-inactive-refresh-user-id-authorized';
+
+      const response = await fetch(`http://127.0.0.1:${address.port}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Lark-Request-Timestamp': timestamp,
+          'X-Lark-Request-Nonce': nonce,
+          'X-Lark-Signature': buildFeishuSignature(timestamp, nonce, body, 'signature-secret'),
+        },
+        body,
+      });
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({ ok: true });
+      const cardText = JSON.stringify(cards);
+      expect(cardText).toContain('agent_tool_confirm');
+      expect(cardText).not.toContain('失活刷新审批无权限');
+    } finally {
+      server.close();
+    }
+  });
+
   it('rejects stale signed HTTP card callbacks when callback signature secret is configured', async () => {
     const server = startFeishuBotServer({ port: 0, appId: 'app', appSecret: 'secret', verificationToken: 'token', callbackSignatureSecret: 'signature-secret' });
     try {
@@ -717,7 +973,7 @@ describe('startFeishuBotServer', () => {
 
       expect(response.status).toBe(200);
       await replySent;
-      expect(messages).toEqual([{ messageId: 'mid-http-route', text: '今日概况', source: 'http', chatId: 'chat', senderOpenId: 'ou_1' }]);
+      expect(messages).toEqual([{ messageId: 'mid-http-route', text: '今日概况', source: 'http', chatId: 'chat', senderOpenId: 'ou_1', metadata: { messageIdClaimed: true } }]);
       expect(replies).toEqual([{ messageId: 'mid-http-route', text: 'handled:今日概况' }]);
     } finally {
       server.close();
@@ -920,7 +1176,7 @@ describe('startFeishuBotServer', () => {
           action: { name: 'query_full_list_submit', behaviors: [{ type: 'callback', value: { action: 'query_full_list', queryRef: '2026-06-11:custodyAbnormal' } }] },
         },
       });
-      const timestamp = '1710000000';
+      const timestamp = String(Math.floor(Date.now() / 1000));
       const nonce = 'nonce';
 
       const response = await fetch(`http://127.0.0.1:${address.port}`, {
@@ -981,6 +1237,7 @@ describe('startFeishuBotServer', () => {
       appId: 'app',
       appSecret: 'secret',
       outputDir: await mkdtemp(join(tmpdir(), 'mt-agent-bot-http-new-link-malformed-')),
+      callbackSignatureSecret: 'signature-secret',
       replyText: async ({ messageId }, text) => {
         replies.push({ messageId, text });
         return { sent: true, channel: 'app' };
@@ -991,21 +1248,17 @@ describe('startFeishuBotServer', () => {
       const address = server.address();
       if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
 
-      const response = await fetch(`http://127.0.0.1:${address.port}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          header: { event_type: 'card.action.trigger' },
-          event: {
-            context: { open_message_id: 'mid-http-new-link-malformed' },
-            action: {
-              tag: 'button',
-              name: 'new_link_batch_confirm_submit',
-              value: { action: 'new_link_batch_confirm' },
-            },
+      const response = await postSignedCardAction(address.port, {
+        header: { event_type: 'card.action.trigger' },
+        event: {
+          context: { open_message_id: 'mid-http-new-link-malformed' },
+          action: {
+            tag: 'button',
+            name: 'new_link_batch_confirm_submit',
+            value: { action: 'new_link_batch_confirm' },
           },
-        }),
-      });
+        },
+      }, 'nonce-new-link-malformed');
 
       expect(response.status).toBe(200);
       expect(JSON.stringify(await response.json())).toContain('新链批量复制确认异常');
@@ -1081,6 +1334,7 @@ describe('startFeishuBotServer', () => {
       appId: 'app',
       appSecret: 'secret',
       outputDir: await mkdtemp(join(tmpdir(), 'mt-agent-bot-http-tool-cancel-')),
+      callbackSignatureSecret: 'signature-secret',
       replyText: async ({ messageId }, text) => {
         replies.push({ messageId, text });
         return { sent: true, channel: 'app' };
@@ -1102,21 +1356,13 @@ describe('startFeishuBotServer', () => {
         },
       };
 
-      const first = await fetch(`http://127.0.0.1:${address.port}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      const second = await fetch(`http://127.0.0.1:${address.port}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
+      const first = await postSignedCardAction(address.port, body, 'nonce-agent-tool-cancel');
+      const second = await postSignedCardAction(address.port, body, 'nonce-agent-tool-cancel');
 
       expect(first.status).toBe(200);
       expect(second.status).toBe(200);
       expect(JSON.stringify(await first.json())).toContain('已取消');
-      expect(JSON.stringify(await second.json())).toContain('已经取消');
+      expect(JSON.stringify(await second.json())).toContain('已经执行完成');
       expect(replies).toEqual([]);
     } finally {
       server.close();
@@ -1138,23 +1384,20 @@ describe('startFeishuBotServer', () => {
       appId: 'app',
       appSecret: 'secret',
       outputDir,
+      callbackSignatureSecret: 'signature-secret',
     });
     try {
       await new Promise<void>((resolve) => server.once('listening', resolve));
       const address = server.address();
       if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
-      const response = await fetch(`http://127.0.0.1:${address.port}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          header: { event_type: 'card.action.trigger' },
-          event: {
-            context: { open_message_id: 'mid-http-agent-tool-ref-cancel' },
-            operator: { open_id: 'ou_http_ref_cancel' },
-            action: { name: 'agent_tool_cancel_submit', behaviors: [{ type: 'callback', value: cancelValue }] },
-          },
-        }),
-      });
+      const response = await postSignedCardAction(address.port, {
+        header: { event_type: 'card.action.trigger' },
+        event: {
+          context: { open_message_id: 'mid-http-agent-tool-ref-cancel' },
+          operator: { open_id: 'ou_http_ref_cancel' },
+          action: { name: 'agent_tool_cancel_submit', behaviors: [{ type: 'callback', value: cancelValue }] },
+        },
+      }, 'nonce-agent-tool-ref-cancel');
 
       expect(response.status).toBe(200);
       expect(JSON.stringify(await response.json())).toContain('rental.delist');
@@ -1175,26 +1418,23 @@ describe('startFeishuBotServer', () => {
       appId: 'app',
       appSecret: 'secret',
       outputDir,
+      callbackSignatureSecret: 'signature-secret',
     });
     try {
       await new Promise<void>((resolve) => server.once('listening', resolve));
       const address = server.address();
       if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
-      const response = await fetch(`http://127.0.0.1:${address.port}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          header: { event_type: 'card.action.trigger' },
-          event: {
-            context: { open_message_id: 'mid-http-agent-tool-ref-cancel-missing' },
-            operator: { open_id: 'ou_http_ref_cancel_missing' },
-            action: {
-              name: 'agent_tool_cancel_submit',
-              behaviors: [{ type: 'callback', value: { action: 'agent_tool_cancel', requestRef: 'agent_tool_missing_ref', confirmationKey: '0123456789abcdef01234567' } }],
-            },
+      const response = await postSignedCardAction(address.port, {
+        header: { event_type: 'card.action.trigger' },
+        event: {
+          context: { open_message_id: 'mid-http-agent-tool-ref-cancel-missing' },
+          operator: { open_id: 'ou_http_ref_cancel_missing' },
+          action: {
+            name: 'agent_tool_cancel_submit',
+            behaviors: [{ type: 'callback', value: { action: 'agent_tool_cancel', requestRef: 'agent_tool_missing_ref', confirmationKey: '0123456789abcdef01234567' } }],
           },
-        }),
-      });
+        },
+      }, 'nonce-agent-tool-ref-cancel-missing');
 
       expect(response.status).toBe(200);
       expect(JSON.stringify(await response.json())).toContain('取消异常');
@@ -1420,6 +1660,7 @@ describe('startFeishuBotServer', () => {
 
   it('replies with a price callback confirmation card after differential pricing automation completes', async () => {
     const cards: Array<{ messageId: string; card: Record<string, unknown> }> = [];
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-http-activity-card-'));
     let resolveReplySent!: () => void;
     const replySent = new Promise<void>((resolve) => {
       resolveReplySent = resolve;
@@ -1429,8 +1670,9 @@ describe('startFeishuBotServer', () => {
       port: 0,
       appId: 'app',
       appSecret: 'secret',
-      outputDir: 'output',
+      outputDir,
       activityAutomationClient,
+      callbackSignatureSecret: 'signature-secret',
       replyCard: async ({ messageId }, card) => {
         cards.push({ messageId, card });
         resolveReplySent();
@@ -1446,27 +1688,24 @@ describe('startFeishuBotServer', () => {
       if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
       const confirmValue = readButtonValue(buildActivityAutomationCard(), 'activity_automation_confirm_submit');
 
-      const response = await fetch(`http://127.0.0.1:${address.port}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          header: { event_type: 'card.action.trigger' },
-          event: {
-            context: { open_message_id: 'mid-http-activity-card' },
-            action: {
-              value: confirmValue,
-              form_value: {
-                starts_at: '2026-06-23',
-                ends_at: '2026-06-30',
-                discount_ss: '8.5',
-                discount_s: '9.0',
-                discount_a: '9.5',
-                discount_b: '9.8',
-              },
+      const response = await postSignedCardAction(address.port, {
+        header: { event_type: 'card.action.trigger' },
+        event: {
+          context: { open_message_id: 'mid-http-activity-card' },
+          action: {
+            name: 'activity_automation_confirm_submit',
+            value: confirmValue,
+            form_value: {
+              starts_at: '2026-06-23',
+              ends_at: '2026-06-30',
+              discount_ss: '8.5',
+              discount_s: '9.0',
+              discount_a: '9.5',
+              discount_b: '9.8',
             },
           },
-        }),
-      });
+        },
+      }, 'nonce-activity-card');
 
       expect(response.status).toBe(200);
       await replySent;
@@ -1525,9 +1764,10 @@ describe('startFeishuBotServer', () => {
         }),
       });
 
-      expect(response.status).toBe(200);
+      expect(response.status).toBe(401);
       expect(activityAutomationClient.executions).toEqual([]);
-      expect(replies).toEqual([{ messageId: 'mid-http-activity-card-unsigned', text: '差异化定价确认参数无效，请重新发起。' }]);
+      expect(replies).toEqual([]);
+      await expect(response.json()).resolves.toEqual({ error: 'missing callback signature secret' });
     } finally {
       server.close();
     }
@@ -1535,6 +1775,7 @@ describe('startFeishuBotServer', () => {
 
   it('accepts nested differential_pricing_form values in HTTP differential pricing callbacks', async () => {
     const cards: Array<{ messageId: string; card: unknown }> = [];
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-http-activity-card-nested-'));
     let resolveReplySent!: () => void;
     const replySent = new Promise<void>((resolve) => {
       resolveReplySent = resolve;
@@ -1544,8 +1785,9 @@ describe('startFeishuBotServer', () => {
       port: 0,
       appId: 'app',
       appSecret: 'secret',
-      outputDir: 'output',
+      outputDir,
       activityAutomationClient,
+      callbackSignatureSecret: 'signature-secret',
       replyCard: async ({ messageId }, card) => {
         cards.push({ messageId, card });
         resolveReplySent();
@@ -1561,25 +1803,22 @@ describe('startFeishuBotServer', () => {
       if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
       const confirmValue = readButtonValue(buildActivityAutomationCard(), 'activity_automation_confirm_submit');
 
-      const response = await fetch(`http://127.0.0.1:${address.port}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          header: { event_type: 'card.action.trigger' },
-          event: {
-            context: { open_message_id: 'mid-http-activity-card-nested' },
-            action: {
-              value: confirmValue,
-              form_value: {
-                differential_pricing_form: {
-                  starts_at: '2026-06-24',
-                  ends_at: '2026-06-30',
-                },
+      const response = await postSignedCardAction(address.port, {
+        header: { event_type: 'card.action.trigger' },
+        event: {
+          context: { open_message_id: 'mid-http-activity-card-nested' },
+          action: {
+            name: 'activity_automation_confirm_submit',
+            value: confirmValue,
+            form_value: {
+              differential_pricing_form: {
+                starts_at: '2026-06-24',
+                ends_at: '2026-06-30',
               },
             },
           },
-        }),
-      });
+        },
+      }, 'nonce-activity-card-nested');
 
       expect(response.status).toBe(200);
       await replySent;
@@ -1773,14 +2012,16 @@ describe('startFeishuBotServer', () => {
   });
 
   it('does not execute duplicate HTTP rental operation confirmations from the same card', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-http-rental-operation-confirm-'));
     const replies: Array<{ messageId: string; text: string }> = [];
     const rentalPriceClient = fakeRentalPriceClient();
     const server = startFeishuBotServer({
       port: 0,
       appId: 'app',
       appSecret: 'secret',
-      outputDir: 'output',
+      outputDir,
       rentalPriceClient,
+      callbackSignatureSecret: 'signature-secret',
       replyText: async ({ messageId }, text) => {
         replies.push({ messageId, text });
         return { sent: true, channel: 'app' };
@@ -1796,21 +2037,14 @@ describe('startFeishuBotServer', () => {
         event: {
           context: { open_message_id: 'mid-http-rental-operation-confirm' },
           action: {
+            name: 'rental_operation_confirm_submit',
             value: confirmValue,
           },
         },
       };
 
-      const first = await fetch(`http://127.0.0.1:${address.port}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      const second = await fetch(`http://127.0.0.1:${address.port}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
+      const first = await postSignedCardAction(address.port, body, 'nonce-rental-operation-confirm');
+      const second = await postSignedCardAction(address.port, body, 'nonce-rental-operation-confirm');
 
       expect(first.status).toBe(200);
       expect(second.status).toBe(200);
@@ -1917,6 +2151,7 @@ describe('startFeishuBotServer', () => {
       appId: 'app',
       appSecret: 'secret',
       outputDir,
+      callbackSignatureSecret: 'signature-secret',
       replyCard: async ({ messageId }, card) => {
         cards.push({ messageId, card });
         return { sent: true, channel: 'app' };
@@ -1926,16 +2161,8 @@ describe('startFeishuBotServer', () => {
       await new Promise<void>((resolve) => server.once('listening', resolve));
       const address = server.address();
       if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
-      const first = await fetch(`http://127.0.0.1:${address.port}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ header: { event_type: 'card.action.trigger' }, event: { context: { open_message_id: 'mid-http-refresh-strategy' }, action: { value: delistValue } } }),
-      });
-      const second = await fetch(`http://127.0.0.1:${address.port}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ header: { event_type: 'card.action.trigger' }, event: { context: { open_message_id: 'mid-http-refresh-strategy' }, action: { value: refillValue } } }),
-      });
+      const first = await postSignedCardAction(address.port, { header: { event_type: 'card.action.trigger' }, event: { context: { open_message_id: 'mid-http-refresh-strategy' }, action: { value: delistValue } } }, 'nonce-refresh-strategy');
+      const second = await postSignedCardAction(address.port, { header: { event_type: 'card.action.trigger' }, event: { context: { open_message_id: 'mid-http-refresh-strategy' }, action: { value: refillValue } } }, 'nonce-refresh-strategy');
 
       expect(first.status).toBe(200);
       expect(second.status).toBe(200);
@@ -2024,6 +2251,7 @@ describe('startFeishuBotServer', () => {
       appSecret: 'secret',
       outputDir,
       rentalPriceClient,
+      callbackSignatureSecret: 'signature-secret',
       replyText: async ({ messageId }, text) => {
         replies.push({ messageId, text });
         return { sent: true, channel: 'app' };
@@ -2054,19 +2282,13 @@ describe('startFeishuBotServer', () => {
       const confirmValue = readAgentToolConfirmValue(buildAgentToolConfirmCard(request, { requestRef }));
       expect(JSON.stringify(confirmValue)).not.toContain('rent10day');
 
-      const response = await fetch(`http://127.0.0.1:${address.port}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          header: { event_type: 'card.action.trigger' },
-          event: {
-            context: { open_message_id: 'mid-http-agent-tool-ref-price' },
-            action: {
-              value: confirmValue,
-            },
-          },
-        }),
-      });
+      const response = await postSignedCardAction(address.port, {
+        header: { event_type: 'card.action.trigger' },
+        event: {
+          context: { open_message_id: 'mid-http-agent-tool-ref-price' },
+          action: { value: confirmValue },
+        },
+      }, 'nonce-agent-tool-ref-price');
 
       expect(response.status).toBe(200);
       expect(calls).toEqual([{ productId: '653', fields: { rent1day: '29.85', rent10day: '74.85' } }]);
@@ -2099,6 +2321,7 @@ describe('startFeishuBotServer', () => {
       appSecret: 'secret',
       outputDir,
       rentalPriceClient,
+      callbackSignatureSecret: 'signature-secret',
       replyText: async ({ messageId }, text) => {
         replies.push({ messageId, text });
         return { sent: true, channel: 'app' };
@@ -2114,14 +2337,10 @@ describe('startFeishuBotServer', () => {
         reason: agentExploreReason('dec-http-ledger', '下架 648'),
       }));
 
-      const response = await fetch(`http://127.0.0.1:${address.port}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          header: { event_type: 'card.action.trigger' },
-          event: { context: { open_message_id: 'mid-http-agent-explore-ledger' }, action: { value: confirmValue } },
-        }),
-      });
+      const response = await postSignedCardAction(address.port, {
+        header: { event_type: 'card.action.trigger' },
+        event: { context: { open_message_id: 'mid-http-agent-explore-ledger' }, action: { value: confirmValue } },
+      }, 'nonce-agent-explore-ledger');
 
       const date = new Date().toISOString().slice(0, 10);
       const entries = await loadOperationLedgerJsonlEntries(outputDir, date);
@@ -2147,6 +2366,7 @@ describe('startFeishuBotServer', () => {
       outputDir: fixtures.outputDir,
       rentalPriceClient,
       closedOrderRegistryPaths: fixtures.registryPaths,
+      callbackSignatureSecret: 'signature-secret',
       replyText: async ({ messageId }, text) => {
         replies.push({ messageId, text });
         return { sent: true, channel: 'app' };
@@ -2173,19 +2393,13 @@ describe('startFeishuBotServer', () => {
           metadataStore: {},
         },
       }));
-      const response = await fetch(`http://127.0.0.1:${address.port}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          header: { event_type: 'card.action.trigger' },
-          event: {
-            context: { open_message_id: 'mid-http-agent-continuation-registry' },
-            action: {
-              value: confirmValue,
-            },
-          },
-        }),
-      });
+      const response = await postSignedCardAction(address.port, {
+        header: { event_type: 'card.action.trigger' },
+        event: {
+          context: { open_message_id: 'mid-http-agent-continuation-registry' },
+          action: { value: confirmValue },
+        },
+      }, 'nonce-agent-continuation-registry');
 
       expect(response.status).toBe(200);
       expect(rentalPriceClient.calls).toEqual(['875']);
@@ -2245,6 +2459,7 @@ describe('startFeishuBotServer', () => {
       appSecret: 'secret',
       outputDir,
       rentalPriceClient,
+      callbackSignatureSecret: 'signature-secret',
       replyCard: async ({ messageId }, card) => {
         cards.push({ messageId, card });
         return { sent: true, channel: 'app' };
@@ -2264,14 +2479,10 @@ describe('startFeishuBotServer', () => {
       };
       const confirmValue = readAgentToolConfirmValue(buildAgentToolConfirmCard(request));
 
-      const response = await fetch(`http://127.0.0.1:${address.port}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          header: { event_type: 'card.action.trigger' },
-          event: { context: { open_message_id: 'mid-http-dm-pending' }, action: { value: confirmValue } },
-        }),
-      });
+      const response = await postSignedCardAction(address.port, {
+        header: { event_type: 'card.action.trigger' },
+        event: { context: { open_message_id: 'mid-http-dm-pending' }, action: { value: confirmValue } },
+      }, 'nonce-dm-pending');
 
       expect(response.status).toBe(200);
       expect(cards).toHaveLength(1);
@@ -2661,7 +2872,8 @@ describe('startFeishuBotServer', () => {
       expect(response.status).toBe(200);
       expect(cards).toEqual([]);
       const card = await response.json();
-      expect(JSON.stringify(card)).toContain('link_registry_governance_form');
+      expect(JSON.stringify(card)).toContain('组级治理已处理完成');
+      expect(JSON.stringify(card)).not.toContain('link_registry_governance_form');
       await expect(readFile(join(outputDir, '2026-06-24', 'link-registry-governance-session.json'), 'utf8')).resolves.toContain('Wide300 next-round backlog confirmed');
       await expect(readFile(join(outputDir, '2026-06-24', 'link-registry-governance-session.json'), 'utf8')).resolves.toContain('ou_http_governance');
     } finally {

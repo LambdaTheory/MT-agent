@@ -40,6 +40,7 @@ import {
 import { continueAgentPlannerStepsAfterResponse, executeAgentToolRequestWithContinuation } from './agentToolContinuation.js';
 import { agentExploreLedgerContextFromRequest } from './agentExploreAttribution.js';
 import { loadAgentToolConfirmRequestFromValue } from './agentToolConfirmStore.js';
+import { canApproveInactiveRefresh } from './inactiveRefreshAuthorization.js';
 import { loadClarificationContext, verifyClarificationKey } from './clarificationStore.js';
 import { handleInactiveRefreshExecuteSelect } from './inactiveRefreshExecuteSelect.js';
 import { handleRefreshActivityStrategySelect } from './refreshActivityStrategySelect.js';
@@ -78,6 +79,7 @@ export interface FeishuBotServerConfig {
   activityCancellationAssistant?: ActivityCancellationAssistant;
   llmIntentProposalProvider?: LlmIntentProposalProvider;
   agentPlannerProvider?: AgentPlannerProvider;
+  inactiveRefreshApproverIds?: readonly string[];
 }
 
 interface FeishuCardActionEvent {
@@ -411,6 +413,29 @@ function extractCardReviewerId(payload: FeishuCardActionEvent): string | undefin
   return readString(payload.event?.operator?.open_id) ?? readString(payload.event?.operator?.user_id);
 }
 
+function extractCardReviewerIds(payload: FeishuCardActionEvent): string[] {
+  return [readString(payload.event?.operator?.open_id), readString(payload.event?.operator?.user_id)].filter((id): id is string => id !== undefined);
+}
+
+function inactiveRefreshUnauthorizedCard(): FeishuCardPayload {
+  return statusCard('失活刷新审批无权限', '你的飞书账号不在失活刷新审批白名单中，未执行任何复制或下架。', 'red');
+}
+
+async function unauthorizedInactiveRefreshApprovalCard(payload: FeishuCardActionEvent, config: FeishuBotServerConfig): Promise<FeishuCardPayload | undefined> {
+  const value = cardActionValue(payload);
+  const actionName = readString(value?.action);
+  const actorIds = extractCardReviewerIds(payload);
+  if (actionName === 'inactive_refresh_execute_select' && !canApproveInactiveRefresh(actorIds, config.inactiveRefreshApproverIds)) {
+    return inactiveRefreshUnauthorizedCard();
+  }
+  if (actionName !== 'agent_tool_confirm') return undefined;
+  const request = await loadAgentToolConfirmRequestFromValue(config.outputDir ?? 'output', value);
+  if (request?.toolName === 'operations.inactiveRefreshExecute' && !canApproveInactiveRefresh(actorIds, config.inactiveRefreshApproverIds)) {
+    return inactiveRefreshUnauthorizedCard();
+  }
+  return undefined;
+}
+
 function isCardActionTrigger(payload: unknown): payload is FeishuCardActionEvent {
   if (!isRecord(payload)) return false;
   const header = isRecord(payload.header) ? payload.header : undefined;
@@ -649,6 +674,9 @@ async function handleCardActionTrigger(
       await replyText(replyConfig, 'Agent 操作确认参数无效，请重新发起。');
       return;
     }
+    if (request.toolName === 'operations.inactiveRefreshExecute' && !canApproveInactiveRefresh(extractCardReviewerIds(payload), config.inactiveRefreshApproverIds)) {
+      return inactiveRefreshUnauthorizedCard();
+    }
     const claim = claimServerCardAction(messageId, agentToolClaimFamily(value), actionName);
     if (!claim.claimed) {
       return claimStatusCard('Agent 操作已处理', claim.claim);
@@ -705,6 +733,9 @@ async function handleCardActionTrigger(
   }
 
   if (actionName === 'inactive_refresh_execute_select') {
+    if (!canApproveInactiveRefresh(extractCardReviewerIds(payload), config.inactiveRefreshApproverIds)) {
+      return inactiveRefreshUnauthorizedCard();
+    }
     const claim = claimServerCardAction(messageId, inactiveRefreshExecuteClaimFamily(value), actionName);
     if (!claim.claimed) {
       return claimStatusCard('失活刷新计划已处理', claim.claim);
@@ -1078,6 +1109,8 @@ export function startFeishuBotServer(config: FeishuBotServerConfig) {
       if (!config.callbackSignatureSecret && isSensitiveUnsignedCardAction(payload)) return writeJson(res, 401, { error: 'missing callback signature secret' });
       if (!validSignature) return writeJson(res, 401, { error: 'invalid signature' });
       if (config.callbackSignatureSecret && !isFreshFeishuTimestamp(req.headers['x-lark-request-timestamp'] as string | undefined)) return writeJson(res, 401, { error: 'stale signature' });
+      const unauthorizedCard = await unauthorizedInactiveRefreshApprovalCard(payload, config);
+      if (unauthorizedCard) return writeJson(res, 200, unauthorizedCard);
       if (!(await claimPersistentSensitiveCardAction(config.outputDir, payload))) {
         writeJson(res, 200, statusCard('卡片操作已处理', '该卡片操作已经执行完成，请勿重复提交。', 'grey'));
         return;

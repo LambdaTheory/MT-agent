@@ -322,6 +322,8 @@ npm run rental-price-skill:install
   - `FEISHU_BOT_PORT`
   - `FEISHU_BOT_VERIFICATION_TOKEN`
   - `FEISHU_BOT_ENCRYPT_KEY`
+  - `FEISHU_BOT_CALLBACK_SIGNATURE_SECRET`：HTTP 回调模式下敏感卡片操作必须配置请求签名密钥；不要复用 Encrypt Key。
+  - `MT_AGENT_INACTIVE_REFRESH_APPROVER_IDS`：“跑失活刷新”执行审批白名单。填写允许审批的飞书 `open_id`/`user_id`，支持逗号、分号或空白分隔；留空会 fail closed，任何人都不能审批执行。
 - LLM：
   - `LLM_PROVIDER`
   - `LLM_BASE_URL`
