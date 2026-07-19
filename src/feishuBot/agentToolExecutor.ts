@@ -877,7 +877,7 @@ async function rentalPriceSnapshotResponse(
   if (!client.read) return { text: '当前租赁改价客户端还没有接入只读价格读取能力，无法查询定价情况。' };
   const registryContext = await loadClosedOrderRegistryContext(options.closedOrderRegistryPaths);
   const registry = createLinkRegistry(registryContext.registry);
-  const resolution = resolveRentalPriceSnapshotEntries(query, registry);
+  const resolution = resolveRentalPriceSnapshotEntries(query, registry, { expandSingleInternalIdToSameSkuGroup: !queryHasExplicitProductIdentifier(query), allowMultipleInternalIds: true });
   if (!resolution.ok) return { text: resolution.text };
   if (resolution.entries.length === 0) return { text: `链接维护档案已匹配到“${query}”，但没有可查询的未下架商品。` };
   if (resolution.entries.length > RENTAL_PRICE_SNAPSHOT_MAX_PRODUCTS) {
@@ -1682,6 +1682,29 @@ function itemMatchesKeyword(title: string, keyword: string): boolean {
   return Boolean(normalizedKeyword && normalizedTitle.includes(normalizedKeyword));
 }
 
+function queryHasExplicitProductIdentifier(query: string): boolean {
+  return Boolean(
+    parseInternalProductIdsQuery(query) ||
+    parseExplicitInternalProductIdInText(query) ||
+    parseExplicitPlatformProductIdInText(query) ||
+    parseLeadingInternalProductIdActionQuery(query) ||
+    parseLikelyPlatformProductIdInText(query),
+  );
+}
+
+function readAbsoluteRentFields(value: unknown): Record<string, string> | null {
+  if (!isRecord(value)) return null;
+  const fields: Record<string, string> = {};
+  for (const [field, raw] of Object.entries(value)) {
+    if (!isRentPriceField(field)) return null;
+    if (typeof raw !== 'string' && typeof raw !== 'number') return null;
+    const numeric = Number(raw);
+    if (!Number.isFinite(numeric)) return null;
+    fields[field] = numeric.toFixed(2);
+  }
+  return Object.keys(fields).length ? fields : null;
+}
+
 function compactName(entry: LinkRegistryEntry): string {
   return entry.shortName?.trim() || entry.productName?.trim() || entry.internalProductId;
 }
@@ -1717,6 +1740,108 @@ function formatSpecRemovePlanLines(
     ...(blocked.length ? ['', '已阻断项：', ...blocked.slice(0, 8)] : []),
     ...(failedReads.length ? ['', '读取失败：', ...failedReads.slice(0, 8)] : []),
   ].filter((line): line is string => Boolean(line)).join('\n');
+}
+
+async function rentalSpecKeywordPricePlanResponse(
+  args: Record<string, unknown>,
+  reason: string,
+  client: RentalPriceSkillClient,
+  outputDir: string,
+  options: AgentToolExecutionOptions,
+  continuation?: AgentToolConfirmRequest['continuation'],
+): Promise<BotResponse> {
+  const query = requireString(args.query, 'query');
+  const keyword = requireString(args.keyword, 'keyword');
+  const fields = readAbsoluteRentFields(args.fields);
+  if (!fields) return { text: '按规格关键词改价参数无效：fields 只支持 rent*day 绝对租金字段。', metadata: { toolName: 'rental.specKeywordPricePlan', ok: false } };
+  if (!client.read) return { text: '当前租赁改价客户端还没有接入只读价格读取能力，无法生成按规格关键词改价预览。', metadata: { toolName: 'rental.specKeywordPricePlan', ok: false } };
+  if (!client.auditPreviewFromRead) return { text: '当前租赁改价客户端缺少审计预览能力，无法生成按规格关键词改价确认卡。', metadata: { toolName: 'rental.specKeywordPricePlan', ok: false } };
+
+  const registryContext = await loadClosedOrderRegistryContext(options.closedOrderRegistryPaths);
+  const registry = createLinkRegistry(registryContext.registry);
+  const requestedResolutionMode = readLinkRegistryResolutionMode(args.resolutionMode);
+  if (args.resolutionMode !== undefined && !requestedResolutionMode) {
+    return { text: '按规格关键词改价参数无效：resolutionMode 只能是 single 或 sameSkuGroup。', metadata: { toolName: 'rental.specKeywordPricePlan', ok: false } };
+  }
+  const effectiveResolutionMode = requestedResolutionMode ?? (queryHasExplicitProductIdentifier(query) ? 'single' : 'sameSkuGroup');
+  const resolution = resolveRentalPriceSnapshotEntries(query, registry, { expandSingleInternalIdToSameSkuGroup: effectiveResolutionMode === 'sameSkuGroup', allowMultipleInternalIds: true });
+  if (!resolution.ok) return { text: resolution.text, metadata: { toolName: 'rental.specKeywordPricePlan', ok: false } };
+  if (resolution.entries.length === 0) return { text: `链接维护档案已匹配到“${query}”，但没有可处理的未下架商品。`, metadata: { toolName: 'rental.specKeywordPricePlan', ok: false, productIds: [] } };
+  if (resolution.entries.length > RENTAL_PRICE_PREVIEW_MAX_PRODUCTS) return { text: `“${query}”命中 ${resolution.entries.length} 个未下架商品，超过单次按规格关键词改价上限 ${RENTAL_PRICE_PREVIEW_MAX_PRODUCTS} 个。请缩小范围。`, metadata: { toolName: 'rental.specKeywordPricePlan', ok: false } };
+
+  const readyItems: Array<{ productId: string; fields: Record<string, string>; audit?: RentalPriceAuditReference }> = [];
+  const matchLines: string[] = [];
+  const blocked: string[] = [];
+  const unmatched: string[] = [];
+  let matchedSpecCount = 0;
+
+  for (const entry of resolution.entries) {
+    const productId = entry.internalProductId;
+    let current: RentalPriceReadResult;
+    try {
+      current = await client.read(productId);
+    } catch (error) {
+      blocked.push(`商品 ${productId}：读取失败，请检查本地租赁价服务日志。`);
+      continue;
+    }
+    if (!current.ok) {
+      blocked.push(`商品 ${productId}：读取失败，请检查本地租赁价服务日志。`);
+      continue;
+    }
+    const matchedSpecs = current.specs.filter((spec) => itemMatchesKeyword(spec.title, keyword));
+    if (matchedSpecs.length === 0) {
+      unmatched.push(`商品 ${productId}：未命中包含「${keyword}」的规格项`);
+      continue;
+    }
+    const specFields: PerSpecPriceFieldMap = {};
+    for (const spec of matchedSpecs) specFields[spec.specId] = fields;
+    let audit: RentalPriceAuditReference | undefined;
+    try {
+      audit = compactAuditReference(await client.auditPreviewFromRead(productId, { ...current }, fields, specFields) ?? undefined);
+    } catch (error) {
+      blocked.push(`商品 ${productId}：审计预览失败，请检查本地审计日志。`);
+      continue;
+    }
+    const auditBlockReason = rentalPriceExecutionAuditBlockReason(audit);
+    if (auditBlockReason) {
+      blocked.push(`商品 ${productId}：${auditBlockReason}`);
+      continue;
+    }
+    readyItems.push({ productId, fields, ...(audit ? { audit } : {}) });
+    matchedSpecCount += matchedSpecs.length;
+    matchLines.push(`- 商品 ${productId} ${compactName(entry)}：${matchedSpecs.map((spec) => `${spec.specId} ${spec.title}`).join('、')}`);
+  }
+
+  const header = [
+    `按规格关键词改价预览：${query}`,
+    resolution.sameSkuGroupId ? `同款组：${resolution.sameSkuGroupId}` : undefined,
+    `匹配依据：${resolution.matchText}`,
+    `关键词：${keyword}`,
+    `目标价格：${Object.entries(fields).map(([field, value]) => `${field}=${value}`).join('，')}`,
+    `命中规格：${matchedSpecCount} 个`,
+  ].filter((line): line is string => Boolean(line));
+  const text = [
+    ...header,
+    ...(matchLines.length ? ['', '命中明细：', ...matchLines] : []),
+    ...(unmatched.length ? ['', '未命中链接：', ...unmatched.slice(0, 12)] : []),
+    ...(blocked.length ? ['', '阻断项：', ...blocked.slice(0, 12)] : []),
+  ].join('\n');
+  if (blocked.length > 0 || readyItems.length === 0) {
+    return { text, metadata: { toolName: 'rental.specKeywordPricePlan', ok: false, productIds: resolution.entries.map((entry) => entry.internalProductId), previewCount: readyItems.length } };
+  }
+
+  const confirmRequest: AgentToolConfirmRequest = {
+    toolName: 'rental.priceApply',
+    arguments: { items: readyItems },
+    reason,
+    ...(continuation ? { continuation } : {}),
+  };
+  const requestRef = await saveAgentToolConfirmRequest(outputDir, confirmRequest);
+  return {
+    text,
+    card: buildAgentToolConfirmCard(confirmRequest, { requestRef, summaryLines: header, displayElements: buildPriceApplyConfirmDisplayElements(readyItems) }),
+    metadata: { toolName: 'rental.specKeywordPricePlan', ok: true, productIds: resolution.entries.map((entry) => entry.internalProductId), previewCount: readyItems.length, matchedSpecCount },
+  };
 }
 
 async function rentalSpecRemovePlanResponse(
@@ -3170,6 +3295,8 @@ export async function executeAgentToolRequest(
       const keyword = requireString(request.arguments.keyword, 'keyword');
       return rentalSpecRemovePlanResponse(query, keyword, request.reason, options.rentalPriceClient ?? createRentalPriceSkillClient(), options, request.continuation);
     }
+    case 'rental.specKeywordPricePlan':
+      return rentalSpecKeywordPricePlanResponse(request.arguments, request.reason, options.rentalPriceClient ?? createRentalPriceSkillClient(), outputDir, options, request.continuation);
     case 'rental.operationConfirmRequest':
       return executeRentalWriteOperationHandler(request, options.rentalPriceClient ?? createRentalPriceSkillClient(), options.ledgerContext);
     case 'rental.priceChange': {

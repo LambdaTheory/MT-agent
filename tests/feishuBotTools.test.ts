@@ -2469,6 +2469,273 @@ describe('handleBotIntent', () => {
     expect(response.text).toContain('读取商品：成功 2/2');
   });
 
+  it('keeps explicit internal-id rental price snapshots scoped to one product', async () => {
+    const registryRoot = await mkdtemp(join(tmpdir(), 'mt-agent-single-price-registry-'));
+    const registryPaths = await writeX200PriceSnapshotRegistryFixtures(registryRoot);
+    const readProductIds: string[] = [];
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async read(productId) {
+        readProductIds.push(productId);
+        return {
+          productId,
+          ok: true,
+          specs: [{ specId: 'sku-128', title: '黑色 128G' }],
+          values: { 'sku-128': { rent1day: '14', rent7day: '88' } },
+          lines: ['read: ok'],
+        };
+      },
+      async preview() { throw new Error('preview should not run for price snapshot'); },
+      async execute() { throw new Error('execute should not run for price snapshot'); },
+      async copy() { throw new Error('copy should not run for price snapshot'); },
+      async delist() { throw new Error('delist should not run for price snapshot'); },
+      async tenancySet() { throw new Error('tenancySet should not run for price snapshot'); },
+      async specDiscover() { throw new Error('specDiscover should not run for price snapshot'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run for price snapshot'); },
+    };
+
+    const response = await executeAgentToolRequest(
+      { toolName: 'rental.priceSnapshot', arguments: { query: '362' }, reason: '查 362 价格详细' },
+      'output',
+      { rentalPriceClient, closedOrderRegistryPaths: registryPaths },
+    );
+
+    expect(readProductIds).toEqual(['362']);
+    expect(response.text).toContain('按端内ID 362 查询指定商品');
+    expect(response.text).toContain('读取商品：成功 1/1');
+    expect(response.text).not.toContain('同款组：vivo-x200-ultra');
+  });
+
+  it('builds audited spec-keyword rental price confirmations for matched specs only', async () => {
+    const outputDir = await writeContext();
+    const registryRoot = await mkdtemp(join(tmpdir(), 'mt-agent-spec-keyword-price-registry-'));
+    const registryPaths = await writeX300SpecRemoveRegistryFixtures(registryRoot);
+    const auditPreviewFromRead = vi.fn(async (productId: string, current: Record<string, unknown>, fields: Record<string, string>, artifact: unknown) => completeAudit(productId, {
+      expectedFieldCount: 1,
+      diff: [{ specId: 'item-128-a', specTitle: '128G', field: 'rent1day', label: '1天', old: '88.00', new: '99.00', change: '+11.00', changePct: '+12.5%', issues: [] }],
+      current,
+      fields,
+      artifact,
+    }));
+    const applyPerSpec = vi.fn();
+    const read = vi.fn(async (productId: string) => {
+      const specs = productId === '501'
+        ? [{ specId: 'item-64-a', title: '64G 标准' }, { specId: 'item-128-a', title: '128G 黑色' }]
+        : [{ specId: 'item-256-b', title: '256G' }];
+      const values: Record<string, Record<string, string>> = productId === '501'
+        ? { 'item-64-a': { rent1day: '66.00' }, 'item-128-a': { rent1day: '88.00' } }
+        : { 'item-256-b': { rent1day: '120.00' } };
+      return { productId, ok: true, specs, values, lines: ['read: ok'] };
+    });
+    const rentalPriceClient: RentalPriceSkillClient = {
+      read,
+      auditPreviewFromRead,
+      applyPerSpec,
+      async preview() { throw new Error('preview should not run for spec-keyword plan'); },
+      async execute() { throw new Error('execute should not run during preview'); },
+      async copy() { throw new Error('copy should not run'); },
+      async delist() { throw new Error('delist should not run'); },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run when read supplies specs'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+
+    const response = await executeAgentToolRequest(
+      { toolName: 'rental.specKeywordPricePlan', arguments: { query: 'x300u-spec-test', keyword: '128g', fields: { rent1day: 99 }, resolutionMode: 'sameSkuGroup' }, reason: '改价 x300u-spec-test 商品组含128g规格一天租期改为99元' },
+      outputDir,
+      { rentalPriceClient, closedOrderRegistryPaths: registryPaths },
+    );
+
+    expect(read).toHaveBeenCalledWith('501');
+    expect(read).toHaveBeenCalledWith('502');
+    expect(applyPerSpec).not.toHaveBeenCalled();
+    expect(auditPreviewFromRead).toHaveBeenCalledWith('501', expect.any(Object), { rent1day: '99.00' }, { 'item-128-a': { rent1day: '99.00' } });
+    expect(auditPreviewFromRead.mock.calls.map((call) => call[3])).toEqual([
+      { 'item-128-a': { rent1day: '99.00' } },
+    ]);
+    expect(response.text).toContain('按规格关键词改价预览：x300u-spec-test');
+    expect(response.text).toContain('关键词：128g');
+    expect(response.text).toContain('命中规格：1 个');
+    expect(response.text).toContain('未命中包含「128g」的规格项');
+    expect(response.card).toBeDefined();
+    const cardText = JSON.stringify(response.card);
+    expect(cardText).toContain('rental_price_apply_summary');
+    expect(cardText).toContain('rental_price_apply_detail');
+    expect(cardText).toContain('128G');
+    expect(cardText).toContain('88.00 -> 99.00');
+    expect(cardText).toContain('+12.5%');
+    const confirmRequest = await loadAgentToolConfirmRequestFromCard(outputDir, response.card);
+    expect(confirmRequest.toolName).toBe('rental.priceApply');
+    expect(confirmRequest.arguments.items).toEqual([
+      expect.objectContaining({
+        productId: '501',
+        fields: { rent1day: '99.00' },
+        audit: expect.objectContaining({
+          taskId: 'task_501_preview',
+          changesFile: 'changes-501.json',
+          rollbackFile: 'rollback-501.json',
+          currentValuesFile: 'current-501.json',
+          changesSha256: AUDIT_HASH,
+          rollbackSha256: AUDIT_HASH,
+          currentSnapshotSha256: AUDIT_HASH,
+          planHash: AUDIT_HASH,
+          expectedFieldCount: 1,
+        }),
+      }),
+    ]);
+  });
+
+  it('blocks spec-keyword price plans when audit evidence is missing', async () => {
+    const registryRoot = await mkdtemp(join(tmpdir(), 'mt-agent-spec-keyword-no-audit-registry-'));
+    const registryPaths = await writeX300SpecRemoveRegistryFixtures(registryRoot);
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async read(productId) {
+        return {
+          productId,
+          ok: true,
+          specs: [{ specId: 'item-128-a', title: '128G 黑色' }],
+          values: { 'item-128-a': { rent1day: '88.00' } },
+          lines: ['read: ok'],
+        };
+      },
+      async preview() { throw new Error('preview should not run'); },
+      async execute() { throw new Error('execute should not run'); },
+      async copy() { throw new Error('copy should not run'); },
+      async delist() { throw new Error('delist should not run'); },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+
+    const response = await executeAgentToolRequest(
+      { toolName: 'rental.specKeywordPricePlan', arguments: { query: '501', keyword: '128g', fields: { rent1day: '99.00' } }, reason: '改价 501 含128g规格一天99' },
+      'output',
+      { rentalPriceClient, closedOrderRegistryPaths: registryPaths },
+    );
+
+    expect(response.metadata).toMatchObject({ toolName: 'rental.specKeywordPricePlan', ok: false });
+    expect(response.text).toContain('审计预览能力');
+    expect(response.card).toBeUndefined();
+  });
+
+  it('blocks spec-keyword price plans when no specs match the keyword', async () => {
+    const registryRoot = await mkdtemp(join(tmpdir(), 'mt-agent-spec-keyword-empty-registry-'));
+    const registryPaths = await writeX300SpecRemoveRegistryFixtures(registryRoot);
+    const response = await executeAgentToolRequest(
+      { toolName: 'rental.specKeywordPricePlan', arguments: { query: '501', keyword: '128g', fields: { rent1day: '99.00' } }, reason: '改价 501 含128g规格一天99' },
+      'output',
+      {
+        closedOrderRegistryPaths: registryPaths,
+        rentalPriceClient: {
+          async read(productId) {
+            return { productId, ok: true, specs: [{ specId: 'item-64-a', title: '64G 黑色' }], values: { 'item-64-a': { rent1day: '88.00' } }, lines: ['read: ok'] };
+          },
+          async auditPreviewFromRead() { throw new Error('audit should not run without matched specs'); },
+          async preview() { throw new Error('preview should not run'); },
+          async execute() { throw new Error('execute should not run'); },
+          async copy() { throw new Error('copy should not run'); },
+          async delist() { throw new Error('delist should not run'); },
+          async tenancySet() { throw new Error('tenancySet should not run'); },
+          async specDiscover() { throw new Error('specDiscover should not run'); },
+          async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+        },
+      },
+    );
+
+    expect(response.metadata).toMatchObject({ toolName: 'rental.specKeywordPricePlan', ok: false, previewCount: 0 });
+    expect(response.text).toContain('命中规格：0 个');
+    expect(response.card).toBeUndefined();
+  });
+
+  it('blocks spec-keyword price plans on read failures without leaking raw details', async () => {
+    const registryRoot = await mkdtemp(join(tmpdir(), 'mt-agent-spec-keyword-read-fail-registry-'));
+    const registryPaths = await writeX300SpecRemoveRegistryFixtures(registryRoot);
+    const response = await executeAgentToolRequest(
+      { toolName: 'rental.specKeywordPricePlan', arguments: { query: '501', keyword: '128g', fields: { rent1day: '99.00' }, resolutionMode: 'single' }, reason: '改价 501 含128g规格一天99' },
+      'output',
+      {
+        closedOrderRegistryPaths: registryPaths,
+        rentalPriceClient: {
+          async read() { throw new Error('url=https://secret.example/path token=abc123 C:\\secret\\file.json'); },
+          async auditPreviewFromRead() { throw new Error('audit should not run after read failure'); },
+          async preview() { throw new Error('preview should not run'); },
+          async execute() { throw new Error('execute should not run'); },
+          async copy() { throw new Error('copy should not run'); },
+          async delist() { throw new Error('delist should not run'); },
+          async tenancySet() { throw new Error('tenancySet should not run'); },
+          async specDiscover() { throw new Error('specDiscover should not run'); },
+          async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+        },
+      },
+    );
+
+    expect(response.metadata).toMatchObject({ toolName: 'rental.specKeywordPricePlan', ok: false });
+    expect(response.text).toContain('读取失败');
+    expect(response.text).not.toContain('secret.example');
+    expect(response.text).not.toContain('abc123');
+    expect(response.text).not.toContain('secret\\file');
+    expect(response.card).toBeUndefined();
+  });
+
+  it('blocks spec-keyword price plans on audit failures without leaking raw details', async () => {
+    const registryRoot = await mkdtemp(join(tmpdir(), 'mt-agent-spec-keyword-audit-fail-registry-'));
+    const registryPaths = await writeX300SpecRemoveRegistryFixtures(registryRoot);
+    const response = await executeAgentToolRequest(
+      { toolName: 'rental.specKeywordPricePlan', arguments: { query: '501', keyword: '128g', fields: { rent1day: '99.00' }, resolutionMode: 'single' }, reason: '改价 501 含128g规格一天99' },
+      'output',
+      {
+        closedOrderRegistryPaths: registryPaths,
+        rentalPriceClient: {
+          async read(productId) {
+            return { productId, ok: true, specs: [{ specId: 'item-128-a', title: '128G 黑色' }], values: { 'item-128-a': { rent1day: '88.00' } }, lines: ['read: ok'] };
+          },
+          async auditPreviewFromRead() { throw new Error('changesFile=C:\\secret\\changes.json token=abc123'); },
+          async preview() { throw new Error('preview should not run'); },
+          async execute() { throw new Error('execute should not run'); },
+          async copy() { throw new Error('copy should not run'); },
+          async delist() { throw new Error('delist should not run'); },
+          async tenancySet() { throw new Error('tenancySet should not run'); },
+          async specDiscover() { throw new Error('specDiscover should not run'); },
+          async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+        },
+      },
+    );
+
+    expect(response.metadata).toMatchObject({ toolName: 'rental.specKeywordPricePlan', ok: false });
+    expect(response.text).toContain('审计预览失败');
+    expect(response.text).not.toContain('secret\\changes');
+    expect(response.text).not.toContain('abc123');
+    expect(response.card).toBeUndefined();
+  });
+
+  it('rejects invalid spec-keyword price resolution modes without defaulting broader', async () => {
+    const registryRoot = await mkdtemp(join(tmpdir(), 'mt-agent-spec-keyword-invalid-mode-registry-'));
+    const registryPaths = await writeX300SpecRemoveRegistryFixtures(registryRoot);
+    const read = vi.fn();
+    const response = await executeAgentToolRequest(
+      { toolName: 'rental.specKeywordPricePlan', arguments: { query: 'x300u-spec-test', keyword: '128g', fields: { rent1day: '99.00' }, resolutionMode: 'sameSkuGruop' }, reason: '改价 x300u 128g' },
+      'output',
+      {
+        closedOrderRegistryPaths: registryPaths,
+        rentalPriceClient: {
+          read,
+          async auditPreviewFromRead() { throw new Error('audit should not run'); },
+          async preview() { throw new Error('preview should not run'); },
+          async execute() { throw new Error('execute should not run'); },
+          async copy() { throw new Error('copy should not run'); },
+          async delist() { throw new Error('delist should not run'); },
+          async tenancySet() { throw new Error('tenancySet should not run'); },
+          async specDiscover() { throw new Error('specDiscover should not run'); },
+          async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+        },
+      },
+    );
+
+    expect(read).not.toHaveBeenCalled();
+    expect(response.metadata).toMatchObject({ toolName: 'rental.specKeywordPricePlan', ok: false });
+    expect(response.text).toContain('resolutionMode');
+    expect(response.card).toBeUndefined();
+  });
+
   it('allows read-only rental price snapshots for same-sku groups above twenty products', async () => {
     const outputDir = await writeContext();
     const registryRoot = await mkdtemp(join(tmpdir(), 'mt-agent-x200-price-large-registry-'));
