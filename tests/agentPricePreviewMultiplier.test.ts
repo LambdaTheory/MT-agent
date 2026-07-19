@@ -209,6 +209,27 @@ describe('agent rental price preview multiplier handling', () => {
     expect(response.card).toBeDefined();
   });
 
+  it('blocks single-product amount adjustments when the rent scope is ambiguous', async () => {
+    const { client, preview } = fakeRentalPriceClient();
+
+    const response = await executeAgentToolRequest(
+      {
+        toolName: 'rental.pricePreview',
+        arguments: { productIds: ['761'] },
+        reason: '761改价-15元',
+      },
+      'output',
+      { rentalPriceClient: client },
+    );
+
+    expect(preview).not.toHaveBeenCalled();
+    expect(response.metadata).toMatchObject({ toolName: 'rental.pricePreview', ok: false, needsClarification: true });
+    expect(response.text).toContain('改价范围不明确');
+    expect(response.text).toContain('761所有租期改价-15元');
+    expect(response.card).toBeDefined();
+    expect(JSON.stringify(response.card)).toContain('租赁改价需要确认范围');
+  });
+
   it('infers a missing amount adjustment from multi-step price wording', async () => {
     const { client, preview } = fakeRentalPriceClient();
 
@@ -313,6 +334,71 @@ describe('agent rental price preview multiplier handling', () => {
     expect(cardText).not.toContain('参数：{"items"');
   });
 
+  it('simulates a Pocket3 multi-spec product with VAS-like service fields without touching non-rent surfaces', async () => {
+    const preview = vi.fn(async () => {
+      throw new Error('preview should not run when batchRead can build the complex preview');
+    });
+    const vasRead = vi.fn(async () => {
+      throw new Error('vasRead should not run during price preview');
+    });
+    const vasApply = vi.fn(async () => {
+      throw new Error('vasApply should not run during price preview');
+    });
+    const batchRead = vi.fn(async (productIds: string[]) => ({
+      ok: true,
+      status: 'ok',
+      count: productIds.length,
+      results: {
+        '900': {
+          status: 'ok',
+          productId: '900',
+          specs: [{ specId: 'std', title: 'Pocket3 标准版' }, { specId: 'creator', title: 'Pocket3 全能套装' }],
+          values: {
+            std: { rent1day: '100', rent7day: '520', marketPrice: '3999', anXinBaoPrice: '39', vasServiceId: '安心保' },
+            creator: { rent1day: '140', rent7day: '680', marketPrice: '4999', anXinBaoPrice: '49', vasServiceId: '安心保' },
+          },
+        },
+        '901': {
+          status: 'ok',
+          productId: '901',
+          specs: [{ specId: 'std', title: 'Pocket3 标准版' }],
+          values: {
+            std: { rent1day: '90', rent7day: '480', marketPrice: '3999', anXinBaoPrice: '39', vasServiceId: '安心保' },
+          },
+        },
+      },
+      errors: [],
+      warnings: [],
+      lines: ['batch-read: pocket3 complex ok'],
+    }));
+    const auditPreviewFromRead = vi.fn(async (productId: string, _readResult: unknown, _fields: Record<string, string>, _artifact: unknown) => audit(productId));
+
+    const response = await executeAgentToolRequest(
+      {
+        toolName: 'rental.pricePreview',
+        arguments: { productIds: ['900', '901'], adjustmentAmount: -10, scope: 'all_price_fields' },
+        reason: 'Pocket3 安心保链接 900 901 所有租期改价-10元，只改租金不动服务',
+      },
+      'output',
+      { rentalPriceClient: { preview, batchRead, auditPreviewFromRead, vasRead, vasApply } as unknown as RentalPriceSkillClient },
+    );
+
+    expect(batchRead).toHaveBeenCalledWith(['900', '901']);
+    expect(preview).not.toHaveBeenCalled();
+    expect(auditPreviewFromRead).toHaveBeenCalledWith('900', expect.any(Object), { rent1day: '90.00', rent7day: '510.00' }, {
+      std: { rent1day: '90.00', rent7day: '510.00' },
+      creator: { rent1day: '130.00', rent7day: '670.00' },
+    });
+    expect(auditPreviewFromRead).toHaveBeenCalledWith('901', expect.any(Object), { rent1day: '80.00', rent7day: '470.00' }, { rent1day: '80.00', rent7day: '470.00' });
+    expect(vasRead).not.toHaveBeenCalled();
+    expect(vasApply).not.toHaveBeenCalled();
+    const plannedWrites = auditPreviewFromRead.mock.calls.map(([, , fields, artifact]) => ({ fields, artifact }));
+    expect(JSON.stringify(plannedWrites)).not.toContain('anXinBaoPrice');
+    expect(JSON.stringify(plannedWrites)).not.toContain('vasServiceId');
+    expect(response.metadata).toMatchObject({ toolName: 'rental.pricePreview', ok: true, previewCount: 2 });
+    expect(response.card).toBeDefined();
+  });
+
   it('runs batchRead audit previews concurrently while preserving preview order', async () => {
     const preview = vi.fn(async () => {
       throw new Error('preview should not run when batchRead can build the preview');
@@ -392,7 +478,30 @@ describe('agent rental price preview multiplier handling', () => {
     expect(preview).not.toHaveBeenCalled();
     expect(response.metadata).toMatchObject({ toolName: 'rental.pricePreview', ok: false, previewCount: 1 });
     expect(response.text).toContain('审计存在错误');
-    expect(response.card).toBeUndefined();
+    expect(response.card).toBeDefined();
+    expect(JSON.stringify(response.card)).toContain('租赁改价预览已阻断');
+  });
+
+  it('returns a terminal card when multi-spec products reject flat explicit rent fields', async () => {
+    const preview = vi.fn(async () => {
+      throw new Error('多规格商品不能使用扁平改价字段，请使用按规格生成的相对改价计划。');
+    });
+
+    const response = await executeAgentToolRequest(
+      {
+        toolName: 'rental.pricePreview',
+        arguments: { productIds: ['761'] },
+        reason: '761改价1天88 2天188',
+      },
+      'output',
+      { rentalPriceClient: { preview } as unknown as RentalPriceSkillClient },
+    );
+
+    expect(preview).toHaveBeenCalledWith({ mode: 'explicit_fields', productId: '761', fields: { rent1day: '88.00', rent2day: '188.00' } });
+    expect(response.metadata).toMatchObject({ toolName: 'rental.pricePreview', ok: false, previewCount: 0 });
+    expect(response.text).toContain('多规格商品不能使用扁平改价字段');
+    expect(response.card).toBeDefined();
+    expect(JSON.stringify(response.card)).toContain('租赁改价预览已阻断');
   });
 
   it('falls back to serial preview when batchRead is unavailable', async () => {

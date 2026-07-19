@@ -21,3 +21,8 @@ export function inferPriceAdjustmentAmountFromText(text: string): number | null 
 
   return null;
 }
+
+export function hasExplicitRentAdjustmentScope(text: string): boolean {
+  const compact = text.replace(/\s+/g, '');
+  return /所有租期|全部租期|全部租金|所有租金|所有价格|整体|全局|每个租金字段|全部价格字段/.test(compact);
+}
