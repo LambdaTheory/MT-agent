@@ -585,6 +585,33 @@ describe('rental price card action', () => {
     expect(parseRentalOperationConfirmRequest({ request: { action: 'spec-remove-items', productId: '761', keyword: 'handle', items: [{ productId: 'abc', specDimId: 'kit', itemTitle: 'handle' }] } })).toBeNull();
   });
 
+  it('shows a structured audit table for spec removal confirmations without changing callback payloads', () => {
+    const specRemoveRequest = {
+      action: 'spec-remove-items' as const,
+      productId: '761',
+      query: 'x300u-spec-test',
+      keyword: 'handle',
+      sameSkuGroupId: 'x300u-spec-test',
+      items: [
+        { productId: '761', specDimId: 'kit', dimensionTitle: '套装', itemId: 'handle', itemTitle: '手柄套装', keyword: 'handle' },
+        { productId: '762', specDimId: 'kit', dimensionTitle: '套装', itemId: 'no-handle', itemTitle: '无手柄', keyword: 'handle' },
+      ],
+    };
+
+    const card = buildRentalOperationConfirmCard(specRemoveRequest, 'test reason');
+    const cardText = JSON.stringify(card);
+    const confirmValue = readButtonValue(card, 'rental_operation_confirm_submit');
+
+    expect(cardText).toContain('规格结构变更审计');
+    expect(cardText).toContain('rental_spec_remove_audit');
+    expect(cardText).toContain('商品ID');
+    expect(cardText).toContain('规格维度');
+    expect(cardText).toContain('手柄套装');
+    expect(cardText).toContain('无手柄');
+    expect(cardText).toContain('x300u-spec-test');
+    expect(parseRentalOperationConfirmRequest(confirmValue)).toEqual(specRemoveRequest);
+  });
+
   it('does not submit when the external apply step is partial', async () => {
     const rootDir = await mkdtemp(join(tmpdir(), 'mt-agent-rental-price-'));
     const commands: string[] = [];

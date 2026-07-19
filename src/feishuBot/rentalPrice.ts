@@ -637,6 +637,81 @@ function rentalOperationDetailMarkdown(request: RentalOperationConfirmRequest): 
   ].filter((line): line is string => Boolean(line)).join('\n');
 }
 
+function rentalCardMarkdown(content: string): Record<string, unknown> {
+  return { tag: 'markdown', content };
+}
+
+function rentalCardMetricColumn(label: string, value: string, note?: string): Record<string, unknown> {
+  return {
+    tag: 'column',
+    width: 'weighted',
+    weight: 1,
+    elements: [rentalCardMarkdown(`**${label}**\n${value}${note ? `\n<font color=grey>${note}</font>` : ''}`)],
+  };
+}
+
+function rentalCardTable(elementId: string, columns: Array<{ name: string; display_name: string }>, rows: Array<Record<string, string>>, pageSize = 10): Record<string, unknown> {
+  return {
+    tag: 'table',
+    element_id: elementId,
+    page_size: Math.max(1, Math.min(10, pageSize)),
+    row_height: 'low',
+    row_max_height: '140px',
+    freeze_first_column: true,
+    header_style: { background_style: 'grey', text_size: 'normal', text_align: 'left' },
+    columns: columns.map((column) => ({
+      ...column,
+      data_type: 'text',
+      horizontal_align: 'left',
+      width: 'auto',
+    })),
+    rows,
+  };
+}
+
+function specRemoveDisplayElements(request: RentalOperationConfirmRequest): Record<string, unknown>[] {
+  if (request.action !== 'spec-remove-items') return [];
+  const productIds = Array.from(new Set(request.items.map((item) => item.productId)));
+  const dimensionIds = Array.from(new Set(request.items.map((item) => item.specDimId)));
+  const shownItems = request.items.slice(0, SPEC_REMOVE_CONFIRM_DISPLAY_LIMIT);
+  const omitted = request.items.length - shownItems.length;
+  const rows = shownItems.map((item) => ({
+    productId: item.productId,
+    dimension: item.dimensionTitle ? `${item.dimensionTitle} (${item.specDimId})` : item.specDimId,
+    itemTitle: item.itemTitle,
+    itemId: item.itemId ?? '-',
+    keyword: item.keyword ?? request.keyword,
+  }));
+  return [
+    rentalCardMarkdown([
+      "<text_tag color='orange'>规格结构变更审计：预览已完成，尚未写入</text_tag>",
+      '**确认后会删除下表命中的规格项，并逐商品刷新规格结构；不会删除整个规格维度。**',
+      request.sameSkuGroupId ? `同款组：${request.sameSkuGroupId}` : undefined,
+      request.query ? `原始商品条件：${request.query}` : undefined,
+    ].filter((line): line is string => Boolean(line)).join('\n')),
+    {
+      tag: 'column_set',
+      flex_mode: 'none',
+      background_style: 'grey',
+      columns: [
+        rentalCardMetricColumn('影响商品', `${productIds.length} 个`, productIds.slice(0, 5).join('、')),
+        rentalCardMetricColumn('规格项', `${request.items.length} 项`, `关键词 ${request.keyword}`),
+        rentalCardMetricColumn('规格维度', `${dimensionIds.length} 个`),
+        rentalCardMetricColumn('执行方式', '逐商品串行', '删除后刷新并校验'),
+      ],
+    },
+    rentalCardMarkdown('**将删除的规格项（审计表）**'),
+    rentalCardTable('rental_spec_remove_audit', [
+      { name: 'productId', display_name: '商品ID' },
+      { name: 'dimension', display_name: '规格维度' },
+      { name: 'itemTitle', display_name: '规格项' },
+      { name: 'itemId', display_name: 'itemId' },
+      { name: 'keyword', display_name: '关键词' },
+    ], rows),
+    omitted > 0 ? rentalCardMarkdown(`<font color=grey>还有 ${omitted} 个规格项未在表格中展示；完整执行范围以确认请求为准。</font>`) : rentalCardMarkdown('<font color=grey>完整执行范围以确认请求为准；卡片展示不改变执行 payload。</font>'),
+  ];
+}
+
 export function buildRentalOperationConfirmCard(request: RentalOperationConfirmRequest, reason: string): FeishuCardPayload {
   const title = rentalOperationTitle(request);
   const details = rentalOperationDetailMarkdown(request);
@@ -650,6 +725,7 @@ export function buildRentalOperationConfirmCard(request: RentalOperationConfirmR
     body: {
       elements: [
         { tag: 'markdown', content: `**是否要执行：${title}？**${details}\n\nLLM 理解原因：${reason}` },
+        ...specRemoveDisplayElements(request),
         {
           tag: 'form',
           name: 'rental_operation_confirm_form',
