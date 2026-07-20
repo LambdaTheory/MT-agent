@@ -2,6 +2,7 @@ import { mkdtemp, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { FakeLlmProvider } from '../src/llm/fakeProvider.js';
 import type { LinkRegistryEntry } from '../src/linkRegistry/types.js';
 import {
   handleLinkRegistryMaintenanceCardAction,
@@ -206,6 +207,87 @@ describe('link registry maintenance session', () => {
         shortName: 'DJI Pocket 3',
       }),
     ]));
+  });
+
+  it('shows LLM reference suggestions in daemon maintenance cards without auto-applying them', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-link-maintenance-llm-'));
+    const overridesPath = join(outputDir, 'config', 'link-registry-overrides.json');
+    const provider = new FakeLlmProvider(JSON.stringify({
+      suggestions: [
+        {
+          internalProductId: '702',
+          action: 'merge_group',
+          confidence: 0.82,
+          rationale: 'Pocket3 naming matches [DJI](https://example.test) <at id="ou_x">owner</at>; keep human confirmation required',
+          sameSkuGroupId: 'dji-pocket-3',
+          categoryName: '相机',
+          productType: 'gimbal-camera',
+          shortName: 'DJI Pocket 3',
+          uncertainties: ['需要人工确认是否创作者套装单独分组'],
+        },
+      ],
+    }));
+
+    const response = await openLinkRegistryMaintenancePrompt(outputDir, {
+      date: '2026-06-24',
+      registry: registryEntries,
+      referenceDate: '2026-06-24',
+      overridesPath,
+      llmProvider: provider,
+    });
+
+    const promptText = JSON.stringify(response?.card);
+    expect(promptText).toContain('规则原因');
+    expect(promptText).toContain('LLM参考：归入同款组 (merge＿group)｜置信度 0.82｜同款组 dji-pocket-3；品类 相机；类型 gimbal-camera；短名 DJI Pocket 3');
+
+    const started = await handleLinkRegistryMaintenanceCardAction(outputDir, {
+      date: '2026-06-24',
+      action: 'start',
+    });
+    const reviewText = JSON.stringify(started.card);
+    expect(reviewText).toContain('LLM参考建议（仅供人工参考，不自动生效）');
+    expect(reviewText).toContain('建议动作：归入同款组 (merge＿group)｜置信度：0.82');
+    expect(reviewText).toContain('判断依据：Pocket3 naming matches ［DJI］（https://example.test）');
+    expect(reviewText).toContain('‹at id=\\"ou＿x\\"›owner‹/at›; keep human confirmation required');
+    expect(reviewText).not.toContain('[DJI](https://example.test)');
+    expect(reviewText).not.toContain('<at id="ou_x">');
+    expect(reviewText).toContain('不确定点：需要人工确认是否创作者套装单独分组');
+    expect(reviewText).toContain('name":"same_sku_group_id_custom');
+    expect(reviewText).not.toContain('finalSameSkuGroupId');
+
+    await expect(readFile(overridesPath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('refreshes LLM suggestions when a same-signature prompt is forced open again', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-link-maintenance-llm-refresh-'));
+    const overridesPath = join(outputDir, 'config', 'link-registry-overrides.json');
+    await openLinkRegistryMaintenancePrompt(outputDir, {
+      date: '2026-06-24',
+      registry: registryEntries,
+      referenceDate: '2026-06-24',
+      overridesPath,
+    });
+    const provider = new FakeLlmProvider(JSON.stringify({
+      suggestions: [{
+        internalProductId: '702',
+        action: 'merge_group',
+        confidence: 0.83,
+        rationale: 'same deterministic queue should still refresh LLM display metadata',
+        sameSkuGroupId: 'dji-pocket-3',
+        uncertainties: [],
+      }],
+    }));
+
+    const response = await openLinkRegistryMaintenancePrompt(outputDir, {
+      date: '2026-06-24',
+      registry: registryEntries,
+      referenceDate: '2026-06-24',
+      overridesPath,
+      force: true,
+      llmProvider: provider,
+    });
+
+    expect(JSON.stringify(response?.card)).toContain('LLM参考：归入同款组 (merge＿group)｜置信度 0.83');
   });
 
   it('serializes concurrent maintenance override submissions without changing payload shape', async () => {
