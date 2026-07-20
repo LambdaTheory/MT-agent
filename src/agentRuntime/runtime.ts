@@ -8,6 +8,7 @@ import { handleBotIntent } from '../feishuBot/tools.js';
 import type { BotIntent, BotResponse } from '../feishuBot/types.js';
 import type { AgentPlannerProvider } from './planner.js';
 import type { AgentRequest, AgentResponse } from './types.js';
+import type { LlmProvider } from '../llm/provider.js';
 
 export type AgentIntentResolver = (text: string) => BotIntent;
 
@@ -18,6 +19,7 @@ export interface AgentRuntimeConfig {
   llmToolSelector?: LlmToolSelectionProvider;
   llmIntentProposalProvider?: LlmIntentProposalProvider;
   agentPlannerProvider?: AgentPlannerProvider;
+  agentExploreProvider?: LlmProvider;
   rentalPriceClient?: RentalPriceSkillClient;
   activityAutomationClient?: ActivityAutomationSkillClient;
   closedOrderFetchImpl?: typeof fetch;
@@ -34,6 +36,7 @@ export function createAgentRuntime(config: AgentRuntimeConfig = {}): AgentRuntim
     llmToolSelector: config.llmToolSelector,
     llmIntentProposalProvider: config.llmIntentProposalProvider,
     agentPlannerProvider: config.agentPlannerProvider,
+    agentExploreProvider: config.agentExploreProvider,
     rentalPriceClient: config.rentalPriceClient,
     activityAutomationClient: config.activityAutomationClient,
     closedOrderFetchImpl: config.closedOrderFetchImpl,

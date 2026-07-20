@@ -374,6 +374,7 @@ function executeDirectAgentToolResponse(
       rentalPriceClient: options.rentalPriceClient,
       closedOrderFetchImpl: options.closedOrderFetchImpl,
       closedOrderRegistryPaths: options.closedOrderRegistryPaths,
+      agentExploreProvider: options.agentExploreProvider,
     },
   );
 }
@@ -405,7 +406,7 @@ export async function executeOrConfirmAgentToolRequest(
     return executeAgentToolRequest(
       { toolName: 'rental.pricePreview', arguments: pricePreviewArgumentsFromChangeRequest(rentalRequest), reason: request.reason },
       outputDir,
-      { rentalPriceClient: options.rentalPriceClient, closedOrderFetchImpl: options.closedOrderFetchImpl, closedOrderRegistryPaths: options.closedOrderRegistryPaths },
+      { rentalPriceClient: options.rentalPriceClient, closedOrderFetchImpl: options.closedOrderFetchImpl, closedOrderRegistryPaths: options.closedOrderRegistryPaths, agentExploreProvider: options.agentExploreProvider },
     );
   }
   if (isPreConfirmationPlanningTool(request.toolName)) {
@@ -413,6 +414,7 @@ export async function executeOrConfirmAgentToolRequest(
       rentalPriceClient: options.rentalPriceClient,
       closedOrderFetchImpl: options.closedOrderFetchImpl,
       closedOrderRegistryPaths: options.closedOrderRegistryPaths,
+      agentExploreProvider: options.agentExploreProvider,
     });
   }
   const policy = decideAgentPolicy({ tool, input: completedArguments, reason: request.reason });
@@ -421,6 +423,7 @@ export async function executeOrConfirmAgentToolRequest(
       rentalPriceClient: options.rentalPriceClient,
       closedOrderFetchImpl: options.closedOrderFetchImpl,
       closedOrderRegistryPaths: options.closedOrderRegistryPaths,
+      agentExploreProvider: options.agentExploreProvider,
     });
   }
   return {
@@ -476,6 +479,7 @@ async function handleLinkRegistryPromptIntent(
     overridesPath: registryContext.resolvedPaths.overridesPath,
     force: true,
     ...(promptSummary ? { promptSummary } : {}),
+    ...(options.agentExploreProvider ? { llmProvider: options.agentExploreProvider } : {}),
   });
   const governance = async () => openLinkRegistryGovernancePrompt(outputDir, {
     date,

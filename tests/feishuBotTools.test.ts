@@ -13,6 +13,7 @@ import { executeAgentToolRequest } from '../src/feishuBot/agentToolExecutor.js';
 import { loadAgentToolConfirmRequestFromValue } from '../src/feishuBot/agentToolConfirmStore.js';
 import { handleRefreshActivityStrategySelect } from '../src/feishuBot/refreshActivityStrategySelect.js';
 import { handleBotIntent } from '../src/feishuBot/tools.js';
+import { FakeLlmProvider } from '../src/llm/fakeProvider.js';
 
 const mocks = vi.hoisted(() => ({
   runPublicTrafficReportCli: vi.fn(),
@@ -1218,6 +1219,33 @@ describe('handleBotIntent', () => {
     expect(cardText).toContain('link_registry_maintenance_snooze_submit');
   });
 
+  it('shows LLM reference suggestions on the link registry maintenance prompt from explicit command intent', async () => {
+    const registryRoot = await mkdtemp(join(tmpdir(), 'mt-agent-link-registry-maintenance-llm-prompt-'));
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-link-registry-maintenance-llm-output-'));
+    const registryPaths = await writeLinkRegistryOverviewFixtures(registryRoot);
+    const provider = new FakeLlmProvider(JSON.stringify({
+      suggestions: [{
+        internalProductId: '590',
+        action: 'merge_group',
+        confidence: 0.82,
+        rationale: 'looks like Pocket 3',
+        sameSkuGroupId: 'dji-pocket-3',
+        categoryName: '相机',
+        productType: 'gimbal-camera',
+        shortName: 'DJI Pocket 3',
+        uncertainties: [],
+      }],
+    }));
+
+    const response = await handleBotIntent(
+      { type: 'link_registry_maintenance_prompt' },
+      outputDir,
+      { closedOrderRegistryPaths: registryPaths, agentExploreProvider: provider },
+    );
+
+    expect(JSON.stringify(response.card)).toContain('LLM参考：归入同款组 (merge＿group)｜置信度 0.82');
+  });
+
   it('opens the link registry governance prompt card from an explicit command intent', async () => {
     const registryRoot = await mkdtemp(join(tmpdir(), 'mt-agent-link-registry-governance-prompt-'));
     const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-link-registry-governance-output-'));
@@ -1246,6 +1274,30 @@ describe('handleBotIntent', () => {
 
     expect(response.card).toBeDefined();
     expect(JSON.stringify(response.card)).toContain('link_registry_maintenance_start_submit');
+  });
+
+  it('passes LLM reference suggestions through the Agent tool maintenance prompt', async () => {
+    const registryRoot = await mkdtemp(join(tmpdir(), 'mt-agent-link-registry-agent-llm-maintenance-'));
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-link-registry-agent-llm-output-'));
+    const registryPaths = await writeLinkRegistryOverviewFixtures(registryRoot);
+    const provider = new FakeLlmProvider(JSON.stringify({
+      suggestions: [{
+        internalProductId: '590',
+        action: 'merge_group',
+        confidence: 0.81,
+        rationale: 'agent tool path should still show reference only',
+        sameSkuGroupId: 'dji-pocket-3',
+        uncertainties: [],
+      }],
+    }));
+
+    const response = await executeAgentToolRequest(
+      { toolName: 'linkRegistry.maintenancePrompt', arguments: {}, reason: 'open maintenance card' },
+      outputDir,
+      { closedOrderRegistryPaths: registryPaths, agentExploreProvider: provider },
+    );
+
+    expect(JSON.stringify(response.card)).toContain('LLM参考：归入同款组 (merge＿group)｜置信度 0.81');
   });
 
   it('returns an inventory status overview card for the new command', async () => {

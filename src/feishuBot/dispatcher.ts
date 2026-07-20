@@ -9,6 +9,7 @@ import type { ActivityAutomationSkillClient } from './activityAutomation.js';
 import type { BotIntent, BotIntentResolver, BotResponse, FeishuBotDispatchResult, FeishuBotIncomingTextMessage } from './types.js';
 import type { AgentPlannerProvider } from '../agentRuntime/planner.js';
 import type { ClosedOrderRegistryPathsInput } from '../closedOrderFeedback/runtime.js';
+import type { LlmProvider } from '../llm/provider.js';
 
 export interface FeishuMessageDispatcherConfig {
   outputDir?: string;
@@ -20,6 +21,7 @@ export interface FeishuMessageDispatcherConfig {
   llmToolSelector?: LlmToolSelectionProvider;
   llmIntentProposalProvider?: LlmIntentProposalProvider;
   agentPlannerProvider?: AgentPlannerProvider;
+  agentExploreProvider?: LlmProvider;
   rentalPriceClient?: RentalPriceSkillClient;
   activityAutomationClient?: ActivityAutomationSkillClient;
   closedOrderFetchImpl?: typeof fetch;
@@ -198,6 +200,7 @@ export function createFeishuMessageDispatcher(config: FeishuMessageDispatcherCon
           llmToolSelector: config.llmToolSelector,
           llmIntentProposalProvider: config.llmIntentProposalProvider,
           agentPlannerProvider: config.agentPlannerProvider,
+          agentExploreProvider: config.agentExploreProvider,
           rentalPriceClient: config.rentalPriceClient,
           activityAutomationClient: config.activityAutomationClient,
           closedOrderFetchImpl: config.closedOrderFetchImpl,
@@ -211,6 +214,7 @@ export function createFeishuMessageDispatcher(config: FeishuMessageDispatcherCon
           llmToolSelector: config.llmToolSelector,
           llmIntentProposalProvider: config.llmIntentProposalProvider,
           agentPlannerProvider: config.agentPlannerProvider,
+          agentExploreProvider: config.agentExploreProvider,
           rentalPriceClient: config.rentalPriceClient,
           activityAutomationClient: config.activityAutomationClient,
           closedOrderFetchImpl: config.closedOrderFetchImpl,

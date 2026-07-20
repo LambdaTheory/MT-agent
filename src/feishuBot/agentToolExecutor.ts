@@ -3,6 +3,7 @@ import { basename, dirname, join } from 'node:path';
 import { buildAgentToolConfirmCard } from '../agentRuntime/approvalCard.js';
 import { recordOperationEvent } from '../agentRuntime/operationLedger.js';
 import type { FeishuCardPayload } from '../notify/feishuApp.js';
+import type { LlmProvider } from '../llm/provider.js';
 import { runPublicTrafficReportCli } from '../cli/publicTrafficReport.js';
 import type { AgentToolConfirmRequest } from '../agentRuntime/approvalCard.js';
 import { loadConfig } from '../config/loadConfig.js';
@@ -128,6 +129,7 @@ export interface AgentToolExecutionOptions {
   rentalPriceClient?: RentalPriceSkillClient;
   closedOrderFetchImpl?: typeof fetch;
   closedOrderRegistryPaths?: ClosedOrderRegistryPathsInput;
+  agentExploreProvider?: LlmProvider;
   ledgerContext?: RentalWriteLedgerContext;
 }
 
@@ -2994,6 +2996,7 @@ async function linkRegistryPromptResponse(
     referenceDate: date,
     overridesPath: registryContext.resolvedPaths.overridesPath,
     force: true,
+    ...(options.agentExploreProvider ? { llmProvider: options.agentExploreProvider } : {}),
   });
   const governance = async () => openLinkRegistryGovernancePrompt(outputDir, {
     date,
