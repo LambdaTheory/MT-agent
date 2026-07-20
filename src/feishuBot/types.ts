@@ -20,6 +20,7 @@ export type BotIntent =
   | { type: 'operations_learning_quiz' }
   | { type: 'operations_learning_summary' }
   | { type: 'operations_learning_history' }
+  | { type: 'operation_review' }
   | { type: 'agent_learning_summary' }
   | { type: 'query_product'; keyword: string; date?: string }
   | { type: 'lookup_product_id_card' }

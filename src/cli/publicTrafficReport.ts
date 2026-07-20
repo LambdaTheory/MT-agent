@@ -27,6 +27,7 @@ import { parseGoodsExportSnapshot } from '../mapping/goodsExportMapping.js';
 import { loadProductIdMapping, type ProductIdMapping } from '../mapping/productIdMapping.js';
 import { writeProductIdMappingFromExport } from '../mapping/refreshProductIdMapping.js';
 import { sendFeishuCard } from '../notify/feishu.js';
+import { recordGoodsTableNewLinkObservations } from '../operationObservations/store.js';
 import { analyzePublicTrafficData } from '../publicTraffic/analyzePublicTrafficData.js';
 import { buildPublicTrafficCard } from '../publicTraffic/buildPublicTrafficCard.js';
 import { assessDashboardQuality, formatDashboardCrawlSummary } from '../publicTraffic/dashboardQuality.js';
@@ -560,6 +561,7 @@ export async function runPublicTrafficReportCli(): Promise<PublicTrafficReportCl
       currentDate: runDate,
       current: currentGoodsSnapshot,
     });
+    await recordGoodsTableNewLinksSafely(config.outputDir, currentGoodsSnapshot, firstSeenState, runDate, log);
     const newGoodsPlatformIds = newGoodsPlatformIdsFromFirstSeen(currentGoodsSnapshot, firstSeenState, runDate);
     const linkLifecycle = await updateGoodsLinkLifecycleStateSerialized({
       path: paths.goodsLinkLifecycleState,
@@ -805,6 +807,29 @@ export async function runPublicTrafficReportCli(): Promise<PublicTrafficReportCl
     await writeFile(paths.log, logText, 'utf8');
     await mkdir(dirname(paths.latestLog), { recursive: true });
     await writeFile(paths.latestLog, logText, 'utf8');
+  }
+}
+
+async function recordGoodsTableNewLinksSafely(
+  outputDir: string,
+  currentGoodsSnapshot: GoodsSnapshotItem[],
+  firstSeenState: GoodsFirstSeenIndex,
+  runDate: string,
+  log: ReturnType<typeof createRunLog>,
+): Promise<void> {
+  const items = currentGoodsSnapshot.flatMap((item) => {
+    const productId = item.internalProductId.trim();
+    if (!/^\d+$/.test(productId)) return [];
+    const firstSeen = firstSeenState[productId];
+    if (!firstSeen || firstSeen.baseline || firstSeen.firstSeenDate !== runDate) return [];
+    return [{ productId, platformProductId: item.platformProductId, productName: item.productName, firstSeenDate: firstSeen.firstSeenDate }];
+  });
+  if (items.length === 0) return;
+  try {
+    await recordGoodsTableNewLinkObservations(outputDir, { observedAt: `${runDate}T00:00:00.000Z`, items });
+    log.addEvent(`operation observations 新链接写入: ${items.length} 条`);
+  } catch (error) {
+    log.addEvent(`operation observations 新链接写入失败: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 

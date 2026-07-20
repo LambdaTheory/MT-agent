@@ -5,6 +5,7 @@ export const PRE_CONFIRMATION_PLANNING_TOOLS = new Set([
   'rental.bulkPricePlan',
   'rental.specRemovePlan',
   'rental.specKeywordPricePlan',
+  'rental.priceSelectionPlan',
   'rental.newLinkBatchPlan',
   'rental.perSpecPricePlan',
   'rental.specDimPlan',

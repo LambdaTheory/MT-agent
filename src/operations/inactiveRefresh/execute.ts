@@ -1,22 +1,30 @@
 import { mkdir, open, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { recordOperationEvent } from '../../agentRuntime/operationLedger.js';
+import type { ClosedOrderRegistryPathsInput } from '../../closedOrderFeedback/runtime.js';
 import type { BotResponse } from '../../feishuBot/types.js';
-import type { RentalPriceCopyResult, RentalPriceDelistResult, RentalPriceSkillClient } from '../../feishuBot/rentalPrice.js';
+import type { RentalPriceCopyResult, RentalPriceDelistResult, RentalPriceReadResult, RentalPriceSkillClient } from '../../feishuBot/rentalPrice.js';
 import type { RentalWriteLedgerContext } from '../../feishuBot/rentalWriteOperationHandlers.js';
+import { mutateJsonFileSerialized } from '../../linkRegistry/persistence.js';
+import type { LinkRegistryOverrides } from '../../linkRegistry/overrides.js';
 import { recordInactiveRefreshObservations } from '../../operationObservations/store.js';
 import { isInactiveRefreshPlanRef, loadInactiveRefreshPlan, verifyInactiveRefreshPlanKey } from './planStore.js';
 
-export async function executeInactiveRefreshPlan(input: { outputDir: string; planRef: string; confirmationKey: string; client: RentalPriceSkillClient; ledgerContext?: RentalWriteLedgerContext }): Promise<BotResponse> {
+export async function executeInactiveRefreshPlan(input: { outputDir: string; planRef: string; confirmationKey: string; client: RentalPriceSkillClient; ledgerContext?: RentalWriteLedgerContext; closedOrderRegistryPaths?: ClosedOrderRegistryPathsInput }): Promise<BotResponse> {
   if (!isInactiveRefreshPlanRef(input.planRef)) return invalidPlanResponse();
   const plan = await loadInactiveRefreshPlan(input.outputDir, input.planRef);
   if (!plan || !verifyInactiveRefreshPlanKey(plan, input.confirmationKey)) {
     return invalidPlanResponse();
   }
-  const claimed = await claimExecution(input.outputDir, input.planRef);
-  if (!claimed) return { text: '失活刷新计划已执行或处理中，请重新发起。', metadata: { toolName: 'operations.inactiveRefreshExecute', ok: false } };
   const copyResults: RentalPriceCopyResult[] = [];
   const delistResults: RentalPriceDelistResult[] = [];
+  const preflight = await validatePlanPreflight(input.client, plan);
+  if (!preflight.ok) {
+    await writeAudit(input.outputDir, input.planRef, { plan, copyResults, delistResults, ok: false, preflight });
+    return { text: `失活刷新执行前校验失败：${preflight.reason}。未复制新链，未下架原链接。`, metadata: { toolName: 'operations.inactiveRefreshExecute', ok: false, newProductIds: [], delistedProductIds: [] } };
+  }
+  const claimed = await claimExecution(input.outputDir, input.planRef);
+  if (!claimed) return { text: '失活刷新计划已执行或处理中，请重新发起。', metadata: { toolName: 'operations.inactiveRefreshExecute', ok: false } };
   for (const item of plan.newLinkItems) {
     for (let index = 0; index < item.count; index += 1) {
       const result = await input.client.copy(item.sourceProductId);
@@ -29,6 +37,10 @@ export async function executeInactiveRefreshPlan(input: { outputDir: string; pla
         await writeAudit(input.outputDir, input.planRef, { plan, copyResults, delistResults, ok: false });
         return { text: `失活刷新执行中断：补链源 ${item.sourceProductId} 复制未返回新链接 ID，未下架原链接。`, metadata: { toolName: 'operations.inactiveRefreshExecute', ok: false, newProductIds: copyResults.flatMap((copy) => copy.newProductId ? [copy.newProductId] : []), delistedProductIds: [] } };
       }
+      if (!isValidRegistryProductId(result.newProductId)) {
+        await writeAudit(input.outputDir, input.planRef, { plan, copyResults, delistResults, ok: false, invalidNewProductId: result.newProductId });
+        return { text: `失活刷新执行中断：补链源 ${item.sourceProductId} 返回的新链接 ID 无效，未下架原链接。`, metadata: { toolName: 'operations.inactiveRefreshExecute', ok: false, newProductIds: [], delistedProductIds: [] } };
+      }
     }
   }
   for (const productId of plan.delistProductIds) {
@@ -40,14 +52,35 @@ export async function executeInactiveRefreshPlan(input: { outputDir: string; pla
   }
   const ok = copyResults.every((result) => result.ok) && delistResults.length === plan.delistProductIds.length && delistResults.every((result) => result.ok);
   const auditPath = await writeAudit(input.outputDir, input.planRef, { plan, copyResults, delistResults, ok });
+  const newProductIds = copyResults.flatMap((copy) => copy.newProductId ? [copy.newProductId] : []);
+  const delistedProductIds = delistResults.filter((result) => result.ok).map((result) => result.productId);
   if (ok) {
+    const sourceItems = plan.newLinkItems.flatMap((item) => Array.from({ length: item.count }, () => item));
+    const registryWritebackError = await writeInactiveRefreshRegistryState(input.closedOrderRegistryPaths?.overridesPath ?? defaultOverridesPath(input.outputDir), {
+      date: plan.date,
+      observedAt: new Date().toISOString(),
+      newLinks: copyResults.flatMap((copy, index) => copy.newProductId ? [{ productId: copy.newProductId, source: sourceItems[index] }] : []),
+      delistedProductIds,
+    }).then(() => null, (error: unknown) => error instanceof Error ? error.message : String(error));
     await recordInactiveRefreshObservationsBestEffort(input.outputDir, {
       planRef: input.planRef,
       auditPath,
-      newProductIds: copyResults.flatMap((copy) => copy.newProductId ? [copy.newProductId] : []),
-      delistedProductIds: delistResults.filter((result) => result.ok).map((result) => result.productId),
-      sourceProductIds: plan.newLinkItems.flatMap((item) => Array.from({ length: item.count }, () => item.sourceProductId)),
+      newProductIds,
+      delistedProductIds,
+      sourceProductIds: sourceItems.map((item) => item.sourceProductId),
     });
+    if (registryWritebackError) {
+      return {
+        text: [
+          '失活刷新执行完成，但 link registry 状态写回失败',
+          `补链：成功 ${copyResults.filter((result) => result.ok).length}/${plan.newLinkItems.reduce((sum, item) => sum + item.count, 0)}`,
+          `下架：成功 ${delistResults.filter((result) => result.ok).length}/${plan.delistProductIds.length}`,
+          `写回错误：${registryWritebackError}`,
+          `审计文件：${auditPath}`,
+        ].join('\n'),
+        metadata: { toolName: 'operations.inactiveRefreshExecute', ok: false, operationOk: true, registryWritebackOk: false, auditPath, newProductIds, delistedProductIds },
+      };
+    }
   }
   return {
     text: [
@@ -60,10 +93,88 @@ export async function executeInactiveRefreshPlan(input: { outputDir: string; pla
       toolName: 'operations.inactiveRefreshExecute',
       ok,
       auditPath,
-      newProductIds: copyResults.flatMap((copy) => copy.newProductId ? [copy.newProductId] : []),
-      delistedProductIds: delistResults.filter((result) => result.ok).map((result) => result.productId),
+      newProductIds,
+      delistedProductIds,
     },
   };
+}
+
+function defaultOverridesPath(outputDir: string): string {
+  return join(outputDir, '..', 'config', 'link-registry-overrides.json');
+}
+
+async function writeInactiveRefreshRegistryState(overridesPath: string, input: { date: string; observedAt: string; newLinks: Array<{ productId: string; source?: { keyword: string; sourceProductName: string; sameSkuGroupId?: string } }>; delistedProductIds: string[] }): Promise<void> {
+  const invalidNewLink = input.newLinks.find((item) => !isValidRegistryProductId(item.productId));
+  if (invalidNewLink) throw new Error(`invalid newProductId for link registry writeback: ${invalidNewLink.productId}`);
+  const invalidDelistProductId = input.delistedProductIds.find((productId) => !isValidRegistryProductId(productId));
+  if (invalidDelistProductId) throw new Error(`invalid delistProductId for link registry writeback: ${invalidDelistProductId}`);
+  await mutateJsonFileSerialized<LinkRegistryOverrides>(overridesPath, { version: 1 }, (existing) => {
+    const entries = [...(existing.entries ?? [])];
+    for (const productId of input.delistedProductIds) {
+      upsertOverrideEntry(entries, {
+        internalProductId: productId,
+        status: 'removed',
+        listingState: 'delisted',
+        statusObservedAt: input.observedAt,
+        updatedAt: input.date,
+        reason: 'inactive_refresh_success',
+      });
+    }
+    for (const link of input.newLinks) {
+      upsertOverrideEntry(entries, {
+        internalProductId: link.productId,
+        ...(link.source?.sourceProductName ? { productName: link.source.sourceProductName } : {}),
+        ...(link.source?.keyword ? { shortName: link.source.keyword } : {}),
+        ...(link.source?.sameSkuGroupId ? { sameSkuGroupId: link.source.sameSkuGroupId } : {}),
+        status: 'active',
+        listingState: 'on_sale',
+        statusObservedAt: input.observedAt,
+        updatedAt: input.date,
+        reason: 'inactive_refresh_success',
+      });
+    }
+    entries.sort((left, right) => left.internalProductId.localeCompare(right.internalProductId, undefined, { numeric: true }));
+    return { ...existing, version: 1, entries };
+  });
+}
+
+function upsertOverrideEntry(entries: NonNullable<LinkRegistryOverrides['entries']>, patch: NonNullable<LinkRegistryOverrides['entries']>[number]): void {
+  const index = entries.findIndex((entry) => entry.internalProductId === patch.internalProductId);
+  if (index >= 0) entries[index] = { ...entries[index], ...patch };
+  else entries.push(patch);
+}
+
+function isValidRegistryProductId(productId: string): boolean {
+  return /^\d+$/.test(productId.trim());
+}
+
+async function validatePlanPreflight(client: RentalPriceSkillClient, plan: { newLinkItems: Array<{ sourceProductId: string }>; delistProductIds: string[] }): Promise<{ ok: true } | { ok: false; reason: string; productId?: string; role?: 'source' | 'delist' }> {
+  if (typeof client.read !== 'function') return { ok: false, reason: '租赁客户端缺少执行前读取能力' };
+  const read = client.read;
+  const sourceProductIds = [...new Set(plan.newLinkItems.map((item) => item.sourceProductId))];
+  for (const productId of sourceProductIds) {
+    const result = await readPreflight(read, productId);
+    if (!isReadableCurrent(result)) return { ok: false, reason: `补链源 ${productId} 当前不可读取或不可操作`, productId, role: 'source' };
+  }
+  for (const productId of plan.delistProductIds) {
+    const result = await readPreflight(read, productId);
+    if (!isReadableCurrent(result)) return { ok: false, reason: `待下架链接 ${productId} 当前不可读取或不可操作`, productId, role: 'delist' };
+  }
+  return { ok: true };
+}
+
+async function readPreflight(read: (productId: string) => Promise<RentalPriceReadResult>, productId: string): Promise<RentalPriceReadResult | null> {
+  try {
+    return await read(productId);
+  } catch {
+    return null;
+  }
+}
+
+function isReadableCurrent(result: RentalPriceReadResult | null): result is RentalPriceReadResult {
+  if (!result?.ok) return false;
+  if (result.specs.length > 0) return true;
+  return Object.keys(result.values).length > 0;
 }
 
 async function recordInactiveRefreshObservationsBestEffort(outputDir: string, input: { planRef: string; auditPath: string; newProductIds: string[]; delistedProductIds: string[]; sourceProductIds: string[] }): Promise<void> {

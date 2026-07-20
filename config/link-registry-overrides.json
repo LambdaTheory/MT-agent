@@ -256,7 +256,7 @@
       "confidence": 0.95,
       "reason": "link_registry_maintenance_review",
       "maintainer": "group_review_csv",
-      "updatedAt": "2026-07-18",
+      "updatedAt": "2026-07-20",
       "sameSkuGroupId": "canon-sx740",
       "categoryId": "camera",
       "categoryName": "相机",
@@ -358,7 +358,7 @@
       "productType": "smartphone",
       "shortName": "x200 u",
       "confidence": 0.95,
-      "updatedAt": "2026-07-18",
+      "updatedAt": "2026-07-20",
       "reason": "link_registry_maintenance_review"
     },
     {
@@ -369,7 +369,7 @@
       "productType": "gimbal-camera",
       "shortName": "Pocket 3",
       "confidence": 0.95,
-      "updatedAt": "2026-07-18",
+      "updatedAt": "2026-07-20",
       "reason": "link_registry_maintenance_review"
     },
     {
@@ -677,7 +677,7 @@
       "confidence": 0.95,
       "reason": "link_registry_maintenance_review",
       "maintainer": "group_review_csv",
-      "updatedAt": "2026-07-18",
+      "updatedAt": "2026-07-20",
       "categoryId": "camera",
       "categoryName": "相机",
       "productType": "instant-camera"
@@ -1860,7 +1860,7 @@
       "confidence": 0.95,
       "reason": "link_registry_maintenance_review",
       "maintainer": "codex",
-      "updatedAt": "2026-07-18"
+      "updatedAt": "2026-07-20"
     },
     {
       "internalProductId": "762",
@@ -1892,7 +1892,7 @@
       "confidence": 0.95,
       "reason": "link_registry_maintenance_review",
       "maintainer": "codex",
-      "updatedAt": "2026-07-18"
+      "updatedAt": "2026-07-20"
     },
     {
       "internalProductId": "764",
@@ -2697,6 +2697,17 @@
       "updatedAt": "2026-06-27"
     },
     {
+      "internalProductId": "953",
+      "sameSkuGroupId": "ipod-touch-6",
+      "categoryId": "media-player",
+      "categoryName": "播放器",
+      "productType": "music-player",
+      "shortName": "iPod touch 6",
+      "confidence": 0.95,
+      "updatedAt": "2026-07-20",
+      "reason": "link_registry_maintenance_review"
+    },
+    {
       "internalProductId": "954",
       "sameSkuGroupId": "ipod-touch-6",
       "categoryId": "media-player",
@@ -2708,6 +2719,17 @@
       "reason": "link_registry_maintenance_review"
     },
     {
+      "internalProductId": "955",
+      "sameSkuGroupId": "ipod-touch-6",
+      "categoryId": "media-player",
+      "categoryName": "播放器",
+      "productType": "music-player",
+      "shortName": "iPod touch 6",
+      "confidence": 0.95,
+      "updatedAt": "2026-07-20",
+      "reason": "link_registry_maintenance_review"
+    },
+    {
       "internalProductId": "956",
       "sameSkuGroupId": "ipod-touch-6",
       "categoryId": "media-player",
@@ -2716,6 +2738,17 @@
       "shortName": "iPod touch 6",
       "confidence": 0.95,
       "updatedAt": "2026-07-04",
+      "reason": "link_registry_maintenance_review"
+    },
+    {
+      "internalProductId": "957",
+      "sameSkuGroupId": "ipod-touch-6",
+      "categoryId": "media-player",
+      "categoryName": "播放器",
+      "productType": "music-player",
+      "shortName": "iPod touch 6",
+      "confidence": 0.95,
+      "updatedAt": "2026-07-20",
       "reason": "link_registry_maintenance_review"
     },
     {
@@ -2738,6 +2771,17 @@
       "shortName": "iPod touch 6",
       "confidence": 0.95,
       "updatedAt": "2026-07-04",
+      "reason": "link_registry_maintenance_review"
+    },
+    {
+      "internalProductId": "960",
+      "sameSkuGroupId": "ipod-touch-6",
+      "categoryId": "media-player",
+      "categoryName": "播放器",
+      "productType": "music-player",
+      "shortName": "iPod touch 6",
+      "confidence": 0.95,
+      "updatedAt": "2026-07-20",
       "reason": "link_registry_maintenance_review"
     },
     {

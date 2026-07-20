@@ -94,6 +94,7 @@ describe('agent runtime tool registry', () => {
       'rental.pricePreview',
       'rental.priceSnapshot',
       'rental.specKeywordPricePlan',
+      'rental.priceSelectionPlan',
       'rental.bulkPricePlan',
       'rental.bulkPriceApply',
       'rental.newLinkBatchPlan',
@@ -403,6 +404,7 @@ describe('agent runtime tool registry', () => {
       'rental.pricePreview',
       'rental.priceSnapshot',
       'rental.specKeywordPricePlan',
+      'rental.priceSelectionPlan',
       'rental.bulkPricePlan',
       'rental.newLinkBatchPlan',
       'rental.priceRollback',
@@ -679,6 +681,51 @@ describe('agent runtime tool registry', () => {
     });
     expect(validateAgentToolArguments('rental.specKeywordPricePlan', { query: 'ipod touch 6', keyword: '128g', fields: { rent1day: '99.00' }, resolutionMode: 'sameSkuGroup' })).toBe(true);
     expect(validateAgentToolArguments('rental.specKeywordPricePlan', { query: 'ipod touch 6', keyword: '128g', fields: { rent1day: '99.00' }, extra: true })).toBe(false);
+    expect(findAgentTool('rental.priceSelectionPlan')).toMatchObject({ risk: 'write', requiresConfirmation: true });
+    expect(findAgentTool('rental.priceSelectionPlan')?.inputSchema).toMatchObject({
+      properties: {
+        query: { type: 'string' },
+        filters: { type: 'array', minItems: 1 },
+        fields: { oneOf: expect.any(Array) },
+        transform: { type: 'object' },
+        resolutionMode: { type: 'string', enum: ['single', 'sameSkuGroup'] },
+      },
+      required: ['query', 'filters', 'fields', 'transform'],
+      additionalProperties: false,
+    });
+    expect(validateAgentToolArguments('rental.priceSelectionPlan', {
+      query: 'ipod touch 6',
+      filters: [{ type: 'specTitleContains', value: '金色' }],
+      fields: 'rent_fields',
+      transform: { type: 'multiply', value: 1.1 },
+      resolutionMode: 'sameSkuGroup',
+    })).toBe(true);
+    expect(validateAgentToolArguments('rental.priceSelectionPlan', {
+      query: 'ipod touch 6',
+      filters: [{ type: 'priceEquals', field: 'rent1day', value: '88.00' }],
+      fields: ['rent1day'],
+      transform: { type: 'set', value: '66.00' },
+      resolutionMode: 'sameSkuGroup',
+    })).toBe(true);
+    expect(validateAgentToolArguments('rental.priceSelectionPlan', {
+      query: 'ipod touch 6',
+      filters: [{ type: 'priceEquals', value: '88.00' }],
+      fields: ['rent1day'],
+      transform: { type: 'set', value: '66.00' },
+    })).toBe(false);
+    expect(validateAgentToolArguments('rental.priceSelectionPlan', {
+      query: 'ipod touch 6',
+      filters: [{ type: 'specTitleContains', field: 'rent1day', value: '金色' }],
+      fields: 'rent_fields',
+      transform: { type: 'multiply', value: 1.1 },
+    })).toBe(false);
+    expect(validateAgentToolArguments('rental.priceSelectionPlan', {
+      query: 'ipod touch 6',
+      filters: [{ type: 'specTitleContains', value: '金色' }],
+      fields: 'rent_fields',
+      transform: { type: 'multiply', value: 1.1 },
+      extra: true,
+    })).toBe(false);
     expect(findAgentTool('rental.delistBatch')?.inputSchema).toMatchObject({
       properties: {
         productIds: { type: 'array' },

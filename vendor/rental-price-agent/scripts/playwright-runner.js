@@ -230,11 +230,12 @@ function checkConfiguredPage(url, expectedUrl) {
   try {
     const current = new URL(String(url || ""));
     const expected = new URL(String(expectedUrl || ""));
+    const currentRoute = current.searchParams.get("r");
     const expectedRoute = expected.searchParams.get("r");
     const ok = current.origin === expected.origin
       && current.pathname === expected.pathname
-      && (!expectedRoute || current.searchParams.get("r") === expectedRoute);
-    return { ok, url: current.toString(), origin: current.origin, expectedOrigin: expected.origin, pathname: current.pathname, expectedPathname: expected.pathname };
+      && (!expectedRoute || currentRoute === expectedRoute);
+    return { ok, url: current.toString(), origin: current.origin, expectedOrigin: expected.origin, pathname: current.pathname, expectedPathname: expected.pathname, route: currentRoute, expectedRoute };
   } catch {
     return { ok: false, url: String(url || ""), reason: "invalid_configured_page_url" };
   }
@@ -2357,6 +2358,10 @@ async function findProductOnList(productId) {
     await page.goto(buildListUrl(channel.url, { pagesize: 100 }), { waitUntil: "networkidle" });
     const login = await ensureLogin();
     if (login && login.status === "error") return login;
+    const postLoginPage = checkConfiguredPage(page.url(), channel.url);
+    if (!postLoginPage.ok) {
+      await page.goto(buildListUrl(channel.url, { pagesize: 100 }), { waitUntil: "networkidle" });
+    }
     const initialPage = checkConfiguredPage(page.url(), channel.url);
     if (!initialPage.ok) return { status: "error", message: "Product list navigation failed canonical validation", channelKey: channel.key, channelLabel: channel.label, ...initialPage };
     await page.waitForTimeout(1500);
@@ -2395,30 +2400,166 @@ async function findProductOnList(productId) {
   return { found: false, searchedChannels: channels.map(channel => ({ key: channel.key, label: channel.label, url: channel.url })) };
 }
 
+const CONFIRM_ACTION_TEXT_SOURCE = "^(?:确定|确认|是|OK|确认下架|确定下架|下架|确认删除|确定删除|删除|继续|提交)$";
+const DESTRUCTIVE_CONFIRM_ACTION_TEXT_SOURCE = "(?:确认下架|确定下架|下架|确认删除|确定删除|删除)";
+const DESTRUCTIVE_DIALOG_TEXT_SOURCE = "(?:下架|删除|停售)";
+
+function isConfirmActionLabel(label) {
+  return new RegExp(CONFIRM_ACTION_TEXT_SOURCE, "i").test(String(label || "").replace(/\s+/g, "").trim());
+}
+
+function isDestructiveConfirmActionLabel(label) {
+  return new RegExp(DESTRUCTIVE_CONFIRM_ACTION_TEXT_SOURCE, "i").test(String(label || "").replace(/\s+/g, "").trim());
+}
+
 async function clickVisibleConfirmIn(scopeHandle) {
   if (!scopeHandle) return { clicked: false };
   const text = await scopeHandle.evaluate(el => el.textContent?.trim().substring(0, 200) || "").catch(() => "");
-  const clicked = await scopeHandle.evaluate(el => {
+  const clicked = await scopeHandle.evaluate((el, confirmActionTextSource) => {
+    const confirmActionText = new RegExp(confirmActionTextSource, "i");
+    function visible(node) {
+      if (!node) return false;
+      const rect = node.getBoundingClientRect();
+      const style = getComputedStyle(node);
+      return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden";
+    }
     const candidates = Array.from(el.querySelectorAll("button, a, input[type='button'], input[type='submit']"));
     const btn = candidates.find(node => {
-      const txt = (node.textContent || node.value || "").trim();
-      return (txt === "确认" || txt === "确定" || txt === "是" || txt === "OK") && node.offsetParent !== null;
+      const txt = (node.textContent || node.value || "").replace(/\s+/g, "").trim();
+      return confirmActionText.test(txt) && visible(node);
     });
     if (btn) { btn.click(); return true; }
     return false;
-  }).catch(() => false);
+  }, CONFIRM_ACTION_TEXT_SOURCE).catch(() => false);
   return { clicked, text };
 }
 
+async function dismissNonDestructiveOverlays() {
+  const actions = await page.evaluate(() => {
+    function visible(node) {
+      if (!node) return false;
+      const rect = node.getBoundingClientRect();
+      const style = getComputedStyle(node);
+      return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden";
+    }
+    const done = [];
+    const tenancyPopup = document.querySelector(".BOX_PUBLIC_POP_WEB");
+    if (tenancyPopup && visible(tenancyPopup)) {
+      tenancyPopup.style.display = "none";
+      done.push({ type: "hide", selector: ".BOX_PUBLIC_POP_WEB" });
+    }
+    const dialogs = Array.from(document.querySelectorAll(".jconfirm, .layui-layer-dialog, .layui-layer-confirm, .modal.show, .modal.in, .modal, .layui-layer, .layui-m-layer")).filter(visible);
+    const safeCloseText = /^(?:关闭|取消|知道了|我知道了|稍后|暂不|返回|×|x)$/i;
+    const destructiveText = /(?:下架|删除|停售)/;
+    for (const dialog of dialogs) {
+      const text = (dialog.textContent || "").replace(/\s+/g, " ").trim().substring(0, 160);
+      if (destructiveText.test(text)) continue;
+      const closeBtn = Array.from(dialog.querySelectorAll(".jconfirm-closeIcon, .layui-layer-close, .close, [data-dismiss='modal'], [aria-label='Close'], button, a, span.btn, input[type='button']")).find(node => {
+        if (!visible(node)) return false;
+        const label = (node.textContent || node.value || node.getAttribute("aria-label") || "").replace(/\s+/g, "").trim();
+        return node.matches(".jconfirm-closeIcon, .layui-layer-close, .close, [data-dismiss='modal'], [aria-label='Close']") || safeCloseText.test(label);
+      });
+      if (closeBtn) {
+        closeBtn.click();
+        done.push({ type: "close", text });
+      }
+    }
+    return done;
+  }).catch(() => []);
+  if (actions.length > 0) await page.waitForTimeout(500);
+  return actions;
+}
+
+async function clickVisibleDestructiveConfirm() {
+  return await page.evaluate((confirmActionTextSource, dialogTextSource) => {
+    const confirmActionText = new RegExp(confirmActionTextSource, "i");
+    const dialogActionText = new RegExp(dialogTextSource, "i");
+    function visible(node) {
+      if (!node) return false;
+      const rect = node.getBoundingClientRect();
+      const style = getComputedStyle(node);
+      return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden";
+    }
+    function zIndex(node) {
+      const raw = getComputedStyle(node).zIndex;
+      const parsed = Number.parseInt(raw, 10);
+      return Number.isFinite(parsed) ? parsed : 0;
+    }
+    const dialogs = Array.from(document.querySelectorAll(".modal.show, .modal.in, .layui-layer-dialog, .layui-layer-confirm, .layui-m-layer, .modal, .layui-layer, .jconfirm")).filter(visible);
+    const candidates = [];
+    for (const dialog of dialogs) {
+      const text = (dialog.textContent || "").replace(/\s+/g, " ").trim();
+      for (const node of Array.from(dialog.querySelectorAll("button, a, span.btn, input[type='button'], input[type='submit']"))) {
+        if (!visible(node)) continue;
+        const label = (node.textContent || node.value || "").replace(/\s+/g, "").trim();
+        if (!label || !confirmActionText.test(label)) continue;
+        const score = (dialogActionText.test(label) ? 4 : 0) + (dialogActionText.test(text) ? 2 : 0) + zIndex(dialog) / 100000;
+        if (score > 0) candidates.push({ node, score, text: text.substring(0, 240), label });
+      }
+    }
+    candidates.sort((a, b) => b.score - a.score);
+    const selected = candidates[0];
+    if (!selected) return { clicked: false, text: dialogs.map(dialog => (dialog.textContent || "").replace(/\s+/g, " ").trim().substring(0, 160)).join(" | ") };
+    selected.node.click();
+    return { clicked: true, text: selected.text, label: selected.label };
+  }, CONFIRM_ACTION_TEXT_SOURCE, DESTRUCTIVE_DIALOG_TEXT_SOURCE).catch(() => ({ clicked: false, text: "" }));
+}
+
+async function collectDelistDiagnostics() {
+  return await page.evaluate(() => {
+    function visible(node) {
+      if (!node) return false;
+      const rect = node.getBoundingClientRect();
+      const style = getComputedStyle(node);
+      return rect.width > 0 && rect.height > 0 && style.display !== "none" && style.visibility !== "hidden";
+    }
+    const dialogs = Array.from(document.querySelectorAll(".modal.show, .modal.in, .layui-layer-dialog, .layui-layer-confirm, .layui-m-layer, .modal, .layui-layer, .jconfirm"))
+      .filter(visible)
+      .slice(0, 5)
+      .map(node => ({ className: String(node.className || "").substring(0, 120), text: (node.textContent || "").replace(/\s+/g, " ").trim().substring(0, 220) }));
+    const buttons = Array.from(document.querySelectorAll("button, a, span.btn, input[type='button'], input[type='submit']"))
+      .filter(visible)
+      .map(node => ({
+        tag: node.tagName,
+        className: String(node.className || "").substring(0, 80),
+        text: (node.textContent || node.value || "").replace(/\s+/g, " ").trim().substring(0, 80),
+        href: String(node.getAttribute("href") || "").substring(0, 180),
+        dataToggle: String(node.getAttribute("data-toggle") || ""),
+        dataHref: String(node.getAttribute("data-href") || "").substring(0, 180),
+        onclick: String(node.getAttribute("onclick") || "").substring(0, 180),
+      }))
+      .filter(item => item.text.includes("下架") || item.text.includes("确定") || item.text.includes("确认") || item.text.includes("删除") || item.text.includes("关闭") || item.text.includes("取消"))
+      .slice(0, 20);
+    const checkedInputs = Array.from(document.querySelectorAll("input[type='checkbox']"))
+      .filter(input => input.checked)
+      .map(input => ({
+        name: String(input.getAttribute("name") || "").substring(0, 80),
+        value: String(input.getAttribute("value") || "").substring(0, 80),
+        className: String(input.className || "").substring(0, 80),
+        id: String(input.id || "").substring(0, 80),
+      }));
+    const checkedCount = checkedInputs.length;
+    const exactBatchButtons = Array.from(document.querySelectorAll("button[data-toggle='batch'], a[data-toggle='batch']"))
+      .filter(visible)
+      .map(node => ({
+        tag: node.tagName,
+        className: String(node.className || "").substring(0, 80),
+        text: (node.textContent || node.value || "").replace(/\s+/g, " ").trim().substring(0, 80),
+        href: String(node.getAttribute("href") || "").substring(0, 180),
+        dataHref: String(node.getAttribute("data-href") || "").substring(0, 180),
+      }));
+    return { url: location.href, checkedCount, checkedInputs, dialogs, buttons, exactBatchButtons };
+  }).catch(err => ({ error: err && err.message ? err.message : String(err) }));
+}
+
 async function maybeConfirmDialog() {
-  const modal = await page.waitForSelector(".modal.show, .modal.in, .layui-layer-dialog, .layui-m-layer, .modal, .layui-layer", { timeout: 3000, state: "visible" }).catch(() => null);
-  if (!modal) return { confirmed: false, text: "" };
-  const result = await clickVisibleConfirmIn(modal);
+  await page.waitForSelector(".modal.show, .modal.in, .layui-layer-dialog, .layui-layer-confirm, .layui-m-layer, .modal, .layui-layer, .jconfirm", { timeout: 8000, state: "visible" }).catch(() => null);
+  const result = await clickVisibleDestructiveConfirm();
   if (result.clicked) {
     await page.waitForTimeout(1000);
     await page.waitForLoadState("networkidle").catch(() => {});
   }
-  return { confirmed: result.clicked, text: result.text };
+  return { confirmed: result.clicked, text: result.text, confirmLabel: result.label, diagnostics: result.clicked ? undefined : await collectDelistDiagnostics() };
 }
 
 function copyResultStatus(newProductId) {
@@ -2457,22 +2598,25 @@ function unknownCopyResult(productId, confirmText, extra = {}) {
 
 // --- Delist product ---
 async function actionDelist(productId) {
+  await dismissNonDestructiveOverlays();
   const lookup = await findProductOnList(productId);
   if (lookup.status === "error") return lookup;
   const { found, row, channelKey, channelLabel } = lookup;
   if (!found) return { status: "error", message: "Product not found: " + productId };
+  await dismissNonDestructiveOverlays();
   const cb = await row.$("input[type='checkbox']");
   if (!cb) return { status: "error", message: "Checkbox not found in row" };
   await cb.check();
   await page.waitForTimeout(300);
 
   // Click 下架 button
-  const btn = await page.$("button[data-toggle='batch']:has(i.icow-xiajia3)");
-  if (!btn) return { status: "error", message: "下架 button not found" };
+  await dismissNonDestructiveOverlays();
+  const btn = await page.$("button[data-toggle='batch']:has(i.icow-xiajia3), button:has-text('下架'), a:has-text('下架')");
+  if (!btn) return { status: "error", action: "delist", productId, channelKey, channelLabel, message: "下架 button not found" };
   await btn.click();
   const confirm = await maybeConfirmDialog();
   if (!confirm.confirmed) {
-    return { status: "error", action: "delist", productId, channelKey, channelLabel, confirmed: false, confirmText: confirm.text, message: "Delist confirmation dialog was not confirmed" };
+    return { status: "error", action: "delist", productId, channelKey, channelLabel, confirmed: false, confirmText: confirm.text, diagnostics: confirm.diagnostics, message: "Delist confirmation dialog was not confirmed" };
   }
   await page.waitForTimeout(2000);
   await page.waitForLoadState("networkidle").catch(() => {});
@@ -3284,12 +3428,18 @@ if (require.main === module) {
 	    actionNavigate,
 	    actionLogin,
 	    actionBatchRead,
+	    clickVisibleConfirmIn,
+	    dismissNonDestructiveOverlays,
+	    clickVisibleDestructiveConfirm,
+    collectDelistDiagnostics,
 	    findProductOnList,
 	    handleLegacyAction,
 	    classifyPlatformSearchExclusion,
     filterPlatformProducts,
     readProductOnTab,
     isDynamicRentField,
+	    isConfirmActionLabel,
+    isDestructiveConfirmActionLabel,
     resolveFieldSelector,
     resolveDynamicRentSelector,
 	    getDynamicRentConfig,

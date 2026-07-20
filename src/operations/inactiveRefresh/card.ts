@@ -74,14 +74,14 @@ function groupLines(plan: InactiveRefreshPlan): string {
 }
 
 function sourceLines(plan: InactiveRefreshPlan): string {
-  const evidenceSources = plan.evidence?.groups.flatMap((group) => group.source ? [group.source] : []) ?? [];
-  if (evidenceSources.length > 0) {
-    return evidenceSources.map((source) => `- ${source.groupId}｜安全源 ${source.productId} ${source.productName}｜${metricSummary(source.metrics)}｜${source.reason}`).join('\n');
-  }
   if (plan.newLinkItems.length === 0) return '本次没有可执行补链来源。';
   return plan.newLinkItems
-    .map((item) => `- ${groupKey(item)}｜复制 ${item.count} 条｜安全源 ${item.sourceProductId} ${item.sourceProductName}`)
+    .map((item) => `- ${groupKey(item)}｜复制 ${item.count} 条｜${sourceStrategyLabel(item)} ${item.sourceProductId} ${item.sourceProductName}`)
     .join('\n');
+}
+
+function sourceStrategyLabel(item: InactiveRefreshNewLinkItem): string {
+  return item.sourceStrategy === 'self_copy_fallback' ? '自复制源' : '安全源';
 }
 
 function formatMetric(value: number | undefined, suffix = ''): string {
@@ -146,6 +146,7 @@ function fixedRules(): string {
     '- 新链接上线不足 14 天只观察，不进入失活刷新。',
     '- 高曝光高访问但金额为 0 归为转化异常，不进刷新。',
     '- 上线天数缺失、金额缺失或金额口径冲突进入人工复核。',
+    '- 优先复制同款组内健康安全源；没有健康源时，可在先复制后下架保护下复制失活候选自己。',
     '- 每日全局上限 20 条；同款组 1-3 条最多 1 条，4-10 条最多 2 条，10 条以上最多处理 20%。',
   ].join('\n');
 }

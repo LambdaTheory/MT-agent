@@ -25,7 +25,7 @@ describe('agent price percent decrease handling', () => {
       fields: { rent1day: '80.00' },
       lines: ['preview ok'],
       warnings: [],
-      audit: { taskId: `task_${request.productId}`, rollbackFile: `rollback_${request.productId}.json`, hasErrors: false },
+      audit: { taskId: `task_${request.productId}`, rollbackFile: `rollback_${request.productId}.json`, changesFile: `changes_${request.productId}.json`, currentValuesFile: `current_${request.productId}.json`, changesSha256: 'a'.repeat(64), rollbackSha256: 'a'.repeat(64), currentSnapshotSha256: 'a'.repeat(64), planHash: 'a'.repeat(64), expectedFieldCount: 1, diff: [{ field: 'rent1day', label: '1天', old: '100.00', new: '80.00', change: '-20.00', changePct: '-20.0%', issues: [] }], hasErrors: false, hasWarnings: false },
     }));
     const rentalPriceClient = {
       preview,
@@ -197,31 +197,54 @@ describe('agent price percent decrease handling', () => {
     expect(JSON.stringify(response.card)).not.toContain('agent_tool_confirm');
   });
 
-  it('blocks spec-keyword relative price changes from whole-product price preview', async () => {
+  it('plans spec-keyword relative price changes through price selection instead of clarification', async () => {
+    const auditPreviewFromRead = vi.fn(async () => ({
+      taskId: 'task_820_preview',
+      changesFile: 'changes-820.json',
+      rollbackFile: 'rollback-820.json',
+      currentValuesFile: 'current-820.json',
+      changesSha256: 'a'.repeat(64),
+      rollbackSha256: 'a'.repeat(64),
+      currentSnapshotSha256: 'a'.repeat(64),
+      planHash: 'a'.repeat(64),
+      expectedFieldCount: 1,
+      hasErrors: false,
+      hasWarnings: false,
+      diff: [{ specId: 'weekday-a', specTitle: '平日套餐', field: 'rent1day', label: '1天', old: '100.00', new: '110.00', change: '+10.00', changePct: '+10.0%', issues: [] }],
+    }));
     const preview = vi.fn();
 
     const response = await continueAgentPlannerSteps({
-      goal: '对 sx70 同款组中规格含有日常或者平日的规格价格加 30 元',
+      goal: '对 sx70 同款组中规格含有平日的规格价格上调10%',
       reason: '用户要求按规格名称关键词筛选后改价',
       steps: [
         {
-          toolName: 'rental.pricePreview',
-          arguments: { productIds: ['820', '821'], adjustmentAmount: 30, scope: 'rent_fields' },
-          reason: '对解析出的商品生成租金字段改价预览',
+          toolName: 'rental.priceSelectionPlan',
+          arguments: { query: '820', filters: [{ type: 'specTitleContains', value: '平日' }], fields: 'rent_fields', transform: { type: 'multiply', value: 1.1 } },
+          reason: '对命中规格生成租金字段上调10%的审计预览',
         },
       ],
       baseIndex: 0,
       totalSteps: 1,
       metadataStore: {},
       textParts: ['Agent 多步骤计划：对 sx70 规格关键词改价'],
-      sourceText: '改价,所有sx70商品中所有规格含有日常或者平日的字样的,价格+30元',
+      sourceText: '改价,所有sx70商品中所有规格含有平日字样的,价格上调10%',
       outputDir: 'output',
-      options: { rentalPriceClient: { preview } as unknown as RentalPriceSkillClient },
+      options: {
+        rentalPriceClient: {
+          preview,
+          async read(productId: string) {
+            return { productId, ok: true, specs: [{ specId: 'weekday-a', title: '平日套餐' }], values: { 'weekday-a': { rent1day: '100.00' } }, lines: ['read: ok'] };
+          },
+          auditPreviewFromRead,
+        } as unknown as RentalPriceSkillClient,
+      },
     });
 
     expect(preview).not.toHaveBeenCalled();
-    expect(response?.text).toContain('规格名称关键词');
-    expect(JSON.stringify(response?.card)).toContain('agent_clarification_form');
-    expect(JSON.stringify(response?.card)).not.toContain('agent_tool_confirm');
+    expect(auditPreviewFromRead).toHaveBeenCalledWith('820', expect.any(Object), { rent1day: '110.00' }, { 'weekday-a': { rent1day: '110.00' } });
+    expect(response?.text).toContain('rental.priceSelectionPlan');
+    expect(JSON.stringify(response?.card)).toContain('agent_tool_confirm');
+    expect(JSON.stringify(response?.card)).toContain('rental.priceApply');
   });
 });

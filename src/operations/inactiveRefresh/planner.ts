@@ -1,10 +1,20 @@
+import { readdir, readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { aggregateWindowProducts, readWindowMetric, type WindowProductAggregate } from '../../agentData/windowAggregate.js';
 import { createLinkRegistry } from '../../linkRegistry/store.js';
 import type { LinkRegistryEntry } from '../../linkRegistry/types.js';
+import { loadActiveInactiveRefreshDelistedProductIds } from '../../operationObservations/store.js';
 import type { InactiveRefreshLinkEvidence, InactiveRefreshMetricEvidence, InactiveRefreshNewLinkItem, InactiveRefreshPlanEvidence, InactiveRefreshPlanResult, InactiveRefreshSourceEvidence } from './types.js';
 
 const DAILY_LIMIT = 20;
 const EVIDENCE_LIMIT = 30;
+
+interface PartialCopyAuditShape {
+  ok?: unknown;
+  plan?: { delistProductIds?: unknown };
+  copyResults?: unknown;
+  delistResults?: unknown;
+}
 
 function positiveDashboardAmount(aggregate: WindowProductAggregate): number | undefined {
   for (const key of ['createdOrderAmount', 'signedOrderAmount', 'reviewedOrderAmount', 'shippedOrderAmount'] as const) {
@@ -42,6 +52,10 @@ function isSafeSourceAggregate(aggregate: WindowProductAggregate | undefined): b
   const amount = readWindowMetric(aggregate, 'amount');
   const custodyDays = readWindowMetric(aggregate, 'custodyDays');
   return typeof amount === 'number' && amount > 0 && typeof custodyDays === 'number' && custodyDays >= 14;
+}
+
+function isCurrentlyActionable(entry: LinkRegistryEntry): boolean {
+  return entry.source.includes('daemon_catalog') && entry.status === 'active' && entry.listingState !== 'delisted' && entry.listingState !== 'gone';
 }
 
 function displayName(entry: LinkRegistryEntry | undefined, aggregate: WindowProductAggregate): string {
@@ -93,12 +107,36 @@ function sourceEvidence(source: LinkRegistryEntry, aggregate: WindowProductAggre
   };
 }
 
+function newLinkItemFromSource(source: LinkRegistryEntry, count: number, fallbackAggregate: WindowProductAggregate): InactiveRefreshNewLinkItem {
+  return {
+    keyword: source.sameSkuGroupId ?? displayName(source, fallbackAggregate),
+    count,
+    sourceProductId: source.internalProductId,
+    sourceProductName: source.shortName ?? source.productName ?? source.internalProductId,
+    sourceStrategy: 'healthy_source',
+    ...(source.sameSkuGroupId ? { sameSkuGroupId: source.sameSkuGroupId } : {}),
+  };
+}
+
+function selfCopyNewLinkItem(entry: LinkRegistryEntry, aggregate: WindowProductAggregate): InactiveRefreshNewLinkItem {
+  return {
+    keyword: entry.sameSkuGroupId ?? displayName(entry, aggregate),
+    count: 1,
+    sourceProductId: entry.internalProductId,
+    sourceProductName: entry.shortName ?? entry.productName ?? aggregate.productName ?? entry.internalProductId,
+    sourceStrategy: 'self_copy_fallback',
+    ...(entry.sameSkuGroupId ? { sameSkuGroupId: entry.sameSkuGroupId } : {}),
+  };
+}
+
 function pushBounded<T>(target: T[], value: T): void {
   if (target.length < EVIDENCE_LIMIT) target.push(value);
 }
 
 export async function buildInactiveRefreshPlan(input: { outputDir: string; date: string; registryEntries: LinkRegistryEntry[] }): Promise<InactiveRefreshPlanResult> {
   const aggregates = await aggregateWindowProducts({ outputDir: input.outputDir, endDate: input.date, windowDays: 14 });
+  const cooldownProductIds = await loadActiveInactiveRefreshDelistedProductIds(input.outputDir);
+  const partialCopyBlockedProductIds = await loadPartialCopyBlockedProductIds(input.outputDir);
   const registry = createLinkRegistry(input.registryEntries);
   const entriesByInternalId = new Map(input.registryEntries.map((entry) => [entry.internalProductId, entry]));
   const groups = new Map<string, { entries: LinkRegistryEntry[]; aggregates: WindowProductAggregate[] }>();
@@ -111,8 +149,22 @@ export async function buildInactiveRefreshPlan(input: { outputDir: string; date:
 
   for (const aggregate of aggregates) {
     const entry = entriesByInternalId.get(aggregate.internalProductId);
-    if (entry && entry.status !== 'active') continue;
+    if (entry && !isCurrentlyActionable(entry)) continue;
     const groupId = entry?.sameSkuGroupId ?? `ungrouped:${aggregate.internalProductId}`;
+    if (cooldownProductIds.has(aggregate.internalProductId)) {
+      const evidence = linkEvidence(aggregate, entry, groupId, 'excluded', '14 天操作观察期内已执行失活刷新，暂不重复入选。');
+      evidencesByInternalId.set(aggregate.internalProductId, evidence);
+      excluded += 1;
+      pushBounded(excludedLinks, evidence);
+      continue;
+    }
+    if (partialCopyBlockedProductIds.has(aggregate.internalProductId)) {
+      const evidence = linkEvidence(aggregate, entry, groupId, 'excluded', '已有补链复制成功但旧链下架失败的审计记录，暂不重复复制；请先处理已复制新链。');
+      evidencesByInternalId.set(aggregate.internalProductId, evidence);
+      excluded += 1;
+      pushBounded(excludedLinks, evidence);
+      continue;
+    }
     const { decision, reason } = classify(aggregate);
     const evidence = linkEvidence(aggregate, entry, groupId, decision, reason);
     evidencesByInternalId.set(aggregate.internalProductId, evidence);
@@ -142,41 +194,35 @@ export async function buildInactiveRefreshPlan(input: { outputDir: string; date:
 
   for (const [groupId, group] of [...groups.entries()].sort((left, right) => left[0].localeCompare(right[0]))) {
     if (remaining <= 0) break;
-    const candidateIds = new Set(group.entries.map((entry) => entry.internalProductId));
-    const source = registry
-      .listBySameSkuGroup(groupId, { includeRemoved: false })
-      .filter((entry) => entry.status === 'active' && !candidateIds.has(entry.internalProductId))
-      .find((entry) => isSafeSourceAggregate(aggregatesByInternalId.get(entry.internalProductId)));
-    if (!source) {
-      skippedGroups.push(`${groupId}: 无安全源`);
-      continue;
-    }
-    const activeCount = registry.listBySameSkuGroup(groupId, { includeRemoved: false }).filter((entry) => entry.status === 'active').length;
+    const activeCount = registry.listBySameSkuGroup(groupId, { includeRemoved: false }).filter((entry) => isCurrentlyActionable(entry)).length;
     const limit = Math.min(groupLimit(activeCount), remaining, group.entries.length);
     const selected = group.entries.slice(0, limit);
     const limitExcludedProductIds = group.entries.slice(limit).map((entry) => entry.internalProductId);
     if (selected.length === 0) continue;
+    const candidateIds = new Set(group.entries.map((entry) => entry.internalProductId));
+    const source = registry
+      .listBySameSkuGroup(groupId, { includeRemoved: false })
+      .filter((entry) => isCurrentlyActionable(entry) && !candidateIds.has(entry.internalProductId))
+      .find((entry) => isSafeSourceAggregate(aggregatesByInternalId.get(entry.internalProductId)));
     delistProductIds.push(...selected.map((entry) => entry.internalProductId));
     for (const entry of selected) {
       const evidence = evidencesByInternalId.get(entry.internalProductId);
       if (evidence) executableLinks.push(evidence);
     }
-    newLinkItems.push({
-      keyword: source.sameSkuGroupId ?? displayName(source, group.aggregates[0]!),
-      count: selected.length,
-      sourceProductId: source.internalProductId,
-      sourceProductName: source.shortName ?? source.productName ?? source.internalProductId,
-      ...(source.sameSkuGroupId ? { sameSkuGroupId: source.sameSkuGroupId } : {}),
-    });
+    if (source) {
+      newLinkItems.push(newLinkItemFromSource(source, selected.length, group.aggregates[0]!));
+    } else {
+      for (const entry of selected) newLinkItems.push(selfCopyNewLinkItem(entry, aggregatesByInternalId.get(entry.internalProductId)!));
+    }
     groupEvidence.push({
       groupId,
       activeCount,
       limit,
       selectedProductIds: selected.map((entry) => entry.internalProductId),
       limitExcludedProductIds,
-      source: sourceEvidence(source, aggregatesByInternalId.get(source.internalProductId), groupId),
+      ...(source ? { source: sourceEvidence(source, aggregatesByInternalId.get(source.internalProductId), groupId) } : {}),
     });
-    lines.push(`- ${source.sameSkuGroupId ?? groupId}：下架 ${selected.map((entry) => entry.internalProductId).join('、')}，补链源 ${source.internalProductId}`);
+    lines.push(`- ${source?.sameSkuGroupId ?? groupId}：下架 ${selected.map((entry) => entry.internalProductId).join('、')}，补链源 ${source ? source.internalProductId : '自复制'}`);
     remaining -= selected.length;
     excluded += Math.max(0, group.entries.length - selected.length);
   }
@@ -194,4 +240,54 @@ export async function buildInactiveRefreshPlan(input: { outputDir: string; date:
     summary: { candidates: manualReview + excluded + delistProductIds.length, executable: delistProductIds.length, manualReview, excluded },
     lines,
   };
+}
+
+async function loadPartialCopyBlockedProductIds(outputDir: string): Promise<Set<string>> {
+  const auditDir = join(outputDir, 'latest', 'inactive-refresh-audits');
+  let names: string[];
+  try {
+    names = await readdir(auditDir);
+  } catch (error) {
+    if (isNodeErrorCode(error, 'ENOENT')) return new Set();
+    throw error;
+  }
+  const productIds = new Set<string>();
+  for (const name of names.filter((item) => item.endsWith('.json'))) {
+    const parsed = JSON.parse(await readFile(join(auditDir, name), 'utf8')) as unknown;
+    for (const productId of partialCopyBlockedProductIdsFromAudit(parsed)) productIds.add(productId);
+  }
+  return productIds;
+}
+
+function partialCopyBlockedProductIdsFromAudit(value: unknown): string[] {
+  if (!isRecord(value)) return [];
+  const audit = value as PartialCopyAuditShape;
+  if (audit.ok === true) return [];
+  const copiedCount = arrayOfRecords(audit.copyResults).filter((item) => item.ok === true && stringValue(item.newProductId)).length;
+  if (copiedCount === 0) return [];
+  const planned = arrayOfStrings(audit.plan?.delistProductIds);
+  const delisted = new Set(arrayOfRecords(audit.delistResults).filter((item) => item.ok === true).map((item) => stringValue(item.productId)).filter((item): item is string => Boolean(item)));
+  return planned.filter((productId) => !delisted.has(productId));
+}
+
+function arrayOfRecords(value: unknown): Record<string, unknown>[] {
+  return Array.isArray(value) ? value.filter(isRecord) : [];
+}
+
+function arrayOfStrings(value: unknown): string[] {
+  return Array.isArray(value) ? value.map(stringValue).filter((item): item is string => Boolean(item)) : [];
+}
+
+function stringValue(value: unknown): string | undefined {
+  if (typeof value === 'string' && value.trim()) return value.trim();
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  return undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isNodeErrorCode(error: unknown, code: string): boolean {
+  return error instanceof Error && 'code' in error && error.code === code;
 }

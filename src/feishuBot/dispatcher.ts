@@ -109,6 +109,7 @@ function canonicalizeIntent(intent: BotIntent): BotIntent {
     case 'operations_learning_quiz':
     case 'operations_learning_summary':
     case 'operations_learning_history':
+    case 'operation_review':
     case 'agent_learning_summary':
     case 'lookup_product_id_card':
     case 'link_registry_overview':

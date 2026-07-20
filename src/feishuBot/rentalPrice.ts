@@ -137,6 +137,12 @@ export interface RentalPriceDelistResult {
   productId: string;
   ok: boolean;
   lines: string[];
+  status?: string;
+  message?: string;
+  confirmed?: boolean;
+  confirmText?: string;
+  channelKey?: string;
+  channelLabel?: string;
 }
 
 export interface RentalPriceTenancySetResult {
@@ -800,6 +806,44 @@ function optionalNumber(response: Record<string, unknown>, key: string): number 
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
+function boundedString(value: unknown, maxLength = 500): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  return trimmed.length > maxLength ? `${trimmed.slice(0, maxLength)}...` : trimmed;
+}
+
+function sanitizeDiagnosticUrl(value: unknown): string | undefined {
+  const url = boundedString(value, 1000);
+  if (!url) return undefined;
+  try {
+    const parsed = new URL(url);
+    return `${parsed.origin}${parsed.pathname}`;
+  } catch {
+    const [withoutFragment] = url.split('#', 1);
+    return withoutFragment.split('?', 1)[0];
+  }
+}
+
+function sanitizedDaemonSubmitEvidence(submit: Record<string, unknown>): Record<string, unknown> {
+  const evidence: Record<string, unknown> = { status: commandStatus(submit) };
+  for (const key of ['code', 'errorCode', 'reason'] as const) {
+    const value = boundedString(submit[key]);
+    if (value) evidence[key] = value;
+  }
+  const message = boundedString(submit.message);
+  const detail = boundedString(submit.detail);
+  const currentUrl = sanitizeDiagnosticUrl(submit.currentUrl ?? submit.url);
+  const sideEffectPossible = optionalBoolean(submit, 'sideEffectPossible');
+  const retrySafe = optionalBoolean(submit, 'retrySafe');
+  if (message) evidence.message = message;
+  if (detail) evidence.detail = detail;
+  if (currentUrl) evidence.currentUrl = currentUrl;
+  if (sideEffectPossible !== undefined) evidence.sideEffectPossible = sideEffectPossible;
+  if (retrySafe !== undefined) evidence.retrySafe = retrySafe;
+  return evidence;
+}
+
 function firstStringField(value: unknown, keys: string[]): string | null {
   if (!isRecord(value)) return null;
   for (const key of keys) {
@@ -1290,6 +1334,21 @@ async function updateAuditTask(rootDir: string, audit: RentalPriceAuditReference
   if (!(await fileExists(taskStoreScript))) return;
   if (resultFile) await runNodeJson(taskStoreScript, ['add-evidence', audit.taskId, evidenceType, resultFile]).catch(() => ({}));
   await runNodeJson(taskStoreScript, ['update', audit.taskId, 'status', status]).catch(() => ({}));
+}
+
+async function setAuditTaskResult(rootDir: string, audit: RentalPriceAuditReference | undefined, key: string, value: Record<string, unknown>): Promise<void> {
+  if (!audit?.taskId || !AUDIT_TASK_ID_PATTERN.test(audit.taskId)) return;
+  const taskFile = join(stableSiblingDataRoot(rootDir), 'tasks', `${audit.taskId}.json`);
+  if (!(await fileExists(taskFile))) return;
+  const task = await readJsonRecord(taskFile);
+  const timestamp = new Date().toISOString();
+  task.results = { ...(isRecord(task.results) ? task.results : {}), [key]: value };
+  task.updatedAt = timestamp;
+  task.history = [
+    ...(Array.isArray(task.history) ? task.history : []),
+    { timestamp, action: 'set_result', key },
+  ];
+  await writeJsonFile(taskFile, task);
 }
 
 async function readJsonRecord(path: string): Promise<Record<string, unknown>> {
@@ -1930,12 +1989,56 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
       const submit = await send({ action: 'submit', expectedProductId: request.productId });
       const submitStatus = commandStatus(submit);
       if (submitStatus !== 'ok') {
-        await updateAuditTask(rootDir, audit, 'failed');
+        const resultFile = join(artifactDir, `execution-failure-${request.productId}-${timestampToken()}.json`);
+        const sideEffectPossible = optionalBoolean(submit, 'sideEffectPossible') ?? true;
+        const retrySafe = optionalBoolean(submit, 'retrySafe') ?? false;
+        const submitEvidence = sanitizedDaemonSubmitEvidence(submit);
+        const executionResult = {
+          productId: request.productId,
+          ok: false,
+          phase: 'submit',
+          expectedFields: changes,
+          expectedFieldCount,
+          applyStatus,
+          submitStatus,
+          submit: submitEvidence,
+          verifyStatus: 'skipped',
+          changesFile,
+          rollbackFile: audit?.rollbackFile,
+          sideEffectPossible,
+          retrySafe,
+          createdAt: new Date().toISOString(),
+        };
+        const taskExecutionSummary = {
+          productId: request.productId,
+          ok: false,
+          phase: 'submit',
+          applyStatus,
+          submitStatus,
+          verifyStatus: 'skipped',
+          sideEffectPossible,
+          retrySafe,
+          resultFile,
+          createdAt: executionResult.createdAt,
+        };
+        await writeJsonFile(resultFile, executionResult);
+        await updateAuditTask(rootDir, audit, 'failed', resultFile, 'execution_result');
+        await setAuditTaskResult(rootDir, audit, 'execution', taskExecutionSummary);
+        const submitMessage = optionalString(submit, 'message');
         return {
           productId: request.productId,
           ok: false,
-          lines: [`apply: ${applyStatus}`, `submit: ${submitStatus}`, 'verify: skipped', ...auditLines],
-          ...(audit ? { audit: { ...(audit.taskId ? { taskId: audit.taskId } : {}), status: audit.taskId ? 'failed' : 'untracked', ...(audit.rollbackFile ? { rollbackFile: audit.rollbackFile } : {}) } } : {}),
+          lines: [
+            `apply: ${applyStatus}`,
+            `submit: ${submitStatus}`,
+            'verify: skipped',
+            ...(submitMessage ? [`submitMessage: ${submitMessage}`] : []),
+            `sideEffectPossible: ${sideEffectPossible}`,
+            `retrySafe: ${retrySafe}`,
+            ...auditLines,
+            ...(audit ? [`resultFile: ${resultFile}`] : []),
+          ],
+          ...(audit ? { audit: { ...(audit.taskId ? { taskId: audit.taskId } : {}), status: audit.taskId ? 'failed' : 'untracked', resultFile, ...(audit.rollbackFile ? { rollbackFile: audit.rollbackFile } : {}) } } : {}),
         };
       }
 
@@ -1998,12 +2101,55 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
       const submit = await send({ action: 'submit', expectedProductId: productId });
       const submitStatus = commandStatus(submit);
       if (submitStatus !== 'ok') {
-        await updateAuditTask(rootDir, audit, 'rollback_failed');
+        const resultFile = join(artifactDir, `rollback-execution-failure-${productId}-${timestampToken()}.json`);
+        const sideEffectPossible = optionalBoolean(submit, 'sideEffectPossible') ?? true;
+        const retrySafe = optionalBoolean(submit, 'retrySafe') ?? false;
+        const submitEvidence = sanitizedDaemonSubmitEvidence(submit);
+        const executionResult = {
+          productId,
+          ok: false,
+          phase: 'rollback-submit',
+          expectedFields: fields,
+          expectedFieldCount: priceArtifactFieldCount(fields),
+          applyStatus,
+          submitStatus,
+          submit: submitEvidence,
+          verifyStatus: 'skipped',
+          rollbackFile: audit.rollbackFile,
+          sideEffectPossible,
+          retrySafe,
+          createdAt: new Date().toISOString(),
+        };
+        const taskExecutionSummary = {
+          productId,
+          ok: false,
+          phase: 'rollback-submit',
+          applyStatus,
+          submitStatus,
+          verifyStatus: 'skipped',
+          sideEffectPossible,
+          retrySafe,
+          resultFile,
+          createdAt: executionResult.createdAt,
+        };
+        await writeJsonFile(resultFile, executionResult);
+        await updateAuditTask(rootDir, audit, 'rollback_failed', resultFile, 'rollback_execution_result');
+        await setAuditTaskResult(rootDir, audit, 'rollbackExecution', taskExecutionSummary);
+        const submitMessage = optionalString(submit, 'message');
         return {
           productId,
           ok: false,
-          lines: [`rollbackApply: ${applyStatus}`, `submit: ${submitStatus}`, 'verify: skipped', ...auditLines],
-          audit: { ...(audit.taskId ? { taskId: audit.taskId } : {}), status: audit.taskId ? 'rollback_failed' : 'untracked', ...(audit.rollbackFile ? { rollbackFile: audit.rollbackFile } : {}) },
+          lines: [
+            `rollbackApply: ${applyStatus}`,
+            `submit: ${submitStatus}`,
+            'verify: skipped',
+            ...(submitMessage ? [`submitMessage: ${submitMessage}`] : []),
+            `sideEffectPossible: ${sideEffectPossible}`,
+            `retrySafe: ${retrySafe}`,
+            ...auditLines,
+            `resultFile: ${resultFile}`,
+          ],
+          audit: { ...(audit.taskId ? { taskId: audit.taskId } : {}), status: audit.taskId ? 'rollback_failed' : 'untracked', resultFile, ...(audit.rollbackFile ? { rollbackFile: audit.rollbackFile } : {}) },
         };
       }
 
@@ -2070,7 +2216,33 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
       const result = await send({ action: 'delist', productId });
       const status = commandStatus(result);
       const message = typeof result.message === 'string' ? result.message : undefined;
-      return { productId, ok: status === 'ok' || status === 'warn', lines: [`delist: ${status}`, ...(message ? [message] : [])] };
+      const confirmed = optionalBoolean(result, 'confirmed');
+      const confirmText = optionalString(result, 'confirmText');
+      const channelKey = optionalString(result, 'channelKey');
+      const channelLabel = optionalString(result, 'channelLabel');
+      const currentUrl = optionalString(result, 'url');
+      const route = optionalString(result, 'route');
+      const expectedRoute = optionalString(result, 'expectedRoute');
+      return {
+        productId,
+        ok: status === 'ok' || status === 'warn',
+        lines: [
+          `delist: ${status}`,
+          ...(message ? [message] : []),
+          ...(confirmed !== undefined ? [`confirmed: ${confirmed}`] : []),
+          ...(confirmText ? [`confirmText: ${confirmText.substring(0, 120)}`] : []),
+          ...(channelLabel ? [`channel: ${channelLabel}`] : []),
+          ...(route || expectedRoute ? [`route: ${route ?? 'unknown'} expected: ${expectedRoute ?? 'unknown'}`] : []),
+          ...(currentUrl ? [`currentUrl: ${currentUrl}`] : []),
+        ],
+        status,
+        ...(message ? { message } : {}),
+        ...(confirmed !== undefined ? { confirmed } : {}),
+        ...(confirmText ? { confirmText } : {}),
+        ...(channelKey ? { channelKey } : {}),
+        ...(channelLabel ? { channelLabel } : {}),
+        ...(currentUrl ? { currentUrl } : {}),
+      };
     },
     async tenancySet(productId, days) {
       const result = await send({ action: 'tenancy-set', productId, days });

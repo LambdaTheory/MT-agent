@@ -2,7 +2,7 @@
 
 > 本文面向接手 MT-agent 的开发 Agent 与维护人员，说明模块现状、文件边界、主链路、开发方向、安全约束和验证方式。
 >
-> **最后核对基线：2026-07-19；当前稳定集成分支：`master`。** 文档描述应优先以当前代码和测试为准，阶段性审计文档仅用于理解历史决策和剩余运行边界。
+> **最后核对基线：2026-07-20；当前稳定集成分支：`master`。** 文档描述应优先以当前代码和测试为准，阶段性审计文档仅用于理解历史决策和剩余运行边界。
 
 ---
 
@@ -266,6 +266,7 @@ MT-agent/
 - `reportQuery` 不支持的 filter、sort 或 metric 必须显式报错，不能静默返回空结果或「声称排序却未排序」。
 - 查询结果默认卡片优先：对象列表/问题池使用专用或普通列表卡，指标解释类使用轻量结果卡；直接 legacy `publicTraffic.reportQuery target=section` 保持 text-only，避免绕过 `productLink.query` 重新产问题池卡片。
 - 交互卡片会暂停后续步骤；LLM 计划要把打开交互卡的工具放在最后，或先进行澄清。
+- 链接维护卡的 LLM 参考建议复用 `HandleBotIntentOptions.agentExploreProvider` / raw `LlmProvider`，必须从 CLI 启动、SDK/HTTP dispatcher、Agent runtime、`executeAgentToolRequest` 和 continuation 执行路径完整透传；新增维护入口时也要显式决定是否传 `llmProvider`。
 - `跑失活刷新` 是硬命令，应在 Agent-first 模式下本地直通 `run_inactive_refresh`，不得落回 LLM 选择旧 `operations.refreshActivityPlan`。
 - 新增或修改卡片 action 时必须同时维护 SDK 与 HTTP 两条路径的 action name 映射、claim/幂等状态和对应测试；生产默认跑 SDK 长连接。
 
@@ -428,6 +429,17 @@ daemon 状态同步边界：
 
 下架原因归因是 `listingState === 'delisted'` 之后的解释层，不参与状态仲裁。平台证据来自商品总表的「审核不通过原因」和「冻结原因」，分别归因为 `platform_review_rejected` / `platform_frozen`，其他平台限制归为 `platform_restricted`；仅在同一商品快照明确已下架、状态文本非空、观察时间新鲜且内外时间一致时确认。Agent 主动下架证据来自 operation ledger 中成功的 `delist` 执行，并要求后续严格更晚的已下架回读；没有平台或 Agent 证据时只能写 `external_manual_off_shelf_pending_confirmation`（外部人工下架，待确认），不得推断具体同事。刷新健康门禁（如 daemon 空结果或商品快照异常掉数）会抑制全部下架归因，并按日期持久化供同日 runtime 复用。
 
+#### 链接维护/审计 LLM 参考建议（2026-07-20）
+
+链接维护 daemon 卡片和 `link-registry:audit --llm-suggestions` 已支持展示 LLM 参考建议，但语义是**人工参考，不自动生效**：
+
+- `maintenanceSession.ts` 只把 LLM 输出写入队列项的 `llmSuggestion` 展示元数据；`overrideEntryPayload`、callback payload、排序、`decision`、最终 override 写入都不得读取 `llmSuggestion`。
+- `auditReview.ts` 在审批 Markdown 中把 LLM 建议放在「审计事实」和「人工填写区」之间；最终落库仍只看人工填写的 `decision/final*` 字段。
+- LLM 输出进入 Feishu Markdown 或审计 Markdown 前必须用安全展示文本中和 Markdown/Feishu 特殊语法，避免 `[link](url)`、`<at ...>`、表格管道、反引号、强调符号等被渲染成可点击链接、mention 或误导性结构。原始 JSON/CSV 可保留机器字段，但渲染层不能直接输出未中和文本。
+- provider 失败、无 provider、JSON 不合规、action 不在白名单、confidence 非 `0..1` 或 rationale 缺失时，只能显示「不可用」或「未启用」，不能阻断维护卡，也不能降级为猜测写入。
+- 同一日期/同一 deterministic signature 的维护 session 在 `force` 重开时必须刷新展示元数据和 options；不能复用旧 queue 导致 LLM 建议缺失或陈旧，但 `reviewing/completed` session 仍不得被覆盖。
+- live 入口覆盖范围包括：飞书 SDK bot、HTTP bot、dispatcher/runtime、direct intent、Agent tool executor/continuation，以及 `publicTrafficReport.ts` 日报后链接维护提醒。新增入口要补 `tests/cliLoadEnvSource.test.ts`、`tests/feishuBotTools.test.ts` 或对应 session 测试。
+
 ### 4.8 `src/activityAutomation/`：差异化定价活动自动化
 
 它不是通用活动脚本，而是针对差异化定价活动表单的半自动执行器。
@@ -571,7 +583,17 @@ Daemon 商品列表能力核验（2026-07-18）：
 7. 新版 delayed-verify 是手动触发且 fail-closed；缺 readback、零校验、setup-only 结构校验缺失、image/VAS 证据异常都不得宣称成功。
 8. 新版 rollback 明确只覆盖字段/VAS，图片/spec/tenancy 不支持自动回滚；飞书卡片和报告必须如实呈现该边界。
 9. MT daemon 配置读取已适配稳定版 sibling data root 下的 `daemon/daemon.port`、`daemon/daemon.token`，并在命令中携带 hello negotiation/client 元数据；新增 mutation 必须保持 negotiated dispatch，不得绕过版本/状态协商。
-10. lifecycle 命令、PM2 daemon 启停、真实 SaaS 操作、浏览器 profile 和 `.env` 都有外部副作用；审计和开发默认只做静态检查、单元测试、schema/contract 测试，不自动执行真实操作。
+10. `vendor/rental-price-agent/scripts/lib/daemon-client.js` 的 negotiated command 默认超时为 `DEFAULT_DAEMON_COMMAND_TIMEOUT_MS = 60000`；租赁价真实写操作可能被页面加载、浮层或保存等待拖慢，不得把默认值退回 3 秒。若新增调用需要更短超时，必须显式传入并确认不会影响 apply/submit/verify。
+11. lifecycle 命令、PM2 daemon 启停、真实 SaaS 操作、浏览器 profile 和 `.env` 都有外部副作用；审计和开发默认只做静态检查、单元测试、schema/contract 测试，不自动执行真实操作。
+
+改价/回滚 submit 失败诊断基线（2026-07-20）：
+
+- `src/feishuBot/rentalPrice.ts` 的 `execute(request)` 在 apply 已执行但 submit 非 `ok` 时，必须持久化 `execution-failure-<productId>-*.json` 到 `vendor/.rental-price-agent-data/artifacts/mt-agent-audit`；`rollback(request)` 在回滚 apply 已执行但 submit 非 `ok` 时，必须持久化 `rollback-execution-failure-<productId>-*.json`。两条路径都不得只返回 `submit:error` 文本。
+- failure artifact 必须包含脱敏后的 submit evidence、`phase`（普通执行为 `submit`，回滚为 `rollback-submit`）、期望字段数量、`applyStatus`、`submitStatus`、`verifyStatus: 'skipped'`、`sideEffectPossible`、`retrySafe` 和相关 changes/rollback file 引用；不得写入 URL query secret 或其他敏感 token。
+- 同一失败必须更新 audit task：普通执行状态为 `failed`，evidence 类型为 `execution_result`，摘要写入 `task.results.execution`；回滚状态为 `rollback_failed`，evidence 类型为 `rollback_execution_result`，摘要写入 `task.results.rollbackExecution`。task results 只保存摘要，不嵌入 raw submit 或完整 expected fields。
+- 失败返回给飞书/调用方时要暴露 `resultFile`、submit message、side-effect/retry 语义，便于后续人工定位；由于 submit 结果失败后无法保证平台保存状态，verify 必须保持 skipped，不得把未验证的回滚宣称为成功。
+- 该基线由 `tests/feishuBotRentalPrice.test.ts` 中的 `persists submit failure details after apply succeeds without running verify` 和 `persists rollback submit failure details after rollback apply succeeds without running verify` 覆盖；变更后至少运行 `npx vitest run tests/feishuBotRentalPrice.test.ts -t "submit failure details"`、相关 LSP diagnostics 和 `npm run build`。
+- 代码修改后如果要让飞书生产 Bot 立即生效，需要显式重启 `mt-feishu-bot`；PM2 重启属于外部副作用，不能在审计/文档更新中默认执行。
 
 业务级批量租赁改价基线（2026-07-15 已合入 master）：
 
@@ -689,6 +711,7 @@ npm test -- --run tests/dashboardCrawlerSource.test.ts tests/dashboardCaptureDat
 
 - 只改纯函数/数据层：至少执行对应测试 + build。
 - 改工具 schema/运行时/飞书路由：测试工具 contract、执行器、SDK 与 HTTP 路径（若两者共享能力）。
+- 改链接维护 LLM 展示或 provider wiring：至少跑 `tests/linkRegistryMaintenanceSession.test.ts`、`tests/linkRegistryAuditReviewLlm.test.ts`、`tests/cliLoadEnvSource.test.ts`、相关 `tests/feishuBotTools.test.ts` 用例和 `tests/publicTrafficReportCliBehavior.test.ts`，并用 `--exclude ".worktrees/**" --exclude ".claude/**"` 避免误扫历史 worktree 测试。
 - 改 crawler：优先 source/fixture 测试；真实后台抓取需先获授权。
 - 改库存快照：至少覆盖 builder、strict reader、query、card、Bot 工具和 group-review CLI；验证 `null`/零值语义及 generation/date 一致性门禁。
 - 改写操作：必须补齐 preview、确认、拒绝、重复确认、失败、readback/审计测试。

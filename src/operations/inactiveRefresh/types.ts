@@ -3,6 +3,7 @@ export interface InactiveRefreshNewLinkItem {
   count: number;
   sourceProductId: string;
   sourceProductName: string;
+  sourceStrategy?: 'healthy_source' | 'self_copy_fallback';
   sameSkuGroupId?: string;
 }
 

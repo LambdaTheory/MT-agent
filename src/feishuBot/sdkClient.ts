@@ -177,6 +177,18 @@ function readString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
 }
 
+function readReplyMessageId(value: unknown): string | undefined {
+  if (typeof value === 'string') {
+    try {
+      return readReplyMessageId(JSON.parse(value));
+    } catch {
+      return undefined;
+    }
+  }
+  if (!isRecord(value)) return undefined;
+  return readString(value.message_id) ?? (isRecord(value.data) ? readString(value.data.message_id) : undefined);
+}
+
 function readNumber(value: unknown): number | undefined {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (typeof value === 'string' && value.trim()) {
@@ -441,11 +453,12 @@ async function replyText(client: FeishuSdkClient, messageId: string, text: strin
   });
 }
 
-async function replyCard(client: FeishuSdkClient, messageId: string, card: FeishuCardPayload): Promise<void> {
-  await client.im.v1.message.reply({
+async function replyCard(client: FeishuSdkClient, messageId: string, card: FeishuCardPayload): Promise<string | undefined> {
+  const result = await client.im.v1.message.reply({
     path: { message_id: messageId },
     data: { content: JSON.stringify(card), msg_type: 'interactive' },
   });
+  return readReplyMessageId(result);
 }
 
 async function updateCard(client: FeishuSdkClient, messageId: string, card: FeishuCardPayload): Promise<boolean> {
@@ -602,9 +615,11 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
       }
 
       const sentPreviewProgress = shouldSendRentalPricePreviewProgress(message.text);
+      let previewProgressMessageId: string | undefined;
       if (sentPreviewProgress) {
-        await replyCard(client, message.messageId, buildRentalPricePreviewProgressCard([], message.text)).catch((error) => {
+        previewProgressMessageId = await replyCard(client, message.messageId, buildRentalPricePreviewProgressCard([], message.text)).catch((error) => {
           logError(error, { messageId: message.messageId, phase: 'reply' });
+          return undefined;
         });
       }
 
@@ -638,6 +653,18 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
       if (response.skipped) return;
 
       try {
+        if (sentPreviewProgress && previewProgressMessageId) {
+          await deliverCard(client, previewProgressMessageId, response.card ?? agentToolResultStatusCard(response), logError);
+          logInfo(formatRuntimeLog({
+            level: 'info',
+            component: 'feishu-bot',
+            event: 'message.reply.completed',
+            messageId: message.messageId,
+            replyType: response.card ? 'card' : 'text',
+            elapsedMs: Date.now() - startedAt,
+          }));
+          return;
+        }
         if (response.progressCard && !sentPreviewProgress) await replyCard(client, message.messageId, response.progressCard);
         if (response.card) await replyCard(client, message.messageId, response.card);
         else await replyText(client, message.messageId, response.text);

@@ -219,6 +219,7 @@ export function parseExactBotIntent(input: string): BotIntent {
   }
   if (/^(运营学习|学习反馈).*(历史|统计)$/.test(canonicalText)) return { type: 'operations_learning_history' };
   if (/^(运营学习|学习反馈).*(汇总|总结)$/.test(canonicalText)) return { type: 'operations_learning_summary' };
+  if (/^(?:操作回顾|操作复盘|运营复盘|运营操作复盘|operation review)$/i.test(canonicalText)) return { type: 'operation_review' };
   if (/^(开始)?(运营学习|学习测验|今日测验|loop测验|运营测验|测验)$|学习\s*loop|运营学习\s*loop/i.test(canonicalText)) return { type: 'operations_learning_quiz' };
   if (/^(差异化定价|配置差异化定价)$/.test(canonicalText)) return { type: 'differential_pricing_card' };
   if (/^取消差异化定价$/.test(canonicalText)) return { type: 'cancel_differential_pricing_card' };
@@ -300,6 +301,7 @@ function isAgentFirstLocalDirectIntent(intent: BotIntent): boolean {
     case 'operations_learning_quiz':
     case 'operations_learning_summary':
     case 'operations_learning_history':
+    case 'operation_review':
     case 'agent_learning_summary':
     case 'lookup_product_id_card':
     case 'lookup_product_id':

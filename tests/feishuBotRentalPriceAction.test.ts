@@ -1000,4 +1000,56 @@ describe('rental price card action', () => {
     expect(json).not.toContain('rental_price_select_rollback_submit');
     expect(json).not.toContain('rental_price_prepare_rollback_all_submit');
   });
+
+  it('shows price apply failure reasons and acknowledges failure without success wording', async () => {
+    const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
+    const sent: unknown[] = [];
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-sdk-price-failure-'));
+    const response = await executeAgentToolRequest(
+      {
+        toolName: 'rental.priceApply',
+        arguments: { items: [{ productId: '761', fields: { rent7day: '778.00' }, audit: completeAudit('761') }] },
+        reason: 'confirmed preview',
+      },
+      outputDir,
+      { rentalPriceClient: {
+        async preview() { throw new Error('preview should not run'); },
+        async execute(request) { return { productId: request.productId, ok: false, lines: ['DAEMON_UNREACHABLE: Daemon request timed out', 'browser profile is locked'] }; },
+        async copy() { throw new Error('copy should not run'); },
+        async delist() { throw new Error('delist should not run'); },
+        async tenancySet() { throw new Error('tenancySet should not run'); },
+        async specDiscover() { throw new Error('specDiscover should not run'); },
+        async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+      } },
+    );
+
+    const cardJson = JSON.stringify(response.card);
+    expect(cardJson).toContain('失败原因');
+    expect(cardJson).toContain('商品 761');
+    expect(cardJson).toContain('DAEMON_UNREACHABLE: Daemon request timed out');
+    expect(cardJson).toContain('已知晓执行结果');
+    expect(cardJson).not.toContain('认可本次操作完成');
+
+    const bot = createFeishuSdkBot({ appId: 'app', appSecret: 'secret', outputDir, sdk: fakeSdk(sent, registered), rentalPriceClient: {
+      async preview() { throw new Error('preview should not run'); },
+      async execute() { throw new Error('execute should not run'); },
+      async rollback() { throw new Error('rollback should not run'); },
+      async copy() { throw new Error('copy should not run'); },
+      async delist() { throw new Error('delist should not run'); },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    } });
+    const value = readButtonValue(response.card, 'rental_price_acknowledge_completion_submit');
+
+    bot.start();
+    const result = await registered['card.action.trigger']({ event: { context: { open_message_id: 'om-price-failed-ack' }, operator: { open_id: 'ou_ack' }, action: { name: 'rental_price_acknowledge_completion_submit', value } } });
+    const acknowledgedJson = JSON.stringify(result);
+
+    expect(acknowledgedJson).toContain('租赁改价失败结果已知晓');
+    expect(acknowledgedJson).toContain('已知晓执行失败结果');
+    expect(acknowledgedJson).toContain('不代表改价成功');
+    expect(acknowledgedJson).not.toContain('租赁改价已认可完成');
+    await rm(outputDir, { recursive: true, force: true });
+  });
 });

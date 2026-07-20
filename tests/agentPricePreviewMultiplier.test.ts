@@ -482,6 +482,39 @@ describe('agent rental price preview multiplier handling', () => {
     expect(JSON.stringify(response.card)).toContain('租赁改价预览已阻断');
   });
 
+  it('surfaces daemon batchRead product errors on blocked preview cards', async () => {
+    const preview = vi.fn(async () => {
+      throw new Error('preview should not run when batchRead returns daemon errors');
+    });
+    const batchRead = vi.fn(async () => ({
+      ok: false,
+      status: 'error',
+      count: 0,
+      results: {},
+      errors: [{ productId: '900', error: 'redirected to login' }],
+      warnings: [],
+      lines: ['batch-read: error'],
+    }));
+    const auditPreviewFromRead = vi.fn(async (productId: string) => audit(productId));
+
+    const response = await executeAgentToolRequest(
+      {
+        toolName: 'rental.pricePreview',
+        arguments: { productIds: ['900', '901'], adjustmentAmount: -10, scope: 'rent_fields' },
+        reason: '改价,所有x300u链接所有租期价格-10元',
+      },
+      'output',
+      { rentalPriceClient: { preview, batchRead, auditPreviewFromRead } as unknown as RentalPriceSkillClient },
+    );
+
+    expect(batchRead).toHaveBeenCalledTimes(1);
+    expect(preview).not.toHaveBeenCalled();
+    expect(response.metadata).toMatchObject({ toolName: 'rental.pricePreview', ok: false, previewCount: 0 });
+    expect(response.text).toContain('商品 900：批量读取失败：redirected to login');
+    expect(response.text).toContain('商品 901：批量读取失败');
+    expect(JSON.stringify(response.card)).toContain('redirected to login');
+  });
+
   it('returns a terminal card when multi-spec products reject flat explicit rent fields', async () => {
     const preview = vi.fn(async () => {
       throw new Error('多规格商品不能使用扁平改价字段，请使用按规格生成的相对改价计划。');

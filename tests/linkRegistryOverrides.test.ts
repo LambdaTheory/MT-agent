@@ -22,6 +22,21 @@ describe('link registry overrides', () => {
     expect(result.risks).toEqual([]);
   });
 
+  it('applies listing state overrides for agent-confirmed inactive refresh writeback', () => {
+    const result = applyLinkRegistryOverrides(entries, {
+      version: 1,
+      entries: [
+        { internalProductId: '701', status: 'removed', listingState: 'delisted', statusObservedAt: '2026-07-17T01:00:00.000Z', reason: 'inactive_refresh_success' },
+        { internalProductId: '999', productName: 'New inactive refresh link', status: 'active', listingState: 'on_sale', statusObservedAt: '2026-07-17T01:00:00.000Z', reason: 'inactive_refresh_success' },
+      ],
+    });
+
+    expect(result.entries).toEqual(expect.arrayContaining([
+      expect.objectContaining({ internalProductId: '701', status: 'removed', listingState: 'delisted', statusObservedAt: '2026-07-17T01:00:00.000Z' }),
+      expect.objectContaining({ internalProductId: '999', status: 'active', listingState: 'on_sale', statusObservedAt: '2026-07-17T01:00:00.000Z' }),
+    ]));
+  });
+
   it('ignores disabled overrides and keeps the original entry behavior', () => {
     const result = applyLinkRegistryOverrides(entries, {
       version: 1,
@@ -115,7 +130,7 @@ describe('link registry overrides', () => {
   });
 
   it('parses and rejects malformed override contracts', () => {
-    expect(parseLinkRegistryOverrides({ version: 1, entries: [{ internalProductId: '701', sameSkuGroupId: 'canon-sx70' }], sameSkuGroupRules: [{ matchSameSkuGroupId: 'canon r50', sameSkuGroupId: 'canon-eos-r50', shortName: 'R50' }], sameSkuGroupAliasRules: [{ sameSkuGroupId: 'canon-sx70', aliases: ['SX70'] }] })).toEqual({ version: 1, entries: [{ internalProductId: '701', sameSkuGroupId: 'canon-sx70', productName: undefined, categoryId: undefined, categoryName: undefined, productType: undefined, shortName: undefined, aliases: undefined, status: undefined, confidence: undefined, reason: undefined, maintainer: undefined, updatedAt: undefined, disabled: undefined }], shortNameRules: undefined, sameSkuGroupRules: [{ matchSameSkuGroupId: 'canon r50', sameSkuGroupId: 'canon-eos-r50', productName: undefined, categoryId: undefined, categoryName: undefined, productType: undefined, shortName: 'R50', aliases: undefined, confidence: undefined, reason: undefined, maintainer: undefined, updatedAt: undefined, disabled: undefined }], sameSkuGroupAliasRules: [{ sameSkuGroupId: 'canon-sx70', aliases: ['SX70'], reason: undefined, maintainer: undefined, updatedAt: undefined, disabled: undefined }] });
+    expect(parseLinkRegistryOverrides({ version: 1, entries: [{ internalProductId: '701', sameSkuGroupId: 'canon-sx70' }], sameSkuGroupRules: [{ matchSameSkuGroupId: 'canon r50', sameSkuGroupId: 'canon-eos-r50', shortName: 'R50' }], sameSkuGroupAliasRules: [{ sameSkuGroupId: 'canon-sx70', aliases: ['SX70'] }] })).toEqual({ version: 1, entries: [{ internalProductId: '701', sameSkuGroupId: 'canon-sx70', productName: undefined, categoryId: undefined, categoryName: undefined, productType: undefined, shortName: undefined, aliases: undefined, status: undefined, listingState: undefined, statusObservedAt: undefined, confidence: undefined, reason: undefined, maintainer: undefined, updatedAt: undefined, disabled: undefined }], shortNameRules: undefined, sameSkuGroupRules: [{ matchSameSkuGroupId: 'canon r50', sameSkuGroupId: 'canon-eos-r50', productName: undefined, categoryId: undefined, categoryName: undefined, productType: undefined, shortName: 'R50', aliases: undefined, confidence: undefined, reason: undefined, maintainer: undefined, updatedAt: undefined, disabled: undefined }], sameSkuGroupAliasRules: [{ sameSkuGroupId: 'canon-sx70', aliases: ['SX70'], reason: undefined, maintainer: undefined, updatedAt: undefined, disabled: undefined }] });
     expect(() => parseLinkRegistryOverrides({ version: 1, entries: [{ internalProductId: 'bad', sameSkuGroupId: 'Canon SX70' }] })).toThrow('Invalid entry override internalProductId');
     expect(() => parseLinkRegistryOverrides({ version: 2 })).toThrow('version must be 1');
   });

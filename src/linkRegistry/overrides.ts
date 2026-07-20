@@ -1,5 +1,5 @@
 import { preferredShortNameForSameSkuGroup } from './buildRegistry.js';
-import type { LinkRegistryEntry, LinkRegistrySource, LinkRegistryStatus } from './types.js';
+import type { LinkListingState, LinkRegistryEntry, LinkRegistrySource, LinkRegistryStatus } from './types.js';
 
 export interface LinkRegistryEntryOverride {
   internalProductId: string;
@@ -11,6 +11,8 @@ export interface LinkRegistryEntryOverride {
   aliases?: string[];
   sameSkuGroupId?: string;
   status?: LinkRegistryStatus;
+  listingState?: LinkListingState;
+  statusObservedAt?: string;
   confidence?: number;
   reason?: string;
   maintainer?: string;
@@ -115,7 +117,7 @@ export interface ApplyLinkRegistryOverridesResult {
   risks: LinkRegistryOverrideRisk[];
 }
 
-type ClassificationPatch = Partial<Pick<LinkRegistryEntry, 'productName' | 'categoryId' | 'categoryName' | 'productType' | 'shortName' | 'aliases' | 'sameSkuGroupId' | 'status' | 'confidence' | 'updatedAt'>>;
+type ClassificationPatch = Partial<Pick<LinkRegistryEntry, 'productName' | 'categoryId' | 'categoryName' | 'productType' | 'shortName' | 'aliases' | 'sameSkuGroupId' | 'status' | 'listingState' | 'statusObservedAt' | 'confidence' | 'updatedAt'>>;
 
 const MANUAL_SEED_CONFIDENCE = 0.6;
 
@@ -187,6 +189,13 @@ function optionalStatus(record: Record<string, unknown>, key: string): LinkRegis
   return value;
 }
 
+function optionalListingState(record: Record<string, unknown>, key: string): LinkListingState | undefined {
+  const value = record[key];
+  if (value === undefined) return undefined;
+  if (value !== 'on_sale' && value !== 'delisted' && value !== 'gone' && value !== 'unknown') throw new Error(`Invalid ${key}: expected LinkListingState`);
+  return value;
+}
+
 function optionalStringArray(record: Record<string, unknown>, key: string): string[] | undefined {
   const value = record[key];
   if (value === undefined) return undefined;
@@ -224,6 +233,8 @@ function parseEntryOverride(value: unknown): LinkRegistryEntryOverride {
     aliases: optionalStringArray(value, 'aliases'),
     sameSkuGroupId,
     status: optionalStatus(value, 'status'),
+    listingState: optionalListingState(value, 'listingState'),
+    statusObservedAt: optionalString(value, 'statusObservedAt'),
     confidence: optionalNumber(value, 'confidence'),
     reason: optionalString(value, 'reason'),
     maintainer: optionalString(value, 'maintainer'),
@@ -324,6 +335,8 @@ function patchFrom(value: ClassificationPatch): ClassificationPatch {
     aliases: value.aliases?.map((item) => item.trim()).filter(Boolean),
     sameSkuGroupId: trimmed(value.sameSkuGroupId),
     status: value.status,
+    listingState: value.listingState,
+    statusObservedAt: trimmed(value.statusObservedAt),
     confidence: value.confidence,
     updatedAt: trimmed(value.updatedAt),
   };
@@ -416,6 +429,8 @@ function seedEntryFromOverride(override: LinkRegistryEntryOverride): LinkRegistr
     ...(aliases ? { aliases } : {}),
     ...(trimmed(override.sameSkuGroupId) ? { sameSkuGroupId: trimmed(override.sameSkuGroupId) } : {}),
     status: override.status ?? 'unknown',
+    ...(override.listingState ? { listingState: override.listingState } : {}),
+    ...(trimmed(override.statusObservedAt) ? { statusObservedAt: trimmed(override.statusObservedAt) } : {}),
     confidence: override.confidence ?? MANUAL_SEED_CONFIDENCE,
     ...(trimmed(override.updatedAt) ? { updatedAt: trimmed(override.updatedAt) } : {}),
     classificationSource: 'manual_override',
@@ -436,6 +451,8 @@ function applyPatch(entry: LinkRegistryEntry, patch: ClassificationPatch, source
     ...(aliases ? { aliases } : {}),
     ...(nextPatch.sameSkuGroupId ? { sameSkuGroupId: nextPatch.sameSkuGroupId } : {}),
     ...(nextPatch.status ? { status: nextPatch.status } : {}),
+    ...(nextPatch.listingState ? { listingState: nextPatch.listingState } : {}),
+    ...(nextPatch.statusObservedAt ? { statusObservedAt: nextPatch.statusObservedAt } : {}),
     ...(nextPatch.confidence !== undefined ? { confidence: nextPatch.confidence } : {}),
     ...(nextPatch.updatedAt ? { updatedAt: nextPatch.updatedAt } : {}),
     classificationSource: source === 'short_name_rule' ? 'short_name_rule' : 'manual_override',

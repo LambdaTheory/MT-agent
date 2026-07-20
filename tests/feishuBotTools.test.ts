@@ -6,7 +6,7 @@ import { parseAgentToolConfirmRequest } from '../src/agentRuntime/approvalCard.j
 import type { AgentPlannerProvider } from '../src/agentRuntime/planner.js';
 import type { LlmIntentProposalProvider } from '../src/feishuBot/llmIntentProposal.js';
 import type { LlmToolSelectionProvider } from '../src/feishuBot/llmProvider.js';
-import type { RentalPriceSkillClient } from '../src/feishuBot/rentalPrice.js';
+import type { RentalPriceReadResult, RentalPriceSkillClient } from '../src/feishuBot/rentalPrice.js';
 import { recordAgentLearningEvent } from '../src/agentLearning/store.js';
 import { executeAgentToolRequestWithContinuation } from '../src/feishuBot/agentToolContinuation.js';
 import { executeAgentToolRequest } from '../src/feishuBot/agentToolExecutor.js';
@@ -2656,6 +2656,141 @@ describe('handleBotIntent', () => {
           expectedFieldCount: 1,
         }),
       }),
+    ]);
+  });
+
+  it('builds audited price selection confirmations for spec keyword relative changes', async () => {
+    const outputDir = await writeContext();
+    const registryRoot = await mkdtemp(join(tmpdir(), 'mt-agent-price-selection-keyword-'));
+    const registryPaths = await writeX300SpecRemoveRegistryFixtures(registryRoot);
+    const auditPreviewFromRead = vi.fn(async (productId: string, current: Record<string, unknown>, fields: Record<string, string>, artifact: unknown) => completeAudit(productId, {
+      expectedFieldCount: 2,
+      diff: [
+        { specId: 'gold-a', specTitle: '金色 128G', field: 'rent1day', label: '1天', old: '100.00', new: '110.00', change: '+10.00', changePct: '+10.0%', issues: [] },
+        { specId: 'gold-a', specTitle: '金色 128G', field: 'rent7day', label: '7天', old: '200.00', new: '220.00', change: '+20.00', changePct: '+10.0%', issues: [] },
+      ],
+      current,
+      fields,
+      artifact,
+    }));
+    const read = vi.fn(async (productId: string): Promise<RentalPriceReadResult> => {
+      if (productId === '501') {
+        return {
+          productId,
+          ok: true,
+          specs: [{ specId: 'gold-a', title: '金色 128G' }, { specId: 'black-a', title: '黑色 128G' }],
+          values: {
+            'gold-a': { rent1day: '100.00', rent7day: '200.00' },
+            'black-a': { rent1day: '90.00', rent7day: '180.00' },
+          },
+          lines: ['read: ok'],
+        };
+      }
+      return { productId, ok: true, specs: [{ specId: 'black-b', title: '黑色 256G' }], values: { 'black-b': { rent1day: '80.00', rent7day: '160.00' } }, lines: ['read: ok'] };
+    });
+    const rentalPriceClient: RentalPriceSkillClient = {
+      read,
+      auditPreviewFromRead,
+      async preview() { throw new Error('preview should not run for price selection plan'); },
+      async execute() { throw new Error('execute should not run during preview'); },
+      async copy() { throw new Error('copy should not run'); },
+      async delist() { throw new Error('delist should not run'); },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+
+    const response = await executeAgentToolRequest(
+      {
+        toolName: 'rental.priceSelectionPlan',
+        arguments: {
+          query: 'x300u-spec-test',
+          filters: [{ type: 'specTitleContains', value: '金色' }],
+          fields: 'rent_fields',
+          transform: { type: 'multiply', value: 1.1 },
+          resolutionMode: 'sameSkuGroup',
+        },
+        reason: 'ipod touch 6商品组，所有含有金色字样的规格的所有租期上调10%',
+      },
+      outputDir,
+      { rentalPriceClient, closedOrderRegistryPaths: registryPaths },
+    );
+
+    expect(read).toHaveBeenCalledWith('501');
+    expect(read).toHaveBeenCalledWith('502');
+    expect(auditPreviewFromRead).toHaveBeenCalledWith('501', expect.any(Object), { rent1day: '110.00', rent7day: '220.00' }, { 'gold-a': { rent1day: '110.00', rent7day: '220.00' } });
+    expect(response.metadata).toMatchObject({ toolName: 'rental.priceSelectionPlan', ok: true, previewCount: 1, matchedSpecCount: 1 });
+    expect(response.text).toContain('价格选择改价预览：x300u-spec-test');
+    expect(response.text).toContain('规格名称包含「金色」');
+    expect(response.text).toContain('变换：乘以 1.1');
+    expect(response.card).toBeDefined();
+    const confirmRequest = await loadAgentToolConfirmRequestFromCard(outputDir, response.card);
+    expect(confirmRequest.toolName).toBe('rental.priceApply');
+    expect(confirmRequest.arguments.items).toEqual([
+      expect.objectContaining({
+        productId: '501',
+        fields: { rent1day: '110.00', rent7day: '220.00' },
+        audit: expect.objectContaining({ changesFile: 'changes-501.json', expectedFieldCount: 2 }),
+      }),
+    ]);
+  });
+
+  it('builds audited price selection confirmations for current price filters', async () => {
+    const outputDir = await writeContext();
+    const registryRoot = await mkdtemp(join(tmpdir(), 'mt-agent-price-selection-current-'));
+    const registryPaths = await writeX300SpecRemoveRegistryFixtures(registryRoot);
+    const auditPreviewFromRead = vi.fn(async (productId: string, current: Record<string, unknown>, fields: Record<string, string>, artifact: unknown) => completeAudit(productId, {
+      expectedFieldCount: 1,
+      diff: [{ specId: 'match-a', specTitle: '银色', field: 'rent1day', label: '1天', old: '88.00', new: '66.00', change: '-22.00', changePct: '-25.0%', issues: [] }],
+      current,
+      fields,
+      artifact,
+    }));
+    const rentalPriceClient: RentalPriceSkillClient = {
+      async read(productId): Promise<RentalPriceReadResult> {
+        return {
+          productId,
+          ok: true,
+          specs: productId === '501' ? [{ specId: 'match-a', title: '银色' }, { specId: 'miss-a', title: '金色' }] : [{ specId: 'miss-b', title: '黑色' }],
+          values: productId === '501'
+            ? { 'match-a': { rent1day: '88.00', rent7day: '188.00' }, 'miss-a': { rent1day: '99.00', rent7day: '199.00' } }
+            : { 'miss-b': { rent1day: '77.00', rent7day: '177.00' } },
+          lines: ['read: ok'],
+        };
+      },
+      auditPreviewFromRead,
+      async preview() { throw new Error('preview should not run for price selection plan'); },
+      async execute() { throw new Error('execute should not run during preview'); },
+      async copy() { throw new Error('copy should not run'); },
+      async delist() { throw new Error('delist should not run'); },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+
+    const response = await executeAgentToolRequest(
+      {
+        toolName: 'rental.priceSelectionPlan',
+        arguments: {
+          query: 'x300u-spec-test',
+          filters: [{ type: 'priceEquals', field: 'rent1day', value: '88.00' }],
+          fields: ['rent1day'],
+          transform: { type: 'set', value: '66.00' },
+          resolutionMode: 'sameSkuGroup',
+        },
+        reason: 'ipod touch 6 商品组，所有一天租期价格为88的，改价为66',
+      },
+      outputDir,
+      { rentalPriceClient, closedOrderRegistryPaths: registryPaths },
+    );
+
+    expect(auditPreviewFromRead).toHaveBeenCalledWith('501', expect.any(Object), { rent1day: '66.00' }, { 'match-a': { rent1day: '66.00' } });
+    expect(auditPreviewFromRead).toHaveBeenCalledTimes(1);
+    expect(response.metadata).toMatchObject({ toolName: 'rental.priceSelectionPlan', ok: true, previewCount: 1, matchedSpecCount: 1 });
+    expect(response.text).toContain('rent1day 等于 88.00');
+    const confirmRequest = await loadAgentToolConfirmRequestFromCard(outputDir, response.card);
+    expect(confirmRequest.arguments.items).toEqual([
+      expect.objectContaining({ productId: '501', fields: { rent1day: '66.00' } }),
     ]);
   });
 

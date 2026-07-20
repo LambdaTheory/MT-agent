@@ -109,7 +109,7 @@ function validateTaskIndex(value, options = {}) {
   return value;
 }
 
-const TASK_STATUSES = new Set(["planned", "running", "in_progress", "completed", "failed", "cancelled", "stopped"]);
+const TASK_STATUSES = new Set(["planned", "running", "in_progress", "completed", "failed", "cancelled", "stopped", "rolled_back", "rollback_failed", "rollback_verify_failed"]);
 
 function validateTaskStatus(status, label) {
   if (typeof status !== "string" || !TASK_STATUSES.has(status)) fail("MALFORMED_MIGRATION_OBJECT", label + " is invalid");

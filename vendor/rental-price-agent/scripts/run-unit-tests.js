@@ -635,6 +635,52 @@ test("findProductOnList revalidates the list page after keyword search navigatio
   assert.equal(queriedProductLink, false);
 });
 
+test("findProductOnList reopens the configured list page after login redirects away", async () => {
+  let currentUrl = "about:blank";
+  const visited = [];
+  let listRedirectsRemaining = 1;
+  let queriedProductLink = false;
+  pwRunner.__setConfigForTest({
+    saas: {
+      loginUrl: "https://trusted.example/web/index.php?c=user&a=login",
+      productListUrl: "https://trusted.example/web/index.php?r=goods",
+      credentials: { username: "user", password: "secret" },
+    },
+    selectors: { login: { username: "#u", password: "#p", submitButton: "#s" } },
+  });
+  pwRunner.__setPageForTest({
+    async goto(url) {
+      visited.push(url);
+      if (url.includes("r=goods") && listRedirectsRemaining > 0) {
+        listRedirectsRemaining -= 1;
+        currentUrl = "https://trusted.example/web/index.php?c=user&a=login";
+        return;
+      }
+      currentUrl = url;
+    },
+    url() { return currentUrl; },
+    async fill() {},
+    async click() { currentUrl = "https://trusted.example/web/index.php?r=dashboard"; },
+    async waitForURL() {},
+    async waitForTimeout() {},
+    async waitForLoadState() {},
+    async $(selector) {
+      if (selector === "#u") return { form: true };
+      if (selector === "input[name='keyword']") return null;
+      if (selector === `a[href*="goods.edit&id=761"]`) {
+        queriedProductLink = true;
+        return { async evaluateHandle(fn) { return fn({ closest() { return { tag: "row" }; } }); } };
+      }
+      return null;
+    },
+  });
+
+  const result = await pwRunner.findProductOnList("761");
+  assert.equal(result.found, true, JSON.stringify(result));
+  assert.equal(queriedProductLink, true);
+  assert.equal(visited.filter(url => url.includes("r=goods")).length, 2);
+});
+
 test("findProductOnList searches active sold-out and stock channels and returns channel labels", async () => {
   let currentUrl = "";
   const visited = [];
@@ -713,6 +759,91 @@ test("actionPlatformSearch aggregates products across three channels and preserv
   assert.deepEqual(result.products.map(item => item.id), ["761", "762", "764"]);
   assert.deepEqual(result.excluded.map(item => item.channelLabel), ["售罄"]);
   assert.equal(result.channels.length, 3);
+});
+
+test("delist confirmation accepts destructive confirm labels but rejects cancel labels", () => {
+  for (const label of ["确定", "确认", "确认下架", "确认 下架", "确定下架", "下架", "确认删除", "继续", "OK"]) {
+    assert.equal(pwRunner.isConfirmActionLabel(label), true, label);
+  }
+  for (const label of ["取消", "关闭", "暂不下架", "返回", "下架失败"]) {
+    assert.equal(pwRunner.isConfirmActionLabel(label), false, label);
+  }
+});
+
+test("destructive delist confirmation accepts only destructive labels directly", () => {
+  for (const label of ["确认下架", "确定下架", "下架", "确认删除", "确定删除", "删除"]) {
+    assert.equal(pwRunner.isDestructiveConfirmActionLabel(label), true, label);
+  }
+  for (const label of ["确定", "确认", "知道了", "关闭", "取消", "继续"]) {
+    assert.equal(pwRunner.isDestructiveConfirmActionLabel(label), false, label);
+  }
+});
+
+test("clickVisibleDestructiveConfirm prefers destructive dialog over generic popup", async () => {
+  let genericClicked = false;
+  let destructiveClicked = false;
+  const makeButton = (text, click) => ({
+    textContent: text,
+    value: "",
+    getBoundingClientRect() { return { width: 80, height: 32 }; },
+    click,
+  });
+  const genericButton = makeButton("确定", () => { genericClicked = true; });
+  const destructiveButton = makeButton("确定", () => { destructiveClicked = true; });
+  const makeDialog = (text, button, zIndex) => ({
+    textContent: text,
+    getBoundingClientRect() { return { width: 300, height: 120 }; },
+    querySelectorAll() { return [button]; },
+    __zIndex: zIndex,
+  });
+  const genericDialog = makeDialog("活动提示 确定", genericButton, 2000);
+  const destructiveDialog = makeDialog("确定要下架该商品吗？ 确定 取消", destructiveButton, 1000);
+  const originalDocument = global.document;
+  const originalGetComputedStyle = global.getComputedStyle;
+  global.document = { querySelectorAll() { return [genericDialog, destructiveDialog]; } };
+  global.getComputedStyle = node => ({ display: "block", visibility: "visible", zIndex: String(node.__zIndex || 0) });
+  pwRunner.__setPageForTest({
+    async evaluate(fn, ...args) { return fn(...args); },
+    async waitForTimeout() {},
+  });
+  try {
+    const result = await pwRunner.clickVisibleDestructiveConfirm();
+    assert.equal(result.clicked, true);
+    assert.equal(destructiveClicked, true);
+    assert.equal(genericClicked, false);
+    assert.match(result.text, /下架/);
+  } finally {
+    global.document = originalDocument;
+    global.getComputedStyle = originalGetComputedStyle;
+  }
+});
+
+test("clickVisibleConfirmIn clicks fixed-position destructive confirm buttons", async () => {
+  let clicked = false;
+  const button = {
+    textContent: "确认下架",
+    value: "",
+    getBoundingClientRect() { return { width: 80, height: 32 }; },
+    click() { clicked = true; },
+  };
+  const scope = {
+    async evaluate(fn, arg) {
+      return fn({
+        textContent: "确定要下架该商品吗？ 确认下架 取消",
+        querySelectorAll() { return [button]; },
+      }, arg);
+    },
+  };
+  const originalGetComputedStyle = global.getComputedStyle;
+  global.getComputedStyle = () => ({ display: "block", visibility: "visible" });
+  try {
+    const result = await pwRunner.clickVisibleConfirmIn(scope);
+    assert.equal(result.clicked, true);
+    assert.equal(clicked, true);
+    assert.match(result.text, /确定要下架/);
+  } finally {
+    global.getComputedStyle = originalGetComputedStyle;
+  }
 });
 
 test("classifySubmitResponseEvidence 把匹配的 3xx 保持为 unknown", () => {

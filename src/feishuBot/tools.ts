@@ -15,6 +15,7 @@ import { readInventorySameSkuSnapshot } from '../inventoryStatus/store.js';
 import { openLinkRegistryGovernancePrompt } from '../linkRegistry/governanceSession.js';
 import { openLinkRegistryMaintenancePrompt } from '../linkRegistry/maintenanceSession.js';
 import { refreshLinkRegistryForPrompt } from '../linkRegistry/promptRefresh.js';
+import type { fetchDaemonCatalogSnapshot } from '../linkRegistry/daemonCatalog.js';
 import { createLinkRegistry } from '../linkRegistry/store.js';
 import type { LinkRegistryEntry } from '../linkRegistry/types.js';
 import { startOperationsLearningSession, summarizeOperationsLearningHistory, summarizeOperationsLearningSession } from '../operationsLearningLoop/session.js';
@@ -322,6 +323,7 @@ export interface HandleBotIntentOptions {
   activityAutomationClient?: ActivityAutomationSkillClient;
   closedOrderFetchImpl?: typeof fetch;
   closedOrderRegistryPaths?: ClosedOrderRegistryPathsInput;
+  daemonCatalogFetcher?: typeof fetchDaemonCatalogSnapshot;
   clarificationDepth?: number;
   confidenceExecuteThreshold?: number;
 }
@@ -375,6 +377,7 @@ function executeDirectAgentToolResponse(
       closedOrderFetchImpl: options.closedOrderFetchImpl,
       closedOrderRegistryPaths: options.closedOrderRegistryPaths,
       agentExploreProvider: options.agentExploreProvider,
+      daemonCatalogFetcher: options.daemonCatalogFetcher,
     },
   );
 }
@@ -415,6 +418,7 @@ export async function executeOrConfirmAgentToolRequest(
       closedOrderFetchImpl: options.closedOrderFetchImpl,
       closedOrderRegistryPaths: options.closedOrderRegistryPaths,
       agentExploreProvider: options.agentExploreProvider,
+      daemonCatalogFetcher: options.daemonCatalogFetcher,
     });
   }
   const policy = decideAgentPolicy({ tool, input: completedArguments, reason: request.reason });
@@ -424,6 +428,7 @@ export async function executeOrConfirmAgentToolRequest(
       closedOrderFetchImpl: options.closedOrderFetchImpl,
       closedOrderRegistryPaths: options.closedOrderRegistryPaths,
       agentExploreProvider: options.agentExploreProvider,
+      daemonCatalogFetcher: options.daemonCatalogFetcher,
     });
   }
   return {
@@ -629,6 +634,7 @@ async function executeAgentMultiStepPlannerResponse(
       rentalPriceClient: options.rentalPriceClient,
       closedOrderFetchImpl: options.closedOrderFetchImpl,
       closedOrderRegistryPaths: options.closedOrderRegistryPaths,
+      daemonCatalogFetcher: options.daemonCatalogFetcher,
     },
   });
 }
@@ -832,6 +838,16 @@ export async function handleBotIntent(intent: BotIntent, outputDir = 'output', o
 
   if (intent.type === 'operations_learning_history') {
     return { text: await summarizeOperationsLearningHistory(outputDir) };
+  }
+
+  if (intent.type === 'operation_review') {
+    return executeDirectAgentToolResponse(
+      'operations.operationReview',
+      {},
+      '明确飞书命令要求查看运营操作复盘；该操作只读取本地观察记录和审计文件。',
+      outputDir,
+      options,
+    );
   }
 
   if (intent.type === 'agent_learning_summary') {

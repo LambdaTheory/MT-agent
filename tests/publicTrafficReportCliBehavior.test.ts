@@ -6,6 +6,7 @@ import type { AgentConfig, PeriodProductMetrics, RawTableData } from '../src/dom
 import { parsePublicTrafficArtifactManifest } from '../src/publicTraffic/artifacts.js';
 import { buildPublicTrafficPaths } from '../src/publicTraffic/paths.js';
 import { loadRefreshSuppressionState } from '../src/linkRegistry/refreshSuppressionState.js';
+import { loadOperationObservations } from '../src/operationObservations/store.js';
 import type { ExposureDailyDelta, PublicTrafficDataReportContext } from '../src/publicTraffic/types.js';
 
 type PublicTrafficDataReportContextWithGeneration = PublicTrafficDataReportContext & { generationId?: unknown };
@@ -425,6 +426,49 @@ describe('runPublicTrafficReportCli public traffic sequencing', () => {
     expect(context.newProductPoolIds).toEqual(['701']);
     expect(context.newProductPoolItems?.map((item) => item.productId)).toEqual(['701']);
     await expect(readFile(todayPaths.log, 'utf8')).resolves.toContain('goods-manager 新链接观察: 原始=3, 商品总表近7天首次出现=1');
+  });
+
+  it('records current goods-table first-seen new links into operation observations', async () => {
+    vi.stubEnv('GOODS_MANAGER_BASE_URL', 'http://192.168.1.22:3010');
+    mocks.loadProductIdMapping.mockResolvedValueOnce({ p701: '701' });
+    const statePath = join(mocks.outputDir, 'state', 'goods-first-seen.json');
+    await mkdir(join(mocks.outputDir, 'state'), { recursive: true });
+    await writeFile(statePath, JSON.stringify({}), 'utf8');
+    mocks.crawlPublicTrafficSources.mockResolvedValueOnce({
+      goodsExportPath: join(mocks.outputDir, 'goods.xlsx'),
+      exposure: {
+        overview: [
+          { period: '1d', exposure: 10, visits: 2, amount: 3, conversionRate: 20 },
+          { period: '7d', exposure: 70, visits: 14, amount: 21, conversionRate: 20 },
+          { period: '30d', exposure: 300, visits: 60, amount: 90, conversionRate: 20 },
+        ],
+        products: [{ productName: '当前商品', platformProductId: 'p-current', exposure: 1000, visits: 100, amount: 200, custodyDays: null, raw: {} }],
+      },
+      dashboard: [],
+      orderAnalysis: {
+        capturedAt: '2026-06-10T12:00:00Z',
+        pages: {
+          overview: { key: 'overview', label: '标准订单分析', dataDate: '2026-06-09', indicators: [] },
+          delivery: { key: 'delivery', label: '发货分析', dataDate: '2026-06-09', indicators: [] },
+          return: { key: 'return', label: '归还分析', dataDate: '2026-06-09', indicators: [] },
+          customs: { key: 'customs', label: '关单分析', dataDate: '2026-06-09', indicators: [] },
+        },
+      },
+    });
+    mocks.fetchRecentGoodsManagerProducts.mockResolvedValueOnce([
+      { productId: '701', productName: '商品总表新增链', shortTitle: '', submittedAt: '2026-06-10 09:00:00', merchant: '', alipaySyncStatus: '已同步', alipayCode: '', stock: 0, skuCount: 0, maintenanceStatus: '待维护', note: '' },
+    ]);
+    const { runPublicTrafficReportCli } = await import('../src/cli/publicTrafficReport.js');
+
+    await runPublicTrafficReportCli();
+    const store = await loadOperationObservations(mocks.outputDir);
+
+    expect(store.observations).toHaveLength(1);
+    expect(store.observations[0]).toMatchObject({
+      operationType: 'goods_table_new_link',
+      subjects: [{ role: 'new_link', productId: '701' }],
+      source: { toolName: 'publicTraffic.goodsTableNewLink', firstSeenDate: '2026-06-10' },
+    });
   });
 
   it('initializes first-seen state as baseline and does not treat all existing goods as new links', async () => {

@@ -11,7 +11,7 @@ import { loadConfig } from '../config/loadConfig.js';
 import { loadEnv } from '../config/loadEnv.js';
 import { loadClosedOrderIngestState } from '../closedOrderFeedback/ingest.js';
 import { buildClosedOrderObservationReport, writeClosedOrderObservationReportArtifacts } from '../closedOrderFeedback/observation.js';
-import { loadClosedOrderRegistryContext, type ClosedOrderRegistryPathsInput } from '../closedOrderFeedback/runtime.js';
+import { loadClosedOrderRegistryContext, resolveClosedOrderRegistryPaths, type ClosedOrderRegistryPathsInput } from '../closedOrderFeedback/runtime.js';
 import type { AgentIntent, AgentProblemType } from '../agentData/types.js';
 import { rankProductsByCategory, rankProductsByCategoryWindowed, type CategoryRankingMetric } from '../agentData/categoryRanking.js';
 import { buildDataHealthReport } from '../agentData/dataHealth.js';
@@ -24,6 +24,7 @@ import { queryPublicTrafficWindow, type PublicTrafficWindowQueryResult } from '.
 import { getPublicTrafficMetric, publicTrafficMetricKeys, type PublicTrafficMetricKey } from '../agentData/publicTrafficMetricCatalog.js';
 import { openLinkRegistryGovernancePrompt } from '../linkRegistry/governanceSession.js';
 import { openLinkRegistryMaintenancePrompt } from '../linkRegistry/maintenanceSession.js';
+import { fetchDaemonCatalogSnapshot, saveDaemonCatalogSnapshot } from '../linkRegistry/daemonCatalog.js';
 import { createLinkRegistry } from '../linkRegistry/store.js';
 import type { LinkRegistryEntry } from '../linkRegistry/types.js';
 import { summarizeAgentLearning } from '../agentLearning/store.js';
@@ -47,6 +48,7 @@ import {
   type NewLinkBatchConfirmRequest,
 } from '../newLinkWorkflow/batch.js';
 import { sendFeishuCard } from '../notify/feishu.js';
+import { buildOperationReview } from '../operations/operationReview.js';
 import { summarizeOperationsLearningHistory, summarizeOperationsLearningSession } from '../operationsLearningLoop/session.js';
 import { buildPublicTrafficCard } from '../publicTraffic/buildPublicTrafficCard.js';
 import { buildPublicTrafficFeishuText } from '../publicTraffic/buildPublicTrafficFeishu.js';
@@ -73,6 +75,7 @@ import {
   formatInventoryStatusOverviewText,
 } from './inventoryStatusCard.js';
 import { buildLinkRegistryOverviewCard, formatLinkRegistryOverviewText } from './linkRegistryOverviewCard.js';
+import { buildOperationReviewCard, formatOperationReviewText } from './operationReviewCard.js';
 import { buildQueryTextCard } from './queryCards.js';
 import {
   buildRentalOperationConfirmCard,
@@ -134,6 +137,7 @@ export interface AgentToolExecutionOptions {
   closedOrderRegistryPaths?: ClosedOrderRegistryPathsInput;
   agentExploreProvider?: LlmProvider;
   ledgerContext?: RentalWriteLedgerContext;
+  daemonCatalogFetcher?: typeof fetchDaemonCatalogSnapshot;
 }
 
 type AgentToolWriteEvent = 'execution_started' | 'execution_succeeded' | 'execution_failed';
@@ -1290,6 +1294,17 @@ function buildPriceApplyCompletionRows(results: RentalPriceExecutionResult[]): A
   }));
 }
 
+function executionFailureReason(result: RentalPriceExecutionResult): string {
+  if (result.ok) return '-';
+  return result.lines.map((line) => line.trim()).filter(Boolean).slice(0, 3).join('；') || '执行失败，但未返回具体原因';
+}
+
+function priceApplyFailureSummary(results: RentalPriceExecutionResult[]): string[] {
+  return results
+    .filter((result) => !result.ok)
+    .map((result) => `- 商品 ${result.productId}：${executionFailureReason(result)}`);
+}
+
 interface RollbackReadyItem {
   productId: string;
   taskId: string;
@@ -1316,7 +1331,11 @@ function storedRollbackActionValue(action: string, storedAction: { rollbackRef: 
 
 function completionActionValue(action: string, results: RentalPriceExecutionResult[]): Record<string, unknown> {
   const productIds = results.map((result) => result.productId);
-  return { action, productIds, confirmationKey: confirmationKey({ productIds } as Record<string, unknown>) };
+  const successCount = results.filter((result) => result.ok).length;
+  const totalCount = results.length;
+  const hasFailures = successCount !== totalCount;
+  const summary = { productIds, successCount, totalCount, hasFailures };
+  return { action, ...summary, confirmationKey: confirmationKey(summary as Record<string, unknown>) };
 }
 
 function legacyRollbackButton(result: RentalPriceExecutionResult, index: number): Record<string, unknown> | null {
@@ -1335,12 +1354,14 @@ function legacyRollbackButton(result: RentalPriceExecutionResult, index: number)
 async function buildPriceApplyCompletionCard(results: RentalPriceExecutionResult[], outputDir: string): Promise<FeishuCardPayload> {
   const success = results.filter((item) => item.ok);
   const rollbackReady = rollbackReadyItems(results);
+  const hasFailures = success.length !== results.length;
+  const failureSummary = priceApplyFailureSummary(results);
   const rollbackAction = rollbackReady.length ? await saveRentalPriceRollbackAction(outputDir, rollbackReady) : null;
   const actionElements: Record<string, unknown>[] = [
     {
       tag: 'button',
-      text: { tag: 'plain_text', content: '认可本次操作完成' },
-      type: 'primary',
+      text: { tag: 'plain_text', content: hasFailures ? '已知晓执行结果' : '认可本次操作完成' },
+      type: hasFailures ? 'default' : 'primary',
       form_action_type: 'submit',
       name: 'rental_price_acknowledge_completion_submit',
       behaviors: [{ type: 'callback', value: completionActionValue('rental_price_acknowledge_completion', results) }],
@@ -1369,14 +1390,15 @@ async function buildPriceApplyCompletionCard(results: RentalPriceExecutionResult
   return {
     schema: '2.0',
     config: { wide_screen_mode: true },
-    header: { title: { tag: 'plain_text', content: success.length === results.length ? '租赁改价执行完成' : 'Agent 操作失败' }, template: success.length === results.length ? 'green' : 'red' },
+    header: { title: { tag: 'plain_text', content: hasFailures ? 'Agent 操作失败' : '租赁改价执行完成' }, template: hasFailures ? 'red' : 'green' },
     body: {
       elements: [
         cardMarkdown([
-          success.length === results.length ? "<text_tag color='green'>已写入并完成回读流程</text_tag>" : "<text_tag color='red'>存在失败项，勿重复提交</text_tag>",
+          hasFailures ? "<text_tag color='red'>存在失败项，勿重复提交</text_tag>" : "<text_tag color='green'>已写入并完成回读流程</text_tag>",
           `**成功 ${success.length}/${results.length}，可回滚 ${rollbackReady.length}/${results.length}**`,
           '回滚不是一键执行。选择回滚或全部回滚都只会生成二次确认卡，确认后才按 taskId 校验审计链路并执行。',
         ].join('\n')),
+        ...(failureSummary.length ? [cardMarkdown(['**失败原因**', ...failureSummary].join('\n'))] : []),
         {
           tag: 'column_set',
           flex_mode: 'none',
@@ -1482,17 +1504,33 @@ export async function buildRentalPriceRollbackSelectCard(outputDir: string, valu
 export function buildRentalPriceCompletionAcknowledgedCard(value: unknown, reviewerId?: string): FeishuCardPayload | null {
   if (!isRecord(value)) return null;
   const productIds = readTaskIdArray(value.productIds) ?? (Array.isArray(value.productIds) ? value.productIds.map((item) => readString(item)).filter((item): item is string => Boolean(item)) : null);
-  if (!productIds || readString(value.confirmationKey) !== confirmationKey({ productIds } as Record<string, unknown>)) return null;
+  if (!productIds) return null;
+  const successCount = typeof value.successCount === 'number' && Number.isInteger(value.successCount) ? value.successCount : null;
+  const totalCount = typeof value.totalCount === 'number' && Number.isInteger(value.totalCount) ? value.totalCount : null;
+  const hasFailures = typeof value.hasFailures === 'boolean' ? value.hasFailures : null;
+  const hasSummaryFields = value.successCount !== undefined || value.totalCount !== undefined || value.hasFailures !== undefined;
+  const providedKey = readString(value.confirmationKey);
+  if (hasSummaryFields) {
+    if (successCount === null || totalCount === null || hasFailures === null) return null;
+    if (providedKey !== confirmationKey({ productIds, successCount, totalCount, hasFailures } as Record<string, unknown>)) return null;
+  } else if (providedKey !== confirmationKey({ productIds } as Record<string, unknown>)) {
+    return null;
+  }
+  const acknowledgedFailures = hasFailures === true;
+  const statusLine = successCount !== null && totalCount !== null ? `执行结果：成功 ${successCount}/${totalCount}` : undefined;
   return {
     schema: '2.0',
     config: { wide_screen_mode: true },
-    header: { title: { tag: 'plain_text', content: '租赁改价已认可完成' }, template: 'green' },
+    header: { title: { tag: 'plain_text', content: acknowledgedFailures ? '租赁改价失败结果已知晓' : '租赁改价已认可完成' }, template: acknowledgedFailures ? 'red' : 'green' },
     body: {
       elements: [cardMarkdown([
-        '<text_tag color=green>已认可完成</text_tag>',
+        acknowledgedFailures ? '<text_tag color=red>已知晓执行失败结果</text_tag>' : '<text_tag color=green>已认可完成</text_tag>',
+        statusLine,
         `商品：${productIds.join('、')}`,
         reviewerId ? `认可人：${reviewerId}` : undefined,
-        '本卡已收口；如后续仍需回滚，请重新发起回滚指令并走审计确认。',
+        acknowledgedFailures
+          ? '本卡已收口；这只表示已知晓失败结果，不代表改价成功。请先排查失败原因，确认无副作用后再重新发起。'
+          : '本卡已收口；如后续仍需回滚，请重新发起回滚指令并走审计确认。',
       ].filter((line): line is string => Boolean(line)).join('\n'))],
     },
   };
@@ -1600,6 +1638,18 @@ type BatchReadPricePreviewOutcome =
   | { status: 'ready'; item: { productId: string; fields: Record<string, string>; audit?: RentalPriceAuditReference } }
   | { status: 'blocked'; message: string };
 
+function batchReadErrorByProductId(errors: unknown): Map<string, string> {
+  const byProductId = new Map<string, string>();
+  if (!Array.isArray(errors)) return byProductId;
+  for (const entry of errors) {
+    if (!isRecord(entry)) continue;
+    const productId = readString(entry.productId);
+    const message = readString(entry.error) ?? readString(entry.message) ?? readString(entry.reason) ?? readString(entry.code);
+    if (productId && message) byProductId.set(productId, message);
+  }
+  return byProductId;
+}
+
 async function batchReadPricePreviewItems(
   productIds: string[],
   client: RentalPriceSkillClient,
@@ -1614,12 +1664,14 @@ async function batchReadPricePreviewItems(
     return null;
   }
   const results = isRecord(batchRead.results) ? batchRead.results : {};
+  const errorsByProductId = batchReadErrorByProductId(batchRead.errors);
   const readyItems: Array<{ productId: string; fields: Record<string, string>; audit?: RentalPriceAuditReference }> = [];
   const blocked: string[] = [];
   const outcomes = await mapConcurrent(productIds, BATCH_READ_AUDIT_CONCURRENCY, async (productId): Promise<BatchReadPricePreviewOutcome> => {
     const result = results[productId];
     if (!isRecord(result)) {
-      return { status: 'blocked', message: `商品 ${productId}：批量读取失败` };
+      const error = errorsByProductId.get(productId);
+      return { status: 'blocked', message: `商品 ${productId}：批量读取失败${error ? `：${error}` : ''}` };
     }
     const status = readString(result.status);
     const fields = batchReadPricePreviewFields(result.values, input);
@@ -1958,6 +2010,93 @@ function readAbsoluteRentFields(value: unknown): Record<string, string> | null {
   return Object.keys(fields).length ? fields : null;
 }
 
+type PriceSelectionFilter =
+  | { type: 'specTitleContains'; value: string }
+  | { type: 'priceEquals'; field: string; value: string };
+
+type PriceSelectionTransform =
+  | { type: 'set'; value: number }
+  | { type: 'multiply'; value: number }
+  | { type: 'adjust'; value: number };
+
+function readPriceSelectionFilters(value: unknown): PriceSelectionFilter[] | null {
+  if (!Array.isArray(value) || value.length === 0 || value.length > 6) return null;
+  const filters: PriceSelectionFilter[] = [];
+  for (const item of value) {
+    if (!isRecord(item)) return null;
+    if (item.type === 'specTitleContains') {
+      const keyword = readString(item.value);
+      if (!keyword) return null;
+      filters.push({ type: 'specTitleContains', value: keyword });
+      continue;
+    }
+    if (item.type === 'priceEquals') {
+      const field = readString(item.field);
+      const rawValue = typeof item.value === 'string' || typeof item.value === 'number' ? Number(item.value) : NaN;
+      if (!field || !isRentPriceField(field) || !Number.isFinite(rawValue)) return null;
+      filters.push({ type: 'priceEquals', field, value: moneyFixed(rawValue) });
+      continue;
+    }
+    return null;
+  }
+  return filters;
+}
+
+function readPriceSelectionFields(value: unknown): 'rent_fields' | string[] | null {
+  if (value === 'rent_fields') return 'rent_fields';
+  if (!Array.isArray(value) || value.length === 0 || value.length > 32) return null;
+  const fields = [...new Set(value.filter((item): item is string => typeof item === 'string' && isRentPriceField(item)))];
+  return fields.length === value.length ? fields : null;
+}
+
+function readPriceSelectionTransform(value: unknown): PriceSelectionTransform | null {
+  if (!isRecord(value)) return null;
+  const rawValue = typeof value.value === 'string' || typeof value.value === 'number' ? Number(value.value) : NaN;
+  if (!Number.isFinite(rawValue)) return null;
+  if (value.type === 'set') return { type: 'set', value: rawValue };
+  if (value.type === 'multiply' && rawValue > 0) return { type: 'multiply', value: rawValue };
+  if (value.type === 'adjust' && rawValue !== 0) return { type: 'adjust', value: rawValue };
+  return null;
+}
+
+function priceSelectionFilterText(filter: PriceSelectionFilter): string {
+  return filter.type === 'specTitleContains'
+    ? `规格名称包含「${filter.value}」`
+    : `${filter.field} 等于 ${filter.value}`;
+}
+
+function priceSelectionTransformText(transform: PriceSelectionTransform): string {
+  if (transform.type === 'set') return `设为 ${moneyFixed(transform.value)}`;
+  if (transform.type === 'multiply') return `乘以 ${transform.value}`;
+  return `${transform.value > 0 ? '+' : ''}${moneyFixed(transform.value)}`;
+}
+
+function priceSelectionSpecMatches(spec: { specId: string; title: string }, values: Record<string, string> | undefined, filters: PriceSelectionFilter[]): boolean {
+  return filters.every((filter) => {
+    if (filter.type === 'specTitleContains') return itemMatchesKeyword(spec.title, filter.value);
+    const current = values?.[filter.field];
+    return current !== undefined && Number.isFinite(Number(current)) && moneyFixed(Number(current)) === filter.value;
+  });
+}
+
+function priceSelectionFieldsForSpec(values: Record<string, string>, fields: 'rent_fields' | string[]): string[] {
+  if (fields !== 'rent_fields') return fields.filter((field) => values[field] !== undefined);
+  const ordered = RENT_FIELD_ORDER.map((item) => item.field).filter((field) => values[field] !== undefined);
+  const extra = Object.keys(values).filter((field) => isRentPriceField(field) && !ordered.includes(field)).sort();
+  return [...ordered, ...extra];
+}
+
+function priceSelectionTargetValue(current: string | undefined, transform: PriceSelectionTransform): string | null {
+  if (transform.type === 'set') return moneyFixed(transform.value);
+  const numeric = Number(current);
+  if (!Number.isFinite(numeric)) return null;
+  return moneyFixed(transform.type === 'multiply' ? numeric * transform.value : numeric + transform.value);
+}
+
+function firstSpecFields(specFields: PerSpecPriceFieldMap): Record<string, string> {
+  return Object.values(specFields)[0] ?? {};
+}
+
 function compactName(entry: LinkRegistryEntry): string {
   return entry.shortName?.trim() || entry.productName?.trim() || entry.internalProductId;
 }
@@ -2094,6 +2233,126 @@ async function rentalSpecKeywordPricePlanResponse(
     text,
     card: buildAgentToolConfirmCard(confirmRequest, { requestRef, summaryLines: header, displayElements: buildPriceApplyConfirmDisplayElements(readyItems) }),
     metadata: { toolName: 'rental.specKeywordPricePlan', ok: true, productIds: resolution.entries.map((entry) => entry.internalProductId), previewCount: readyItems.length, matchedSpecCount },
+  };
+}
+
+async function rentalPriceSelectionPlanResponse(
+  args: Record<string, unknown>,
+  reason: string,
+  client: RentalPriceSkillClient,
+  outputDir: string,
+  options: AgentToolExecutionOptions,
+  continuation?: AgentToolConfirmRequest['continuation'],
+): Promise<BotResponse> {
+  const query = requireString(args.query, 'query');
+  const filters = readPriceSelectionFilters(args.filters);
+  const selectedFields = readPriceSelectionFields(args.fields);
+  const transform = readPriceSelectionTransform(args.transform);
+  if (!filters || !selectedFields || !transform) return { text: '价格选择改价参数无效：需要 query、filters、fields 和 transform。', metadata: { toolName: 'rental.priceSelectionPlan', ok: false } };
+  if (!client.read) return { text: '当前租赁改价客户端还没有接入只读价格读取能力，无法生成价格选择改价预览。', metadata: { toolName: 'rental.priceSelectionPlan', ok: false } };
+  if (!client.auditPreviewFromRead) return { text: '当前租赁改价客户端缺少审计预览能力，无法生成价格选择改价确认卡。', metadata: { toolName: 'rental.priceSelectionPlan', ok: false } };
+
+  const registryContext = await loadClosedOrderRegistryContext(options.closedOrderRegistryPaths);
+  const registry = createLinkRegistry(registryContext.registry);
+  const requestedResolutionMode = readLinkRegistryResolutionMode(args.resolutionMode);
+  if (args.resolutionMode !== undefined && !requestedResolutionMode) {
+    return { text: '价格选择改价参数无效：resolutionMode 只能是 single 或 sameSkuGroup。', metadata: { toolName: 'rental.priceSelectionPlan', ok: false } };
+  }
+  const effectiveResolutionMode = requestedResolutionMode ?? (queryHasExplicitProductIdentifier(query) ? 'single' : 'sameSkuGroup');
+  const resolution = resolveRentalPriceSnapshotEntries(query, registry, { expandSingleInternalIdToSameSkuGroup: effectiveResolutionMode === 'sameSkuGroup', allowMultipleInternalIds: true });
+  if (!resolution.ok) return { text: resolution.text, metadata: { toolName: 'rental.priceSelectionPlan', ok: false } };
+  if (resolution.entries.length === 0) return { text: `链接维护档案已匹配到“${query}”，但没有可处理的未下架商品。`, metadata: { toolName: 'rental.priceSelectionPlan', ok: false, productIds: [] } };
+  if (resolution.entries.length > RENTAL_PRICE_PREVIEW_MAX_PRODUCTS) return { text: `“${query}”命中 ${resolution.entries.length} 个未下架商品，超过单次价格选择改价上限 ${RENTAL_PRICE_PREVIEW_MAX_PRODUCTS} 个。请缩小范围。`, metadata: { toolName: 'rental.priceSelectionPlan', ok: false } };
+
+  const readyItems: Array<{ productId: string; fields: Record<string, string>; audit?: RentalPriceAuditReference }> = [];
+  const matchLines: string[] = [];
+  const blocked: string[] = [];
+  const unmatched: string[] = [];
+  let matchedSpecCount = 0;
+
+  for (const entry of resolution.entries) {
+    const productId = entry.internalProductId;
+    let current: RentalPriceReadResult;
+    try {
+      current = await client.read(productId);
+    } catch {
+      blocked.push(`商品 ${productId}：读取失败，请检查本地租赁价服务日志。`);
+      continue;
+    }
+    if (!current.ok) {
+      blocked.push(`商品 ${productId}：读取失败，请检查本地租赁价服务日志。`);
+      continue;
+    }
+
+    const specFields: PerSpecPriceFieldMap = {};
+    const matchedSpecs: string[] = [];
+    for (const spec of current.specs) {
+      const values = current.values[spec.specId];
+      if (!priceSelectionSpecMatches(spec, values, filters)) continue;
+      const fieldsForSpec = values ? priceSelectionFieldsForSpec(values, selectedFields) : [];
+      const targetFields: Record<string, string> = {};
+      for (const field of fieldsForSpec) {
+        const targetValue = priceSelectionTargetValue(values?.[field], transform);
+        if (targetValue !== null) targetFields[field] = targetValue;
+      }
+      if (Object.keys(targetFields).length === 0) continue;
+      specFields[spec.specId] = targetFields;
+      matchedSpecs.push(`${spec.specId} ${spec.title}`);
+    }
+
+    if (Object.keys(specFields).length === 0) {
+      unmatched.push(`商品 ${productId}：未命中满足条件且可改价的规格项`);
+      continue;
+    }
+
+    const fields = firstSpecFields(specFields);
+    let audit: RentalPriceAuditReference | undefined;
+    try {
+      audit = compactAuditReference(await client.auditPreviewFromRead(productId, { ...current }, fields, specFields) ?? undefined);
+    } catch {
+      blocked.push(`商品 ${productId}：审计预览失败，请检查本地审计日志。`);
+      continue;
+    }
+    const auditBlockReason = rentalPriceExecutionAuditBlockReason(audit);
+    if (auditBlockReason) {
+      blocked.push(`商品 ${productId}：${auditBlockReason}`);
+      continue;
+    }
+    readyItems.push({ productId, fields, ...(audit ? { audit } : {}) });
+    matchedSpecCount += matchedSpecs.length;
+    matchLines.push(`- 商品 ${productId} ${compactName(entry)}：${matchedSpecs.join('、')}`);
+  }
+
+  const header = [
+    `价格选择改价预览：${query}`,
+    resolution.sameSkuGroupId ? `同款组：${resolution.sameSkuGroupId}` : undefined,
+    `匹配依据：${resolution.matchText}`,
+    `筛选条件：${filters.map(priceSelectionFilterText).join('，')}`,
+    `目标字段：${selectedFields === 'rent_fields' ? '所有租期字段' : selectedFields.join('，')}`,
+    `变换：${priceSelectionTransformText(transform)}`,
+    `命中规格：${matchedSpecCount} 个`,
+  ].filter((line): line is string => Boolean(line));
+  const text = [
+    ...header,
+    ...(matchLines.length ? ['', '命中明细：', ...matchLines] : []),
+    ...(unmatched.length ? ['', '未命中链接：', ...unmatched.slice(0, 12)] : []),
+    ...(blocked.length ? ['', '阻断项：', ...blocked.slice(0, 12)] : []),
+  ].join('\n');
+  if (blocked.length > 0 || readyItems.length === 0) {
+    return { text, metadata: { toolName: 'rental.priceSelectionPlan', ok: false, productIds: resolution.entries.map((entry) => entry.internalProductId), previewCount: readyItems.length, matchedSpecCount } };
+  }
+
+  const confirmRequest: AgentToolConfirmRequest = {
+    toolName: 'rental.priceApply',
+    arguments: { items: readyItems },
+    reason,
+    ...(continuation ? { continuation } : {}),
+  };
+  const requestRef = await saveAgentToolConfirmRequest(outputDir, confirmRequest);
+  return {
+    text,
+    card: buildAgentToolConfirmCard(confirmRequest, { requestRef, summaryLines: header, displayElements: buildPriceApplyConfirmDisplayElements(readyItems) }),
+    metadata: { toolName: 'rental.priceSelectionPlan', ok: true, productIds: resolution.entries.map((entry) => entry.internalProductId), previewCount: readyItems.length, matchedSpecCount },
   };
 }
 
@@ -3093,6 +3352,14 @@ function readInactiveRefreshExecuteArgs(args: Record<string, unknown>): { planRe
 async function inactiveRefreshPlanResponse(outputDir: string, args: Record<string, unknown>, options: AgentToolExecutionOptions): Promise<BotResponse> {
   const date = typeof args.date === 'string' ? args.date : (await findLatestReportContext(outputDir))?.context.date;
   if (!date) return { text: '还没有找到公域日报上下文。', metadata: { toolName: 'operations.inactiveRefreshPlan', ok: false } };
+  const resolvedPaths = await resolveClosedOrderRegistryPaths(options.closedOrderRegistryPaths);
+  const daemonRefresh = await refreshInactiveRefreshDaemonCatalog(resolvedPaths.daemonCatalogPath, options.daemonCatalogFetcher ?? fetchDaemonCatalogSnapshot);
+  if (!daemonRefresh.ok) {
+    return {
+      text: '失活刷新计划生成失败：daemon 链接目录刷新失败。为避免使用旧快照，本次未生成计划；请检查服务端日志。',
+      metadata: { toolName: 'operations.inactiveRefreshPlan', ok: false, reason: 'daemon_catalog_refresh_failed' },
+    };
+  }
   const registryContext = await loadClosedOrderRegistryContext(options.closedOrderRegistryPaths);
   const result = await buildInactiveRefreshPlan({ outputDir, date, registryEntries: registryContext.registry });
   if (!result.plan) {
@@ -3107,6 +3374,25 @@ async function inactiveRefreshPlanResponse(outputDir: string, args: Record<strin
     card: buildInactiveRefreshPlanCard({ plan: result.plan, planRef, summary: result.summary, lines: result.lines }),
     metadata: { toolName: 'operations.inactiveRefreshPlan', ok: true, executableCount: result.plan.executableCount, planRef, summary: result.summary },
   };
+}
+
+async function refreshInactiveRefreshDaemonCatalog(daemonCatalogPath: string, fetcher: typeof fetchDaemonCatalogSnapshot): Promise<{ ok: true } | { ok: false; reason: string }> {
+  try {
+    const snapshot = await fetcher({ cwd: process.cwd() });
+    await saveDaemonCatalogSnapshot(daemonCatalogPath, snapshot);
+    return { ok: true };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    console.warn(`失活刷新 daemon 链接目录刷新失败：${redactDaemonRefreshError(reason)}`);
+    return { ok: false, reason };
+  }
+}
+
+function redactDaemonRefreshError(value: string): string {
+  return value
+    .replace(/([?&](?:token|access_token|key|secret|password)=)[^\s&]+/gi, '$1[REDACTED]')
+    .replace(/\b(?:token|access_token|key|secret|password)=\S+/gi, (match) => `${match.split('=')[0]}=[REDACTED]`)
+    .replace(/Bearer\s+\S+/gi, 'Bearer [REDACTED]');
 }
 
 function currentShanghaiYear(): number {
@@ -3377,6 +3663,20 @@ export async function executeAgentToolRequest(
     }
     case 'operationsLearning.history':
       return { text: await summarizeOperationsLearningHistory(outputDir) };
+    case 'operations.operationReview': {
+      const review = await buildOperationReview(outputDir);
+      return {
+        text: formatOperationReviewText(review),
+        card: buildOperationReviewCard(review),
+        metadata: {
+          toolName: 'operations.operationReview',
+          ok: true,
+          observationCount: review.observations.total,
+          inactiveRefreshAuditGapCount: review.inactiveRefreshAuditGaps.length,
+          missingObservationNewProductIds: review.inactiveRefreshAuditGaps.flatMap((gap) => gap.missingObservationNewProductIds),
+        },
+      };
+    }
     case 'agentLearning.summary':
       return { text: await summarizeAgentLearning(outputDir) };
     case 'activity.differentialPricingCard':
@@ -3537,7 +3837,7 @@ export async function executeAgentToolRequest(
       return inactiveRefreshPlanResponse(outputDir, request.arguments, options);
     case 'operations.inactiveRefreshExecute': {
       const { planRef, confirmationKey } = readInactiveRefreshExecuteArgs(request.arguments);
-      return executeInactiveRefreshPlan({ outputDir, planRef, confirmationKey, client: options.rentalPriceClient ?? createRentalPriceSkillClient(), ledgerContext: options.ledgerContext });
+      return executeInactiveRefreshPlan({ outputDir, planRef, confirmationKey, client: options.rentalPriceClient ?? createRentalPriceSkillClient(), ledgerContext: options.ledgerContext, closedOrderRegistryPaths: options.closedOrderRegistryPaths });
     }
     case 'rental.daemonStatus':
     case 'rental.platformSearch':
@@ -3583,6 +3883,8 @@ export async function executeAgentToolRequest(
     }
     case 'rental.specKeywordPricePlan':
       return rentalSpecKeywordPricePlanResponse(request.arguments, request.reason, options.rentalPriceClient ?? createRentalPriceSkillClient(), outputDir, options, request.continuation);
+    case 'rental.priceSelectionPlan':
+      return rentalPriceSelectionPlanResponse(request.arguments, request.reason, options.rentalPriceClient ?? createRentalPriceSkillClient(), outputDir, options, request.continuation);
     case 'rental.operationConfirmRequest':
       return executeRentalWriteOperationHandler(request, options.rentalPriceClient ?? createRentalPriceSkillClient(), options.ledgerContext);
     case 'rental.priceChange': {

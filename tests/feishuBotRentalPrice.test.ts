@@ -602,6 +602,180 @@ describe('rental price skill client copy diagnostics', () => {
     expect(rolledBackTask.evidence.some((item) => item.type === 'rollback_verify_result')).toBe(true);
   }, 30000);
 
+  it('persists submit failure details after apply succeeds without running verify', async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), 'mt-agent-rental-price-submit-failure-'));
+    await copyRentalPriceAuditScripts(rootDir);
+    const dataRoot = join(dirname(rootDir), `.${basename(rootDir)}-data`);
+    const currentValues = { rent1day: '88.00' };
+    const commands: Array<Record<string, unknown>> = [];
+    vi.stubGlobal('fetch', vi.fn(async (_input, init) => {
+      const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+      commands.push(body);
+      if (body.action === 'read') {
+        return new Response(JSON.stringify({ status: 'ok', productId: '876', values: currentValues, specs: [] }));
+      }
+      if (body.action === 'apply' && typeof body.changesFile === 'string') {
+        return new Response(JSON.stringify({ status: 'ok', appliedCount: 1 }));
+      }
+      if (body.action === 'submit') {
+        return new Response(JSON.stringify({
+          status: 'error',
+          message: '保存按钮被页面浮层遮挡',
+          currentUrl: 'https://example.test/web/index.php?c=site&a=entry&m=ewei_shopv2&do=web&r=goods.edit&id=876&token=secret#frag',
+          sideEffectPossible: true,
+          retrySafe: false,
+        }));
+      }
+      return new Response(JSON.stringify({ status: 'ok' }));
+    }));
+    const client = createRentalPriceSkillClient({ rootDir, daemonUrl: 'http://127.0.0.1:9223' });
+
+    const preview = await client.preview({ mode: 'explicit_fields', productId: '876', fields: { rent1day: '80.00' } });
+    const result = await client.execute({ mode: 'explicit_fields', productId: '876', fields: preview.fields, audit: preview.audit });
+
+    expect(result.ok).toBe(false);
+    expect(result.lines.join('\n')).toContain('apply: ok');
+    expect(result.lines.join('\n')).toContain('submit: error');
+    expect(result.lines.join('\n')).toContain('verify: skipped');
+    expect(result.audit?.status).toBe('failed');
+    expect(result.audit?.resultFile).toContain('execution-failure-876-');
+    expect(commands.filter((command) => command.action === 'read')).toHaveLength(1);
+
+    const resultFile = result.audit?.resultFile;
+    expect(resultFile).toBeTruthy();
+    const failure = JSON.parse(await readFile(resultFile!, 'utf8')) as Record<string, unknown>;
+    expect(failure).toMatchObject({
+      productId: '876',
+      ok: false,
+      phase: 'submit',
+      applyStatus: 'ok',
+      submitStatus: 'error',
+      verifyStatus: 'skipped',
+      sideEffectPossible: true,
+      retrySafe: false,
+    });
+    expect(failure.submit).toMatchObject({ status: 'error', message: '保存按钮被页面浮层遮挡' });
+    expect(failure.submit).toMatchObject({ currentUrl: 'https://example.test/web/index.php' });
+    expect(JSON.stringify(failure)).not.toContain('token=secret');
+
+    const task = JSON.parse(await readFile(join(dataRoot, 'tasks', `${preview.audit?.taskId}.json`), 'utf8')) as {
+      status: string;
+      evidence: Array<{ type: string; path: string }>;
+      results: { execution?: Record<string, unknown> };
+    };
+    expect(task.status).toBe('failed');
+    expect(task.evidence.some((item) => item.type === 'execution_result' && item.path === resultFile)).toBe(true);
+    expect(task.results.execution).toMatchObject({
+      productId: '876',
+      ok: false,
+      phase: 'submit',
+      applyStatus: 'ok',
+      submitStatus: 'error',
+      verifyStatus: 'skipped',
+      sideEffectPossible: true,
+      retrySafe: false,
+      resultFile,
+    });
+    expect(task.results.execution).not.toHaveProperty('submit');
+    expect(task.results.execution).not.toHaveProperty('expectedFields');
+  }, 30000);
+
+  it('persists rollback submit failure details after rollback apply succeeds without running verify', async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), 'mt-agent-rental-price-rollback-submit-failure-'));
+    await copyRentalPriceAuditScripts(rootDir);
+    const dataRoot = join(dirname(rootDir), `.${basename(rootDir)}-data`);
+    const currentValues = { rent1day: '88.00' };
+    const commands: Array<Record<string, unknown>> = [];
+    vi.stubGlobal('fetch', vi.fn(async (_input, init) => {
+      const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+      commands.push(body);
+      if (body.action === 'read') {
+        return new Response(JSON.stringify({ status: 'ok', productId: '876', values: currentValues, specs: [] }));
+      }
+      if (body.action === 'apply' && typeof body.changesFile === 'string') {
+        const changes = JSON.parse(await readFile(body.changesFile, 'utf8')) as Record<string, string>;
+        if (typeof changes.rent1day === 'string') currentValues.rent1day = changes.rent1day;
+        return new Response(JSON.stringify({ status: 'ok', appliedCount: 1 }));
+      }
+      if (body.action === 'submit') {
+        return new Response(JSON.stringify({
+          status: 'error',
+          message: '保存失败，请重试',
+          currentUrl: 'https://example.test/web/index.php?c=site&a=entry&m=ewei_shopv2&do=web&r=goods.edit&id=876&token=rollback-secret#frag',
+          sideEffectPossible: false,
+          retrySafe: true,
+        }));
+      }
+      return new Response(JSON.stringify({ status: 'ok' }));
+    }));
+    const client = createRentalPriceSkillClient({ rootDir, daemonUrl: 'http://127.0.0.1:9223' });
+
+    const preview = await client.preview({ mode: 'explicit_fields', productId: '876', fields: { rent1day: '66.00' } });
+    const verifyFile = join(dirname(preview.audit!.changesFile!), 'verify-876-test.json');
+    await writeFile(verifyFile, JSON.stringify({
+      productId: '876',
+      ok: true,
+      expectedFieldCount: 1,
+      matchedFieldCount: 1,
+      changesFile: preview.audit!.changesFile,
+    }, null, 2), 'utf8');
+    const taskFile = join(dataRoot, 'tasks', `${preview.audit?.taskId}.json`);
+    const completedTask = JSON.parse(await readFile(taskFile, 'utf8')) as Record<string, unknown>;
+    await writeFile(taskFile, JSON.stringify({
+      ...completedTask,
+      status: 'completed',
+      evidence: [{ type: 'verify_result', path: verifyFile, timestamp: new Date().toISOString() }],
+    }, null, 2), 'utf8');
+
+    const rollback = await client.rollback!({ taskId: preview.audit!.taskId! });
+
+    expect(rollback.ok).toBe(false);
+    expect(rollback.lines.join('\n')).toContain('rollbackApply: ok');
+    expect(rollback.lines.join('\n')).toContain('submit: error');
+    expect(rollback.lines.join('\n')).toContain('verify: skipped');
+    expect(rollback.audit?.status).toBe('rollback_failed');
+    expect(rollback.audit?.resultFile).toContain('rollback-execution-failure-876-');
+    expect(commands.filter((command) => command.action === 'read')).toHaveLength(1);
+
+    const resultFile = rollback.audit?.resultFile;
+    expect(resultFile).toBeTruthy();
+    const failure = JSON.parse(await readFile(resultFile!, 'utf8')) as Record<string, unknown>;
+    expect(failure).toMatchObject({
+      productId: '876',
+      ok: false,
+      phase: 'rollback-submit',
+      applyStatus: 'ok',
+      submitStatus: 'error',
+      verifyStatus: 'skipped',
+      sideEffectPossible: false,
+      retrySafe: true,
+    });
+    expect(failure.submit).toMatchObject({ status: 'error', message: '保存失败，请重试' });
+    expect(failure.submit).toMatchObject({ currentUrl: 'https://example.test/web/index.php' });
+    expect(JSON.stringify(failure)).not.toContain('rollback-secret');
+
+    const task = JSON.parse(await readFile(join(dataRoot, 'tasks', `${preview.audit?.taskId}.json`), 'utf8')) as {
+      status: string;
+      evidence: Array<{ type: string; path: string }>;
+      results: { rollbackExecution?: Record<string, unknown> };
+    };
+    expect(task.status).toBe('rollback_failed');
+    expect(task.evidence.some((item) => item.type === 'rollback_execution_result' && item.path === resultFile)).toBe(true);
+    expect(task.results.rollbackExecution).toMatchObject({
+      productId: '876',
+      ok: false,
+      phase: 'rollback-submit',
+      applyStatus: 'ok',
+      submitStatus: 'error',
+      verifyStatus: 'skipped',
+      sideEffectPossible: false,
+      retrySafe: true,
+      resultFile,
+    });
+    expect(task.results.rollbackExecution).not.toHaveProperty('submit');
+    expect(task.results.rollbackExecution).not.toHaveProperty('expectedFields');
+  }, 30000);
+
   it('rejects tampered rollback artifacts before daemon apply', async () => {
     const rootDir = await mkdtemp(join(tmpdir(), 'mt-agent-rental-price-rollback-tamper-'));
     await copyRentalPriceAuditScripts(rootDir);

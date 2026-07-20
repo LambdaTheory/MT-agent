@@ -111,6 +111,10 @@ async function register({ test, assert, helpers }) {
     const entry = { taskId: task.taskId, instruction: task.instruction, status: task.status, createdAt: task.createdAt, extension: true };
     const index = { stateSchemaVersion: migrations.CURRENT_STATE_SCHEMA_VERSION, tasks: [entry], extension: true };
     assert.equal(migrations.validateTaskIndex(index), index);
+    for (const status of ["rolled_back", "rollback_failed", "rollback_verify_failed"]) {
+      assert.equal(migrations.validateTask({ ...task, status }).status, status);
+      assert.equal(migrations.validateTaskIndex({ ...index, tasks: [{ ...entry, status }] }).tasks[0].status, status);
+    }
     for (const field of ["taskId", "instruction", "status", "createdAt"]) {
       const malformedEntry = { ...entry };
       delete malformedEntry[field];

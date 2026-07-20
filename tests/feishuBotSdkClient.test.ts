@@ -245,6 +245,57 @@ describe('createFeishuSdkBot', () => {
     expect(JSON.stringify(sent)).toContain('租赁改价预览处理中');
   });
 
+  it('patches rental price progress card to a failed final result when preview blocks without a card', async () => {
+    const registered: Record<string, (data: unknown) => Promise<void>> = {};
+    const sent: unknown[] = [];
+
+    class FakeClient {
+      im = { v1: { message: {
+        reply: async (request: unknown) => {
+          sent.push({ kind: 'reply', request });
+          return JSON.stringify(request).includes('租赁改价预览处理中') ? { data: { message_id: 'om-progress-card' } } : { data: { message_id: 'om-final-reply' } };
+        },
+        patch: async (request: unknown) => sent.push({ kind: 'patch', request }),
+      } } };
+    }
+
+    class FakeWSClient {
+      start() {
+        return undefined;
+      }
+    }
+
+    class FakeEventDispatcher {
+      register(handlers: Record<string, (data: unknown) => Promise<void>>) {
+        Object.assign(registered, handlers);
+        return this;
+      }
+    }
+
+    const bot = createFeishuSdkBot({
+      appId: 'app',
+      appSecret: 'secret',
+      dispatchMessage: async () => ({
+        text: '价格选择改价预览：ipod touch 6商品组\n\n阻断项：\n商品 653：读取失败，请检查本地租赁价服务日志。',
+        skipped: false,
+        metadata: { toolName: 'rental.priceSelectionPlan', ok: false },
+      }),
+      sdk: { Client: FakeClient, WSClient: FakeWSClient, EventDispatcher: FakeEventDispatcher },
+    });
+
+    bot.start();
+    await registered['im.message.receive_v1']({
+      message: { message_id: 'mid-sdk-rental-progress-blocked', message_type: 'text', content: JSON.stringify({ text: '761改价-15元' }) },
+    });
+
+    expect(sent[0]).toMatchObject({ kind: 'reply' });
+    expect(JSON.stringify(sent[0])).toContain('租赁改价预览处理中');
+    expect(sent[1]).toMatchObject({ kind: 'patch', request: { path: { message_id: 'om-progress-card' } } });
+    expect(JSON.stringify(sent[1])).toContain('Agent 操作失败');
+    expect(JSON.stringify(sent[1])).toContain('商品 653：读取失败');
+    expect(JSON.stringify(sent)).not.toContain('om-final-reply');
+  });
+
   it('does not send rental price progress before spec-keyword clarification', async () => {
     const registered: Record<string, (data: unknown) => Promise<void>> = {};
     const sent: unknown[] = [];

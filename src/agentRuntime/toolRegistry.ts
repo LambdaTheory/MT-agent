@@ -963,6 +963,55 @@ const rentalSpecKeywordPricePlanArgumentsSchema = {
   required: ['query', 'keyword', 'fields'],
   additionalProperties: false,
 };
+const rentalPriceSelectionFilterSchema = {
+  oneOf: [
+    {
+      type: 'object',
+      properties: {
+        type: { type: 'string', enum: ['specTitleContains'] },
+        value: { type: ['string', 'number'] },
+      },
+      required: ['type', 'value'],
+      additionalProperties: false,
+    },
+    {
+      type: 'object',
+      properties: {
+        type: { type: 'string', enum: ['priceEquals'] },
+        field: { type: 'string', pattern: '^rent\\d+day$' },
+        value: { type: ['string', 'number'] },
+      },
+      required: ['type', 'field', 'value'],
+      additionalProperties: false,
+    },
+  ],
+};
+const rentalPriceSelectionTransformSchema = {
+  type: 'object',
+  properties: {
+    type: { type: 'string', enum: ['set', 'multiply', 'adjust'] },
+    value: { type: ['string', 'number'] },
+  },
+  required: ['type', 'value'],
+  additionalProperties: false,
+};
+const rentalPriceSelectionPlanArgumentsSchema = {
+  type: 'object',
+  properties: {
+    query: { type: 'string' },
+    filters: { type: 'array', minItems: 1, maxItems: 6, items: rentalPriceSelectionFilterSchema },
+    fields: {
+      oneOf: [
+        { type: 'string', enum: ['rent_fields'] },
+        { type: 'array', items: { type: 'string', pattern: '^rent\\d+day$' }, minItems: 1, maxItems: 32 },
+      ],
+    },
+    transform: rentalPriceSelectionTransformSchema,
+    resolutionMode: { type: 'string', enum: ['single', 'sameSkuGroup'] },
+  },
+  required: ['query', 'filters', 'fields', 'transform'],
+  additionalProperties: false,
+};
 const newLinkBatchPlanArgumentsSchema = {
   type: 'object',
   properties: {
@@ -1328,6 +1377,13 @@ const agentTools: AgentToolDefinition[] = [
     inputSchema: inactiveRefreshExecuteArgumentsSchema,
   },
   {
+    name: 'operations.operationReview',
+    description: '只读汇总运营操作观察记录和失活刷新审计缺口，返回操作回顾卡；不会复制、下架、改价或写回观察文件。',
+    risk: 'read',
+    requiresConfirmation: false,
+    inputSchema: noArgumentsSchema,
+  },
+  {
     name: 'closedOrder.syncFeedback',
     description: '同步关单反馈到本地状态',
     risk: 'write',
@@ -1627,6 +1683,14 @@ const agentTools: AgentToolDefinition[] = [
     risk: 'write',
     requiresConfirmation: true,
     inputSchema: rentalSpecKeywordPricePlanArgumentsSchema,
+    resultMetadataSchema: rentalPricePreviewResultMetadataSchema,
+  },
+  {
+    name: 'rental.priceSelectionPlan',
+    description: '按商品名/端内ID/同款组读取当前规格价格，使用 filters 选择规格，再用 transform(set/multiply/adjust) 计算绝对目标价并生成租赁改价审计确认卡；适用于规格关键词相对改价和当前价格条件筛选改价。',
+    risk: 'write',
+    requiresConfirmation: true,
+    inputSchema: rentalPriceSelectionPlanArgumentsSchema,
     resultMetadataSchema: rentalPricePreviewResultMetadataSchema,
   },
   {

@@ -12,8 +12,9 @@ const { LAYOUT, SKILL_DIR } = require("./config-loader");
 const { captureLoadedReleaseIdentity, enforceRestartForCommand } = require("./restart-session");
 
 const LOADED_RELEASE_IDENTITY = captureLoadedReleaseIdentity({ targetDir: SKILL_DIR });
+const DEFAULT_DAEMON_COMMAND_TIMEOUT_MS = 60000;
 
-function requestJson({ port, token, body, timeoutMs = 3000 }) {
+function requestJson({ port, token, body, timeoutMs = DEFAULT_DAEMON_COMMAND_TIMEOUT_MS }) {
   return new Promise(resolve => {
     const data = JSON.stringify(body);
     const request = http.request({
@@ -55,7 +56,7 @@ function extractHandshake(response, nonce) {
   return validateHandshakeShape(handshake);
 }
 
-async function sendNegotiatedCommand({ port, token, command, manifest = readCurrentMetadata(), timeoutMs = 3000, beforeCommand }) {
+async function sendNegotiatedCommand({ port, token, command, manifest = readCurrentMetadata(), timeoutMs = DEFAULT_DAEMON_COMMAND_TIMEOUT_MS, beforeCommand }) {
   if (command && (command.action === "ping" || command.action === "hello")) return requestJson({ port, token, body: command, timeoutMs });
   const preflight = await enforceRestartForCommand({ layout: LAYOUT, command, loadedIdentity: LOADED_RELEASE_IDENTITY, deferClear: true });
   if (!preflight.allowed) return preflight;
@@ -87,4 +88,4 @@ async function sendNegotiatedCommand({ port, token, command, manifest = readCurr
   return requestJson({ port, token, body: negotiated, timeoutMs });
 }
 
-module.exports = { LOADED_RELEASE_IDENTITY, requestJson, sendNegotiatedCommand };
+module.exports = { DEFAULT_DAEMON_COMMAND_TIMEOUT_MS, LOADED_RELEASE_IDENTITY, requestJson, sendNegotiatedCommand };

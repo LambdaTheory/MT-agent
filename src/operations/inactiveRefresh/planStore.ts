@@ -140,12 +140,14 @@ function parseNewLinkItems(value: unknown): InactiveRefreshNewLinkItem[] | null 
     if (typeof item.count !== 'number' || !Number.isInteger(item.count) || item.count < 1) return null;
     if (typeof item.sourceProductId !== 'string') return null;
     if (typeof item.sourceProductName !== 'string') return null;
+    if (item.sourceStrategy !== undefined && item.sourceStrategy !== 'healthy_source' && item.sourceStrategy !== 'self_copy_fallback') return null;
     if (item.sameSkuGroupId !== undefined && typeof item.sameSkuGroupId !== 'string') return null;
     items.push({
       keyword: item.keyword,
       count: item.count,
       sourceProductId: item.sourceProductId,
       sourceProductName: item.sourceProductName,
+      ...(item.sourceStrategy === undefined ? {} : { sourceStrategy: item.sourceStrategy }),
       ...(item.sameSkuGroupId === undefined ? {} : { sameSkuGroupId: item.sameSkuGroupId }),
     });
   }
