@@ -9,6 +9,7 @@ import { recordDailyMissionRejection } from '../agentRuntime/dailyMissionRejecti
 import type { AgentToolConfirmRequest } from '../agentRuntime/approvalCard.js';
 import { buildClarifiedMessage, parseAgentClarificationCancelRef, parseAgentClarificationCustomRef, parseAgentClarificationSelectRef } from '../agentRuntime/clarificationCard.js';
 import type { AgentPlannerProvider } from '../agentRuntime/planner.js';
+import type { LlmProvider } from '../llm/provider.js';
 import { recordAgentLearningEvent } from '../agentLearning/store.js';
 import { handleLinkRegistryGovernanceCardAction } from '../linkRegistry/governanceSession.js';
 import { handleLinkRegistryMaintenanceCardAction } from '../linkRegistry/maintenanceSession.js';
@@ -79,6 +80,7 @@ export interface FeishuBotServerConfig {
   activityCancellationAssistant?: ActivityCancellationAssistant;
   llmIntentProposalProvider?: LlmIntentProposalProvider;
   agentPlannerProvider?: AgentPlannerProvider;
+  agentExploreProvider?: LlmProvider;
   inactiveRefreshApproverIds?: readonly string[];
 }
 
@@ -693,6 +695,7 @@ async function handleCardActionTrigger(
       rentalPriceClient: config.rentalPriceClient,
       closedOrderFetchImpl: config.closedOrderFetchImpl,
       closedOrderRegistryPaths: config.closedOrderRegistryPaths,
+      agentExploreProvider: config.agentExploreProvider,
     };
     const effectiveOutputDir = config.outputDir ?? 'output';
     const agentExploreLedgerContext = agentExploreLedgerContextFromRequest(request, effectiveOutputDir);
@@ -1083,6 +1086,7 @@ export function startFeishuBotServer(config: FeishuBotServerConfig) {
     closedOrderRegistryPaths: config.closedOrderRegistryPaths,
     llmIntentProposalProvider: config.llmIntentProposalProvider,
     agentPlannerProvider: config.agentPlannerProvider,
+    agentExploreProvider: config.agentExploreProvider,
   });
   const dispatchMessage = config.dispatchMessage ?? ((message: FeishuBotIncomingTextMessage) => dispatcher.dispatch({
     ...message,

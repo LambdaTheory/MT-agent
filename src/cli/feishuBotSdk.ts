@@ -22,7 +22,7 @@ export async function main(): Promise<void> {
     botMentionName: process.env.FEISHU_BOT_MENTION_NAME,
     outputDir: process.env.MT_AGENT_OUTPUT_DIR ?? 'output',
     inactiveRefreshApproverIds: parseInactiveRefreshApproverIds(process.env.MT_AGENT_INACTIVE_REFRESH_APPROVER_IDS),
-    ...(llmProvider ? { agentPlannerProvider: createAgentPlannerProvider(llmProvider) } : {}),
+    ...(llmProvider ? { agentPlannerProvider: createAgentPlannerProvider(llmProvider), agentExploreProvider: llmProvider } : {}),
   });
   await bot.start();
   startClosedOrderPriceAlertMonitor({

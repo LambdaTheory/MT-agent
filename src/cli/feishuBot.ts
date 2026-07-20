@@ -23,7 +23,7 @@ export async function runFeishuBotCli(): Promise<void> {
     callbackSignatureSecret: process.env.FEISHU_BOT_CALLBACK_SIGNATURE_SECRET,
     outputDir: process.env.MT_AGENT_OUTPUT_DIR ?? 'output',
     inactiveRefreshApproverIds: parseInactiveRefreshApproverIds(process.env.MT_AGENT_INACTIVE_REFRESH_APPROVER_IDS),
-    ...(llmProvider ? { agentPlannerProvider: createAgentPlannerProvider(llmProvider) } : {}),
+    ...(llmProvider ? { agentPlannerProvider: createAgentPlannerProvider(llmProvider), agentExploreProvider: llmProvider } : {}),
   });
   startClosedOrderPriceAlertMonitor({
     env: process.env,
