@@ -47,6 +47,7 @@ import { loadProductNameMap } from '../publicTraffic/productDisplayName.js';
 import { savePublicTrafficRunState } from '../publicTraffic/publicTrafficRunState.js';
 import { loadRecentExposureDeltas } from '../publicTraffic/recentExposureDeltas.js';
 import { loadPublicTrafficRulesConfig } from '../publicTraffic/rulesConfig.js';
+import { createLlmProviderFromEnv } from '../llm/openAiCompatibleProvider.js';
 import type { PeriodProductMetrics, RawTableData } from '../domain/types.js';
 import type { GoodsManagerNewProductPoolItem } from '../publicTraffic/goodsManagerNewProducts.js';
 import type { ExposureCumulativeProduct, ExposureLinkStatus, ExposureOverviewMetric, GoodsSnapshotItem, PublicTrafficDataReportContext, PublicTrafficDataSummary } from '../publicTraffic/types.js';
@@ -860,11 +861,13 @@ async function sendLinkRegistryMaintenancePromptSafely(
   log: ReturnType<typeof createRunLog>,
 ): Promise<boolean> {
   try {
+    const llmProvider = createLlmProviderFromEnv(process.env);
     const prompt = await openLinkRegistryMaintenancePrompt(outputDir, {
       date: runDate,
       registry,
       referenceDate: runDate,
       overridesPath,
+      ...(llmProvider ? { llmProvider } : {}),
     });
     if (!prompt?.card) {
       log.addEvent('链接维护提醒：当前没有需要主动发起的维护项');

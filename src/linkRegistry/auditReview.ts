@@ -72,6 +72,80 @@ function reviewSubjectOf(row: LinkRegistryAuditReviewRow): string {
   return row.internalProductId || row.sameSkuGroupId || row.shortName || row.productName || row.platformProductId || '未命名项';
 }
 
+function safeMarkdownText(value: string | undefined): string {
+  return (value ?? '').replace(/[<>[\]()`|*_]/g, (char) => ({
+    '<': '‹',
+    '>': '›',
+    '[': '［',
+    ']': '］',
+    '(': '（',
+    ')': '）',
+    '`': '\'',
+    '|': '｜',
+    '*': '＊',
+    '_': '＿',
+  }[char] ?? char));
+}
+
+const LLM_ACTION_LABELS: Record<string, string> = {
+  map_platform_id: '补平台映射',
+  split_group: '拆分同款组',
+  merge_group: '合并同款组',
+  classify: '补分类',
+  watch: '观察',
+  ignore: '忽略',
+};
+
+function llmActionLabel(action: string): string {
+  const label = LLM_ACTION_LABELS[action];
+  return label ? `${label} (${safeMarkdownText(action)})` : safeMarkdownText(action) || '无';
+}
+
+function llmConfidenceLabel(confidence: string): string {
+  const numeric = Number(confidence);
+  if (!Number.isFinite(numeric)) return confidence || '无';
+  if (numeric >= 0.8) return `${confidence}｜高`;
+  if (numeric >= 0.55) return `${confidence}｜中`;
+  return `${confidence}｜低`;
+}
+
+function llmSuggestionStats(report: LinkRegistryAuditReviewReport): { available: number; unavailable: number; missing: number } {
+  return report.rows.reduce((stats, row) => {
+    if (!row.llmSuggestion) stats.missing += 1;
+    else if (row.llmSuggestion.status === 'available') stats.available += 1;
+    else stats.unavailable += 1;
+    return stats;
+  }, { available: 0, unavailable: 0, missing: 0 });
+}
+
+function llmSuggestedFieldSummary(suggestion: LinkRegistryAuditReviewLlmSuggestion): string {
+  const fields = [
+    suggestion.suggestedSameSkuGroupId ? `同款组 ${safeMarkdownText(suggestion.suggestedSameSkuGroupId)}` : '',
+    suggestion.suggestedCategoryName ? `品类 ${safeMarkdownText(suggestion.suggestedCategoryName)}` : '',
+    suggestion.suggestedProductType ? `类型 ${safeMarkdownText(suggestion.suggestedProductType)}` : '',
+    suggestion.suggestedShortName ? `短名 ${safeMarkdownText(suggestion.suggestedShortName)}` : '',
+  ].filter(Boolean);
+  return fields.join('；') || '无结构化字段建议';
+}
+
+function llmSuggestionReferenceLines(row: LinkRegistryAuditReviewRow): string[] {
+  const suggestion = row.llmSuggestion;
+  if (!suggestion) return ['LLM 参考建议（仅供人工参考，不自动生效）', '- 未启用：本次审计未生成 LLM 建议。'];
+  if (suggestion.status !== 'available') {
+    return [
+      'LLM 参考建议（仅供人工参考，不自动生效）',
+      `- 状态：不可用｜${safeMarkdownText(suggestion.rationale || '未通过数据契约校验')}`,
+    ];
+  }
+  return [
+    'LLM 参考建议（仅供人工参考，不自动生效）',
+    `- 建议动作：${llmActionLabel(suggestion.action)}｜置信度：${llmConfidenceLabel(suggestion.confidence)}`,
+    `- 建议字段：${llmSuggestedFieldSummary(suggestion)}`,
+    `- 判断依据：${safeMarkdownText(suggestion.rationale)}`,
+    `- 不确定点：${suggestion.uncertainties.map(safeMarkdownText).join('；') || '无'}`,
+  ];
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
@@ -485,6 +559,7 @@ export function renderLinkRegistryAuditReviewCsv(report: LinkRegistryAuditReview
 }
 
 export function renderLinkRegistryAuditReviewGuide(report: LinkRegistryAuditReviewReport): string {
+  const llmStats = llmSuggestionStats(report);
   return [
     '# 链接档案审计审批说明',
     '',
@@ -492,6 +567,7 @@ export function renderLinkRegistryAuditReviewGuide(report: LinkRegistryAuditRevi
     `- 待审总行数：${report.summary.totalRows}`,
     `- P0：${report.summary.p0Rows}，P1：${report.summary.p1Rows}，P2：${report.summary.p2Rows}`,
     `- 明细类型：entry ${report.summary.entryRows} / same_sku_group ${report.summary.sameSkuGroupRows} / override_risk ${report.summary.overrideRiskRows}`,
+    `- LLM 建议：可用 ${llmStats.available} / 不可用 ${llmStats.unavailable} / 未启用 ${llmStats.missing}`,
     '',
     '本轮建议优先填写 Markdown 审批单；CSV 仅保留作备份。',
     '',
@@ -515,6 +591,7 @@ export function renderLinkRegistryAuditReviewGuide(report: LinkRegistryAuditRevi
 
 export function renderLinkRegistryAuditReviewMarkdown(report: LinkRegistryAuditReviewReport): string {
   const lines: string[] = [];
+  const llmStats = llmSuggestionStats(report);
   lines.push('# 链接档案审计审批单');
   lines.push('');
   lines.push(`- 生成时间：${report.generatedAt}`);
@@ -525,12 +602,14 @@ export function renderLinkRegistryAuditReviewMarkdown(report: LinkRegistryAuditR
   lines.push(`- Entry：${report.summary.entryRows}`);
   lines.push(`- SameSkuGroup：${report.summary.sameSkuGroupRows}`);
   lines.push(`- OverrideRisk：${report.summary.overrideRiskRows}`);
+  lines.push(`- LLM 建议：可用 ${llmStats.available} / 不可用 ${llmStats.unavailable} / 未启用 ${llmStats.missing}`);
   lines.push('');
   lines.push('## Top Rows');
   lines.push('');
   report.rows.slice(0, 30).forEach((row, index) => {
     const subject = row.internalProductId || row.sameSkuGroupId || row.shortName || row.message || `row-${index + 1}`;
-    lines.push(`${index + 1}. [${row.priority}] ${subject} | ${row.reviewReasons.join('、')}`);
+    const action = row.llmSuggestion?.status === 'available' ? ` | LLM ${llmActionLabel(row.llmSuggestion.action)} ${row.llmSuggestion.confidence}` : '';
+    lines.push(`${index + 1}. [${row.priority}] ${subject} | ${row.reviewReasons.join('、')}${action}`);
   });
   lines.push('');
   return lines.join('\n');
@@ -542,6 +621,7 @@ function pushEditableField(lines: string[], name: string, value: string): void {
 
 export function renderLinkRegistryAuditReviewApprovalMarkdown(report: LinkRegistryAuditReviewReport): string {
   const lines: string[] = [];
+  const llmStats = llmSuggestionStats(report);
   lines.push('# 链接档案审计审批单（Markdown 填写版）');
   lines.push('');
   lines.push('填写说明：');
@@ -556,10 +636,16 @@ export function renderLinkRegistryAuditReviewApprovalMarkdown(report: LinkRegist
   lines.push(`P0: ${report.summary.p0Rows}`);
   lines.push(`P1: ${report.summary.p1Rows}`);
   lines.push(`P2: ${report.summary.p2Rows}`);
+  lines.push(`LLM建议: 可用 ${llmStats.available} / 不可用 ${llmStats.unavailable} / 未启用 ${llmStats.missing}`);
   lines.push('');
 
   report.rows.forEach((row, index) => {
     lines.push(`## ${index + 1}. [${row.priority}] [${row.kind}] ${reviewSubjectOf(row)}`);
+    lines.push(`优先级/原因：${row.priority}｜${row.reviewReasons.join('、') || '无'}`);
+    lines.push(`审计对象：${row.internalProductId || '无单品 ID'}｜${row.sameSkuGroupId || '无同款组'}｜${row.shortName || row.productName || '未命名'}`);
+    lines.push(...llmSuggestionReferenceLines(row));
+    lines.push('');
+    lines.push('原始事实字段：');
     pushEditableField(lines, 'reviewKey', reviewKeyOf(row));
     pushEditableField(lines, 'reviewReasons', row.reviewReasons.join('、'));
     pushEditableField(lines, 'internalProductId', row.internalProductId);
@@ -580,16 +666,17 @@ export function renderLinkRegistryAuditReviewApprovalMarkdown(report: LinkRegist
     pushEditableField(lines, 'firstSeenDate', row.firstSeenDate);
     pushEditableField(lines, 'updatedAt', row.updatedAt);
     pushEditableField(lines, 'suggestedShortName', row.suggestedShortName);
-    pushEditableField(lines, 'llmSuggestionStatus', row.llmSuggestion?.status ?? '');
-    pushEditableField(lines, 'llmSuggestedAction', row.llmSuggestion?.action ?? '');
-    pushEditableField(lines, 'llmConfidence', row.llmSuggestion?.confidence ?? '');
-    pushEditableField(lines, 'llmRationale', row.llmSuggestion?.rationale ?? '');
-    pushEditableField(lines, 'llmSuggestedSameSkuGroupId', row.llmSuggestion?.suggestedSameSkuGroupId ?? '');
-    pushEditableField(lines, 'llmSuggestedCategoryName', row.llmSuggestion?.suggestedCategoryName ?? '');
-    pushEditableField(lines, 'llmSuggestedProductType', row.llmSuggestion?.suggestedProductType ?? '');
-    pushEditableField(lines, 'llmSuggestedShortName', row.llmSuggestion?.suggestedShortName ?? '');
-    pushEditableField(lines, 'llmUncertainties', row.llmSuggestion?.uncertainties.join('、') ?? '');
+    pushEditableField(lines, 'llmSuggestionStatus', safeMarkdownText(row.llmSuggestion?.status ?? ''));
+    pushEditableField(lines, 'llmSuggestedAction', safeMarkdownText(row.llmSuggestion?.action ?? ''));
+    pushEditableField(lines, 'llmConfidence', safeMarkdownText(row.llmSuggestion?.confidence ?? ''));
+    pushEditableField(lines, 'llmRationale', safeMarkdownText(row.llmSuggestion?.rationale ?? ''));
+    pushEditableField(lines, 'llmSuggestedSameSkuGroupId', safeMarkdownText(row.llmSuggestion?.suggestedSameSkuGroupId ?? ''));
+    pushEditableField(lines, 'llmSuggestedCategoryName', safeMarkdownText(row.llmSuggestion?.suggestedCategoryName ?? ''));
+    pushEditableField(lines, 'llmSuggestedProductType', safeMarkdownText(row.llmSuggestion?.suggestedProductType ?? ''));
+    pushEditableField(lines, 'llmSuggestedShortName', safeMarkdownText(row.llmSuggestion?.suggestedShortName ?? ''));
+    pushEditableField(lines, 'llmUncertainties', safeMarkdownText(row.llmSuggestion?.uncertainties.join('、') ?? ''));
     lines.push('');
+    lines.push('人工填写区（只有这里会决定最终落库）：');
     pushEditableField(lines, 'decision', row.decision);
     pushEditableField(lines, 'finalSameSkuGroupId', row.finalSameSkuGroupId);
     pushEditableField(lines, 'finalCategoryName', row.finalCategoryName);

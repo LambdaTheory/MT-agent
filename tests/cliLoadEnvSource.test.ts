@@ -17,6 +17,7 @@ describe('CLI loadEnv wiring', () => {
   it('wires the Feishu SDK bot through the planner-first runtime only', async () => {
     const text = await source('../src/cli/feishuBotSdk.ts');
     expect(text).toContain('agentPlannerProvider: createAgentPlannerProvider(llmProvider)');
+    expect(text).toContain('agentExploreProvider: llmProvider');
     expect(text).not.toContain('createLlmToolSelector');
     expect(text).not.toContain('llmToolSelector:');
   });
@@ -24,8 +25,20 @@ describe('CLI loadEnv wiring', () => {
   it('wires the Feishu HTTP bot through the planner-first runtime only', async () => {
     const text = await source('../src/cli/feishuBot.ts');
     expect(text).toContain('agentPlannerProvider: createAgentPlannerProvider(llmProvider)');
+    expect(text).toContain('agentExploreProvider: llmProvider');
     expect(text).not.toContain('createLlmToolSelector');
     expect(text).not.toContain('llmToolSelector:');
+  });
+
+  it('wires LLM provider into Feishu Agent tool continuations and public traffic maintenance prompts', async () => {
+    const server = await source('../src/feishuBot/server.ts');
+    const sdkClient = await source('../src/feishuBot/sdkClient.ts');
+    const publicTraffic = await source('../src/cli/publicTrafficReport.ts');
+    expect(server).toContain('agentExploreProvider: config.agentExploreProvider');
+    expect(sdkClient).toContain('agentExploreProvider: config.agentExploreProvider');
+    expect(publicTraffic).toContain("import { createLlmProviderFromEnv } from '../llm/openAiCompatibleProvider.js';");
+    expect(publicTraffic).toContain('const llmProvider = createLlmProviderFromEnv(process.env);');
+    expect(publicTraffic).toContain('...(llmProvider ? { llmProvider } : {})');
   });
 
   it('loads .env before Feishu test send', async () => {

@@ -110,7 +110,7 @@ describe('linkRegistryAuditReview LLM suggestions', () => {
           reviewKey: 'entry:902',
           action: 'watch',
           confidence: 0.7,
-          rationale: 'insufficient mapping evidence; watch first',
+          rationale: 'insufficient [mapping](https://example.test) <at id="ou_x">owner</at>; watch first',
           uncertainties: [],
         },
       ],
@@ -123,8 +123,16 @@ describe('linkRegistryAuditReview LLM suggestions', () => {
     expect(csv).toContain('"llmSuggestedAction"');
     expect(csv).toContain('"watch"');
     expect(approvalMarkdown).toContain('LLM 建议仅供人工确认，不会自动写入 override');
+    expect(approvalMarkdown).toContain('LLM建议: 可用 1 / 不可用 0 / 未启用 0');
+    expect(approvalMarkdown).toContain('LLM 参考建议（仅供人工参考，不自动生效）');
+    expect(approvalMarkdown).toContain('- 建议动作：观察 (watch)｜置信度：0.70｜中');
+    expect(approvalMarkdown).toContain('- 建议字段：无结构化字段建议');
+    expect(approvalMarkdown).toContain('人工填写区（只有这里会决定最终落库）：');
     expect(approvalMarkdown).toContain('llmSuggestedAction: watch');
-    expect(approvalMarkdown).toContain('llmRationale: insufficient mapping evidence; watch first');
+    expect(approvalMarkdown).toContain('llmRationale: insufficient ［mapping］（https://example.test） ‹at id="ou＿x"›owner‹/at›; watch first');
+    expect(approvalMarkdown).not.toContain('[mapping](https://example.test)');
+    expect(approvalMarkdown).not.toContain('<at id="ou_x">');
+    expect(approvalMarkdown.indexOf('LLM 参考建议')).toBeLessThan(approvalMarkdown.indexOf('decision: '));
   });
 
   it('neutralizes formula-prefixed LLM fields in CSV output', async () => {

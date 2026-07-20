@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import type { LlmProvider } from '../llm/provider.js';
 import type { FeishuCardPayload } from '../notify/feishuApp.js';
 import { createLinkRegistry } from './store.js';
 import {
@@ -32,6 +33,18 @@ interface LinkRegistryMaintenanceSuggestion {
   shortName?: string;
 }
 
+interface LinkRegistryMaintenanceLlmSuggestion {
+  status: 'available' | 'unavailable';
+  action?: string;
+  confidence?: string;
+  rationale: string;
+  sameSkuGroupId?: string;
+  categoryName?: string;
+  productType?: string;
+  shortName?: string;
+  uncertainties: string[];
+}
+
 interface LinkRegistryMaintenanceSessionQueueItem {
   internalProductId: string;
   platformProductId?: string;
@@ -43,6 +56,7 @@ interface LinkRegistryMaintenanceSessionQueueItem {
   reasonCodes: LinkRegistryMaintenanceReasonCode[];
   reasonLabels: string[];
   suggested: LinkRegistryMaintenanceSuggestion;
+  llmSuggestion?: LinkRegistryMaintenanceLlmSuggestion;
   sameSkuGroupOptions: string[];
 }
 
@@ -74,6 +88,7 @@ export interface OpenLinkRegistryMaintenancePromptInput {
   overridesPath: string;
   force?: boolean;
   promptSummary?: LinkRegistryRefreshSummary;
+  llmProvider?: LlmProvider;
 }
 
 export interface LinkRegistryMaintenanceCardActionInput {
@@ -131,6 +146,149 @@ function statusCard(
 
 function compactName(item: { shortName?: string; productName?: string; internalProductId: string }): string {
   return item.shortName?.trim() || item.productName?.trim() || item.internalProductId;
+}
+
+const LLM_MAINTENANCE_ACTIONS = new Set(['map_platform_id', 'merge_group', 'classify', 'watch', 'ignore']);
+
+const LLM_MAINTENANCE_ACTION_LABELS: Record<string, string> = {
+  map_platform_id: '补平台映射',
+  merge_group: '归入同款组',
+  classify: '补分类',
+  watch: '观察',
+  ignore: '忽略',
+};
+
+const LLM_MAINTENANCE_SYSTEM_PROMPT = [
+  '你是链接维护助手。只给人工维护卡片生成参考建议。',
+  '不得写入 override，不得生成执行命令，不得要求调用 shell、文件系统、飞书或外部接口。',
+  '只输出 JSON，形如 {"suggestions":[{"internalProductId":"1032","action":"merge_group","confidence":0.82,"rationale":"...","sameSkuGroupId":"canon-r50","categoryName":"相机","productType":"mirrorless-camera","shortName":"佳能 R50","uncertainties":[]}]}。',
+  'action 只能取 map_platform_id|merge_group|classify|watch|ignore。',
+].join('\n');
+
+function singleLineText(value: unknown): string {
+  return typeof value === 'string' ? value.trim().replace(/[\r\n]+/g, ' / ') : '';
+}
+
+function safeMarkdownText(value: string | undefined): string {
+  return (value ?? '').replace(/[<>[\]()`|*_]/g, (char) => ({
+    '<': '‹',
+    '>': '›',
+    '[': '［',
+    ']': '］',
+    '(': '（',
+    ')': '）',
+    '`': '\'',
+    '|': '｜',
+    '*': '＊',
+    '_': '＿',
+  }[char] ?? char));
+}
+
+function unavailableLlmMaintenanceSuggestion(rationale: string): LinkRegistryMaintenanceLlmSuggestion {
+  return { status: 'unavailable', rationale, uncertainties: [] };
+}
+
+function parseLlmMaintenanceSuggestion(value: unknown): LinkRegistryMaintenanceLlmSuggestion {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return unavailableLlmMaintenanceSuggestion('LLM 建议未通过数据契约校验');
+  const record = value as Record<string, unknown>;
+  const action = singleLineText(record.action);
+  const confidence = record.confidence;
+  const rationale = singleLineText(record.rationale);
+  if (!LLM_MAINTENANCE_ACTIONS.has(action) || typeof confidence !== 'number' || confidence < 0 || confidence > 1 || !rationale) {
+    return unavailableLlmMaintenanceSuggestion('LLM 建议未通过数据契约校验');
+  }
+  return {
+    status: 'available',
+    action,
+    confidence: confidence.toFixed(2),
+    rationale,
+    sameSkuGroupId: singleLineText(record.sameSkuGroupId) || undefined,
+    categoryName: singleLineText(record.categoryName) || undefined,
+    productType: singleLineText(record.productType) || undefined,
+    shortName: singleLineText(record.shortName) || undefined,
+    uncertainties: Array.isArray(record.uncertainties) ? record.uncertainties.map(singleLineText).filter(Boolean) : [],
+  };
+}
+
+function llmMaintenanceContext(item: LinkRegistryMaintenanceSessionQueueItem): Record<string, unknown> {
+  return {
+    internalProductId: item.internalProductId,
+    platformProductId: item.platformProductId ?? '',
+    productName: item.productName ?? '',
+    shortName: item.shortName ?? '',
+    status: item.status,
+    reasonCodes: item.reasonCodes,
+    reasonLabels: item.reasonLabels,
+    deterministicSuggestion: item.suggested,
+    sameSkuGroupOptions: item.sameSkuGroupOptions,
+  };
+}
+
+async function enrichMaintenanceQueueWithLlmSuggestions(
+  queue: LinkRegistryMaintenanceSessionQueueItem[],
+  provider: LlmProvider | undefined,
+): Promise<LinkRegistryMaintenanceSessionQueueItem[]> {
+  if (!provider || queue.length === 0) return queue;
+  try {
+    const result = await provider.generateJson({
+      messages: [
+        { role: 'system', content: LLM_MAINTENANCE_SYSTEM_PROMPT },
+        { role: 'user', content: JSON.stringify({ rows: queue.slice(0, 20).map(llmMaintenanceContext) }) },
+      ],
+      temperature: 0,
+    });
+    const suggestions = Array.isArray(result.json.suggestions) ? result.json.suggestions : [];
+    const suggestionByProductId = new Map<string, unknown>();
+    for (const suggestion of suggestions) {
+      if (!suggestion || typeof suggestion !== 'object' || Array.isArray(suggestion)) continue;
+      const productId = singleLineText((suggestion as Record<string, unknown>).internalProductId);
+      if (productId) suggestionByProductId.set(productId, suggestion);
+    }
+    return queue.map((item) => ({
+      ...item,
+      llmSuggestion: suggestionByProductId.has(item.internalProductId)
+        ? parseLlmMaintenanceSuggestion(suggestionByProductId.get(item.internalProductId))
+        : unavailableLlmMaintenanceSuggestion('LLM 未返回该链接建议'),
+    }));
+  } catch {
+    return queue.map((item) => ({ ...item, llmSuggestion: unavailableLlmMaintenanceSuggestion('LLM 建议生成失败') }));
+  }
+}
+
+function llmActionLabel(action: string | undefined): string {
+  if (!action) return '无';
+  const label = LLM_MAINTENANCE_ACTION_LABELS[action];
+  return label ? `${label} (${safeMarkdownText(action)})` : safeMarkdownText(action);
+}
+
+function llmFieldSummary(suggestion: LinkRegistryMaintenanceLlmSuggestion): string {
+  const fields = [
+    suggestion.sameSkuGroupId ? `同款组 ${safeMarkdownText(suggestion.sameSkuGroupId)}` : '',
+    suggestion.categoryName ? `品类 ${safeMarkdownText(suggestion.categoryName)}` : '',
+    suggestion.productType ? `类型 ${safeMarkdownText(suggestion.productType)}` : '',
+    suggestion.shortName ? `短名 ${safeMarkdownText(suggestion.shortName)}` : '',
+  ].filter(Boolean);
+  return fields.join('；') || '无结构化字段建议';
+}
+
+function llmPreviewLine(item: LinkRegistryMaintenanceSessionQueueItem): string {
+  const suggestion = item.llmSuggestion;
+  if (!suggestion) return '';
+  if (suggestion.status !== 'available') return `\nLLM参考：不可用｜${safeMarkdownText(suggestion.rationale)}`;
+  return `\nLLM参考：${llmActionLabel(suggestion.action)}｜置信度 ${suggestion.confidence}｜${llmFieldSummary(suggestion)}`;
+}
+
+function llmReviewBlock(item: LinkRegistryMaintenanceSessionQueueItem): string | null {
+  const suggestion = item.llmSuggestion;
+  if (!suggestion) return null;
+  if (suggestion.status !== 'available') return `**LLM参考建议（仅供人工参考，不自动生效）**\n不可用：${safeMarkdownText(suggestion.rationale)}`;
+  return [
+    '**LLM参考建议（仅供人工参考，不自动生效）**',
+    `建议动作：${llmActionLabel(suggestion.action)}｜置信度：${suggestion.confidence}`,
+    `建议字段：${llmFieldSummary(suggestion)}`,
+    `判断依据：${safeMarkdownText(suggestion.rationale)}`,
+    `不确定点：${suggestion.uncertainties.map(safeMarkdownText).join('；') || '无'}`,
+  ].join('\n');
 }
 
 function reasonPriority(reasonCodes: LinkRegistryMaintenanceReasonCode[]): number {
@@ -346,7 +504,7 @@ function refreshGroupSummary(summary: LinkRegistryRefreshSummary | undefined): s
 function buildPromptCard(session: LinkRegistryMaintenanceSession): FeishuCardPayload {
   const previewLines = session.queue
     .slice(0, 3)
-    .map((item, index) => `${index + 1}. ${compactName(item)}（${item.internalProductId}）\n${item.reasonLabels.join('、')}`);
+    .map((item, index) => `${index + 1}. ${compactName(item)}（${item.internalProductId}）\n规则原因：${item.reasonLabels.join('、')}${llmPreviewLine(item)}`);
   const headline = refreshHeadline(session.promptSummary, metricSummary(session));
   const groupSummary = refreshGroupSummary(session.promptSummary);
   const hasPendingQueue = session.queue.length > 0;
@@ -434,7 +592,8 @@ function buildReviewCard(
           name: 'link_registry_maintenance_form',
           elements: [
             markdown(`**商品**\n${compactName(item)}\n<text_tag color='grey'>端内 ID ${item.internalProductId}${item.platformProductId ? ` · 平台 ID ${item.platformProductId}` : ''}</text_tag>`),
-            markdown(`**待补字段**\n${item.reasonLabels.join('、')}`),
+            markdown(`**规则原因**\n${item.reasonLabels.join('、')}`),
+            ...(llmReviewBlock(item) ? [markdown(llmReviewBlock(item)!)] : []),
             markdown(`**机器建议**\n同款组：${item.suggested.sameSkuGroupId ?? '待定'}\n分类：${item.suggested.categoryId ?? '待定'}${item.suggested.productType ? ` / ${item.suggested.productType}` : ''}\n短名：${item.suggested.shortName ?? compactName(item)}`),
             {
               tag: 'select_static',
@@ -602,7 +761,10 @@ export async function openLinkRegistryMaintenancePrompt(
   outputDir: string,
   input: OpenLinkRegistryMaintenancePromptInput,
 ): Promise<LinkRegistryMaintenanceResponse | null> {
-  const queue = buildSessionQueue(input.registry, input.referenceDate ?? input.date);
+  const queue = await enrichMaintenanceQueueWithLlmSuggestions(
+    buildSessionQueue(input.registry, input.referenceDate ?? input.date),
+    input.llmProvider,
+  );
   if (queue.length === 0 && !input.promptSummary?.newLinkCount) return null;
 
   const signature = buildSessionSignature(queue);
@@ -622,6 +784,10 @@ export async function openLinkRegistryMaintenancePrompt(
         ...existing,
         status: 'open',
         updatedAt: new Date().toISOString(),
+        queue,
+        categoryOptions: categoryOptions(input.registry),
+        productTypeOptions: productTypeOptions(input.registry),
+        overridesPath: input.overridesPath,
         ...(input.promptSummary ? { promptSummary: input.promptSummary } : {}),
       };
       reminderSession = updated;
