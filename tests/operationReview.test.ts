@@ -133,7 +133,7 @@ async function writePartialInactiveRefreshAudit(dir: string): Promise<string> {
       { productId: '840', ok: true, status: 'ok', newProductId: '1050' },
     ],
     delistResults: [
-      { productId: '253', ok: false, status: 'error', message: '租赁套餐自定义租期不允许修改', lines: ['delist: error', '租赁套餐自定义租期不允许修改'] },
+      { productId: '253', ok: false, status: 'error', message: 'Delist confirmation dialog was not confirmed', lines: ['delist: error'] },
     ],
     ok: false,
   });
@@ -169,7 +169,7 @@ describe('operation review', () => {
       plannedDelistProductIds: ['253', '507'],
       attemptedDelistProductIds: ['253'],
       failedDelistProductIds: ['253'],
-      firstFailureReason: '租赁套餐自定义租期不允许修改',
+      firstFailureReason: '确认弹窗未被自动确认（可能是页面弹窗识别未覆盖，或自动化进程未加载最新代码）',
     });
   });
 
@@ -198,7 +198,8 @@ describe('operation review', () => {
     expect(serialized).toContain('失活刷新补链观察覆盖');
     expect(serialized.match(/"tag":"chart"/g)).toHaveLength(3);
     expect(serialized).toContain('1049、1050');
-    expect(serialized).toContain('租赁套餐自定义租期不允许修改');
+    expect(serialized).toContain('确认弹窗未被自动确认');
+    expect(serialized).not.toContain('Delist confirmation dialog was not confirmed');
     expect(serialized).not.toContain('callback');
     expect(text).toContain('表现健康度：表现好 1 条，有效曝光 1 条，未达标 1 条，数据不足 1 条');
     expect(text).toContain('失活刷新补链观察缺口：2 条');

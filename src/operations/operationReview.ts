@@ -264,10 +264,15 @@ function inactiveRefreshAuditGapFromParsed(auditPath: string, parsed: unknown, o
 function firstFailureReason(failedDelists: DelistResultShape[]): { firstFailureReason?: string } {
   const first = failedDelists[0];
   if (!first) return {};
-  if (typeof first.message === 'string' && first.message.trim()) return { firstFailureReason: first.message.trim() };
+  if (typeof first.message === 'string' && first.message.trim()) return { firstFailureReason: localizeDelistFailureReason(first.message.trim()) };
   const lines = arrayOfStrings(first.lines);
   const line = lines.find((item) => item.trim() && !/^delist:/i.test(item));
-  return line ? { firstFailureReason: line.trim() } : {};
+  return line ? { firstFailureReason: localizeDelistFailureReason(line.trim()) } : {};
+}
+
+function localizeDelistFailureReason(reason: string): string {
+  if (/Delist confirmation dialog was not confirmed/i.test(reason)) return '确认弹窗未被自动确认（可能是页面弹窗识别未覆盖，或自动化进程未加载最新代码）';
+  return reason;
 }
 
 function sourceProductIdsFromPlan(value: unknown): string[] {

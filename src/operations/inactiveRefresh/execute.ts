@@ -48,55 +48,85 @@ export async function executeInactiveRefreshPlan(input: { outputDir: string; pla
     const result = await input.client.delist(productId);
     delistResults.push(result);
     await recordWriteEvent(input, result.ok ? 'execution_succeeded' : 'execution_failed', productId);
-    if (!result.ok) break;
   }
   const ok = copyResults.every((result) => result.ok) && delistResults.length === plan.delistProductIds.length && delistResults.every((result) => result.ok);
   const auditPath = await writeAudit(input.outputDir, input.planRef, { plan, copyResults, delistResults, ok });
   const newProductIds = copyResults.flatMap((copy) => copy.newProductId ? [copy.newProductId] : []);
   const delistedProductIds = delistResults.filter((result) => result.ok).map((result) => result.productId);
-  if (ok) {
-    const sourceItems = plan.newLinkItems.flatMap((item) => Array.from({ length: item.count }, () => item));
-    const registryWritebackError = await writeInactiveRefreshRegistryState(input.closedOrderRegistryPaths?.overridesPath ?? defaultOverridesPath(input.outputDir), {
-      date: plan.date,
-      observedAt: new Date().toISOString(),
-      newLinks: copyResults.flatMap((copy, index) => copy.newProductId ? [{ productId: copy.newProductId, source: sourceItems[index] }] : []),
-      delistedProductIds,
-    }).then(() => null, (error: unknown) => error instanceof Error ? error.message : String(error));
-    await recordInactiveRefreshObservationsBestEffort(input.outputDir, {
-      planRef: input.planRef,
-      auditPath,
-      newProductIds,
-      delistedProductIds,
-      sourceProductIds: sourceItems.map((item) => item.sourceProductId),
-    });
-    if (registryWritebackError) {
-      return {
-        text: [
-          '失活刷新执行完成，但 link registry 状态写回失败',
-          `补链：成功 ${copyResults.filter((result) => result.ok).length}/${plan.newLinkItems.reduce((sum, item) => sum + item.count, 0)}`,
-          `下架：成功 ${delistResults.filter((result) => result.ok).length}/${plan.delistProductIds.length}`,
-          `写回错误：${registryWritebackError}`,
-          `审计文件：${auditPath}`,
-        ].join('\n'),
-        metadata: { toolName: 'operations.inactiveRefreshExecute', ok: false, operationOk: true, registryWritebackOk: false, auditPath, newProductIds, delistedProductIds },
-      };
-    }
+  const failedDelists = delistResults.filter((result) => !result.ok);
+  const failedDelistProductIds = failedDelists.map((result) => result.productId);
+  const sourceItems = plan.newLinkItems.flatMap((item) => Array.from({ length: item.count }, () => item));
+  const registryWritebackError = await writeInactiveRefreshRegistryState(input.closedOrderRegistryPaths?.overridesPath ?? defaultOverridesPath(input.outputDir), {
+    date: plan.date,
+    observedAt: new Date().toISOString(),
+    newLinks: copyResults.flatMap((copy, index) => copy.newProductId ? [{ productId: copy.newProductId, source: sourceItems[index] }] : []),
+    delistedProductIds,
+  }).then(() => null, (error: unknown) => error instanceof Error ? error.message : String(error));
+  await recordInactiveRefreshObservationsBestEffort(input.outputDir, {
+    planRef: input.planRef,
+    auditPath,
+    newProductIds,
+    delistedProductIds,
+    sourceProductIds: sourceItems.map((item) => item.sourceProductId),
+  });
+  if (registryWritebackError) {
+    return {
+      text: [
+        ok ? '失活刷新执行完成，但 link registry 状态写回失败' : '失活刷新部分完成，但 link registry 状态写回失败',
+        `补链：成功 ${copyResults.filter((result) => result.ok).length}/${plan.newLinkItems.reduce((sum, item) => sum + item.count, 0)}`,
+        `下架：成功 ${delistResults.filter((result) => result.ok).length}/${plan.delistProductIds.length}`,
+        failedDelistProductIds.length ? `下架失败：${failedDelistProductIds.join('、')}` : undefined,
+        firstDelistFailureReason(failedDelists),
+        `写回错误：${registryWritebackError}`,
+        `审计文件：${auditPath}`,
+      ].filter((line): line is string => Boolean(line)).join('\n'),
+      metadata: { ...inactiveRefreshExecuteMetadata(ok, auditPath, newProductIds, delistedProductIds, failedDelists), operationOk: ok, registryWritebackOk: false },
+    };
   }
   return {
     text: [
-      ok ? '失活刷新执行完成' : '失活刷新执行中断',
+      ok ? '失活刷新执行完成' : '失活刷新部分完成：下架失败项已跳过，其余旧链已继续尝试',
       `补链：成功 ${copyResults.filter((result) => result.ok).length}/${plan.newLinkItems.reduce((sum, item) => sum + item.count, 0)}`,
       `下架：成功 ${delistResults.filter((result) => result.ok).length}/${plan.delistProductIds.length}`,
+      failedDelistProductIds.length ? `下架失败：${failedDelistProductIds.join('、')}` : undefined,
+      firstDelistFailureReason(failedDelists),
       `审计文件：${auditPath}`,
-    ].join('\n'),
+    ].filter((line): line is string => Boolean(line)).join('\n'),
     metadata: {
-      toolName: 'operations.inactiveRefreshExecute',
-      ok,
-      auditPath,
-      newProductIds,
-      delistedProductIds,
+      ...inactiveRefreshExecuteMetadata(ok, auditPath, newProductIds, delistedProductIds, failedDelists),
+      registryWritebackOk: true,
     },
   };
+}
+
+function inactiveRefreshExecuteMetadata(ok: boolean, auditPath: string, newProductIds: string[], delistedProductIds: string[], failedDelists: RentalPriceDelistResult[]): Record<string, unknown> {
+  return {
+    toolName: 'operations.inactiveRefreshExecute',
+    ok,
+    auditPath,
+    newProductIds,
+    delistedProductIds,
+    failedDelistProductIds: failedDelists.map((result) => result.productId),
+    delistFailures: failedDelists.map((result) => ({
+      productId: result.productId,
+      ...(result.message ? { message: result.message } : {}),
+      ...(result.status ? { status: result.status } : {}),
+      ...(result.confirmed !== undefined ? { confirmed: result.confirmed } : {}),
+      ...(result.confirmText ? { confirmText: result.confirmText } : {}),
+      ...(result.channelLabel ? { channelLabel: result.channelLabel } : {}),
+    })),
+  };
+}
+
+function firstDelistFailureReason(failedDelists: RentalPriceDelistResult[]): string | undefined {
+  const first = failedDelists[0];
+  if (!first?.message) return undefined;
+  return `首个失败原因：${localizeDelistFailureReason(first.message)}`;
+}
+
+function localizeDelistFailureReason(reason: string): string {
+  if (/Delist confirmation dialog was not confirmed/i.test(reason)) return '确认弹窗未被自动确认（可能是页面弹窗识别未覆盖，或自动化进程未加载最新代码）';
+  return reason;
 }
 
 function defaultOverridesPath(outputDir: string): string {

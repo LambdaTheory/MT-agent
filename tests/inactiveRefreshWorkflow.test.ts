@@ -155,6 +155,25 @@ function fakeRentalClient(events: string[]): RentalPriceSkillClient {
   };
 }
 
+function fakeDelistFailureClient(events: string[], failingProductIds: Set<string>): RentalPriceSkillClient {
+  let copyCount = 0;
+  return {
+    ...fakeRentalClient(events),
+    async copy(productId) {
+      copyCount += 1;
+      events.push(`copy:${productId}`);
+      return { productId, ok: true, newProductId: `100${copyCount}`, lines: [`copied ${productId}`], status: 'completed' };
+    },
+    async delist(productId) {
+      events.push(`delist:${productId}`);
+      if (failingProductIds.has(productId)) {
+        return { productId, ok: false, status: 'error', message: 'Delist confirmation dialog was not confirmed', lines: ['delist: error'], confirmed: false };
+      }
+      return { productId, ok: true, lines: [`delisted ${productId}`] };
+    },
+  };
+}
+
 function fakeCopyWithoutNewProductIdClient(events: string[]): RentalPriceSkillClient {
   return {
     async preview() { throw new Error('preview should not run'); },
@@ -626,6 +645,58 @@ describe('inactive refresh executable workflow', () => {
     expect(events).toEqual(['copy:900', 'delist:901']);
     expect(response.text).toContain('失活刷新执行完成');
     expect(response.metadata).toMatchObject({ toolName: 'operations.inactiveRefreshExecute', ok: true, delistedProductIds: ['901'], newProductIds: ['1900'] });
+  });
+
+  it('continues delisting remaining stale links after one delist fails', async () => {
+    const { outputDir, registryPaths } = await writeInactiveRefreshFixtures();
+    const plan: InactiveRefreshPlan = {
+      date: '2026-07-17',
+      delistProductIds: ['901', '902', '903'],
+      newLinkItems: [{ keyword: 'Pocket 3', count: 3, sourceProductId: '900', sourceProductName: 'Pocket3 健康源', sameSkuGroupId: 'dji-pocket-3' }],
+      skippedGroups: [],
+      executableCount: 3,
+    };
+    const planRef = await saveInactiveRefreshPlan(outputDir, plan);
+    const events: string[] = [];
+
+    const response = await executeAgentToolRequest(
+      { toolName: 'operations.inactiveRefreshExecute', arguments: { planRef, confirmationKey: inactiveRefreshPlanConfirmationKey(plan) }, reason: 'execute inactive refresh with partial delist failure' },
+      outputDir,
+      { rentalPriceClient: fakeDelistFailureClient(events, new Set(['902'])), closedOrderRegistryPaths: registryPaths },
+    );
+    const audit = JSON.parse(await readFile(join(outputDir, 'latest', 'inactive-refresh-audits', `${planRef}.json`), 'utf8')) as { ok?: boolean; delistResults?: Array<{ productId?: string; ok?: boolean }> };
+    const overrides = JSON.parse(await readFile(registryPaths.overridesPath, 'utf8')) as { entries: Array<Record<string, unknown>> };
+    const store = await loadOperationObservations(outputDir);
+
+    expect(events).toEqual(['copy:900', 'copy:900', 'copy:900', 'delist:901', 'delist:902', 'delist:903']);
+    expect(response.text).toContain('失活刷新部分完成');
+    expect(response.text).toContain('下架失败：902');
+    expect(response.text).toContain('确认弹窗未被自动确认');
+    expect(response.text).not.toContain('Delist confirmation dialog was not confirmed');
+    expect(response.metadata).toMatchObject({
+      toolName: 'operations.inactiveRefreshExecute',
+      ok: false,
+      newProductIds: ['1001', '1002', '1003'],
+      delistedProductIds: ['901', '903'],
+      failedDelistProductIds: ['902'],
+      delistFailures: [expect.objectContaining({ productId: '902', message: 'Delist confirmation dialog was not confirmed', confirmed: false })],
+      registryWritebackOk: true,
+    });
+    expect(audit.ok).toBe(false);
+    expect(audit.delistResults?.map((result) => `${result.productId}:${result.ok}`)).toEqual(['901:true', '902:false', '903:true']);
+    expect(overrides.entries).toEqual(expect.arrayContaining([
+      expect.objectContaining({ internalProductId: '901', status: 'removed', listingState: 'delisted', reason: 'inactive_refresh_success' }),
+      expect.objectContaining({ internalProductId: '903', status: 'removed', listingState: 'delisted', reason: 'inactive_refresh_success' }),
+      expect.objectContaining({ internalProductId: '1001', status: 'active', listingState: 'on_sale', reason: 'inactive_refresh_success' }),
+      expect.objectContaining({ internalProductId: '1002', status: 'active', listingState: 'on_sale', reason: 'inactive_refresh_success' }),
+      expect.objectContaining({ internalProductId: '1003', status: 'active', listingState: 'on_sale', reason: 'inactive_refresh_success' }),
+    ]));
+    expect(overrides.entries).not.toEqual(expect.arrayContaining([expect.objectContaining({ internalProductId: '902', status: 'removed' })]));
+    expect(store.observations.map((observation) => observation.subjects)).toEqual([
+      expect.arrayContaining([{ role: 'new_link', productId: '1001', relatedProductId: '901', sourceProductId: '900' }, { role: 'delisted_old_link', productId: '901', relatedProductId: '1001', sourceProductId: '900' }]),
+      expect.arrayContaining([{ role: 'new_link', productId: '1002', relatedProductId: '903', sourceProductId: '900' }, { role: 'delisted_old_link', productId: '903', relatedProductId: '1002', sourceProductId: '900' }]),
+      expect.arrayContaining([{ role: 'new_link', productId: '1003', sourceProductId: '900' }]),
+    ]);
   });
 
   it('records an inactive_refresh operation observation for successful executions', async () => {
