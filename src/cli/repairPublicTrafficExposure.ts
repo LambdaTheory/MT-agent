@@ -1,4 +1,5 @@
 import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import { dirname } from 'node:path';
 import { loadClosedOrderRegistryContext } from '../closedOrderFeedback/runtime.js';
 import { loadConfig } from '../config/loadConfig.js';
@@ -131,6 +132,7 @@ async function writeInventorySameSkuSnapshotSafely(input: {
     const sameSkuSnapshot = buildInventorySameSkuSnapshot({
       date: input.runDate,
       reportDate: input.reportDate,
+      generationId: input.context.generationId,
       context: input.context,
       registry: registryContext.registry,
       overrideRisks: registryContext.overrideRisks,
@@ -191,18 +193,21 @@ export async function repairPublicTrafficExposure(argv = process.argv.slice(2)):
   });
 
   const note = repairNote({ reportDate: priorContext.date, targetDate, baselineDate });
-  const context = analyzePublicTrafficData({
-    date: priorContext.date,
-    rows: merged.rows,
-    overview,
-    previousSummary: priorContext.previousSummary,
-    dataQualityNotes: Array.from(new Set([...(priorContext.dataQualityNotes ?? []), note])),
-    dailyDelta,
-    sevenDaySummary,
-    thirtyDaySummary,
-    cumulativeProducts: currentSnapshot,
-    orderAnalysis,
-  });
+  const context: PublicTrafficDataReportContext = {
+    ...analyzePublicTrafficData({
+      date: priorContext.date,
+      rows: merged.rows,
+      overview,
+      previousSummary: priorContext.previousSummary,
+      dataQualityNotes: Array.from(new Set([...(priorContext.dataQualityNotes ?? []), note])),
+      dailyDelta,
+      sevenDaySummary,
+      thirtyDaySummary,
+      cumulativeProducts: currentSnapshot,
+      orderAnalysis,
+    }),
+    generationId: randomUUID(),
+  };
   context.newProductPoolItems = priorContext.newProductPoolItems;
   context.newProductPoolIds = priorContext.newProductPoolIds;
   context.agentData = priorContext.agentData;
