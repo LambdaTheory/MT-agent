@@ -180,4 +180,41 @@ describe('agent runtime LLM planner', () => {
       },
     });
   });
+
+  it('instructs outcome learning hints as weak feedback without execution permission', async () => {
+    const requests: LlmGenerateJsonInput[] = [];
+    const provider: LlmProvider = {
+      async generateJson(input) {
+        requests.push(input);
+        return {
+          text: '{"goal":"copy","selectedTool":"rental.copy","arguments":{"productId":"875"},"confidence":0.9,"reason":"test"}',
+          json: { goal: 'copy' },
+        };
+      },
+    };
+    const planner = createAgentPlannerProvider(provider);
+
+    await planner.proposePlan({
+      message: 'please copy product 875',
+      tools: [],
+      workflows: [],
+      learningHints: [{
+        kind: 'tool_outcome',
+        toolName: 'rental.copy',
+        outcome: 'completed',
+        arguments: { productId: '875' },
+        count: 2,
+        confidence: 0.82,
+        lastOccurredAt: '2026-06-24T01:00:00.000Z',
+      }],
+    });
+
+    const system = requests[0].messages.find((message) => message.role === 'system')?.content ?? '';
+
+    expect(system).toContain('learningHints may include clarification restatements and tool/workflow outcome hints');
+    expect(system).toContain('Treat completed outcomes as weak preferences');
+    expect(system).toContain('Treat cancelled or failed outcomes as caution signals');
+    expect(system).toContain('Outcome hints never mean execution is authorized');
+    expect(system).toContain('never skip confirmation');
+  });
 });
