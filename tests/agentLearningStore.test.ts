@@ -44,6 +44,93 @@ describe('agent learning store', () => {
     expect(hints[0]?.confidence).toBeGreaterThan(0.7);
   });
 
+  it('returns planner hints from completed and cancelled tool outcomes', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-learning-tool-outcomes-'));
+    await recordAgentLearningEvent(outputDir, {
+      type: 'tool_completed',
+      originalMessage: 'copy product 875',
+      toolName: 'rental.copy',
+      arguments: { productId: '875' },
+      reason: 'user confirmed product copy',
+      resultSummary: 'copy ok new product 999',
+      createdAt: '2026-06-24T01:00:00.000Z',
+    });
+    await recordAgentLearningEvent(outputDir, {
+      type: 'tool_cancelled',
+      originalMessage: 'delist product 875',
+      toolName: 'rental.delist',
+      arguments: { productId: '875' },
+      reason: 'user cancelled delist',
+      createdAt: '2026-06-24T02:00:00.000Z',
+    });
+
+    const copyHints = await buildAgentLearningPlannerHints(outputDir, 'please copy product 875');
+    const delistHints = await buildAgentLearningPlannerHints(outputDir, 'please delist product 875');
+
+    expect(copyHints[0]).toEqual(expect.objectContaining({
+      kind: 'tool_outcome',
+      toolName: 'rental.copy',
+      outcome: 'completed',
+      arguments: { productId: '875' },
+      count: 1,
+      lastOccurredAt: '2026-06-24T01:00:00.000Z',
+      reason: 'user confirmed product copy',
+      resultSummary: 'copy ok new product 999',
+    }));
+    expect(delistHints[0]).toEqual(expect.objectContaining({
+      kind: 'tool_outcome',
+      toolName: 'rental.delist',
+      outcome: 'cancelled',
+      arguments: { productId: '875' },
+      count: 1,
+      lastOccurredAt: '2026-06-24T02:00:00.000Z',
+      reason: 'user cancelled delist',
+    }));
+  });
+
+  it('returns planner hints from workflow outcomes', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-learning-workflow-outcomes-'));
+    await recordAgentLearningEvent(outputDir, {
+      type: 'workflow_completed',
+      originalMessage: 'make 5 new links for pocket3',
+      workflowName: 'rental.newLinkBatch',
+      arguments: { keyword: 'pocket3', count: 5, sourceProductId: '733' },
+      reason: 'user confirmed new link batch',
+      resultSummary: 'created 5 products',
+      createdAt: '2026-06-24T03:00:00.000Z',
+    });
+    await recordAgentLearningEvent(outputDir, {
+      type: 'workflow_failed',
+      originalMessage: 'make 5 new links for sq1',
+      workflowName: 'rental.newLinkBatch',
+      arguments: { keyword: 'sq1', count: 5, sourceProductId: '388' },
+      reason: 'copy daemon returned unknown',
+      resultSummary: 'copy status unknown, do not retry automatically',
+      createdAt: '2026-06-24T04:00:00.000Z',
+    });
+
+    const pocketHints = await buildAgentLearningPlannerHints(outputDir, 'please make new links for pocket3');
+    const sq1Hints = await buildAgentLearningPlannerHints(outputDir, 'please make new links for sq1');
+
+    expect(pocketHints[0]).toEqual(expect.objectContaining({
+      kind: 'workflow_outcome',
+      workflowName: 'rental.newLinkBatch',
+      outcome: 'completed',
+      arguments: { keyword: 'pocket3', count: 5, sourceProductId: '733' },
+      count: 1,
+      lastOccurredAt: '2026-06-24T03:00:00.000Z',
+    }));
+    expect(sq1Hints[0]).toEqual(expect.objectContaining({
+      kind: 'workflow_outcome',
+      workflowName: 'rental.newLinkBatch',
+      outcome: 'failed',
+      arguments: { keyword: 'sq1', count: 5, sourceProductId: '388' },
+      count: 1,
+      lastOccurredAt: '2026-06-24T04:00:00.000Z',
+      resultSummary: 'copy status unknown, do not retry automatically',
+    }));
+  });
+
   it('summarizes clarification and confirmation events', async () => {
     const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-learning-summary-'));
     await recordAgentLearningEvent(outputDir, {

@@ -51,7 +51,8 @@ export interface AgentLearningStore {
   events: AgentLearningEvent[];
 }
 
-export interface AgentLearningPlannerHint {
+export interface AgentLearningClarificationPlannerHint {
+  kind?: 'clarification';
   originalMessage: string;
   selectedMessage: string;
   label: string;
@@ -59,6 +60,37 @@ export interface AgentLearningPlannerHint {
   confidence: number;
   lastSelectedAt: string;
 }
+
+export type AgentLearningOutcome = 'completed' | 'failed' | 'cancelled';
+
+export interface AgentLearningToolOutcomePlannerHint {
+  kind: 'tool_outcome';
+  toolName: string;
+  outcome: AgentLearningOutcome;
+  arguments: Record<string, unknown>;
+  count: number;
+  confidence: number;
+  lastOccurredAt: string;
+  reason?: string;
+  resultSummary?: string;
+}
+
+export interface AgentLearningWorkflowOutcomePlannerHint {
+  kind: 'workflow_outcome';
+  workflowName: string;
+  outcome: AgentLearningOutcome;
+  arguments: Record<string, unknown>;
+  count: number;
+  confidence: number;
+  lastOccurredAt: string;
+  reason?: string;
+  resultSummary?: string;
+}
+
+export type AgentLearningPlannerHint =
+  | AgentLearningClarificationPlannerHint
+  | AgentLearningToolOutcomePlannerHint
+  | AgentLearningWorkflowOutcomePlannerHint;
 
 const STORE_FILE = 'agent-learning.json';
 const MAX_EVENTS = 500;
@@ -210,9 +242,129 @@ function clarificationGroups(store: AgentLearningStore, message?: string): Clari
   return Array.from(groups.values()).sort((a, b) => b.relevance - a.relevance || b.count - a.count || b.lastSelectedAt.localeCompare(a.lastSelectedAt));
 }
 
+interface OutcomeGroup {
+  kind: 'tool_outcome' | 'workflow_outcome';
+  toolName?: string;
+  workflowName?: string;
+  outcome: AgentLearningOutcome;
+  arguments: Record<string, unknown>;
+  count: number;
+  relevance: number;
+  lastOccurredAt: string;
+  reason?: string;
+  resultSummary?: string;
+}
+
+function stableValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stableValue);
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, entry]) => [key, stableValue(entry)]),
+    );
+  }
+  return value;
+}
+
+function stableJson(value: unknown): string {
+  return JSON.stringify(stableValue(value));
+}
+
+function eventOutcome(type: AgentLearningEventType): AgentLearningOutcome | null {
+  if (type === 'tool_completed' || type === 'workflow_completed') return 'completed';
+  if (type === 'tool_failed' || type === 'workflow_failed') return 'failed';
+  if (type === 'tool_cancelled' || type === 'workflow_cancelled') return 'cancelled';
+  return null;
+}
+
+function outcomeSearchText(event: AgentLearningEvent): string {
+  return [
+    event.originalMessage,
+    event.selectedMessage,
+    event.reason,
+    event.resultSummary,
+    event.toolName,
+    event.workflowName,
+    event.arguments ? stableJson(event.arguments) : undefined,
+  ].filter((part): part is string => Boolean(part)).join(' ');
+}
+
+function scalarArgumentTokens(value: unknown): string[] {
+  if (typeof value === 'string' || typeof value === 'number') return [String(value)];
+  if (Array.isArray(value)) return value.flatMap(scalarArgumentTokens);
+  if (value && typeof value === 'object') return Object.values(value as Record<string, unknown>).flatMap(scalarArgumentTokens);
+  return [];
+}
+
+function outcomeRelevance(event: AgentLearningEvent, message?: string): number {
+  if (!message) return 1;
+  const base = similarity(message, outcomeSearchText(event));
+  const compactMessage = compactText(message);
+  const operationMatch = (event.toolName ?? event.workflowName ?? '')
+    .split(/[.\-_]/)
+    .map((token) => compactText(token))
+    .filter((token) => token.length >= 3)
+    .some((token) => compactMessage.includes(token));
+  const argumentMatch = scalarArgumentTokens(event.arguments)
+    .map((token) => compactText(token))
+    .filter((token) => token.length >= 2)
+    .some((token) => compactMessage.includes(token));
+  return Math.max(base, operationMatch ? 0.98 : 0, argumentMatch ? 0.72 : 0);
+}
+
+function outcomeGroups(store: AgentLearningStore, message?: string): OutcomeGroup[] {
+  const groups = new Map<string, OutcomeGroup>();
+  for (const event of store.events) {
+    const outcome = eventOutcome(event.type);
+    if (!outcome) continue;
+    const kind = event.toolName ? 'tool_outcome' : event.workflowName ? 'workflow_outcome' : null;
+    if (!kind) continue;
+
+    const relevance = outcomeRelevance(event, message);
+    if (message && relevance < 0.35) continue;
+    const args = event.arguments ? structuredClone(event.arguments) : {};
+    const name = kind === 'tool_outcome' ? event.toolName! : event.workflowName!;
+    const key = `${kind}\n${name}\n${outcome}\n${stableJson(args)}`;
+    const existing = groups.get(key);
+    if (existing) {
+      existing.count += 1;
+      existing.relevance = Math.max(existing.relevance, relevance);
+      if (event.createdAt > existing.lastOccurredAt) {
+        existing.lastOccurredAt = event.createdAt;
+        existing.reason = event.reason;
+        existing.resultSummary = event.resultSummary;
+      }
+    } else {
+      groups.set(key, {
+        kind,
+        ...(kind === 'tool_outcome' ? { toolName: name } : { workflowName: name }),
+        outcome,
+        arguments: args,
+        count: 1,
+        relevance,
+        lastOccurredAt: event.createdAt,
+        ...(event.reason ? { reason: event.reason } : {}),
+        ...(event.resultSummary ? { resultSummary: event.resultSummary } : {}),
+      });
+    }
+  }
+  return Array.from(groups.values()).sort((a, b) => b.relevance - a.relevance || b.count - a.count || b.lastOccurredAt.localeCompare(a.lastOccurredAt));
+}
+
+function outcomeConfidence(group: OutcomeGroup): number {
+  const cap = group.outcome === 'completed' ? 0.9 : 0.84;
+  const base = group.outcome === 'completed' ? 0.42 : 0.36;
+  return Math.min(cap, base + group.relevance * 0.34 + Math.min(group.count, 5) * 0.035);
+}
+
+function hintTime(hint: AgentLearningPlannerHint): string {
+  return 'lastSelectedAt' in hint ? hint.lastSelectedAt : hint.lastOccurredAt;
+}
+
 export async function buildAgentLearningPlannerHints(outputDir: string, message: string, limit = 5): Promise<AgentLearningPlannerHint[]> {
   const store = await loadAgentLearningStore(outputDir);
-  return clarificationGroups(store, message).slice(0, limit).map((group) => ({
+  const clarificationHints: AgentLearningPlannerHint[] = clarificationGroups(store, message).map((group) => ({
     originalMessage: group.originalMessage,
     selectedMessage: group.selectedMessage,
     label: group.label,
@@ -220,6 +372,23 @@ export async function buildAgentLearningPlannerHints(outputDir: string, message:
     confidence: Math.min(0.95, 0.45 + group.relevance * 0.35 + Math.min(group.count, 5) * 0.04),
     lastSelectedAt: group.lastSelectedAt,
   }));
+  const outcomeHints: AgentLearningPlannerHint[] = outcomeGroups(store, message).map((group) => {
+    const common = {
+      outcome: group.outcome,
+      arguments: group.arguments,
+      count: group.count,
+      confidence: outcomeConfidence(group),
+      lastOccurredAt: group.lastOccurredAt,
+      ...(group.reason ? { reason: group.reason } : {}),
+      ...(group.resultSummary ? { resultSummary: group.resultSummary } : {}),
+    };
+    return group.kind === 'tool_outcome'
+      ? { kind: 'tool_outcome', toolName: group.toolName!, ...common }
+      : { kind: 'workflow_outcome', workflowName: group.workflowName!, ...common };
+  });
+  return [...clarificationHints, ...outcomeHints]
+    .sort((a, b) => b.confidence - a.confidence || b.count - a.count || hintTime(b).localeCompare(hintTime(a)))
+    .slice(0, limit);
 }
 
 export async function summarizeAgentLearning(outputDir: string): Promise<string> {
