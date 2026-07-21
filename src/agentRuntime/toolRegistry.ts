@@ -482,7 +482,7 @@ const problemProductsArgumentsSchema = {
   type: 'object',
   properties: {
     problemType: { type: 'string', enum: ['low_exposure', 'weak_conversion', 'high_potential', 'new_product_pool', 'recommended_action'] },
-    date: { type: 'string' },
+    date: reportDateSchema,
   },
   required: ['problemType'],
   additionalProperties: false,

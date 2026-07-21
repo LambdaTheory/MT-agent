@@ -117,7 +117,7 @@ import {
 import { inferPriceMultiplierFromText, readPriceMultiplierArgument } from './priceMultiplier.js';
 import { runPublicTrafficReportDateComparison, runPublicTrafficReportQuery, type PublicTrafficReportQueryArguments } from './reportQuery.js';
 import { runProductLinkQuery, type ProductLinkQueryArguments } from './productLinkQuery.js';
-import { findLatestReportContext, findReportContextByDate, formatConversionSummary, formatLatestSummary, formatProductRows, parseNumericProductIdList } from './reportStore.js';
+import { findLatestReportContext, findReportContextByDate, formatConversionSummary, formatLatestSummary, formatProductQueryResult, formatProductRows, parseNumericProductIdList, queryProductResult } from './reportStore.js';
 import { saveAgentToolConfirmRequest } from './agentToolConfirmStore.js';
 import { loadRentalPriceRollbackAction, saveRentalPriceRollbackAction } from './rentalPriceRollbackActionStore.js';
 import { refreshActivityPlanConfirmationKey, saveRefreshActivityPlan, type RefreshActivityPlan } from './refreshActivityPlanStore.js';
@@ -252,6 +252,18 @@ function formatRegistryProductRows(productIds: string[], entries: LinkRegistryEn
     const platform = entry.platformProductId ? `平台商品ID ${entry.platformProductId}` : '平台商品ID 未记录';
     return `端内ID ${entry.internalProductId} ${name}\n${platform}，状态 ${formatLinkRegistryStatus(entry)}`;
   }).join('\n\n');
+}
+
+function formatDatedPlannerProductQueryResult(result: ReturnType<typeof queryProductResult>): string {
+  if (result.matches.length === 0) return formatProductQueryResult(result);
+  return result.matches.map((match) => [
+    `端内ID ${match.internalProductId} ${match.row.productName}`,
+    ...match.periods.map((period) => `${period.period.replace('d', '日')}：曝光 ${formatNullableMetric(period.exposure)}，访问 ${formatNullableMetric(period.visits)}，发货 ${formatNullableMetric(period.shippedOrders)}`),
+  ].join('\n')).join('\n\n');
+}
+
+function formatNullableMetric(value: number | null): string {
+  return value === null ? '暂无数据' : String(value);
 }
 
 async function inventoryStatusToolResponse(
@@ -3577,12 +3589,16 @@ export async function executeAgentToolRequest(
       const report = await findReportContextForTool(outputDir, date);
       const keyword = requireString(request.arguments.keyword, 'keyword');
       if (report) {
-        const unified = runProductLinkQuery(report.context, {
-          queryType: parseNumericProductIdList(keyword).length > 1 ? 'productList' : 'productDetail',
-          productQuery: keyword,
-          ...(date ? { date } : {}),
-        });
-        if (unified.result && (unified.result.matches.length > 0 || unified.result.ambiguous.length > 0)) return unified.response;
+        if (date) {
+          const result = queryProductResult(report.context, keyword);
+          if (result.matches.length > 0 || result.ambiguous.length > 0) return { text: formatDatedPlannerProductQueryResult(result) };
+        } else {
+          const unified = runProductLinkQuery(report.context, {
+            queryType: parseNumericProductIdList(keyword).length > 1 ? 'productList' : 'productDetail',
+            productQuery: keyword,
+          });
+          if (unified.result && (unified.result.matches.length > 0 || unified.result.ambiguous.length > 0)) return unified.response;
+        }
       }
       if (!report && date) return { text: missingReportContextText(date) };
       const productIds = parseNumericProductIdList(keyword);
