@@ -62,6 +62,50 @@
       "reason": "approved_product_group_audit"
     },
     {
+      "internalProductId": "1076",
+      "productName": "IXUS 130",
+      "shortName": "canon-ixus-130",
+      "sameSkuGroupId": "canon-ixus-130",
+      "status": "active",
+      "listingState": "on_sale",
+      "statusObservedAt": "2026-07-20T07:11:19.162Z",
+      "updatedAt": "2026-07-20",
+      "reason": "inactive_refresh_success"
+    },
+    {
+      "internalProductId": "1077",
+      "productName": "Osmo Nano",
+      "shortName": "dji-osmo-nano",
+      "sameSkuGroupId": "dji-osmo-nano",
+      "status": "active",
+      "listingState": "on_sale",
+      "statusObservedAt": "2026-07-20T07:11:19.162Z",
+      "updatedAt": "2026-07-20",
+      "reason": "inactive_refresh_success"
+    },
+    {
+      "internalProductId": "1078",
+      "productName": "Osmo Nano",
+      "shortName": "dji-osmo-nano",
+      "sameSkuGroupId": "dji-osmo-nano",
+      "status": "active",
+      "listingState": "on_sale",
+      "statusObservedAt": "2026-07-20T07:11:19.162Z",
+      "updatedAt": "2026-07-20",
+      "reason": "inactive_refresh_success"
+    },
+    {
+      "internalProductId": "1079",
+      "productName": "SQ1",
+      "shortName": "fujifilm-instax-square-sq1",
+      "sameSkuGroupId": "fujifilm-instax-square-sq1",
+      "status": "active",
+      "listingState": "on_sale",
+      "statusObservedAt": "2026-07-20T07:11:19.162Z",
+      "updatedAt": "2026-07-20",
+      "reason": "inactive_refresh_success"
+    },
+    {
       "internalProductId": "218",
       "sameSkuGroupId": "vivo-蔡司-2-35x增距镜-神器",
       "confidence": 0.95,
@@ -256,7 +300,7 @@
       "confidence": 0.95,
       "reason": "link_registry_maintenance_review",
       "maintainer": "group_review_csv",
-      "updatedAt": "2026-07-20",
+      "updatedAt": "2026-07-21",
       "sameSkuGroupId": "canon-sx740",
       "categoryId": "camera",
       "categoryName": "相机",
@@ -358,7 +402,7 @@
       "productType": "smartphone",
       "shortName": "x200 u",
       "confidence": 0.95,
-      "updatedAt": "2026-07-20",
+      "updatedAt": "2026-07-21",
       "reason": "link_registry_maintenance_review"
     },
     {
@@ -369,7 +413,7 @@
       "productType": "gimbal-camera",
       "shortName": "Pocket 3",
       "confidence": 0.95,
-      "updatedAt": "2026-07-20",
+      "updatedAt": "2026-07-21",
       "reason": "link_registry_maintenance_review"
     },
     {
@@ -677,7 +721,7 @@
       "confidence": 0.95,
       "reason": "link_registry_maintenance_review",
       "maintainer": "group_review_csv",
-      "updatedAt": "2026-07-20",
+      "updatedAt": "2026-07-21",
       "categoryId": "camera",
       "categoryName": "相机",
       "productType": "instant-camera"
@@ -1860,7 +1904,7 @@
       "confidence": 0.95,
       "reason": "link_registry_maintenance_review",
       "maintainer": "codex",
-      "updatedAt": "2026-07-20"
+      "updatedAt": "2026-07-21"
     },
     {
       "internalProductId": "762",
@@ -1892,7 +1936,7 @@
       "confidence": 0.95,
       "reason": "link_registry_maintenance_review",
       "maintainer": "codex",
-      "updatedAt": "2026-07-20"
+      "updatedAt": "2026-07-21"
     },
     {
       "internalProductId": "764",
@@ -2785,6 +2829,14 @@
       "reason": "link_registry_maintenance_review"
     },
     {
+      "internalProductId": "966",
+      "status": "removed",
+      "listingState": "delisted",
+      "statusObservedAt": "2026-07-20T07:11:19.162Z",
+      "updatedAt": "2026-07-20",
+      "reason": "inactive_refresh_success"
+    },
+    {
       "internalProductId": "969",
       "sameSkuGroupId": "canon-g7x2",
       "categoryId": "camera",
@@ -2799,6 +2851,22 @@
       "confidence": 0.95,
       "updatedAt": "2026-07-16",
       "reason": "approved_product_group_audit"
+    },
+    {
+      "internalProductId": "971",
+      "status": "removed",
+      "listingState": "delisted",
+      "statusObservedAt": "2026-07-20T07:11:19.162Z",
+      "updatedAt": "2026-07-20",
+      "reason": "inactive_refresh_success"
+    },
+    {
+      "internalProductId": "976",
+      "status": "removed",
+      "listingState": "delisted",
+      "statusObservedAt": "2026-07-20T07:11:19.162Z",
+      "updatedAt": "2026-07-20",
+      "reason": "inactive_refresh_success"
     },
     {
       "internalProductId": "987",
