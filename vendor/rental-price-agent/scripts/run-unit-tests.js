@@ -715,6 +715,84 @@ test("findProductOnList searches active sold-out and stock channels and returns 
   assert.ok(visited.some(url => url.includes("r=goods.stock&pagesize=100")));
 });
 
+test("actionDelist treats a stock-channel product as already delisted", async () => {
+  let currentUrl = "";
+  pwRunner.__setConfigForTest({
+    saas: {
+      loginUrl: "https://trusted.example/web/index.php?r=dashboard",
+      productListUrl: "https://trusted.example/web/index.php?r=goods",
+      productOutListUrl: "https://trusted.example/web/index.php?r=goods.out",
+      productStockListUrl: "https://trusted.example/web/index.php?r=goods.stock",
+    },
+    selectors: { login: { username: "#u", password: "#p", submitButton: "#s", successIndicator: ".ok" } },
+  });
+  pwRunner.__setPageForTest({
+    async goto(url) { currentUrl = url; },
+    url() { return currentUrl; },
+    async waitForTimeout() {},
+    async waitForLoadState() {},
+    async evaluate() { return []; },
+    async $(selector) {
+      if (selector === "input[name='keyword']") return null;
+      if (selector === `a[href*="goods.edit&id=975"]` && currentUrl.includes("r=goods.stock")) {
+        return { async evaluateHandle(fn) { return fn({ closest() { return { tag: "row" }; } }); } };
+      }
+      return null;
+    },
+  });
+
+  const result = await pwRunner.actionDelist("975");
+
+  assert.equal(result.status, "ok", JSON.stringify(result));
+  assert.equal(result.channelLabel, "仓库");
+  assert.equal(result.alreadyDelisted, true);
+});
+
+test("actionDelist accepts warehouse readback when confirmation dialog is not recognized", async () => {
+  let currentUrl = "";
+  let delisted = false;
+  const rowHandle = { async $(selector) { return selector === "input[type='checkbox']" ? { async check() {} } : null; } };
+  pwRunner.__setConfigForTest({
+    saas: {
+      loginUrl: "https://trusted.example/web/index.php?r=dashboard",
+      productListUrl: "https://trusted.example/web/index.php?r=goods",
+      productOutListUrl: "https://trusted.example/web/index.php?r=goods.out",
+      productStockListUrl: "https://trusted.example/web/index.php?r=goods.stock",
+    },
+    selectors: { login: { username: "#u", password: "#p", submitButton: "#s", successIndicator: ".ok" } },
+  });
+  pwRunner.__setPageForTest({
+    async goto(url) { currentUrl = url; },
+    url() { return currentUrl; },
+    async waitForTimeout() {},
+    async waitForLoadState() {},
+    async waitForSelector() { return null; },
+    async evaluate(fn) {
+      const src = String(fn);
+      if (src.includes("candidates.sort")) return { clicked: false, text: "" };
+      if (src.includes("checkedInputs")) return { url: currentUrl, checkedCount: 1, checkedInputs: [], dialogs: [], buttons: [], exactBatchButtons: [] };
+      return [];
+    },
+    async $(selector) {
+      if (selector === "input[name='keyword']") return null;
+      if (selector === `a[href*="goods.edit&id=977"]`) {
+        if (!delisted && currentUrl.includes("r=goods&")) return { async evaluateHandle() { return rowHandle; } };
+        if (delisted && currentUrl.includes("r=goods.stock")) return { async evaluateHandle() { return rowHandle; } };
+      }
+      if (selector.includes("data-toggle='batch'")) return { async click() { delisted = true; } };
+      return null;
+    },
+  });
+
+  const result = await pwRunner.actionDelist("977");
+
+  assert.equal(result.status, "warn", JSON.stringify(result));
+  assert.equal(result.channelLabel, "仓库");
+  assert.equal(result.previousChannelLabel, "在租");
+  assert.equal(result.confirmed, false);
+  assert.equal(result.alreadyDelisted, true);
+});
+
 test("actionPlatformSearch aggregates products across three channels and preserves channel labels", async () => {
   let currentUrl = "";
   pwRunner.__setConfigForTest({

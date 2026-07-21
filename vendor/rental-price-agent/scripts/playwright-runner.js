@@ -2603,6 +2603,7 @@ async function actionDelist(productId) {
   if (lookup.status === "error") return lookup;
   const { found, row, channelKey, channelLabel } = lookup;
   if (!found) return { status: "error", message: "Product not found: " + productId };
+  if (isDelistedLookup(lookup)) return delistAlreadyEffectiveResult(productId, lookup, { status: "ok", message: "Product already in warehouse; no delist needed" });
   await dismissNonDestructiveOverlays();
   const cb = await row.$("input[type='checkbox']");
   if (!cb) return { status: "error", message: "Checkbox not found in row" };
@@ -2616,6 +2617,18 @@ async function actionDelist(productId) {
   await btn.click();
   const confirm = await maybeConfirmDialog();
   if (!confirm.confirmed) {
+    const readback = await findProductOnList(productId).catch(error => ({ status: "error", message: error && error.message ? error.message : String(error) }));
+    if (isDelistedLookup(readback)) {
+      return delistAlreadyEffectiveResult(productId, readback, {
+        status: "warn",
+        confirmed: false,
+        confirmText: confirm.text,
+        diagnostics: confirm.diagnostics,
+        previousChannelKey: channelKey,
+        previousChannelLabel: channelLabel,
+        message: "Delist appears effective after readback, but confirmation dialog was not recognized",
+      });
+    }
     return { status: "error", action: "delist", productId, channelKey, channelLabel, confirmed: false, confirmText: confirm.text, diagnostics: confirm.diagnostics, message: "Delist confirmation dialog was not confirmed" };
   }
   await page.waitForTimeout(2000);
@@ -2633,6 +2646,27 @@ async function actionDelist(productId) {
   if (stillVisible) return { status: "error", action: "delist", productId, channelKey, channelLabel, confirmed: confirm.confirmed, confirmText: confirm.text, message: "Product still visible after delist" };
 
   return { status: "ok", action: "delist", productId, channelKey, channelLabel, confirmed: confirm.confirmed, confirmText: confirm.text };
+}
+
+function isDelistedLookup(lookup) {
+  return Boolean(lookup && lookup.found && lookup.channelKey === "stock");
+}
+
+function delistAlreadyEffectiveResult(productId, lookup, extra = {}) {
+  return {
+    status: extra.status || "ok",
+    action: "delist",
+    productId,
+    channelKey: lookup.channelKey,
+    channelLabel: lookup.channelLabel,
+    alreadyDelisted: true,
+    ...(extra.confirmed !== undefined ? { confirmed: extra.confirmed } : {}),
+    ...(extra.confirmText ? { confirmText: extra.confirmText } : {}),
+    ...(extra.diagnostics ? { diagnostics: extra.diagnostics } : {}),
+    ...(extra.previousChannelKey ? { previousChannelKey: extra.previousChannelKey } : {}),
+    ...(extra.previousChannelLabel ? { previousChannelLabel: extra.previousChannelLabel } : {}),
+    message: extra.message || "Product already appears delisted",
+  };
 }
 
 // --- Copy product ---
@@ -3431,7 +3465,9 @@ if (require.main === module) {
 	    clickVisibleConfirmIn,
 	    dismissNonDestructiveOverlays,
 	    clickVisibleDestructiveConfirm,
-    collectDelistDiagnostics,
+	    collectDelistDiagnostics,
+	    actionDelist,
+	    isDelistedLookup,
 	    findProductOnList,
 	    handleLegacyAction,
 	    classifyPlatformSearchExclusion,
