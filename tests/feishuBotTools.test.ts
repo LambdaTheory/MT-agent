@@ -3779,14 +3779,28 @@ describe('handleBotIntent', () => {
       label: '铺新链',
       createdAt: '2026-06-23T01:00:00.000Z',
     });
+    await recordAgentLearningEvent(outputDir, {
+      type: 'workflow_completed',
+      originalMessage: 'make 5 new links for pocket3',
+      workflowName: 'rental.newLinkBatch',
+      arguments: { keyword: 'pocket3', count: 5, sourceProductId: '733' },
+      reason: 'user confirmed new link batch',
+      resultSummary: 'created 5 products',
+      createdAt: '2026-06-24T03:00:00.000Z',
+    });
     const planner: AgentPlannerProvider = {
       async proposePlan(request) {
         expect(request.message).toBe('帮我处理 pocket3');
-        expect(request.learningHints).toEqual([expect.objectContaining({
+        expect(request.learningHints).toEqual(expect.arrayContaining([expect.objectContaining({
           originalMessage: '帮我处理一下 pocket3',
           selectedMessage: '帮我铺十条 pocket3 的新链',
           label: '铺新链',
-        })]);
+        }), expect.objectContaining({
+          kind: 'workflow_outcome',
+          workflowName: 'rental.newLinkBatch',
+          outcome: 'completed',
+          arguments: { keyword: 'pocket3', count: 5, sourceProductId: '733' },
+        })]));
         return JSON.stringify({
           goal: '查询商品表现',
           selectedTool: 'product.query',
