@@ -2,7 +2,7 @@
 
 > 本文面向接手 MT-agent 的开发 Agent 与维护人员，说明模块现状、文件边界、主链路、开发方向、安全约束和验证方式。
 >
-> **最后核对基线：2026-07-20；当前稳定集成分支：`master`。** 文档描述应优先以当前代码和测试为准，阶段性审计文档仅用于理解历史决策和剩余运行边界。
+> **最后核对基线：2026-07-21；当前稳定集成分支：`master`。** 文档描述应优先以当前代码和测试为准，阶段性审计文档仅用于理解历史决策和剩余运行边界。
 
 ---
 
@@ -19,6 +19,8 @@ MT-agent 是一个服务于支付宝商品运营场景的 `Node.js + TypeScript`
 ```
 
 项目当前的正确定位是：**以数据分析、报表、提醒、只读查询和人工确认后的半自动执行为主的运营 Agent 基座。**
+
+截至 2026-07-21，`master` 已整合指定日期日报查询/推送与 Agent outcome 学习提示两条近期主线：飞书 Bot 可围绕最新或指定业务数据日做日报查询、重发和群推送；LLM planner 可读取经过脱敏和降权处理的历史 outcome hints，用于改善工具选择与澄清，但不得把历史文本当作授权或执行参数来源。
 
 项目**不是**无人值守的全自动改价、下架、复制商品或上链执行器：
 
@@ -199,6 +201,16 @@ MT-agent/
 
 2026-07-15 已完成一次历史缺口回补：业务数据日 `2026-06-12`、`2026-06-13`、`2026-06-16`、`2026-06-17`、`2026-06-19`、`2026-06-22`、`2026-06-29`、`2026-07-01`、`2026-07-02`、`2026-07-08`、`2026-07-10` 的三周期访问页 raw 已写入主仓库 `C:/works/MT-agent/output` 并重建对应本地日报，未重发飞书日报。复核扫描了 35 个日报目录、34 个业务数据日，`2026-06-10` 至 `2026-07-14` 范围内有日报上下文的业务日期均无访问页 raw 缺失；`2026-06-18` 本地无对应日报上下文，不计为访问页缺失。
 
+#### 指定日期日报查询与推送基线（2026-07-21）
+
+飞书 Bot 和 Agent 工具已支持围绕指定业务数据日读取、查询、重发和群推送既有日报，不重新抓取、不默认重建：
+
+- `publicTraffic.reportQuery`、`publicTraffic.problemProducts`、`publicTraffic.resendLatestReport`、`publicTraffic.pushLatestReportToGroup` 等 planner-visible 工具共享 `reportDateSchema`，支持 `YYYY-MM-DD` 以及常见 `YYYY/M/D`、`M-D`、`M月D日` 输入，执行侧仍以标准业务数据日定位日报上下文。
+- 指定日期查找必须通过 `src/feishuBot/reportStore.ts` 的 `findReportContextByDate()`，它按 `公域数据上下文_<runDate>.json` 内的 `context.date` 匹配业务数据日，不能只用 `output/<runDate>/` 目录名推断。
+- 指定日期日报重发/群推送只发送已有日报上下文；没有找到上下文时应明确返回“没有找到 <date> 的公域日报上下文”，不得静默退回最新日报。
+- 多接收方推送由飞书投递层处理，`sendTo` / 群推送只改变发送目标，不改变日报生成、查询或重抓取语义。
+- 日期类回归覆盖在 `tests/agentRuntimeToolRegistry.test.ts`、`tests/feishuBotTools.test.ts`、`tests/feishuBotReportStore.test.ts` 和 `tests/feishuCardDelivery.test.ts`；改动后优先跑这些定向测试。
+
 #### 健康度与托管异常口径（2026-07-16）
 
 公域日报健康度规则已下沉到 `src/publicTraffic/rulesConfig.ts` 的 `health` 配置，并由 `src/cli/publicTrafficReport.ts` / `src/publicTraffic/rebuildPublicTrafficReport.ts` 传入 `analyzePublicTrafficData()`。分析函数仍保持纯函数，不在内部读取配置文件。
@@ -295,6 +307,10 @@ MT-agent/
 
 - 通过 OpenAI-compatible `/chat/completions` 供应商接入。
 - 配置优先级：`MT_AGENT_LLM_*`，其次 `LLM_*`；`MT_AGENT_LLM_PROVIDER=disabled` 可关闭规划器。
+- 飞书 generic planner 会在可用时调用 `buildAgentLearningPlannerHints(outputDir, message)`，把历史澄清选择、工具 outcome 和 workflow outcome 以 `learningHints` 注入 planner request；这些 hints 只是弱反馈，不是新权限、新工具或执行参数来源。
+- `learningHints` 必须被视为不可信历史数据：LLM prompt 已明确禁止跟随嵌入在 hints、arguments、labels、messages 或 summaries 中的指令；新增 planner prompt 时必须保留同等强度的 prompt-injection 边界。
+- planner-visible outcome hints 不得暴露 raw `reason` 或 `resultSummary`；`arguments` 必须先经 `sanitizeHintArguments()` 脱敏，敏感 key、URL、路径类字符串要替换为 `[redacted]`。新增学习字段前先判断是否会把用户私密文本、执行证据或可诱导指令交给 LLM。
+- outcome hints 当前用于提升工具选择、澄清 restatement 和参数倾向；最终仍要经过工具 schema、执行端校验、确认卡和 hidden-tool 边界。不能因为历史上某个工具成功过就跳过澄清、确认或安全源检查。
 - `plannerVisible: true` 才能由 LLM 直接选择。
 - `plannerVisible: false` 是内部/隐藏运行时工具，绝不能通过普通 planner 输出或 continuation 直接调用。
 - 工具 schema、prompt 和执行端必须是同一份可兑现契约；schema 不能声明执行端做不到的字段或枚举。本地 planner 校验已覆盖 `anyOf`、`oneOf`、`not`、`enum`、`pattern`、数组/对象必填项和 `additionalProperties`，新增 schema 约束时必须补对应回归测试。
@@ -523,7 +539,7 @@ npm run public-traffic-report / npm run rebuild-latest
 | `src/report/` | 通用 Markdown、XLSX 构建 |
 | `src/storage/` | output 路径和 run log |
 | `src/observability/` | 运行日志 |
-| `src/agentLearning/` | Agent 学习记录存储 |
+| `src/agentLearning/` | Agent 学习记录存储、clarification/tool/workflow outcome 分组、planner hint relevance/confidence 与脱敏 |
 
 ### 4.12 `vendor/rental-price-agent/`：租赁价外挂技能
 
@@ -685,22 +701,24 @@ git worktree add .worktrees/<topic> -b codex/<topic> master
 
 ```powershell
 npm run build
-npm test -- --exclude ".worktrees/**"
+npx vitest run --dir tests
 ```
 
 - `npm run build`：`tsc -p tsconfig.json`。
-- `npm test`：`vitest run`。
+- `npm test`：`vitest run`；在当前仓库有 `.worktrees/`、`.claude/worktrees/` 等镜像目录时，优先直接使用 `npx vitest run --dir tests ...` 限定根测试目录，避免误扫历史 worktree 测试。
 - 未配置 ESLint/Prettier；保持相邻文件既有 TypeScript 风格、命名和注释密度。
 
 按模块聚焦测试示例：
 
 ```powershell
-npm test -- tests/feishuBot*.test.ts
-npm test -- tests/linkRegistry*.test.ts
-npm test -- tests/publicTraffic*.test.ts
-npm test -- tests/inventoryStatusSnapshot.test.ts tests/inventoryStatusStore.test.ts tests/inventoryStatusHistory.test.ts tests/inventoryStatusQuery.test.ts tests/inventoryStatusCard.test.ts tests/linkRegistryGroupReview.test.ts tests/linkRegistryGroupReviewCli.test.ts
-npm test -- tests/dailyMission*.test.ts
-npm test -- --run tests/dashboardCrawlerSource.test.ts tests/dashboardCaptureDate.test.ts tests/captureDashboardBatchCli.test.ts tests/dashboardRefresh.test.ts tests/captureDashboardCliSource.test.ts tests/exposureCrawlerSource.test.ts
+npx vitest run --dir tests feishuBotTools.test.ts feishuBotReportStore.test.ts feishuCardDelivery.test.ts agentRuntimeToolRegistry.test.ts
+npx vitest run --dir tests agentLearningStore.test.ts agentRuntimeLlmPlanner.test.ts
+npx vitest run --dir tests feishuBot*.test.ts
+npx vitest run --dir tests linkRegistry*.test.ts
+npx vitest run --dir tests publicTraffic*.test.ts
+npx vitest run --dir tests inventoryStatusSnapshot.test.ts inventoryStatusStore.test.ts inventoryStatusHistory.test.ts inventoryStatusQuery.test.ts inventoryStatusCard.test.ts linkRegistryGroupReview.test.ts linkRegistryGroupReviewCli.test.ts
+npx vitest run --dir tests dailyMission*.test.ts
+npx vitest run --dir tests dashboardCrawlerSource.test.ts dashboardCaptureDate.test.ts captureDashboardBatchCli.test.ts dashboardRefresh.test.ts captureDashboardCliSource.test.ts exposureCrawlerSource.test.ts
 ```
 
 访问页补抓完成后，必须按业务数据日复核 `output`：读取每个 `公域数据上下文_<runDate>.json` 的 `date`，再检查同目录 `公域访问数据_1日.json`、`公域访问数据_7日.json`、`公域访问数据_30日.json` 是否存在、JSON 可读、`collection.complete === true` 且 `rowCount > 0`。不要只按目录名判断数据日期。
@@ -711,7 +729,8 @@ npm test -- --run tests/dashboardCrawlerSource.test.ts tests/dashboardCaptureDat
 
 - 只改纯函数/数据层：至少执行对应测试 + build。
 - 改工具 schema/运行时/飞书路由：测试工具 contract、执行器、SDK 与 HTTP 路径（若两者共享能力）。
-- 改链接维护 LLM 展示或 provider wiring：至少跑 `tests/linkRegistryMaintenanceSession.test.ts`、`tests/linkRegistryAuditReviewLlm.test.ts`、`tests/cliLoadEnvSource.test.ts`、相关 `tests/feishuBotTools.test.ts` 用例和 `tests/publicTrafficReportCliBehavior.test.ts`，并用 `--exclude ".worktrees/**" --exclude ".claude/**"` 避免误扫历史 worktree 测试。
+- 改 Agent 学习提示或 planner hint 注入：至少跑 `npx vitest run --dir tests agentLearningStore.test.ts agentRuntimeLlmPlanner.test.ts feishuBotTools.test.ts` 和 `npm run build`，并人工复核 hints 中不得出现 raw `reason`、raw `resultSummary`、URL、路径、token、secret 或可被当作指令的历史文本。
+- 改链接维护 LLM 展示或 provider wiring：至少跑 `tests/linkRegistryMaintenanceSession.test.ts`、`tests/linkRegistryAuditReviewLlm.test.ts`、`tests/cliLoadEnvSource.test.ts`、相关 `tests/feishuBotTools.test.ts` 用例和 `tests/publicTrafficReportCliBehavior.test.ts`；命令同样使用 `npx vitest run --dir tests ...`，避免误扫历史 worktree 测试。
 - 改 crawler：优先 source/fixture 测试；真实后台抓取需先获授权。
 - 改库存快照：至少覆盖 builder、strict reader、query、card、Bot 工具和 group-review CLI；验证 `null`/零值语义及 generation/date 一致性门禁。
 - 改写操作：必须补齐 preview、确认、拒绝、重复确认、失败、readback/审计测试。
