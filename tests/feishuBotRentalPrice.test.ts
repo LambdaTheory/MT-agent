@@ -128,7 +128,9 @@ describe('rental price Feishu integration', () => {
     };
 
     const response = await handleBotIntent(parseBotIntent('改价 商品761 1天22'), 'output', { rentalPriceClient: client });
-    expect(response.card).toBeUndefined();
+    expect(response.card).toBeDefined();
+    expect(JSON.stringify(response.card)).toContain('租赁改价预览已阻断');
+    expect(JSON.stringify(response.card)).not.toContain('rental_price_confirm');
     expect(response.text).toContain('审计存在警告');
     expect(response.text).toContain('改价预览：1 个端内ID');
   });
@@ -152,7 +154,9 @@ describe('rental price Feishu integration', () => {
     };
 
     const response = await handleBotIntent(parseBotIntent('改价 商品761 1天0'), 'output', { rentalPriceClient: client });
-    expect(response.card).toBeUndefined();
+    expect(response.card).toBeDefined();
+    expect(JSON.stringify(response.card)).toContain('租赁改价预览已阻断');
+    expect(JSON.stringify(response.card)).not.toContain('rental_price_confirm');
     expect(response.text).toContain('审计存在错误');
     expect(response.text).not.toContain('rental_price_confirm');
   });
@@ -601,6 +605,50 @@ describe('rental price skill client copy diagnostics', () => {
     expect(rolledBackTask.status).toBe('rolled_back');
     expect(rolledBackTask.evidence.some((item) => item.type === 'rollback_verify_result')).toBe(true);
   }, 30000);
+
+  it('recovers rollback metadata from bound artifacts when completed task records missed one audit field', async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), 'mt-agent-rental-price-rollback-recover-'));
+    await copyRentalPriceAuditScripts(rootDir);
+    const dataRoot = join(dirname(rootDir), `.${basename(rootDir)}-data`);
+    const currentValues: Record<string, { rent1day: string }> = {
+      '954': { rent1day: '100.00' },
+      '959': { rent1day: '40.00' },
+    };
+    vi.stubGlobal('fetch', vi.fn(async (_input, init) => {
+      const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+      const productId = typeof body.productId === 'string' ? body.productId : typeof body.expectedProductId === 'string' ? body.expectedProductId : '954';
+      if (body.action === 'read') return new Response(JSON.stringify({ status: 'ok', productId, values: currentValues[productId], specs: [] }));
+      if (body.action === 'apply' && typeof body.changesFile === 'string') {
+        const changes = JSON.parse(await readFile(body.changesFile, 'utf8')) as Record<string, string>;
+        if (typeof changes.rent1day === 'string') currentValues[productId].rent1day = changes.rent1day;
+        return new Response(JSON.stringify({ status: 'ok' }));
+      }
+      return new Response(JSON.stringify({ status: 'ok' }));
+    }));
+    const client = createRentalPriceSkillClient({ rootDir, daemonUrl: 'http://127.0.0.1:9223' });
+
+    const runCase = async (productId: string, newValue: string, mutateTask: (task: Record<string, unknown>) => void) => {
+      const preview = await client.preview({ mode: 'explicit_fields', productId, fields: { rent1day: newValue } });
+      const execution = await client.execute({ mode: 'explicit_fields', productId, fields: preview.fields, audit: preview.audit });
+      expect(execution.ok).toBe(true);
+      const taskFile = join(dataRoot, 'tasks', `${preview.audit?.taskId}.json`);
+      const task = JSON.parse(await readFile(taskFile, 'utf8')) as Record<string, unknown>;
+      mutateTask(task);
+      await writeFile(taskFile, JSON.stringify(task, null, 2), 'utf8');
+
+      const rollback = await client.rollback!({ taskId: preview.audit!.taskId! });
+
+      expect(rollback.ok).toBe(true);
+      expect(rollback.productId).toBe(productId);
+      expect(rollback.lines.join('\n')).toContain(`auditTask: ${preview.audit?.taskId}`);
+    };
+
+    await runCase('954', '110.00', (task) => { delete task.rollbackFile; });
+    await runCase('959', '44.00', (task) => { delete task.rollbackSha256; });
+
+    expect(currentValues['954'].rent1day).toBe('100.00');
+    expect(currentValues['959'].rent1day).toBe('40.00');
+  }, 60000);
 
   it('persists submit failure details after apply succeeds without running verify', async () => {
     const rootDir = await mkdtemp(join(tmpdir(), 'mt-agent-rental-price-submit-failure-'));

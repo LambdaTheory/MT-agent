@@ -1615,7 +1615,7 @@ function batchReadPricePreviewArtifact(
     }
     if (Object.keys(fields).length) specFields[specId] = fields;
   }
-  return Object.keys(specFields).length > 1 ? specFields : displayFields;
+  return Object.keys(specFields).length > 0 ? specFields : displayFields;
 }
 
 const BATCH_READ_AUDIT_CONCURRENCY = 12;

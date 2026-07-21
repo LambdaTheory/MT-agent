@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { access, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { basename, dirname, resolve, sep, join, isAbsolute } from 'node:path';
 import { promisify } from 'node:util';
 import { parseAgentToolConfirmContinuation, type AgentToolConfirmContinuation } from '../agentRuntime/approvalCard.js';
@@ -784,7 +784,7 @@ function selectedFields(values: Record<string, unknown>, request: RentalPriceCha
 function selectedAuditArtifactFields(values: Record<string, unknown>, request: RentalPriceChangeRequest, fields: Record<string, string>): PriceChangeArtifact {
   if (request.mode === 'explicit_fields') return fields;
   const perSpec = selectedPerSpecFields(values, request);
-  return Object.keys(perSpec).length > 1 ? perSpec : fields;
+  return Object.keys(perSpec).length > 0 ? perSpec : fields;
 }
 
 function commandStatus(response: Record<string, unknown>): string {
@@ -1369,6 +1369,22 @@ function productIdFromRollbackFile(path: string): string | undefined {
   return /(?:^|[\\/])rollback_(\d+)[-_]/.exec(path)?.[1];
 }
 
+async function findRollbackFileByHash(rootDir: string, productId: string, rollbackSha256: string): Promise<string | undefined> {
+  const artifactDir = mtAgentAuditArtifactDir(rootDir);
+  let entries: string[];
+  try {
+    entries = await readdir(artifactDir);
+  } catch (_error) {
+    return undefined;
+  }
+  for (const entry of entries) {
+    if (!entry.startsWith(`rollback_${productId}-`) || !entry.endsWith('.json')) continue;
+    const candidate = join(artifactDir, entry);
+    if (await fileSha256(candidate) === rollbackSha256) return candidate;
+  }
+  return undefined;
+}
+
 function readAuditHash(value: unknown): string | undefined {
   const hash = readString(value);
   return hash && /^[a-f0-9]{64}$/.test(hash) ? hash : undefined;
@@ -1416,18 +1432,20 @@ async function resolveRollbackReference(rootDir: string, request: RentalPriceRol
   const task = await readJsonRecord(taskFile);
   productId = productId ?? productIdFromTaskRecord(task);
   const changesFile = safeAuditPath(rootDir, task.changesFile);
-  const rollbackFile = safeAuditPath(rootDir, task.rollbackFile);
+  let rollbackFile = safeAuditPath(rootDir, task.rollbackFile);
   const currentValuesFile = safeAuditPath(rootDir, task.currentValuesFile);
   const changesSha256 = readAuditHash(task.changesSha256);
-  const rollbackSha256 = readAuditHash(task.rollbackSha256);
+  let rollbackSha256 = readAuditHash(task.rollbackSha256);
   const currentSnapshotSha256 = readAuditHash(task.currentSnapshotSha256);
   const planHash = readAuditHash(task.planHash);
   const expectedFieldCount = readPositiveInteger(task.expectedFieldCount);
+  if (!productId && currentValuesFile && await fileExists(currentValuesFile)) productId = readProductId((await readJsonRecord(currentValuesFile)).productId) ?? undefined;
+  if (!rollbackFile && productId && rollbackSha256) rollbackFile = await findRollbackFileByHash(rootDir, productId, rollbackSha256);
+  if (!rollbackSha256 && rollbackFile && await fileExists(rollbackFile)) rollbackSha256 = await fileSha256(rollbackFile);
   if (!changesSha256 || !rollbackSha256 || !currentSnapshotSha256 || !planHash || !expectedFieldCount || !changesFile || !rollbackFile || !currentValuesFile) {
     throw new Error('回滚审计不完整：缺少回滚哈希、当前快照哈希、计划哈希或字段数量，请重新发起改价预览。');
   }
   if (requestedRollbackFile && requestedRollbackFile !== rollbackFile) throw new Error('回滚文件与审计任务不匹配。');
-  if (!productId && await fileExists(currentValuesFile)) productId = readProductId((await readJsonRecord(currentValuesFile)).productId) ?? undefined;
 
   if (!rollbackFile) throw new Error('回滚需要 rollbackFile，或提供包含 rollbackFile 的 taskId。');
   if (!(await fileExists(changesFile))) throw new Error(`回滚变更文件不存在：${changesFile}`);

@@ -4504,6 +4504,85 @@ describe('handleBotIntent', () => {
     expect(JSON.stringify(response.card)).toContain('999.00');
   });
 
+  it('uses per-spec audit artifacts for batch percentage preview with one-spec current values and keeps confirm fields flat', async () => {
+    const outputDir = await writeContext();
+    const auditPreviewFromRead = vi.fn(async (productId: string, _current: Record<string, unknown>, _fields: Record<string, string>, artifact: Record<string, Record<string, string>>) => completeAudit(productId, {
+      expectedFieldCount: Object.values(artifact).reduce((count, item) => count + Object.keys(item).length, 0),
+      diff: [
+        { field: 'rent1day', label: '1天', old: '11.00', new: '12.10', change: '+1.10', changePct: '+10.0%', issues: [] },
+        { field: 'rent7day', label: '7天', old: '77.00', new: '84.70', change: '+7.70', changePct: '+10.0%', issues: [] },
+      ],
+    }));
+    const batchRead = vi.fn(async (productIds: string[]) => ({
+      ok: true,
+      status: 'ok',
+      count: productIds.length,
+      results: {
+        '653': {
+          status: 'ok',
+          productId: '653',
+          specs: [{ specId: 'sku-a', title: 'A色' }],
+          values: { 'sku-a': { rent1day: '11.00', rent7day: '77.00' } },
+        },
+        '932': {
+          status: 'ok',
+          productId: '932',
+          specs: [{ specId: 'sku-b', title: 'B色' }],
+          values: { 'sku-b': { rent1day: '21.00', rent7day: '27.00' } },
+        },
+      },
+      errors: [],
+      warnings: [],
+      lines: ['batch-read: ok'],
+    }));
+
+    const rentalPriceClient: RentalPriceSkillClient = {
+      batchRead,
+      auditPreviewFromRead,
+      async preview() { throw new Error('preview should not run during batch preview'); },
+      async execute() { throw new Error('execute should not run before confirmation'); },
+      async copy() { throw new Error('copy should not run'); },
+      async delist() { throw new Error('delist should not run'); },
+      async tenancySet() { throw new Error('tenancySet should not run'); },
+      async specDiscover() { throw new Error('specDiscover should not run'); },
+      async specAddAndRefresh() { throw new Error('specAddAndRefresh should not run'); },
+    };
+
+    const response = await executeAgentToolRequest({
+      toolName: 'rental.pricePreview',
+      arguments: {
+        productIds: ['653', '932'],
+        discount: 1.1,
+        scope: 'rent_fields',
+      },
+      reason: 'ipod touch 6,所有价格给我上调10%',
+    }, outputDir, { rentalPriceClient });
+
+    expect(batchRead).toHaveBeenCalledWith(['653', '932']);
+    expect(auditPreviewFromRead).toHaveBeenCalledTimes(2);
+    expect(auditPreviewFromRead.mock.calls[0]).toEqual([
+      '653',
+      expect.any(Object),
+      { rent1day: '12.10', rent7day: '84.70' },
+      { 'sku-a': { rent1day: '12.10', rent7day: '84.70' } },
+    ]);
+    expect(auditPreviewFromRead.mock.calls[1]).toEqual([
+      '932',
+      expect.any(Object),
+      { rent1day: '23.10', rent7day: '29.70' },
+      { 'sku-b': { rent1day: '23.10', rent7day: '29.70' } },
+    ]);
+
+    const confirmRequest = await loadAgentToolConfirmRequestFromCard(outputDir, response.card);
+    expect(confirmRequest.toolName).toBe('rental.priceApply');
+    expect(confirmRequest.arguments.items).toEqual([
+      { productId: '653', fields: { rent1day: '12.10', rent7day: '84.70' }, audit: expect.any(Object) },
+      { productId: '932', fields: { rent1day: '23.10', rent7day: '29.70' }, audit: expect.any(Object) },
+    ]);
+    expect(response.text).toContain('改价预览：2 个端内ID');
+    expect(response.metadata).toMatchObject({ toolName: 'rental.pricePreview', ok: true, previewCount: 2 });
+  });
+
   it('lets the Agent compose product resolution and atomic price preview before group discount execution', async () => {
     const outputDir = await writeContext();
     const registryRoot = await mkdtemp(join(tmpdir(), 'mt-agent-ace-price-registry-'));
