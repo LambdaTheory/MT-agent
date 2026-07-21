@@ -71,8 +71,6 @@ export interface AgentLearningToolOutcomePlannerHint {
   count: number;
   confidence: number;
   lastOccurredAt: string;
-  reason?: string;
-  resultSummary?: string;
 }
 
 export interface AgentLearningWorkflowOutcomePlannerHint {
@@ -83,8 +81,6 @@ export interface AgentLearningWorkflowOutcomePlannerHint {
   count: number;
   confidence: number;
   lastOccurredAt: string;
-  reason?: string;
-  resultSummary?: string;
 }
 
 export type AgentLearningPlannerHint =
@@ -297,6 +293,35 @@ function scalarArgumentTokens(value: unknown): string[] {
   return [];
 }
 
+const SENSITIVE_HINT_KEY_PATTERN = /(?:token|secret|password|cookie|authorization|auth|signature|confirmation|confirm|file|path|url|uri|audit|artifact|state|planref|requestref|rollback|html|payload|raw)/i;
+const URL_OR_PATH_PATTERN = /(?:https?:\/\/|[A-Za-z]:\\|\\\\|\/[\w.-]+\/)/;
+
+function sanitizeHintString(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  if (URL_OR_PATH_PATTERN.test(trimmed)) return '[redacted]';
+  return trimmed.length > 120 ? `${trimmed.slice(0, 120)}...` : trimmed;
+}
+
+function sanitizeHintValue(value: unknown, depth = 0): unknown {
+  if (depth > 3) return '[redacted]';
+  if (typeof value === 'string') return sanitizeHintString(value);
+  if (typeof value === 'number' || typeof value === 'boolean' || value === null) return value;
+  if (Array.isArray(value)) return value.slice(0, 10).map((item) => sanitizeHintValue(item, depth + 1));
+  if (value && typeof value === 'object') {
+    const sanitized: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+      sanitized[key] = SENSITIVE_HINT_KEY_PATTERN.test(key) ? '[redacted]' : sanitizeHintValue(entry, depth + 1);
+    }
+    return sanitized;
+  }
+  return String(value);
+}
+
+function sanitizeHintArguments(args: Record<string, unknown>): Record<string, unknown> {
+  return sanitizeHintValue(args) as Record<string, unknown>;
+}
+
 function outcomeRelevance(event: AgentLearningEvent, message?: string): number {
   if (!message) return 1;
   const base = similarity(message, outcomeSearchText(event));
@@ -375,12 +400,10 @@ export async function buildAgentLearningPlannerHints(outputDir: string, message:
   const outcomeHints: AgentLearningPlannerHint[] = outcomeGroups(store, message).map((group) => {
     const common = {
       outcome: group.outcome,
-      arguments: group.arguments,
+      arguments: sanitizeHintArguments(group.arguments),
       count: group.count,
       confidence: outcomeConfidence(group),
       lastOccurredAt: group.lastOccurredAt,
-      ...(group.reason ? { reason: group.reason } : {}),
-      ...(group.resultSummary ? { resultSummary: group.resultSummary } : {}),
     };
     return group.kind === 'tool_outcome'
       ? { kind: 'tool_outcome', toolName: group.toolName!, ...common }
