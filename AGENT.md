@@ -2,7 +2,7 @@
 
 > 本文面向接手 MT-agent 的开发 Agent 与维护人员，说明模块现状、文件边界、主链路、开发方向、安全约束和验证方式。
 >
-> **最后核对基线：2026-07-21；当前稳定集成分支：`master`。** 文档描述应优先以当前代码和测试为准，阶段性审计文档仅用于理解历史决策和剩余运行边界。
+> **最后核对基线：2026-07-22；当前稳定集成分支：`master`。** 文档描述应优先以当前代码和测试为准，阶段性审计文档仅用于理解历史决策和剩余运行边界。
 
 ---
 
@@ -20,7 +20,7 @@ MT-agent 是一个服务于支付宝商品运营场景的 `Node.js + TypeScript`
 
 项目当前的正确定位是：**以数据分析、报表、提醒、只读查询和人工确认后的半自动执行为主的运营 Agent 基座。**
 
-截至 2026-07-21，`master` 已整合指定日期日报查询/推送与 Agent outcome 学习提示两条近期主线：飞书 Bot 可围绕最新或指定业务数据日做日报查询、重发和群推送；LLM planner 可读取经过脱敏和降权处理的历史 outcome hints，用于改善工具选择与澄清，但不得把历史文本当作授权或执行参数来源。
+截至 2026-07-22，`master` 已整合指定日期日报查询/推送、Agent outcome 学习提示与 Audit Logger 三条近期主线：飞书 Bot 可围绕最新或指定业务数据日做日报查询、重发和群推送；LLM planner 可读取经过脱敏和降权处理的历史 outcome hints，用于改善工具选择与澄清，但不得把历史文本当作授权或执行参数来源。Audit Logger Tasks 1-11 已合入本地 `master`，merge commit 为 `5e28416`，覆盖本地持久化、远程投递/重试/回放、选定工具 spans、确认回调连续性和有界 shutdown。
 
 项目**不是**无人值守的全自动改价、下架、复制商品或上链执行器：
 
@@ -28,6 +28,41 @@ MT-agent 是一个服务于支付宝商品运营场景的 `Node.js + TypeScript`
 - 本地 TypeScript 代码负责数据读取、参数校验、业务计算、确认卡、执行和审计。
 - 对商品/链接有副作用的操作必须经过明确的飞书确认卡。
 - 依赖业务后台页面的操作必须保留登录态、页面变动和账号权限失败的人工兜底。
+
+### 1.1 Agent 化路线基线（2026-07-22）
+
+当前 MT-agent 更准确地说是「接入 LLM 的业务 Bot / 运营自动化基座」，还不是完整自治 Agent。后续 Agent 化的目标不是让 LLM 接管执行，而是引入受控的任务内核，让系统具备明确 task state、evidence、policy、verifier 和 experience，并在每一步仍由确定性代码守住工具契约和安全边界。
+
+已形成的路线共识：**先瘦身，再 Agent 化。** 当前最大结构性阻塞不是模型能力，而是 `src/feishuBot/agentToolExecutor.ts` 的巨型工具执行 switch、租赁/日报/link/operations 逻辑交织，以及横切的 audit、确认、错误处理和卡片展示混在同一层。直接在这个形态上叠 AgentTask Kernel 会放大耦合和回归风险。
+
+推荐演进顺序：
+
+1. **Executor registry 收口**：保留 `executeAgentToolRequest()` 对外签名，把中央 100-case switch 改为 `ToolExecutorRegistry` 调度。中央入口只负责参数校验、policy/audit/verifier wrapper、handler lookup 和统一返回；业务细节下沉到领域 executor。
+2. **先抽 publicTraffic 11 个日报审计工具**：这批工具已是 Audit Logger allowlist，风险较低、边界清晰，适合作为 registry 的第一批迁移样本。
+3. **再抽 rental read-only executor**：包括 `rental.batchRead`、read/snapshot/spec discover 等只读能力；先统一 safe-read、登录态/daemon readiness、错误归一化，再碰真实写操作。
+4. **后置 rental write / operations write**：`rental.pricePreview`、`rental.priceApply`、复制、下架、规格/租期、失活刷新等高风险链路必须在 registry、测试和 health/readiness 稳定后迁移，且保留 preview -> confirmation -> execute -> verify -> audit。
+5. **AgentTask Kernel MVP**：首个试点建议选择租赁批量改价或同类强状态任务。Kernel 负责 task state、step evidence、policy decision、verifier result、recovery hint 和 experience 记录；不负责直接解释自由文本写参数，也不绕过工具 schema/确认卡。
+
+Executor registry 的目标不是完全消灭 switch，而是把一个巨型全局 switch 拆成多个领域内的小型 handler/registry。每个领域 executor 应声明支持的 tool names，并实现统一接口，例如「canHandle/execute」或注册表映射。这样后续 AgentTask Kernel 只依赖稳定的 tool execution contract，不需要理解日报、租赁、link registry 或 operations 的内部实现。
+
+框架选择共识：第一阶段**不建议**用 OpenAI Agents SDK、LangGraph 或其他框架接管 runtime。MT-agent 的核心风险在工具授权、确认状态机、高风险执行、任务持久化、readback verifier 和业务审计，这些必须由本地确定性代码掌控。OpenAI-compatible SDK 可以继续作为 LLM 客户端、structured output、trace adapter 或评估工具，但不能接管 tool permission、confirmation、mutation dispatch 或 verifier。
+
+Health/readiness 是 Agent 化前置基础设施。不能只做 `process alive`，需要把 `/health` 设计成能力就绪信号：
+
+- `GET /health`：轻量检查进程、版本、配置/env 基础完整性、output/state 可读写、Feishu/LLM/rental daemon 的浅层连通性；不得访问真实业务页面或触发外部写操作。
+- `GET /health/deep`：只读深度探测，带鉴权或仅限 localhost/internal，带 timeout/cache；可检查 rental daemon ping、login/session、单品 safe read、batch-read、最新日报 context、link registry 读取、LLM lightweight call 等。
+- health 结果应按 capability 返回 `ok / degraded / down / unknown`，并给出 `reason` 与 `suggestion`。例如这次 wide300 问题应能表现为 `rental.batchRead: degraded`，原因是商品详情 tab 被重定向到登录页，建议刷新登录态或重启/修复 daemon。
+- AgentTask Kernel 后续只能把 health/readiness 当作执行前门禁或降级依据，不能把 health cache 当作业务事实源；真实写操作前仍需即时 read/preview/verifier。
+
+当前 first-cut `/health` 已在 2026-07-22 落地并加载到生产 Bot 进程：
+
+- `src/health/healthService.ts` 聚合浅层只读检查：进程、配置、`outputDir`、最新日报 context、关键 `output/state` 文件、link daemon catalog 快照、`rental-price-agent` daemon ping。它不会访问真实业务页面、不会执行 SaaS 写操作、不会生成确认卡 action。
+- `src/feishuBot/server.ts` 暴露 `GET /health`，返回 JSON health report；整体 `fail` 返回 HTTP 503，`ok` / `warn` 返回 200。
+- `src/feishuBot/menuConsole.ts` 支持飞书单聊自定义菜单事件 key：`/health`、`health`、`health.overview`、`health.shallow`、`console.health`，点击后返回 `/health 系统健康检查` 卡片。
+- SDK 长连接与 HTTP callback 双入口均已接菜单事件；生产主入口 `mt-feishu-bot` 已在用户授权后执行 `npm run feishu-bot:pm2:restart`，重启后 PM2 显示 `mt-feishu-bot` online（pid `21020`，2026-07-22）。`mt-rental-price-agent` 未重启，保持 online。
+- 当前仍是 basic readiness，不等同于完整 `/health/deep`。后续补版本/env、Feishu/LLM lightweight connectivity、能力级 `ok/degraded/down/unknown + reason/suggestion` 时，必须保持只读和超时边界。
+
+最小必要瘦身粗估为 1-1.5 周；中等瘦身约 2-3 周；完整瘦身约 4-6 周。`switch -> registry handler` 本身约占最小瘦身的 20%-30%，如果包含第一批 publicTraffic handler 抽离和回归闭环，约占 35%-45%。这是 Agent 化前杠杆最大的第一刀。
 
 ## 2. 技术与运行环境
 
@@ -67,6 +102,7 @@ MT-agent/
 │  ├─ publicTraffic/           # 公域流量分析、产物和日报展示
 │  ├─ feishuBot/               # 飞书收发、工具执行、卡片和路由
 │  ├─ agentRuntime/            # Agent 规划、工具注册、审批、Daily Mission
+│  ├─ audit/                   # Audit Logger 本地持久化、远程投递、重试回放与生命周期
 │  ├─ agentData/               # 面向 Agent 的确定性数据查询层
 │  ├─ activityAutomation/      # 差异化定价活动页半自动化
 │  ├─ closedOrderFeedback/     # 关单备注同步、分析、观察
@@ -254,6 +290,8 @@ MT-agent/
 
 - `sdkClient.ts`：SDK 长连接、事件处理和卡片回调。
 - `server.ts`：HTTP 回调服务器。
+- `menuConsole.ts`：飞书机器人自定义菜单控制台；当前只实现单聊 health 卡片，其他菜单 key 仅返回基础控制台说明。
+- `../health/healthService.ts`：`GET /health` 与菜单 health 卡片共用的浅层只读 readiness 聚合服务。
 - `agentToolExecutor.ts`：中央工具执行引擎；处理工具结果、审批、continuation，是当前最大的实现文件。
 - `tools.ts`、`readOnlyToolRegistry.ts`：工具定义、只读工具注册。
 - `reportQuery.ts`：报告查询、过滤、排序、汇总。
@@ -281,6 +319,8 @@ MT-agent/
 - 链接维护卡的 LLM 参考建议复用 `HandleBotIntentOptions.agentExploreProvider` / raw `LlmProvider`，必须从 CLI 启动、SDK/HTTP dispatcher、Agent runtime、`executeAgentToolRequest` 和 continuation 执行路径完整透传；新增维护入口时也要显式决定是否传 `llmProvider`。
 - `跑失活刷新` 是硬命令，应在 Agent-first 模式下本地直通 `run_inactive_refresh`，不得落回 LLM 选择旧 `operations.refreshActivityPlan`。
 - 新增或修改卡片 action 时必须同时维护 SDK 与 HTTP 两条路径的 action name 映射、claim/幂等状态和对应测试；生产默认跑 SDK 长连接。
+- 飞书后台自定义菜单已按单聊固定控制台思路配置。当前建议/已约定的事件 key：`health.overview`（健康检查，已实现）、`publicTraffic.report.run`（跑公域日报，暂未接执行确认流）、`publicTraffic.report.pushGroup`（发送/重发日报到群，暂未接执行确认流）。日报生成/群推送有副作用，后续接入菜单时必须先返回确认卡，不能菜单点击后直接执行。
+- 菜单事件必须绕过自然语言 planner，直接按 `event_key` 进入确定性 handler；未知 key 只能返回说明卡或帮助卡，不能猜测执行意图。
 
 ### 4.6 `src/agentRuntime/`：Agent 运行时、审批与 Daily Mission
 
@@ -407,7 +447,70 @@ Daily Mission 失活刷新富卡片目前是独立预览模块，入口为 `npm 
 6. 同日多 run 的 artifacts 需要按 `runId` 隔离，避免覆盖。
 7. JSONL ledger 要能容错坏行并保持读取可用。
 
-### 4.7 `src/linkRegistry/`：现有链接档案与治理
+### 4.7 `src/audit/`：Audit Logger 审计链路
+
+Audit Logger 为选定的 Bot 工具建立本地可追溯、可回放的闭合 trace，并在配置有效时异步投递远程 ingest。Tasks 1-11 已合入本地 `master`，但审计范围仍是显式选择的工具，不代表所有 CLI 或所有工具都已接入。
+
+关键文件：
+
+- `config.ts`：环境变量解析、默认值、URL 校验和选定工具白名单。
+- `auditLogger.ts`：事件构建、本地写入、远程投递、重试、回放和 flush 协调。
+- `event.ts`：规范事件/状态、上下文、脱敏和序列化校验。
+- `http.ts`：`/v1/ingest` HTTP 投递、超时、响应确认和失败分类。
+- `storage.ts`：JSONL 原始日志、retry queue、isolate、回放租约及原子/有界读写。
+- `confirmationLifecycle.ts`：选定确认回调的 trace 恢复、确认/取消事件和 reviewer 上下文。
+- `confirmationContextStore.ts`：确认上下文 sidecar 的保存、读取、TTL 和校验。
+- `domainMapper.ts`：选定工具的业务结果到审计状态、摘要、实体和 tags 的映射。
+- `shutdown.ts`：有界 flush 和关闭适配器。
+
+当前选定的 11 个审计工具：
+
+```text
+publicTraffic.latestSummary
+publicTraffic.conversionSummary
+publicTraffic.reportQuery
+productLink.query
+publicTraffic.problemProducts
+publicTraffic.orderSummary
+system.dataHealth
+publicTraffic.resendLatestReport
+publicTraffic.pushLatestReportToGroup
+publicTraffic.runReport
+publicTraffic.refreshDashboard
+```
+
+激活和入口边界：
+
+- 官方 HTTP 和 SDK Bot CLI 入口始终构造并注入 logger；命中选定工具并激活审计后，本地 raw audit 始终写入。
+- 只有 `AUDIT_INGEST_URL` 有效且以 `/v1/ingest` 结尾时才启用远程投递。URL 留空表示仅本地记录；URL 无效时启动失败。
+- 独立的 `dailyReport` / `publicTrafficReport` CLI 不在审计范围内，除非它们通过上述选定的 Bot 工具路径被调用。
+
+规范闭合 trace 顺序：
+
+```text
+run.start -> agent.start -> tool.start -> tool.end/tool.error
+  -> agent.end/agent.error -> run.final_result/run.failed
+```
+
+产物位于 `output/audit/`：
+
+- `audit-YYYY-MM-DD.jsonl`：本地原始审计事件。
+- `retry-queue.jsonl`：远程失败后的待回放队列。
+- `isolate-YYYY-MM-DD.jsonl`：不可重试或坏记录的隔离项。
+- `confirmation-contexts/`：确认回调恢复 trace 所需的 sidecar。
+- `replay.lease`：回放互斥租约。
+
+retry queue 中的 payload 字符串按原始内容保存并按 byte-identical 方式回放；远程失败、超时或回放失败都不得改变业务响应。关闭时 shutdown adapter 在有界 deadline 内调用 `logger.flush()`，由 flush 统一等待 background ingest、replay 并检查队列状态，最后才由 PM2 结束进程。当前本地运行配置为 `ingest 750ms < flush 1500ms < PM2 kill_timeout 3000ms`，必须保留这个先后关系，避免进程先退出而截断本地/远程审计。
+
+#### Audit Logger 远程 rollout 基线（2026-07-22）
+
+根目录 `.env` 已被 git 忽略，当前运行配置为 `agent_id=mt-agent`、输出目录 `output/audit`、启用 retry、batch `50`，并配置了获授权的远程 `/v1/ingest` endpoint；跟踪文档不记录 deployment host。PM2 的 `mt-feishu-bot` SDK 进程已重启，`mt-rental-price-agent` 未改动。
+
+两条安全闭合 trace，共 12 个事件，已被远程接受；远程 count/latest timestamp 与本地 final events 一致，未产生 retry/isolate 产物。`npm run build` 已通过，聚焦的 5 个文件、46 个测试已通过；此前已提交的聚焦矩阵为 14 个文件、274 个测试。此次 merge/work 保持在本地，未 push。
+
+当前 endpoint 仍是 public plain HTTP；在将传输机密性和完整性视为完成前，必须迁移到 HTTPS。这是后续安全工作，不是功能 rollout 失败的证据。
+
+### 4.8 `src/linkRegistry/`：现有链接档案与治理
 
 该模块维护长期链接档案，不是日报里的一次性临时字段。它为审计、治理提醒、维护提示、同款组上下文和后续 Agent 决策提供事实源。
 
@@ -456,7 +559,7 @@ daemon 状态同步边界：
 - 同一日期/同一 deterministic signature 的维护 session 在 `force` 重开时必须刷新展示元数据和 options；不能复用旧 queue 导致 LLM 建议缺失或陈旧，但 `reviewing/completed` session 仍不得被覆盖。
 - live 入口覆盖范围包括：飞书 SDK bot、HTTP bot、dispatcher/runtime、direct intent、Agent tool executor/continuation，以及 `publicTrafficReport.ts` 日报后链接维护提醒。新增入口要补 `tests/cliLoadEnvSource.test.ts`、`tests/feishuBotTools.test.ts` 或对应 session 测试。
 
-### 4.8 `src/activityAutomation/`：差异化定价活动自动化
+### 4.9 `src/activityAutomation/`：差异化定价活动自动化
 
 它不是通用活动脚本，而是针对差异化定价活动表单的半自动执行器。
 
@@ -475,7 +578,7 @@ daemon 状态同步边界：
 
 页面结构、账号权限和登录态均可能使自动化失效。因此它适合「人工已经确定策略、希望减少机械填写」的场景，而非无人值守批量提交。
 
-### 4.9 `src/closedOrderFeedback/`：关单信息模块
+### 4.10 `src/closedOrderFeedback/`：关单信息模块
 
 从外部接口拉取近期开单/关单备注，避免重复摄入，将自由文本转化为可分析、可观察的运营信息。
 
@@ -490,7 +593,7 @@ daemon 状态同步边界：
 
 需注意真实 API、token 与商户备注的敏感性；测试优先使用 `fakeProvider` 和 fixtures。
 
-### 4.10 `src/inventoryStatus/`：同款组经营快照与库存查询
+### 4.11 `src/inventoryStatus/`：同款组经营快照与库存查询
 
 该模块把公域日报上下文与链接档案汇总为只读的同款组经营快照，供飞书“库存情况”总览/明细卡和链接档案同款组复核使用。这里的“库存情况”主要表达链接档案覆盖、在售结构、缺数据情况和同款组经营指标，不是仓储实物库存数量。
 
@@ -526,7 +629,7 @@ npm run public-traffic-report / npm run rebuild-latest
   -> 飞书库存卡 / link-registry group review
 ```
 
-### 4.11 其他模块
+### 4.12 其他模块
 
 | 路径 | 职责 |
 |---|---|
@@ -541,7 +644,7 @@ npm run public-traffic-report / npm run rebuild-latest
 | `src/observability/` | 运行日志 |
 | `src/agentLearning/` | Agent 学习记录存储、clarification/tool/workflow outcome 分组、planner hint relevance/confidence 与脱敏 |
 
-### 4.12 `vendor/rental-price-agent/`：租赁价外挂技能
+### 4.13 `vendor/rental-price-agent/`：租赁价外挂技能
 
 外部但随仓库提供的 Playwright 技能，通过独立 daemon（默认端口 9223）向 MT-agent 暴露租赁 SaaS 操作。
 
@@ -719,6 +822,7 @@ npx vitest run --dir tests publicTraffic*.test.ts
 npx vitest run --dir tests inventoryStatusSnapshot.test.ts inventoryStatusStore.test.ts inventoryStatusHistory.test.ts inventoryStatusQuery.test.ts inventoryStatusCard.test.ts linkRegistryGroupReview.test.ts linkRegistryGroupReviewCli.test.ts
 npx vitest run --dir tests dailyMission*.test.ts
 npx vitest run --dir tests dashboardCrawlerSource.test.ts dashboardCaptureDate.test.ts captureDashboardBatchCli.test.ts dashboardRefresh.test.ts captureDashboardCliSource.test.ts exposureCrawlerSource.test.ts
+npx vitest run --dir tests tests/auditConfig.test.ts tests/auditHttp.test.ts tests/auditLogger.test.ts tests/auditFakeServiceAcceptance.test.ts tests/auditShutdown.test.ts
 ```
 
 访问页补抓完成后，必须按业务数据日复核 `output`：读取每个 `公域数据上下文_<runDate>.json` 的 `date`，再检查同目录 `公域访问数据_1日.json`、`公域访问数据_7日.json`、`公域访问数据_30日.json` 是否存在、JSON 可读、`collection.complete === true` 且 `rowCount > 0`。不要只按目录名判断数据日期。
@@ -762,7 +866,7 @@ PM2 重启、真实消息发送、daemon 启停均可能产生外部影响；仅
 
 ## 8. 环境变量与数据安全
 
-变量示例见 `.env.example`。主要分组：
+常见变量示例见 `.env.example`；Audit Logger 变量以本文件和运行时配置为准。主要分组：
 
 | 分组 | 典型变量 |
 |---|---|
@@ -771,6 +875,9 @@ PM2 重启、真实消息发送、daemon 启停均可能产生外部影响；仅
 | LLM | `MT_AGENT_LLM_PROVIDER`、`MT_AGENT_LLM_BASE_URL`、`MT_AGENT_LLM_MODEL`、`MT_AGENT_LLM_API_KEY` |
 | 输出与技能 | `MT_AGENT_OUTPUT_DIR`、`RENTAL_PRICE_AGENT_DIR`、daemon URL/token |
 | 外部业务接口 | `GOODS_MANAGER_BASE_URL`、`CLOSED_ORDER_REMARKS_BASE_URL`、API token |
+| Audit Logger | `AUDIT_INGEST_URL`、`MT_AGENT_AUDIT_AGENT_ID`、`MT_AGENT_AUDIT_LOG_DIR`、`AUDIT_INGEST_TIMEOUT_MS`、`AUDIT_RETRY_ENABLED`、`AUDIT_RETRY_MAX_BATCH`、`AUDIT_FLUSH_TIMEOUT_MS` |
+
+Audit Logger 变量由运行时配置使用；不要据此声称 `.env.example` 当前已经包含这些变量。
 
 规则：
 
@@ -789,6 +896,8 @@ PM2 重启、真实消息发送、daemon 启停均可能产生外部影响；仅
 | `docs/llm-agent-runtime.md` | LLM planner、confirmation、continuation 的运行时规则 |
 | `docs/agent-command-corpus-template.md` | Agent 命令语料与预期工具参数模板 |
 | `docs/agent-runtime-refactor-development-audit-2026-07-02.md` | Daily Mission 已知缺口与推荐修复顺序 |
+| `docs/audit-logger-integration-development-assessment-2026-07-21.md` | Audit Logger 集成开发评估与剩余运行边界 |
+| `docs/superpowers/plans/2026-07-21-audit-logger-daily-report-integration.md` | Audit Logger 日报集成实现计划 |
 | `docs/feishu-bot-readonly-command-agent-merge-handoff.md` | 飞书只读命令 Agent 交接资料 |
 | `docs/superpowers/specs/2026-06-24-inventory-same-sku-snapshot-card-design.md` | 同款组经营快照与库存卡设计规格 |
 | `docs/superpowers/plans/2026-06-24-inventory-status-card-chart.md` | 库存卡图表实现计划 |
