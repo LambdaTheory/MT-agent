@@ -6,7 +6,15 @@ import { createActivityCancellationAssistant, type ActivityCancellationAssistant
 import { updateActivitySubmitSessionStatus } from '../activityAutomation/submitSession.js';
 import { resolveDailyMissionApproval } from '../agentRuntime/dailyMissionApprovalCallback.js';
 import { recordDailyMissionRejection } from '../agentRuntime/dailyMissionRejection.js';
+import type { AuditWriter } from '../audit/auditLogger.js';
+import {
+  confirmationKeyFromCallbackValue,
+  prepareCancelledCallbackAudit,
+  prepareConfirmedCallbackAudit,
+  type ConfirmationContextLoader,
+} from '../audit/confirmationLifecycle.js';
 import type { AgentToolConfirmRequest } from '../agentRuntime/approvalCard.js';
+import type { AgentAuditDependencies } from '../agentRuntime/types.js';
 import { buildClarifiedMessage, parseAgentClarificationCancelRef, parseAgentClarificationCustomRef, parseAgentClarificationSelectRef } from '../agentRuntime/clarificationCard.js';
 import type { AgentPlannerProvider } from '../agentRuntime/planner.js';
 import type { LlmProvider } from '../llm/provider.js';
@@ -69,7 +77,7 @@ export interface FeishuBotServerConfig {
   encryptKey?: string;
   callbackSignatureSecret?: string;
   outputDir?: string;
-  handleIntent?: (intent: BotIntent, outputDir?: string) => Promise<BotResponse>;
+  handleIntent?: (intent: BotIntent, outputDir?: string, dependencies?: AgentAuditDependencies) => Promise<BotResponse>;
   dispatchMessage?: (message: FeishuBotIncomingTextMessage) => Promise<FeishuBotDispatchResult>;
   replyText?: (config: FeishuReplyConfig, text: string) => Promise<FeishuAppSendResult>;
   replyCard?: (config: FeishuReplyConfig, card: FeishuCardPayload) => Promise<FeishuAppSendResult>;
@@ -82,6 +90,11 @@ export interface FeishuBotServerConfig {
   agentPlannerProvider?: AgentPlannerProvider;
   agentExploreProvider?: LlmProvider;
   inactiveRefreshApproverIds?: readonly string[];
+  auditLogger?: AuditWriter;
+  confirmationContextLoader?: ConfirmationContextLoader;
+  now?: () => Date;
+  makeTraceId?: () => string;
+  makeSpanId?: () => string;
 }
 
 interface FeishuCardActionEvent {
@@ -702,14 +715,33 @@ async function handleCardActionTrigger(
       agentExploreProvider: config.agentExploreProvider,
     };
     const effectiveOutputDir = config.outputDir ?? 'output';
+    const callbackAudit = await prepareConfirmedCallbackAudit(request.toolName, confirmationKeyFromCallbackValue(value), {
+      source: 'feishu',
+      channel: 'http',
+      channelType: 'unknown',
+      rawActorId: actorId,
+      messageId,
+      ...(readString(value?.requestRef) !== undefined ? { requestRef: readString(value?.requestRef) } : {}),
+    }, {
+      auditLogger: config.auditLogger,
+      confirmationContextLoader: config.confirmationContextLoader,
+      now: config.now,
+      makeTraceId: config.makeTraceId,
+      makeSpanId: config.makeSpanId,
+    });
     const agentExploreLedgerContext = agentExploreLedgerContextFromRequest(request, effectiveOutputDir);
     const missionResult = await resolveDailyMissionApproval(request, effectiveOutputDir, executionOptions);
+    const auditedExecutionOptions = {
+      ...executionOptions,
+      ...(callbackAudit.auditContext !== undefined ? { auditContext: callbackAudit.auditContext } : {}),
+      ...(callbackAudit.auditLogger !== undefined ? { auditLogger: callbackAudit.auditLogger } : {}),
+    };
     const response = missionResult
       ? { text: missionResult.text, card: missionResult.card, metadata: { ok: missionResult.ok, status: missionResult.status } }
       : await executeAgentToolRequestWithContinuation(
         request,
         effectiveOutputDir,
-        agentExploreLedgerContext ? { ...executionOptions, ledgerContext: agentExploreLedgerContext } : executionOptions,
+        agentExploreLedgerContext ? { ...auditedExecutionOptions, ledgerContext: agentExploreLedgerContext } : auditedExecutionOptions,
       );
     const ok = response.metadata?.ok !== false || response.metadata?.status === 'pending_confirmation';
     setServerCardActionStatus(claim.key, ok ? 'completed' : 'failed');
@@ -809,6 +841,22 @@ async function handleCardActionTrigger(
     const claim = claimServerCardAction(messageId, agentToolClaimFamily(value), actionName);
     if (!claim.claimed) {
       return claimStatusCard('Agent 操作已处理', claim.claim);
+    }
+    if (referencedRequest) {
+      await prepareCancelledCallbackAudit(referencedRequest.toolName, confirmationKeyFromCallbackValue(value), {
+        source: 'feishu',
+        channel: 'http',
+        channelType: 'unknown',
+        rawActorId: actorId,
+        messageId,
+        ...(readString(value?.requestRef) !== undefined ? { requestRef: readString(value?.requestRef) } : {}),
+      }, {
+        auditLogger: config.auditLogger,
+        confirmationContextLoader: config.confirmationContextLoader,
+        now: config.now,
+        makeTraceId: config.makeTraceId,
+        makeSpanId: config.makeSpanId,
+      });
     }
     if (reason) await recordDailyMissionRejection({ toolName, arguments: args, reason }, config.outputDir ?? 'output');
     setServerCardActionStatus(claim.key, 'cancelled');
@@ -1119,6 +1167,7 @@ export function startFeishuBotServer(config: FeishuBotServerConfig) {
     llmIntentProposalProvider: config.llmIntentProposalProvider,
     agentPlannerProvider: config.agentPlannerProvider,
     agentExploreProvider: config.agentExploreProvider,
+    auditLogger: config.auditLogger,
   });
   const dispatchMessage = config.dispatchMessage ?? ((message: FeishuBotIncomingTextMessage) => dispatcher.dispatch({
     ...message,

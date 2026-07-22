@@ -4,6 +4,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { buildAgentToolConfirmCard } from '../src/agentRuntime/approvalCard.js';
+import type { AuditEndInput, AuditErrorInput, AuditRecordInput, AuditSpanWriter, AuditStartInput } from '../src/audit/auditLogger.js';
+import type { AuditRecordResult, AuditToolSpanHandle } from '../src/audit/types.js';
+import type { ConfirmationContextRecord } from '../src/audit/confirmationContextStore.js';
 import { MAX_CLARIFY_DEPTH } from '../src/agentRuntime/intentResolution.js';
 import { clarificationConfirmationKey, saveClarificationContext } from '../src/feishuBot/clarificationStore.js';
 import { createDailyMissionRun, saveDailyMissionRun, transitionDailyMissionRun } from '../src/agentRuntime/dailyMissionRun.js';
@@ -106,6 +109,58 @@ const metric = {
 };
 
 const AUDIT_HASH = 'a'.repeat(64);
+
+class RecordingTransportAuditWriter implements AuditSpanWriter {
+  events: AuditRecordInput[] = [];
+
+  async record(input: AuditRecordInput): Promise<AuditRecordResult> {
+    this.events.push(input);
+    return { ok: true, payload: JSON.stringify(input) };
+  }
+
+  async recordAt(input: AuditRecordInput): Promise<AuditRecordResult> {
+    return this.record(input);
+  }
+
+  async start(input: AuditStartInput): Promise<AuditToolSpanHandle> {
+    const parentSpanId = input.parentSpanId ?? input.context?.parentSpanId;
+    const spanId = `tool-span-${this.events.length + 1}`;
+    this.events.push({
+      traceId: input.traceId,
+      spanId,
+      event: 'tool.start',
+      toolName: input.toolName,
+      status: 'OK',
+      resultSummary: input.resultSummary ?? 'started',
+      ...(input.context !== undefined ? { context: input.context } : {}),
+      ...(parentSpanId !== undefined ? { parentSpanId } : {}),
+      ...(input.entity !== undefined ? { entity: input.entity } : {}),
+      ...(input.tags !== undefined ? { tags: input.tags } : {}),
+    });
+    return { traceId: input.traceId, spanId, ...(parentSpanId !== undefined ? { parentSpanId } : {}), toolName: input.toolName, ...(input.context !== undefined ? { context: input.context } : {}), startedAt: '2026-07-21T08:00:00.000Z', startedAtMs: 0 };
+  }
+
+  async end(handle: AuditToolSpanHandle, input: AuditEndInput): Promise<AuditRecordResult> {
+    return this.record({ traceId: handle.traceId, spanId: handle.spanId, event: 'tool.end', toolName: handle.toolName, status: input.status, resultSummary: input.resultSummary, ...(handle.context !== undefined ? { context: handle.context } : {}), ...(handle.parentSpanId !== undefined ? { parentSpanId: handle.parentSpanId } : {}), ...(input.entity !== undefined ? { entity: input.entity } : {}), ...(input.tags !== undefined ? { tags: input.tags } : {}) });
+  }
+
+  async error(handle: AuditToolSpanHandle, input: AuditErrorInput): Promise<AuditRecordResult> {
+    return this.record({ traceId: handle.traceId, spanId: handle.spanId, event: 'tool.error', toolName: handle.toolName, status: input.status, resultSummary: input.resultSummary, ...(handle.context !== undefined ? { context: handle.context } : {}), ...(handle.parentSpanId !== undefined ? { parentSpanId: handle.parentSpanId } : {}), ...(input.error !== undefined ? { error: input.error } : {}), ...(input.tags !== undefined ? { tags: input.tags } : {}) });
+  }
+}
+
+function selectedSidecar(overrides: Partial<ConfirmationContextRecord> = {}): ConfirmationContextRecord {
+  return {
+    schemaVersion: 'agent_tool_confirmation_context:v1',
+    traceId: 'trace-http-selected-callback',
+    toolName: 'publicTraffic.refreshDashboard',
+    createdAt: '2026-07-21T08:00:00.000Z',
+    expiresAt: '2026-07-21T09:00:00.000Z',
+    source: 'feishu',
+    entity: { type: 'report', id: '2026-06-24' },
+    ...overrides,
+  };
+}
 
 function completeAudit(productId: string, taskIdOrOverrides: string | Record<string, unknown> = `task_${productId}_ref`) {
   const overrides = typeof taskIdOrOverrides === 'string' ? { taskId: taskIdOrOverrides } : taskIdOrOverrides;
@@ -1440,6 +1495,146 @@ describe('startFeishuBotServer', () => {
       expect(JSON.stringify(await response.json())).toContain('取消异常');
       const date = new Date().toISOString().slice(0, 10);
       expect(await loadOperationLedgerJsonlEntries(outputDir, date)).toEqual([]);
+    } finally {
+      server.close();
+    }
+  });
+
+  it('audits selected HTTP refresh confirmation after validation and parents tool span to run.resume', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-bot-http-audit-confirm-'));
+    const writer = new RecordingTransportAuditWriter();
+    const cards: Array<{ messageId: string; card: unknown }> = [];
+    const config = { targetUrl: 'https://example.test/dashboard', periods: ['1d', '7d', '30d'], preferredPageSize: 100, outputDir, browserProfileDir: 'profile' };
+    dashboardRefreshMocks.loadConfig.mockResolvedValueOnce(config);
+    dashboardRefreshMocks.runDashboardRefresh.mockResolvedValueOnce({
+      status: 'still_missing',
+      dataDate: '2026-06-24',
+      actualPageDate: '2026-06-24',
+      refreshQuality: { hasMissing: true, notes: [], periods: { '1d': { complete: true, rowCount: 12 }, '7d': { complete: false, rowCount: 0, reason: 'rowCount=0' }, '30d': { complete: true, rowCount: 300 } } },
+      rebuild: 'skipped',
+      resend: 'skipped',
+      rawLocation: `${outputDir}/2026-06-25`,
+      message: 'saved safely',
+    });
+    let loaderCalls = 0;
+    const request = { toolName: 'publicTraffic.refreshDashboard', arguments: { date: '2026-06-24' }, reason: '补抓 2026-06-24 访问页' };
+    const confirmValue = readAgentToolConfirmValue(buildAgentToolConfirmCard(request));
+    const server = startFeishuBotServer({
+      port: 0,
+      appId: 'app',
+      appSecret: 'secret',
+      outputDir,
+      callbackSignatureSecret: 'signature-secret',
+      auditLogger: writer,
+      confirmationContextLoader: { load: async () => { loaderCalls += 1; return selectedSidecar(); } },
+      now: () => new Date('2026-07-21T08:00:00.000Z'),
+      makeSpanId: () => 'http-resume-span',
+      replyCard: async ({ messageId }, card) => { cards.push({ messageId, card }); return { sent: true, channel: 'app' }; },
+    });
+    try {
+      await new Promise<void>((resolve) => server.once('listening', resolve));
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+      const response = await postSignedCardAction(address.port, {
+        header: { event_type: 'card.action.trigger' },
+        event: {
+          context: { open_message_id: 'mid-http-audit-confirm' },
+          operator: { open_id: 'ou_http_audit_confirm' },
+          action: { name: 'agent_tool_confirm_submit', behaviors: [{ type: 'callback', value: confirmValue }] },
+        },
+      }, 'nonce-http-audit-confirm');
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ ok: true });
+      const cardText = JSON.stringify(cards[0]?.card);
+      expect(cardText).toContain('访问页补抓完成，但数据仍未完整');
+      expect(cardText).not.toContain('Agent 操作已完成');
+      expect(loaderCalls).toBe(1);
+      expect(writer.events.map((event) => event.event)).toEqual(['run.resume', 'tool.start', 'tool.end']);
+      expect(writer.events[0]).toMatchObject({ traceId: 'trace-http-selected-callback', spanId: 'http-resume-span', event: 'run.resume', status: 'OK', resultSummary: 'confirmation_resumed', tags: ['confirmed'] });
+      expect(writer.events[1]).toMatchObject({ traceId: 'trace-http-selected-callback', event: 'tool.start', toolName: 'publicTraffic.refreshDashboard', parentSpanId: 'http-resume-span' });
+      expect(writer.events[2]).toMatchObject({ traceId: 'trace-http-selected-callback', event: 'tool.end', parentSpanId: 'http-resume-span' });
+    } finally {
+      server.close();
+    }
+  });
+
+  it('audits selected HTTP refresh cancellation only after requestRef validation', async () => {
+    dashboardRefreshMocks.runDashboardRefresh.mockClear();
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-bot-http-audit-cancel-'));
+    const writer = new RecordingTransportAuditWriter();
+    const request = { toolName: 'publicTraffic.refreshDashboard', arguments: { date: '2026-06-24' }, reason: '取消补抓 2026-06-24 访问页' };
+    const requestRef = await saveAgentToolConfirmRequest(outputDir, request);
+    const cancelValue = readButtonValue(buildAgentToolConfirmCard(request, { requestRef }), 'agent_tool_cancel_submit');
+    let loaderCalls = 0;
+    const server = startFeishuBotServer({
+      port: 0,
+      appId: 'app',
+      appSecret: 'secret',
+      outputDir,
+      callbackSignatureSecret: 'signature-secret',
+      auditLogger: writer,
+      confirmationContextLoader: { load: async () => { loaderCalls += 1; return selectedSidecar({ requestRef, traceId: 'trace-http-cancel' }); } },
+      now: () => new Date('2026-07-21T08:00:00.000Z'),
+      makeSpanId: () => 'http-cancel-span',
+    });
+    try {
+      await new Promise<void>((resolve) => server.once('listening', resolve));
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+      const response = await postSignedCardAction(address.port, {
+        header: { event_type: 'card.action.trigger' },
+        event: {
+          context: { open_message_id: 'mid-http-audit-cancel' },
+          operator: { open_id: 'ou_http_audit_cancel' },
+          action: { name: 'agent_tool_cancel_submit', behaviors: [{ type: 'callback', value: cancelValue }] },
+        },
+      }, 'nonce-http-audit-cancel');
+
+      expect(response.status).toBe(200);
+      expect(JSON.stringify(await response.json())).toContain('工具 publicTraffic.refreshDashboard 操作已取消');
+      expect(loaderCalls).toBe(1);
+      expect(writer.events).toEqual([expect.objectContaining({ traceId: 'trace-http-cancel', spanId: 'http-cancel-span', event: 'run.failed', toolName: 'publicTraffic.refreshDashboard', status: 'CANCELLED', resultSummary: 'confirmation_cancelled', tags: ['cancelled'] })]);
+      expect(dashboardRefreshMocks.runDashboardRefresh).not.toHaveBeenCalledWith(expect.objectContaining({ dataDate: '2026-06-24' }));
+    } finally {
+      server.close();
+    }
+  });
+
+  it('does not load sidecars or emit selected audit for invalid HTTP confirmation or loose cancellation payloads', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-bot-http-audit-invalid-'));
+    const writer = new RecordingTransportAuditWriter();
+    const replies: Array<{ messageId: string; text: string }> = [];
+    let loaderCalls = 0;
+    const request = { toolName: 'publicTraffic.refreshDashboard', arguments: { date: '2026-06-24' }, reason: '补抓 2026-06-24 访问页' };
+    const invalidConfirmValue = { ...(readAgentToolConfirmValue(buildAgentToolConfirmCard(request)) as Record<string, unknown>), confirmationKey: '000000000000000000000000' };
+    const server = startFeishuBotServer({
+      port: 0,
+      appId: 'app',
+      appSecret: 'secret',
+      outputDir,
+      callbackSignatureSecret: 'signature-secret',
+      auditLogger: writer,
+      confirmationContextLoader: { load: async () => { loaderCalls += 1; return selectedSidecar(); } },
+      replyText: async ({ messageId }, text) => { replies.push({ messageId, text }); return { sent: true, channel: 'app' }; },
+    });
+    try {
+      await new Promise<void>((resolve) => server.once('listening', resolve));
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Expected TCP server address');
+      await postSignedCardAction(address.port, {
+        header: { event_type: 'card.action.trigger' },
+        event: { context: { open_message_id: 'mid-http-invalid-confirm' }, operator: { open_id: 'ou_http_invalid' }, action: { name: 'agent_tool_confirm_submit', behaviors: [{ type: 'callback', value: invalidConfirmValue }] } },
+      }, 'nonce-http-invalid-confirm');
+      const looseCancel = await postSignedCardAction(address.port, {
+        header: { event_type: 'card.action.trigger' },
+        event: { context: { open_message_id: 'mid-http-loose-cancel' }, operator: { open_id: 'ou_http_invalid' }, action: { name: 'agent_tool_cancel_submit', behaviors: [{ type: 'callback', value: { action: 'agent_tool_cancel', toolName: 'publicTraffic.refreshDashboard', confirmationKey: 'bad-key' } }] } },
+      }, 'nonce-http-loose-cancel');
+
+      expect(replies.map((item) => item.text)).toContain('Agent 操作确认参数无效，请重新发起。');
+      expect(JSON.stringify(await looseCancel.json())).toContain('工具 publicTraffic.refreshDashboard 操作已取消');
+      expect(loaderCalls).toBe(0);
+      expect(writer.events).toEqual([]);
     } finally {
       server.close();
     }
