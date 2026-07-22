@@ -2,6 +2,11 @@ import { createHash } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { buildAgentToolConfirmCard } from '../agentRuntime/approvalCard.js';
+import type { AgentAuditDependencies } from '../agentRuntime/types.js';
+import { isSelectedAuditTool, type SelectedAuditToolName } from '../audit/config.js';
+import { classifySelectedToolException, mapSelectedToolDomainOutcome, type DeliveryOutcomeCategory, type ProductQueryType as AuditProductQueryType, type RefreshDashboardStatus, type ReportQueryAuditToolName, type SelectedToolDomainFacts } from '../audit/domainMapper.js';
+import type { AuditContext } from '../audit/types.js';
+import { isAuditSpanWriter, type AuditSpanWriter, type AuditWriter } from '../audit/auditLogger.js';
 import { recordOperationEvent } from '../agentRuntime/operationLedger.js';
 import type { FeishuCardPayload } from '../notify/feishuApp.js';
 import type { LlmProvider } from '../llm/provider.js';
@@ -53,7 +58,7 @@ import { summarizeOperationsLearningHistory, summarizeOperationsLearningSession 
 import { buildPublicTrafficCard } from '../publicTraffic/buildPublicTrafficCard.js';
 import { buildPublicTrafficFeishuText } from '../publicTraffic/buildPublicTrafficFeishu.js';
 import { assertDashboardDataDate, previousShanghaiDate } from '../publicTraffic/dashboardCaptureDate.js';
-import { runDashboardRefresh } from '../publicTraffic/dashboardRefresh.js';
+import { runDashboardRefresh, type DashboardRefreshStatus } from '../publicTraffic/dashboardRefresh.js';
 import { buildDashboardRefreshResultCard, formatDashboardRefreshResultText } from './dashboardRefreshCard.js';
 import { buildPublicTrafficPaths } from '../publicTraffic/paths.js';
 import type { PublicTrafficDataReportContext, PublicTrafficPeriodMetrics, PublicTrafficProductDataRow } from '../publicTraffic/types.js';
@@ -138,6 +143,9 @@ export interface AgentToolExecutionOptions {
   agentExploreProvider?: LlmProvider;
   ledgerContext?: RentalWriteLedgerContext;
   daemonCatalogFetcher?: typeof fetchDaemonCatalogSnapshot;
+  auditContext?: AuditContext;
+  auditLogger?: AuditWriter;
+  activateAudit?: AgentAuditDependencies['activateAudit'];
 }
 
 type AgentToolWriteEvent = 'execution_started' | 'execution_succeeded' | 'execution_failed';
@@ -3456,6 +3464,149 @@ async function findReportContextForTool(outputDir: string, date?: string) {
   return date ? findReportContextByDate(outputDir, date) : findLatestReportContext(outputDir);
 }
 
+type SelectedToolOutcomeCapture = (facts: SelectedToolDomainFacts) => void;
+
+interface SelectedAuditExecutionOptions extends AgentToolExecutionOptions {
+  captureSelectedToolOutcome?: SelectedToolOutcomeCapture;
+}
+
+const selectedToolStartSummary = 'selected_tool_started';
+function selectedAuditToolName(toolName: string): SelectedAuditToolName | undefined {
+  return isSelectedAuditTool(toolName) ? toolName as SelectedAuditToolName : undefined;
+}
+
+function captureSelectedToolOutcome(options: SelectedAuditExecutionOptions, facts: SelectedToolDomainFacts): void {
+  options.captureSelectedToolOutcome?.(facts);
+}
+
+function captureReportOutcome(
+  options: SelectedAuditExecutionOptions,
+  toolName: ReportQueryAuditToolName,
+  reportDate: string | undefined,
+  found: boolean,
+): void {
+  if (found && reportDate !== undefined) {
+    captureSelectedToolOutcome(options, { toolName, kind: 'report_success', reportDate });
+    return;
+  }
+  captureSelectedToolOutcome(options, { toolName, kind: 'report_missing', ...(reportDate !== undefined ? { reportDate } : {}) });
+}
+
+function classifyDeliveryOutcome(result: unknown): DeliveryOutcomeCategory {
+  if (!isRecord(result)) return 'unknown';
+  if (result.sent === true) return 'sent';
+  if (result.sent === false) return 'provider_error';
+  return 'unknown';
+}
+
+function selectedProductQueryType(args: ProductLinkQueryArguments): AuditProductQueryType {
+  const queryType = args.queryType;
+  if (queryType === 'productList') return 'product_list';
+  if (queryType === 'problemPool' || queryType === 'problemPoolCounts') return 'problem_pool';
+  if (queryType === 'sourceCoverage') return 'source_coverage';
+  if (queryType === 'linkStatus') return 'link_lifecycle';
+  if (args.section) return 'problem_pool';
+  if (args.source || args.coverageStatus) return 'source_coverage';
+  const productQuery = args.productQuery?.trim() ?? '';
+  if (parseNumericProductIdList(productQuery).length > 1) return 'product_list';
+  return 'product_detail';
+}
+
+function productQueryMatchCount(
+  context: PublicTrafficDataReportContext,
+  execution: ReturnType<typeof runProductLinkQuery>,
+  queryType: AuditProductQueryType,
+): number {
+  if (queryType === 'product_list' && execution.result === undefined && execution.productIds.length === 0) return context.rows.length;
+  return execution.result?.matches.length ?? execution.productIds.length;
+}
+
+function dataHealthQualityIssueCount(result: Awaited<ReturnType<typeof buildDataHealthReport>>): number {
+  return result.dataQualityNotes.length + result.missingIdSampleCount;
+}
+
+function dataHealthStaleSourceCount(result: Awaited<ReturnType<typeof buildDataHealthReport>>): number {
+  return result.orderAnalysisDate !== undefined && result.orderAnalysisDate !== result.date ? 1 : 0;
+}
+
+async function runSelectedReadOnlyAgentIntent(
+  outputDir: string,
+  intent: Exclude<AgentIntent, { type: 'unknown' }>,
+  options: SelectedAuditExecutionOptions,
+  toolName: 'publicTraffic.problemProducts' | 'publicTraffic.orderSummary',
+  date?: string,
+): Promise<BotResponse> {
+  const report = await findReportContextForTool(outputDir, date);
+  if (!report) {
+    captureSelectedToolOutcome(options, { toolName, kind: 'report_missing', ...(date !== undefined ? { reportDate: date } : {}) });
+    return { text: missingReportContextText(date) };
+  }
+  captureSelectedToolOutcome(options, { toolName, kind: 'report_success', reportDate: report.context.date });
+  const tool = findReadOnlyTool(intent);
+  if (!tool) return { text: '暂无匹配工具。' };
+  return tool.run(report.context, intent);
+}
+
+function activateAuditBestEffort(options: AgentToolExecutionOptions, toolName: string): Promise<AuditContext | undefined> {
+  try {
+    const activated = options.activateAudit?.(toolName);
+    return activated === undefined ? Promise.resolve(undefined) : activated.catch(() => undefined);
+  } catch {
+    return Promise.resolve(undefined);
+  }
+}
+
+function startSelectedToolSpan(
+  writer: AuditSpanWriter,
+  toolName: SelectedAuditToolName,
+  context: AuditContext,
+): Promise<Awaited<ReturnType<AuditSpanWriter['start']>> | undefined> {
+  try {
+    return writer.start({
+      traceId: context.traceId,
+      toolName,
+      context,
+      resultSummary: selectedToolStartSummary,
+      tags: ['selected_tool'],
+    }).then((handle) => handle.startRecordResult?.ok === false ? undefined : handle, () => undefined);
+  } catch {
+    return Promise.resolve(undefined);
+  }
+}
+
+async function endSelectedToolSpan(
+  writer: AuditSpanWriter,
+  handle: Awaited<ReturnType<typeof startSelectedToolSpan>>,
+  facts: SelectedToolDomainFacts | undefined,
+): Promise<void> {
+  if (handle === undefined) return;
+  let mapping;
+  try {
+    mapping = mapSelectedToolDomainOutcome(facts ?? { toolName: handle.toolName as SelectedAuditToolName, kind: 'unknown_fallback' });
+  } catch {
+    mapping = mapSelectedToolDomainOutcome({ toolName: handle.toolName as SelectedAuditToolName, kind: 'unknown_fallback' });
+  }
+  try {
+    await writer.end(handle, mapping);
+  } catch {
+    return;
+  }
+}
+
+async function errorSelectedToolSpan(
+  writer: AuditSpanWriter,
+  handle: Awaited<ReturnType<typeof startSelectedToolSpan>>,
+  error: unknown,
+): Promise<void> {
+  if (handle === undefined) return;
+  try {
+    const mapping = classifySelectedToolException(error);
+    await writer.error(handle, { ...mapping, error });
+  } catch {
+    return;
+  }
+}
+
 function reportPeriodDays(period: unknown): number {
   if (period === '30d') return 30;
   if (period === '7d') return 7;
@@ -3540,12 +3691,45 @@ export async function executeAgentToolRequest(
   outputDir = 'output',
   options: AgentToolExecutionOptions = {},
 ): Promise<BotResponse> {
+  const activatedContext = await activateAuditBestEffort(options, request.toolName);
+  const auditContext = options.activateAudit === undefined ? options.auditContext : activatedContext;
+  const selectedToolName = selectedAuditToolName(request.toolName);
+  if (selectedToolName === undefined || auditContext === undefined || !isAuditSpanWriter(options.auditLogger)) {
+    return executeAgentToolRequestInternal(request, outputDir, options);
+  }
+
+  const writer = options.auditLogger;
+  const handle = await startSelectedToolSpan(writer, selectedToolName, auditContext);
+  let outcomeFacts: SelectedToolDomainFacts | undefined;
+  const internalOptions: SelectedAuditExecutionOptions = {
+    ...options,
+    auditContext,
+    captureSelectedToolOutcome: (facts) => {
+      outcomeFacts = facts;
+    },
+  };
+  try {
+    const response = await executeAgentToolRequestInternal(request, outputDir, internalOptions);
+    await endSelectedToolSpan(writer, handle, outcomeFacts);
+    return response;
+  } catch (error) {
+    await errorSelectedToolSpan(writer, handle, error);
+    throw error;
+  }
+}
+
+async function executeAgentToolRequestInternal(
+  request: AgentToolConfirmRequest,
+  outputDir = 'output',
+  options: SelectedAuditExecutionOptions = {},
+): Promise<BotResponse> {
   switch (request.toolName) {
     case 'system.help':
       return { text: PLANNER_HELP_TEXT };
     case 'publicTraffic.latestSummary': {
       const date = readOptionalDate(request.arguments.date);
       const report = await findReportContextForTool(outputDir, date);
+      captureReportOutcome(options, 'publicTraffic.latestSummary', report?.context.date ?? date, Boolean(report));
       if (!report) return { text: missingReportContextText(date) };
       const text = formatLatestSummary(report.context);
       return { text, card: buildQueryTextCard(report.context, text, { template: 'blue' }), metadata: { cardMode: 'nonBlocking' } };
@@ -3553,6 +3737,7 @@ export async function executeAgentToolRequest(
     case 'publicTraffic.conversionSummary': {
       const date = readOptionalDate(request.arguments.date);
       const report = await findReportContextForTool(outputDir, date);
+      captureReportOutcome(options, 'publicTraffic.conversionSummary', report?.context.date ?? date, Boolean(report));
       if (!report) return { text: missingReportContextText(date) };
       const text = formatConversionSummary(report.context);
       return { text, card: buildQueryTextCard(report.context, text, { template: 'blue' }), metadata: { cardMode: 'nonBlocking' } };
@@ -3561,17 +3746,23 @@ export async function executeAgentToolRequest(
       const date = readOptionalDate(request.arguments.date);
       const report = await findReportContextForTool(outputDir, date);
       if (request.arguments.target === 'dateComparison') {
-        if (!report) return { text: missingReportContextText(date) };
+        if (!report) {
+          captureSelectedToolOutcome(options, { toolName: 'publicTraffic.reportQuery', kind: 'report_missing', ...(date !== undefined ? { reportDate: date } : {}) });
+          return { text: missingReportContextText(date) };
+        }
         const compareDate = comparisonReportDate(report.context.date, request.arguments);
         const compareReport = await findReportContextForTool(outputDir, compareDate);
         if (compareReport) {
+          captureSelectedToolOutcome(options, { toolName: 'publicTraffic.reportQuery', kind: 'report_success', reportDate: report.context.date });
           const text = runPublicTrafficReportDateComparison(report.context, compareReport.context, { ...request.arguments, ...(date ? { date } : {}), compareDate } as PublicTrafficReportQueryArguments);
           return { text, card: buildQueryTextCard(report.context, text, { template: 'blue' }), metadata: { cardMode: 'nonBlocking' } };
         }
+        captureSelectedToolOutcome(options, { toolName: 'publicTraffic.reportQuery', kind: 'report_missing', reportDate: compareDate });
         return {
           text: missingReportContextText(compareDate),
         };
       }
+      captureReportOutcome(options, 'publicTraffic.reportQuery', report?.context.date ?? date, Boolean(report));
       const text = report
         ? runPublicTrafficReportQuery(report.context, { ...request.arguments, ...(date ? { date } : {}) } as PublicTrafficReportQueryArguments)
         : missingReportContextText(date);
@@ -3581,8 +3772,21 @@ export async function executeAgentToolRequest(
     case 'productLink.query': {
       const date = readOptionalDate(request.arguments.date);
       const report = await findReportContextForTool(outputDir, date);
-      if (!report) return { text: missingReportContextText(date) };
-      return runProductLinkQuery(report.context, { ...request.arguments, ...(date ? { date } : {}) } as ProductLinkQueryArguments).response;
+      if (!report) {
+        captureSelectedToolOutcome(options, { toolName: 'productLink.query', kind: 'report_missing', ...(date !== undefined ? { reportDate: date } : {}) });
+        return { text: missingReportContextText(date) };
+      }
+      const productQueryArguments = { ...request.arguments, ...(date ? { date } : {}) } as ProductLinkQueryArguments;
+      const execution = runProductLinkQuery(report.context, productQueryArguments);
+      const queryType = selectedProductQueryType(productQueryArguments);
+      captureSelectedToolOutcome(options, {
+        toolName: 'productLink.query',
+        kind: 'product_query',
+        queryType,
+        matchCount: productQueryMatchCount(report.context, execution, queryType),
+        reportDate: report.context.date,
+      });
+      return execution.response;
     }
     case 'product.query': {
       const date = readOptionalDate(request.arguments.date);
@@ -3709,13 +3913,13 @@ export async function executeAgentToolRequest(
     case 'publicTraffic.taskPool':
       return runReadOnlyAgentIntent(outputDir, { type: 'tasks' }, options, readOptionalDate(request.arguments.date));
     case 'publicTraffic.problemProducts':
-      return runReadOnlyAgentIntent(outputDir, { type: 'problem_products', problemType: readProblemType(request.arguments.problemType) }, options, readOptionalDate(request.arguments.date));
+      return runSelectedReadOnlyAgentIntent(outputDir, { type: 'problem_products', problemType: readProblemType(request.arguments.problemType) }, options, 'publicTraffic.problemProducts', readOptionalDate(request.arguments.date));
     case 'publicTraffic.inactiveLinks':
       return runReadOnlyAgentIntent(outputDir, { type: 'inactive_links' }, options, readOptionalDate(request.arguments.date));
     case 'publicTraffic.removedLinks':
       return runReadOnlyAgentIntent(outputDir, { type: 'removed_links' }, options, readOptionalDate(request.arguments.date));
     case 'publicTraffic.orderSummary':
-      return runReadOnlyAgentIntent(outputDir, { type: 'order_summary' }, options, readOptionalDate(request.arguments.date));
+      return runSelectedReadOnlyAgentIntent(outputDir, { type: 'order_summary' }, options, 'publicTraffic.orderSummary', readOptionalDate(request.arguments.date));
     case 'publicTraffic.windowedFindings': {
       const result = await findWindowedProducts(outputDir, {
         lookbackDays: readOptionalLimit(request.arguments.lookbackDays) ?? 1,
@@ -3747,7 +3951,16 @@ export async function executeAgentToolRequest(
       const explicitDate = readOptionalDate(request.arguments.date);
       const latest = explicitDate ? null : await findLatestReportContext(outputDir);
       const date = explicitDate ?? latest?.context.date ?? today();
-      return formatDataHealthResponse(await buildDataHealthReport(outputDir, date));
+      const result = await buildDataHealthReport(outputDir, date);
+      captureSelectedToolOutcome(options, {
+        toolName: 'system.dataHealth',
+        kind: 'data_health',
+        reportDate: result.date,
+        reportContextAvailable: result.hasReportContext,
+        qualityIssueCount: dataHealthQualityIssueCount(result),
+        staleSourceCount: dataHealthStaleSourceCount(result),
+      });
+      return formatDataHealthResponse(result);
     }
     case 'strategy.safeSourceResolve': {
       const date = readOptionalDate(request.arguments.date);
@@ -3795,10 +4008,14 @@ export async function executeAgentToolRequest(
       return formatMetricThresholdExplainResponse(await evaluateMetricThresholdStrategy(outputDir, registryContext.registry, input), input, 'strategy.refreshCandidateExplain');
     }
     case 'publicTraffic.runReport':
-      if (publicTrafficReportRunning) return { text: '公域日报正在运行中，请稍后再试。' };
+      if (publicTrafficReportRunning) {
+        captureSelectedToolOutcome(options, { toolName: 'publicTraffic.runReport', kind: 'already_running' });
+        return { text: '公域日报正在运行中，请稍后再试。' };
+      }
       publicTrafficReportRunning = true;
       try {
         const result = await runPublicTrafficReportCli();
+        captureSelectedToolOutcome(options, { toolName: 'publicTraffic.runReport', kind: 'run_report', firstReportSent: result.firstReportSent === true });
         return { text: formatPublicTrafficReportRunSuccess(result) };
       } finally {
         publicTrafficReportRunning = false;
@@ -3806,22 +4023,30 @@ export async function executeAgentToolRequest(
     case 'publicTraffic.resendLatestReport': {
       const date = readOptionalDate(request.arguments.date);
       const report = await findReportContextForTool(outputDir, date);
-      if (!report) return { text: date ? `没有找到 ${date} 的可重发公域日报。` : '还没有找到可重发的公域日报。' };
+      if (!report) {
+        captureSelectedToolOutcome(options, { toolName: 'publicTraffic.resendLatestReport', kind: 'report_missing', ...(date !== undefined ? { reportDate: date } : {}) });
+        return { text: date ? `没有找到 ${date} 的可重发公域日报。` : '还没有找到可重发的公域日报。' };
+      }
       const card = buildPublicTrafficCard(report.context, { markdownPath: '', workbookPath: '' });
       const fallbackText = buildPublicTrafficFeishuText(report.context, { markdownPath: '', workbookPath: '' });
       const sendTo = readSendTo(request.arguments.sendTo);
       const env = sendTo ? { ...process.env, FEISHU_SEND_TO: sendTo } : process.env;
       const result = await sendFeishuCard(env, card, fallbackText);
+      captureSelectedToolOutcome(options, { toolName: 'publicTraffic.resendLatestReport', kind: 'delivery', deliveryOutcome: classifyDeliveryOutcome(result), reportDate: report.context.date });
       const label = reportSendLabel(date);
       return { text: result.sent ? `${label}公域日报已重发。` : `${label}公域日报重发失败：${result.reason}` };
     }
     case 'publicTraffic.pushLatestReportToGroup': {
       const date = readOptionalDate(request.arguments.date);
       const report = await findReportContextForTool(outputDir, date);
-      if (!report) return { text: date ? `没有找到 ${date} 的可推送公域日报。` : '还没有找到可推送的公域日报。' };
+      if (!report) {
+        captureSelectedToolOutcome(options, { toolName: 'publicTraffic.pushLatestReportToGroup', kind: 'report_missing', ...(date !== undefined ? { reportDate: date } : {}) });
+        return { text: date ? `没有找到 ${date} 的可推送公域日报。` : '还没有找到可推送的公域日报。' };
+      }
       const card = buildPublicTrafficCard(report.context, { markdownPath: '', workbookPath: '' });
       const fallbackText = buildPublicTrafficFeishuText(report.context, { markdownPath: '', workbookPath: '' });
       const result = await sendFeishuCard({ ...process.env, FEISHU_SEND_TO: 'group' }, card, fallbackText);
+      captureSelectedToolOutcome(options, { toolName: 'publicTraffic.pushLatestReportToGroup', kind: 'delivery', deliveryOutcome: classifyDeliveryOutcome(result), reportDate: report.context.date });
       const label = reportSendLabel(date);
       return { text: result.sent ? `${label}公域日报已推送到群。` : `${label}公域日报推送到群失败：${result.reason}` };
     }
@@ -3832,6 +4057,12 @@ export async function executeAgentToolRequest(
       const parsedDate = readOptionalDate(request.arguments.date);
       const dataDate = parsedDate ? assertDashboardDataDate(parsedDate) : previousShanghaiDate();
       const result = await runDashboardRefresh({ config, dataDate, sendTo });
+      captureSelectedToolOutcome(options, {
+        toolName: 'publicTraffic.refreshDashboard',
+        kind: 'refresh_dashboard',
+        refreshStatus: result.status,
+        reportDate: result.dataDate,
+      });
       return {
         text: formatDashboardRefreshResultText(result),
         card: buildDashboardRefreshResultCard(result),

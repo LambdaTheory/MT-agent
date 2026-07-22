@@ -1,4 +1,13 @@
+import type { AuditContext } from '../audit/types.js';
+import type { AuditWriter } from '../audit/auditLogger.js';
+
 export type AgentRequestSource = 'feishu' | 'cli' | 'api' | 'agent' | 'scheduler';
+
+export interface AgentAuditDependencies {
+  auditContext: AuditContext;
+  auditLogger?: AuditWriter;
+  activateAudit(toolName: string): Promise<AuditContext | undefined>;
+}
 
 export interface AgentActor {
   id?: string;

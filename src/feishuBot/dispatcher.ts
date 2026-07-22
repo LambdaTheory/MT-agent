@@ -1,5 +1,6 @@
 import { createAgentRuntime, type AgentRuntime } from '../agentRuntime/runtime.js';
-import type { AgentRequest, AgentResponse } from '../agentRuntime/types.js';
+import type { AgentAuditDependencies, AgentRequest, AgentResponse } from '../agentRuntime/types.js';
+import type { AuditWriter } from '../audit/auditLogger.js';
 import { parseAgentFirstBotIntent, parseBotIntent } from './intent.js';
 import { handleBotIntent } from './tools.js';
 import type { LlmToolSelectionProvider } from './llmProvider.js';
@@ -17,7 +18,7 @@ export interface FeishuMessageDispatcherConfig {
   botMentionName?: string;
   runtime?: AgentRuntime;
   resolveIntent?: BotIntentResolver;
-  handleIntent?: (intent: BotIntent, outputDir?: string) => Promise<BotResponse>;
+  handleIntent?: (intent: BotIntent, outputDir?: string, dependencies?: AgentAuditDependencies) => Promise<BotResponse>;
   llmToolSelector?: LlmToolSelectionProvider;
   llmIntentProposalProvider?: LlmIntentProposalProvider;
   agentPlannerProvider?: AgentPlannerProvider;
@@ -26,6 +27,7 @@ export interface FeishuMessageDispatcherConfig {
   activityAutomationClient?: ActivityAutomationSkillClient;
   closedOrderFetchImpl?: typeof fetch;
   closedOrderRegistryPaths?: ClosedOrderRegistryPathsInput;
+  auditLogger?: AuditWriter;
   logError?: (error: unknown, message: FeishuBotIncomingTextMessage) => void;
 }
 
@@ -197,7 +199,7 @@ export function createFeishuMessageDispatcher(config: FeishuMessageDispatcherCon
 
       try {
         const text = textWithoutMentionKeys(message, config);
-        const handleIntent = config.handleIntent ?? ((intent, outputDir) => handleBotIntent(intent, outputDir, {
+        const handleIntent = config.handleIntent ?? ((intent, outputDir, dependencies) => handleBotIntent(intent, outputDir, {
           llmToolSelector: config.llmToolSelector,
           llmIntentProposalProvider: config.llmIntentProposalProvider,
           agentPlannerProvider: config.agentPlannerProvider,
@@ -207,6 +209,9 @@ export function createFeishuMessageDispatcher(config: FeishuMessageDispatcherCon
           closedOrderFetchImpl: config.closedOrderFetchImpl,
           closedOrderRegistryPaths: config.closedOrderRegistryPaths,
           clarificationDepth: readClarificationDepth(message.metadata?.clarificationDepth),
+          auditContext: dependencies?.auditContext,
+          auditLogger: dependencies?.auditLogger,
+          activateAudit: dependencies?.activateAudit,
         }));
         const runtime = config.runtime ?? createAgentRuntime({
           outputDir: config.outputDir,
@@ -220,6 +225,7 @@ export function createFeishuMessageDispatcher(config: FeishuMessageDispatcherCon
           activityAutomationClient: config.activityAutomationClient,
           closedOrderFetchImpl: config.closedOrderFetchImpl,
           closedOrderRegistryPaths: config.closedOrderRegistryPaths,
+          auditLogger: config.auditLogger,
         });
         const response = toBotResponse(await runtime.handle(toAgentRequest(message, text)));
         return { ...response, skipped: false };
