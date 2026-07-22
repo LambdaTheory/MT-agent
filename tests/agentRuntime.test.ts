@@ -13,7 +13,10 @@ describe('createAgentRuntime', () => {
 
     await expect(runtime.handle({ source: 'feishu', text: '今日概况' })).resolves.toEqual({ text: 'handled:latest_summary:tmp/runtime-output' });
     expect(resolveIntent).toHaveBeenCalledWith('今日概况');
-    expect(handleIntent).toHaveBeenCalledWith(resolvedIntent, 'tmp/runtime-output');
+    expect(handleIntent).toHaveBeenCalledWith(resolvedIntent, 'tmp/runtime-output', expect.objectContaining({
+      auditContext: expect.objectContaining({ source: 'feishu', actorAvailable: false }),
+      activateAudit: expect.any(Function),
+    }));
   });
 
   it('uses the existing deterministic parser when no resolver is injected', async () => {
@@ -57,6 +60,9 @@ describe('createAgentRuntime', () => {
       channel: { type: 'unknown' },
       metadata: { jobId: 'daily-check' },
     })).resolves.toEqual({ text: 'unknown' });
-    expect(handleIntent).toHaveBeenCalledWith({ type: 'unknown', text: '计划任务' }, undefined);
+    expect(handleIntent).toHaveBeenCalledWith({ type: 'unknown', text: '计划任务' }, undefined, expect.objectContaining({
+      auditContext: expect.objectContaining({ source: 'scheduler', rawActorId: 'system', channel: 'scheduler' }),
+      activateAudit: expect.any(Function),
+    }));
   });
 });

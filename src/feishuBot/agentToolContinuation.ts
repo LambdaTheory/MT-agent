@@ -508,6 +508,7 @@ export async function continueAgentPlannerSteps(input: ContinuePlannerStepsInput
   for (const [localIndex, step] of input.steps.entries()) {
     const absoluteIndex = input.baseIndex + localIndex;
     const stepId = stepIdFor(step, absoluteIndex);
+    await input.options.activateAudit?.(step.toolName);
     const resolvedArguments = resolvePlannerArguments(step.arguments, input.metadataStore);
     if (!resolvedArguments.ok) {
       input.textParts.push('');
@@ -643,7 +644,7 @@ export async function executeAgentToolRequestWithContinuation(
   options: AgentToolExecutionOptions = {},
 ): Promise<BotResponse> {
   const response = await executeAgentToolRequest(
-    { toolName: request.toolName, arguments: request.arguments, reason: request.reason },
+    request,
     outputDir,
     options,
   );

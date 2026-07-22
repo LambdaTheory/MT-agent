@@ -1,5 +1,12 @@
 import { basename, dirname } from 'node:path';
-import { buildAgentToolConfirmCard } from '../agentRuntime/approvalCard.js';
+import { buildAgentToolConfirmCard, buildAgentToolConfirmValue } from '../agentRuntime/approvalCard.js';
+import type { AgentAuditDependencies } from '../agentRuntime/types.js';
+import type { SelectedAuditToolName } from '../audit/config.js';
+import { saveConfirmationContext, type ConfirmationAuditToolName, type SaveConfirmationContextInput } from '../audit/confirmationContextStore.js';
+import { classifySelectedToolException, mapSelectedToolDomainOutcome, type SelectedToolDomainFacts } from '../audit/domainMapper.js';
+import { pseudonymizeAuditUserId } from '../audit/event.js';
+import type { AuditContext } from '../audit/types.js';
+import { isAuditSpanWriter, type AuditSpanWriter, type AuditWriter } from '../audit/auditLogger.js';
 import { buildAgentClarificationCard } from '../agentRuntime/clarificationCard.js';
 import type { AgentClarificationRequest } from '../agentRuntime/clarificationCard.js';
 import { decideAgentPolicy } from '../agentRuntime/policy.js';
@@ -34,7 +41,7 @@ import {
 } from './activityAutomation.js';
 import { agentExploreResponse } from './agentExploreResponse.js';
 import { continueAgentPlannerSteps, reviewAgentToolArguments } from './agentToolContinuation.js';
-import { executeAgentToolRequest } from './agentToolExecutor.js';
+import { executeAgentToolRequest, type AgentToolExecutionOptions } from './agentToolExecutor.js';
 import { clarificationConfirmationKey, saveClarificationContext } from './clarificationStore.js';
 import {
   buildInventoryStatusDetailCard,
@@ -201,7 +208,7 @@ async function clarificationResponse(
   };
 }
 
-async function invalidPlannerArgumentsClarification(rawProposal: string, message: string, outputDir: string, priorDepth = 0): Promise<BotResponse | null> {
+async function invalidPlannerArgumentsClarification(rawProposal: string, message: string, outputDir: string, options: HandleBotIntentOptions): Promise<BotResponse | null> {
   let parsed: unknown;
   try {
     parsed = JSON.parse(rawProposal);
@@ -232,6 +239,7 @@ async function invalidPlannerArgumentsClarification(rawProposal: string, message
   if (!toolName) return null;
   const selected = findAgentTool(toolName);
   if (!selected) return null;
+  await options.activateAudit?.(toolName);
 
   const required = requiredFieldsForTool(toolName);
   const question = selectedTool
@@ -260,7 +268,7 @@ async function invalidPlannerArgumentsClarification(rawProposal: string, message
     }, [
       { toolName, arguments: args, label: '补充参数', description: supplementDescription },
       { toolName: 'agent.clarifiedMessage', arguments: { message }, label: '重新规划', description: '让 Agent 重新理解并选择工具' },
-    ], 0.3, outputDir, priorDepth);
+    ], 0.3, outputDir, options.clarificationDepth);
 }
 
 const HELP_TEXT = `📋 查询与分析
@@ -333,6 +341,125 @@ export interface HandleBotIntentOptions {
   daemonCatalogFetcher?: typeof fetchDaemonCatalogSnapshot;
   clarificationDepth?: number;
   confidenceExecuteThreshold?: number;
+  auditContext?: AuditContext;
+  auditLogger?: AuditWriter;
+  activateAudit?: AgentAuditDependencies['activateAudit'];
+  confirmationContextStore?: ConfirmationContextStore;
+}
+
+export interface ConfirmationContextStore {
+  save(input: SaveConfirmationContextInput): Promise<unknown>;
+}
+
+function auditExecutionOptions(options: HandleBotIntentOptions): Pick<AgentToolExecutionOptions, 'auditContext' | 'auditLogger' | 'activateAudit'> {
+  return {
+    ...(options.auditContext ? { auditContext: options.auditContext } : {}),
+    ...(options.auditLogger ? { auditLogger: options.auditLogger } : {}),
+    ...(options.activateAudit ? { activateAudit: options.activateAudit } : {}),
+  };
+}
+
+type DirectAuditToolName = Extract<SelectedAuditToolName, 'publicTraffic.latestSummary' | 'publicTraffic.conversionSummary'>;
+type DirectAuditOutcomeCapture = (facts: SelectedToolDomainFacts) => void;
+
+function activateAuditBestEffort(options: HandleBotIntentOptions, toolName: DirectAuditToolName): Promise<AuditContext | undefined> {
+  try {
+    const activated = options.activateAudit?.(toolName);
+    return activated === undefined ? Promise.resolve(undefined) : activated.catch((_error) => undefined);
+  } catch (_error) {
+    return Promise.resolve(undefined);
+  }
+}
+
+function activateToolAuditBestEffort(options: HandleBotIntentOptions, toolName: string): Promise<AuditContext | undefined> {
+  try {
+    const activated = options.activateAudit?.(toolName);
+    return activated === undefined ? Promise.resolve(undefined) : activated.catch((_error) => undefined);
+  } catch (_error) {
+    return Promise.resolve(undefined);
+  }
+}
+
+function startDirectToolSpan(
+  writer: AuditSpanWriter,
+  toolName: DirectAuditToolName,
+  context: AuditContext,
+): Promise<Awaited<ReturnType<AuditSpanWriter['start']>> | undefined> {
+  try {
+    return writer.start({
+      traceId: context.traceId,
+      toolName,
+      context,
+      resultSummary: 'selected_tool_started',
+      tags: ['selected_tool'],
+    }).then((handle) => handle.startRecordResult?.ok === false ? undefined : handle, (_error) => undefined);
+  } catch (_error) {
+    return Promise.resolve(undefined);
+  }
+}
+
+async function endDirectToolSpan(
+  writer: AuditSpanWriter,
+  handle: Awaited<ReturnType<typeof startDirectToolSpan>>,
+  facts: SelectedToolDomainFacts | undefined,
+): Promise<void> {
+  if (handle === undefined) return;
+  let mapping;
+  try {
+    mapping = mapSelectedToolDomainOutcome(facts ?? { toolName: handle.toolName as DirectAuditToolName, kind: 'unknown_fallback' });
+  } catch (_error) {
+    mapping = mapSelectedToolDomainOutcome({ toolName: handle.toolName as DirectAuditToolName, kind: 'unknown_fallback' });
+  }
+  try {
+    await writer.end(handle, mapping);
+  } catch (_error) {
+    return;
+  }
+}
+
+async function errorDirectToolSpan(
+  writer: AuditSpanWriter,
+  handle: Awaited<ReturnType<typeof startDirectToolSpan>>,
+  error: unknown,
+): Promise<void> {
+  if (handle === undefined) return;
+  try {
+    const mapping = classifySelectedToolException(error);
+    await writer.error(handle, { ...mapping, error });
+  } catch (_error) {
+    return;
+  }
+}
+
+async function withAuditedDirectIntent(
+  toolName: DirectAuditToolName,
+  options: HandleBotIntentOptions,
+  run: (capture: DirectAuditOutcomeCapture) => Promise<BotResponse>,
+): Promise<BotResponse> {
+  const activatedContext = await activateAuditBestEffort(options, toolName);
+  const auditContext = options.activateAudit === undefined ? options.auditContext : activatedContext;
+  if (auditContext === undefined || !isAuditSpanWriter(options.auditLogger)) {
+    return run(() => undefined);
+  }
+
+  const writer = options.auditLogger;
+  const handle = await startDirectToolSpan(writer, toolName, auditContext);
+  let outcomeFacts: SelectedToolDomainFacts | undefined;
+  try {
+    const response = await run((facts) => {
+      outcomeFacts = facts;
+    });
+    await endDirectToolSpan(writer, handle, outcomeFacts);
+    return response;
+  } catch (error) {
+    await errorDirectToolSpan(writer, handle, error);
+    throw error;
+  }
+}
+
+function directReportOutcome(toolName: DirectAuditToolName, reportDate: string | undefined, found: boolean): SelectedToolDomainFacts {
+  if (found && reportDate !== undefined) return { toolName, kind: 'report_success', reportDate };
+  return { toolName, kind: 'report_missing', ...(reportDate !== undefined ? { reportDate } : {}) };
 }
 
 function parseAgentExploreInstruction(text: string): string | null {
@@ -361,12 +488,55 @@ function rentalOperationConfirmResponse(request: RentalOperationConfirmRequest, 
   return { text: `请确认租赁商品操作：${request.productId}`, card: buildRentalOperationConfirmCard(request, reason) };
 }
 
+const defaultConfirmationContextStore: ConfirmationContextStore = Object.freeze({
+  save: (input: SaveConfirmationContextInput) => saveConfirmationContext(input),
+});
+
+function isConfirmationAuditToolName(toolName: string): toolName is ConfirmationAuditToolName {
+  return toolName === 'publicTraffic.runReport' || toolName === 'publicTraffic.refreshDashboard';
+}
+
+function confirmationEntityFor(toolName: ConfirmationAuditToolName, args: Record<string, unknown>): SaveConfirmationContextInput['entity'] | undefined {
+  if (toolName !== 'publicTraffic.refreshDashboard') return undefined;
+  return typeof args.date === 'string' ? { type: 'report', id: args.date } : undefined;
+}
+
 function agentToolConfirmResponse(toolName: string, args: Record<string, unknown>, reason: string): BotResponse {
   const request = { toolName, arguments: args, reason };
   return {
     text: `请确认 Agent 操作：${toolName}`,
     card: buildAgentToolConfirmCard(request),
   };
+}
+
+async function saveInitialConfirmationContextBestEffort(input: {
+  toolName: ConfirmationAuditToolName;
+  args: Record<string, unknown>;
+  reason: string;
+  auditContext: AuditContext | undefined;
+  options: HandleBotIntentOptions;
+  entity?: SaveConfirmationContextInput['entity'];
+}): Promise<BotResponse> {
+  const request = { toolName: input.toolName, arguments: input.args, reason: input.reason };
+  const response: BotResponse = {
+    text: `请确认 Agent 操作：${input.toolName}`,
+    card: buildAgentToolConfirmCard(request),
+  };
+  if (input.auditContext === undefined) return response;
+  try {
+    const initiatorUserId = pseudonymizeAuditUserId(input.auditContext);
+    await (input.options.confirmationContextStore ?? defaultConfirmationContextStore).save({
+      confirmationKey: buildAgentToolConfirmValue(request).confirmationKey,
+      traceId: input.auditContext.traceId,
+      toolName: input.toolName,
+      source: input.auditContext.source,
+      ...(input.entity !== undefined ? { entity: input.entity } : {}),
+      ...(initiatorUserId !== undefined ? { initiatorUserId } : {}),
+    });
+  } catch (_error) {
+    return response;
+  }
+  return response;
 }
 
 function executeDirectAgentToolResponse(
@@ -385,6 +555,7 @@ function executeDirectAgentToolResponse(
       closedOrderRegistryPaths: options.closedOrderRegistryPaths,
       agentExploreProvider: options.agentExploreProvider,
       daemonCatalogFetcher: options.daemonCatalogFetcher,
+      ...auditExecutionOptions(options),
     },
   );
 }
@@ -396,6 +567,7 @@ export async function executeOrConfirmAgentToolRequest(
 ): Promise<BotResponse> {
   const tool = findAgentTool(request.toolName);
   if (!tool) return { text: `Agent 工具不存在：${request.toolName}`, metadata: { toolName: request.toolName, ok: false } };
+  const activatedAuditContext = await activateToolAuditBestEffort(options, request.toolName);
 
   const reviewed = await reviewAgentToolArguments({
     toolName: request.toolName,
@@ -416,7 +588,7 @@ export async function executeOrConfirmAgentToolRequest(
     return executeAgentToolRequest(
       { toolName: 'rental.pricePreview', arguments: pricePreviewArgumentsFromChangeRequest(rentalRequest), reason: request.reason },
       outputDir,
-      { rentalPriceClient: options.rentalPriceClient, closedOrderFetchImpl: options.closedOrderFetchImpl, closedOrderRegistryPaths: options.closedOrderRegistryPaths, agentExploreProvider: options.agentExploreProvider },
+      { rentalPriceClient: options.rentalPriceClient, closedOrderFetchImpl: options.closedOrderFetchImpl, closedOrderRegistryPaths: options.closedOrderRegistryPaths, agentExploreProvider: options.agentExploreProvider, ...auditExecutionOptions(options) },
     );
   }
   if (isPreConfirmationPlanningTool(request.toolName)) {
@@ -426,6 +598,7 @@ export async function executeOrConfirmAgentToolRequest(
       closedOrderRegistryPaths: options.closedOrderRegistryPaths,
       agentExploreProvider: options.agentExploreProvider,
       daemonCatalogFetcher: options.daemonCatalogFetcher,
+      ...auditExecutionOptions(options),
     });
   }
   const policy = decideAgentPolicy({ tool, input: completedArguments, reason: request.reason });
@@ -436,6 +609,17 @@ export async function executeOrConfirmAgentToolRequest(
       closedOrderRegistryPaths: options.closedOrderRegistryPaths,
       agentExploreProvider: options.agentExploreProvider,
       daemonCatalogFetcher: options.daemonCatalogFetcher,
+      ...auditExecutionOptions(options),
+    });
+  }
+  if (isConfirmationAuditToolName(request.toolName)) {
+    return saveInitialConfirmationContextBestEffort({
+      toolName: request.toolName,
+      args: completedArguments,
+      reason: request.reason,
+      auditContext: activatedAuditContext,
+      options,
+      ...(confirmationEntityFor(request.toolName, completedArguments) !== undefined ? { entity: confirmationEntityFor(request.toolName, completedArguments) } : {}),
     });
   }
   return {
@@ -772,7 +956,9 @@ async function executeAgentMultiStepPlannerResponse(
       rentalPriceClient: options.rentalPriceClient,
       closedOrderFetchImpl: options.closedOrderFetchImpl,
       closedOrderRegistryPaths: options.closedOrderRegistryPaths,
+      agentExploreProvider: options.agentExploreProvider,
       daemonCatalogFetcher: options.daemonCatalogFetcher,
+      ...auditExecutionOptions(options),
     },
   });
 }
@@ -815,7 +1001,7 @@ async function agentPlannerResponse(
     if (clarificationParsed.ok) {
       return clarificationResponse(clarificationParsed.proposal, clarificationParsed.proposal.candidates, clarificationParsed.proposal.confidence, outputDir, options.clarificationDepth);
     }
-    return invalidPlannerArgumentsClarification(rawProposal, message, outputDir, options.clarificationDepth);
+    return invalidPlannerArgumentsClarification(rawProposal, message, outputDir, options);
   }
 
   const plannerContextText = [message, parsed.proposal.reason].filter(Boolean).join('\n');
@@ -825,6 +1011,7 @@ async function agentPlannerResponse(
     plannerContextText,
   );
   if (gateByConfidence(parsed.proposal.confidence, confidenceGateOptions(options)) === 'clarify') {
+    await options.activateAudit?.(parsed.proposal.selectedTool);
     const candidate = {
       toolName: parsed.proposal.selectedTool,
       arguments: completedArguments,
@@ -871,13 +1058,19 @@ export async function handleBotIntent(intent: BotIntent, outputDir = 'output', o
   }
 
   if (intent.type === 'latest_summary') {
-    const latest = await findReportContextForIntent(outputDir, intent.date);
-    return { text: latest ? formatLatestSummary(latest.context) : missingReportContextText(intent.date) };
+    return withAuditedDirectIntent('publicTraffic.latestSummary', options, async (capture) => {
+      const latest = await findReportContextForIntent(outputDir, intent.date);
+      capture(directReportOutcome('publicTraffic.latestSummary', latest?.context.date ?? intent.date, Boolean(latest)));
+      return { text: latest ? formatLatestSummary(latest.context) : missingReportContextText(intent.date) };
+    });
   }
 
   if (intent.type === 'conversion_summary') {
-    const latest = await findReportContextForIntent(outputDir, intent.date);
-    return { text: latest ? formatConversionSummary(latest.context) : missingReportContextText(intent.date) };
+    return withAuditedDirectIntent('publicTraffic.conversionSummary', options, async (capture) => {
+      const latest = await findReportContextForIntent(outputDir, intent.date);
+      capture(directReportOutcome('publicTraffic.conversionSummary', latest?.context.date ?? intent.date, Boolean(latest)));
+      return { text: latest ? formatConversionSummary(latest.context) : missingReportContextText(intent.date) };
+    });
   }
 
   if (intent.type === 'inventory_status_overview' || intent.type === 'inventory_status_query') {
@@ -932,7 +1125,7 @@ export async function handleBotIntent(intent: BotIntent, outputDir = 'output', o
     return executeAgentToolRequest(
       { toolName: 'rental.pricePreview', arguments: pricePreviewArgumentsFromChangeRequest(intent.request), reason: `明确飞书命令请求商品 ${intent.productId} 改价。` },
       outputDir,
-      { rentalPriceClient: options.rentalPriceClient, closedOrderFetchImpl: options.closedOrderFetchImpl, closedOrderRegistryPaths: options.closedOrderRegistryPaths },
+      { rentalPriceClient: options.rentalPriceClient, closedOrderFetchImpl: options.closedOrderFetchImpl, closedOrderRegistryPaths: options.closedOrderRegistryPaths, ...auditExecutionOptions(options) },
     );
   }
 
@@ -993,7 +1186,14 @@ export async function handleBotIntent(intent: BotIntent, outputDir = 'output', o
   }
 
   if (intent.type === 'run_public_traffic_report') {
-    return agentToolConfirmResponse('publicTraffic.runReport', {}, '明确飞书命令需要二次确认后才能生成并发送公域日报。');
+    const auditContext = await options.activateAudit?.('publicTraffic.runReport');
+    return saveInitialConfirmationContextBestEffort({
+      toolName: 'publicTraffic.runReport',
+      args: {},
+      reason: '明确飞书命令需要二次确认后才能生成并发送公域日报。',
+      auditContext,
+      options,
+    });
   }
 
   if (intent.type === 'run_inactive_refresh') {
@@ -1007,14 +1207,19 @@ export async function handleBotIntent(intent: BotIntent, outputDir = 'output', o
   }
 
   if (intent.type === 'refresh_public_traffic_dashboard') {
-    return agentToolConfirmResponse(
-      'publicTraffic.refreshDashboard',
-      {
-        ...(intent.date ? { date: intent.date } : {}),
-        ...(intent.sendTo ? { sendTo: intent.sendTo } : {}),
-      },
-      '明确飞书命令需要二次确认后才能补抓目标业务数据日的访问页 1日、7日、30日数据；若补抓后数据完整，可能重建并重发对应日报。',
-    );
+    const auditContext = await options.activateAudit?.('publicTraffic.refreshDashboard');
+    const args = {
+      ...(intent.date ? { date: intent.date } : {}),
+      ...(intent.sendTo ? { sendTo: intent.sendTo } : {}),
+    };
+    return saveInitialConfirmationContextBestEffort({
+      toolName: 'publicTraffic.refreshDashboard',
+      args,
+      reason: '明确飞书命令需要二次确认后才能补抓目标业务数据日的访问页 1日、7日、30日数据；若补抓后数据完整，可能重建并重发对应日报。',
+      auditContext,
+      options,
+      ...(intent.date ? { entity: { type: 'report', id: intent.date } } : {}),
+    });
   }
 
   if (intent.type === 'push_latest_report_to_group') {
@@ -1049,6 +1254,7 @@ export async function handleBotIntent(intent: BotIntent, outputDir = 'output', o
           rentalPriceClient: options.rentalPriceClient,
           closedOrderFetchImpl: options.closedOrderFetchImpl,
           closedOrderRegistryPaths: options.closedOrderRegistryPaths,
+          ...auditExecutionOptions(options),
         },
       });
     }
@@ -1086,7 +1292,7 @@ export async function handleBotIntent(intent: BotIntent, outputDir = 'output', o
           return executeAgentToolRequest(
             { toolName: 'rental.pricePreview', arguments: pricePreviewArgumentsFromChangeRequest(proposedIntent.request), reason: parsedProposal.proposal.reason },
             outputDir,
-            { rentalPriceClient: options.rentalPriceClient, closedOrderFetchImpl: options.closedOrderFetchImpl, closedOrderRegistryPaths: options.closedOrderRegistryPaths },
+            { rentalPriceClient: options.rentalPriceClient, closedOrderFetchImpl: options.closedOrderFetchImpl, closedOrderRegistryPaths: options.closedOrderRegistryPaths, ...auditExecutionOptions(options) },
           );
         }
         const request = rentalIntentToConfirmRequest(proposedIntent);

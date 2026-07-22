@@ -4,6 +4,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { buildAgentToolConfirmCard, type AgentToolConfirmContinuation } from '../src/agentRuntime/approvalCard.js';
+import type { AuditEndInput, AuditErrorInput, AuditRecordInput, AuditSpanWriter, AuditStartInput } from '../src/audit/auditLogger.js';
+import type { AuditRecordResult, AuditToolSpanHandle } from '../src/audit/types.js';
+import type { ConfirmationContextRecord } from '../src/audit/confirmationContextStore.js';
 import { buildAgentClarificationCard } from '../src/agentRuntime/clarificationCard.js';
 import { MAX_CLARIFY_DEPTH } from '../src/agentRuntime/intentResolution.js';
 import { clarificationConfirmationKey, saveClarificationContext } from '../src/feishuBot/clarificationStore.js';
@@ -64,6 +67,58 @@ const metric = {
 };
 
 const AUDIT_HASH = 'a'.repeat(64);
+
+class RecordingSdkAuditWriter implements AuditSpanWriter {
+  events: AuditRecordInput[] = [];
+
+  async record(input: AuditRecordInput): Promise<AuditRecordResult> {
+    this.events.push(input);
+    return { ok: true, payload: JSON.stringify(input) };
+  }
+
+  async recordAt(input: AuditRecordInput): Promise<AuditRecordResult> {
+    return this.record(input);
+  }
+
+  async start(input: AuditStartInput): Promise<AuditToolSpanHandle> {
+    const parentSpanId = input.parentSpanId ?? input.context?.parentSpanId;
+    const spanId = `sdk-tool-span-${this.events.length + 1}`;
+    this.events.push({
+      traceId: input.traceId,
+      spanId,
+      event: 'tool.start',
+      toolName: input.toolName,
+      status: 'OK',
+      resultSummary: input.resultSummary ?? 'started',
+      ...(input.context !== undefined ? { context: input.context } : {}),
+      ...(parentSpanId !== undefined ? { parentSpanId } : {}),
+      ...(input.entity !== undefined ? { entity: input.entity } : {}),
+      ...(input.tags !== undefined ? { tags: input.tags } : {}),
+    });
+    return { traceId: input.traceId, spanId, ...(parentSpanId !== undefined ? { parentSpanId } : {}), toolName: input.toolName, ...(input.context !== undefined ? { context: input.context } : {}), startedAt: '2026-07-21T08:00:00.000Z', startedAtMs: 0 };
+  }
+
+  async end(handle: AuditToolSpanHandle, input: AuditEndInput): Promise<AuditRecordResult> {
+    return this.record({ traceId: handle.traceId, spanId: handle.spanId, event: 'tool.end', toolName: handle.toolName, status: input.status, resultSummary: input.resultSummary, ...(handle.context !== undefined ? { context: handle.context } : {}), ...(handle.parentSpanId !== undefined ? { parentSpanId: handle.parentSpanId } : {}), ...(input.entity !== undefined ? { entity: input.entity } : {}), ...(input.tags !== undefined ? { tags: input.tags } : {}) });
+  }
+
+  async error(handle: AuditToolSpanHandle, input: AuditErrorInput): Promise<AuditRecordResult> {
+    return this.record({ traceId: handle.traceId, spanId: handle.spanId, event: 'tool.error', toolName: handle.toolName, status: input.status, resultSummary: input.resultSummary, ...(handle.context !== undefined ? { context: handle.context } : {}), ...(handle.parentSpanId !== undefined ? { parentSpanId: handle.parentSpanId } : {}), ...(input.error !== undefined ? { error: input.error } : {}), ...(input.tags !== undefined ? { tags: input.tags } : {}) });
+  }
+}
+
+function selectedSdkSidecar(overrides: Partial<ConfirmationContextRecord> = {}): ConfirmationContextRecord {
+  return {
+    schemaVersion: 'agent_tool_confirmation_context:v1',
+    traceId: 'trace-sdk-selected-callback',
+    toolName: 'publicTraffic.refreshDashboard',
+    createdAt: '2026-07-21T08:00:00.000Z',
+    expiresAt: '2026-07-21T09:00:00.000Z',
+    source: 'feishu',
+    entity: { type: 'report', id: '2026-06-24' },
+    ...overrides,
+  };
+}
 
 function completeAudit(productId: string, taskId = `task_${productId}_ref`) {
   return {
@@ -469,6 +524,65 @@ describe('dashboard refresh SDK card delivery contract', () => {
     expect(JSON.stringify(finalCard)).toContain('未重建、未重发');
     expect(JSON.stringify(finalCard)).not.toContain('Agent 操作已完成');
   });
+
+  it('audits selected SDK refresh confirmation before executor work and parents tool span to run.resume', async () => {
+    const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
+    const sent: unknown[] = [];
+    const writer = new RecordingSdkAuditWriter();
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-sdk-audit-confirm-'));
+    const config = { targetUrl: 'https://example.test/dashboard', periods: ['1d', '7d', '30d'], preferredPageSize: 100, outputDir, browserProfileDir: 'profile' };
+    dashboardRefreshMocks.loadConfig.mockResolvedValueOnce(config);
+    dashboardRefreshMocks.runDashboardRefresh.mockImplementationOnce(async () => {
+      expect(writer.events.map((event) => event.event)).toEqual(['run.resume', 'tool.start']);
+      expect(writer.events[1]?.parentSpanId).toBe('sdk-resume-span');
+      return {
+        status: 'still_missing',
+        dataDate: '2026-06-24',
+        actualPageDate: '2026-06-24',
+        refreshQuality: { hasMissing: true, notes: [], periods: { '1d': { complete: true, rowCount: 12 }, '7d': { complete: false, rowCount: 0, reason: 'rowCount=0' }, '30d': { complete: true, rowCount: 300 } } },
+        rebuild: 'skipped',
+        resend: 'skipped',
+        rawLocation: `${outputDir}/2026-06-25`,
+        message: 'saved safely',
+      };
+    });
+    let loaderCalls = 0;
+    const confirmValue = agentToolConfirmActionValue(buildAgentToolConfirmCard({
+      toolName: 'publicTraffic.refreshDashboard',
+      arguments: { date: '2026-06-24' },
+      reason: '补抓 2026-06-24 访问页',
+    }));
+    const bot = createFeishuSdkBot({
+      appId: 'app',
+      appSecret: 'secret',
+      outputDir,
+      sdk: fakeSdk(sent, registered),
+      auditLogger: writer,
+      confirmationContextLoader: { load: async () => { loaderCalls += 1; return selectedSdkSidecar(); } },
+      now: () => new Date('2026-07-21T08:00:00.000Z'),
+      makeSpanId: () => 'sdk-resume-span',
+    });
+
+    bot.start();
+    await registered['card.action.trigger']({
+      event: {
+        context: { open_message_id: 'om-sdk-audit-confirm' },
+        operator: { open_id: 'ou_sdk_audit_confirm' },
+        action: { tag: 'button', name: 'agent_tool_confirm_submit', behaviors: [{ type: 'callback', value: confirmValue }] },
+      },
+    });
+
+    for (let attempt = 0; attempt < 100 && !JSON.stringify(sent).includes('访问页补抓完成，但数据仍未完整'); attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    expect(loaderCalls).toBe(1);
+    expect(JSON.stringify(patchedCard(sent[sent.length - 1]))).toContain('访问页补抓完成，但数据仍未完整');
+    expect(writer.events.map((event) => event.event)).toEqual(['run.resume', 'tool.start', 'tool.end']);
+    expect(writer.events[0]).toMatchObject({ traceId: 'trace-sdk-selected-callback', spanId: 'sdk-resume-span', event: 'run.resume', status: 'OK', resultSummary: 'confirmation_resumed', tags: ['confirmed'] });
+    expect(writer.events[1]).toMatchObject({ traceId: 'trace-sdk-selected-callback', event: 'tool.start', toolName: 'publicTraffic.refreshDashboard', parentSpanId: 'sdk-resume-span' });
+    expect(writer.events[2]).toMatchObject({ traceId: 'trace-sdk-selected-callback', event: 'tool.end', parentSpanId: 'sdk-resume-span' });
+  });
 });
 
 describe('createFeishuSdkBot card.action.trigger', () => {
@@ -759,6 +873,71 @@ describe('createFeishuSdkBot card.action.trigger', () => {
     expect(JSON.stringify(resultCard.card?.data)).toContain('取消异常');
     const date = new Date().toISOString().slice(0, 10);
     expect(await loadOperationLedgerJsonlEntries(outputDir, date)).toEqual([]);
+  });
+
+  it('audits selected SDK refresh cancellation only after requestRef validation', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-sdk-audit-cancel-'));
+    const writer = new RecordingSdkAuditWriter();
+    const request = { toolName: 'publicTraffic.refreshDashboard', arguments: { date: '2026-06-24' }, reason: '取消补抓 2026-06-24 访问页' };
+    const requestRef = await saveAgentToolConfirmRequest(outputDir, request);
+    const cancelValue = readButtonValue(buildAgentToolConfirmCard(request, { requestRef }), 'agent_tool_cancel_submit');
+    const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
+    const sent: unknown[] = [];
+    let loaderCalls = 0;
+    const bot = createFeishuSdkBot({
+      appId: 'app',
+      appSecret: 'secret',
+      outputDir,
+      sdk: fakeSdk(sent, registered),
+      auditLogger: writer,
+      confirmationContextLoader: { load: async () => { loaderCalls += 1; return selectedSdkSidecar({ requestRef, traceId: 'trace-sdk-cancel' }); } },
+      now: () => new Date('2026-07-21T08:00:00.000Z'),
+      makeSpanId: () => 'sdk-cancel-span',
+    });
+
+    bot.start();
+    const result = await registered['card.action.trigger']({
+      event: {
+        context: { open_message_id: 'om-sdk-audit-cancel' },
+        operator: { open_id: 'ou_sdk_audit_cancel' },
+        action: { tag: 'button', name: 'agent_tool_cancel_submit', behaviors: [{ type: 'callback', value: cancelValue }] },
+      },
+    });
+
+    expect(JSON.stringify((result as { card?: { data?: unknown } }).card?.data)).toContain('工具 publicTraffic.refreshDashboard 操作已取消');
+    expect(loaderCalls).toBe(1);
+    expect(writer.events).toEqual([expect.objectContaining({ traceId: 'trace-sdk-cancel', spanId: 'sdk-cancel-span', event: 'run.failed', toolName: 'publicTraffic.refreshDashboard', status: 'CANCELLED', resultSummary: 'confirmation_cancelled', tags: ['cancelled'] })]);
+  });
+
+  it('does not load sidecars or emit selected audit for invalid SDK confirmation or loose cancellation payloads', async () => {
+    const outputDir = await mkdtemp(join(tmpdir(), 'mt-agent-sdk-audit-invalid-'));
+    const registered: Record<string, (data: unknown) => Promise<unknown>> = {};
+    const sent: unknown[] = [];
+    const writer = new RecordingSdkAuditWriter();
+    let loaderCalls = 0;
+    const request = { toolName: 'publicTraffic.refreshDashboard', arguments: { date: '2026-06-24' }, reason: '补抓 2026-06-24 访问页' };
+    const invalidConfirmValue = { ...agentToolConfirmActionValue(buildAgentToolConfirmCard(request)), confirmationKey: '000000000000000000000000' };
+    const bot = createFeishuSdkBot({
+      appId: 'app',
+      appSecret: 'secret',
+      outputDir,
+      sdk: fakeSdk(sent, registered),
+      auditLogger: writer,
+      confirmationContextLoader: { load: async () => { loaderCalls += 1; return selectedSdkSidecar(); } },
+    });
+
+    bot.start();
+    await registered['card.action.trigger']({
+      event: { context: { open_message_id: 'om-sdk-invalid-confirm' }, operator: { open_id: 'ou_sdk_invalid' }, action: { tag: 'button', name: 'agent_tool_confirm_submit', behaviors: [{ type: 'callback', value: invalidConfirmValue }] } },
+    });
+    const looseCancel = await registered['card.action.trigger']({
+      event: { context: { open_message_id: 'om-sdk-loose-cancel' }, operator: { open_id: 'ou_sdk_invalid' }, action: { tag: 'button', name: 'agent_tool_cancel_submit', behaviors: [{ type: 'callback', value: { action: 'agent_tool_cancel', toolName: 'publicTraffic.refreshDashboard', confirmationKey: 'bad-key' } }] } },
+    });
+
+    expect(JSON.stringify(sent)).toContain('Agent 操作确认参数无效，请重新发起。');
+    expect(JSON.stringify((looseCancel as { card?: { data?: unknown } }).card?.data)).toContain('工具 publicTraffic.refreshDashboard 操作已取消');
+    expect(loaderCalls).toBe(0);
+    expect(writer.events).toEqual([]);
   });
 
   it('renders failed Agent clarification continuation as a red status card', async () => {
