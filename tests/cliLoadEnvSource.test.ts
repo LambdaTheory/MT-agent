@@ -9,7 +9,7 @@ describe('CLI loadEnv wiring', () => {
   it('guards Feishu SDK bot startup when imported', async () => {
     const text = await source('../src/cli/feishuBotSdk.ts');
     expect(text).toContain("import { pathToFileURL } from 'node:url';");
-    expect(text).toContain('export async function main(): Promise<void>');
+    expect(text).toContain('export async function main(dependencies: FeishuBotSdkCliDependencies = {}): Promise<void>');
     expect(text).toContain('await bot.start();');
     expect(text).toContain('import.meta.url === pathToFileURL(process.argv[1]).href');
   });

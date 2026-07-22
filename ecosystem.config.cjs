@@ -14,6 +14,7 @@ module.exports = {
       autorestart: true,
       max_restarts: 10,
       min_uptime: '10s',
+      kill_timeout: 3000,
       out_file: 'output/feishu-bot-sdk.out.log',
       error_file: 'output/feishu-bot-sdk.err.log',
       merge_logs: true,
