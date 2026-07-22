@@ -44,6 +44,7 @@ import {
 import { resolveQueryFullListText } from './queryFullListAction.js';
 import { buildIdLookupCard } from './idLookupCard.js';
 import { lookupProductId } from './idLookup.js';
+import { buildFeishuBotMenuConsoleCard, extractFeishuBotMenuEvent, FEISHU_BOT_MENU_EVENT_TYPES } from './menuConsole.js';
 import {
   buildActivityCancelAssistanceCard,
   buildActivityCancelFailureCard,
@@ -107,13 +108,18 @@ interface FeishuSdkReplyRequest {
   data: { content: string; msg_type: 'text' | 'interactive' };
 }
 
+interface FeishuSdkCreateRequest {
+  params: { receive_id_type: 'open_id' | 'chat_id' };
+  data: { receive_id: string; content: string; msg_type: 'text' | 'interactive' };
+}
+
 interface FeishuSdkPatchRequest {
   path: { message_id: string };
   data: { content: string };
 }
 
 interface FeishuSdkClient {
-  im: { v1: { message: { reply(request: FeishuSdkReplyRequest): Promise<unknown> | unknown; patch?: (request: FeishuSdkPatchRequest) => Promise<unknown> | unknown } } };
+  im: { v1: { message: { reply(request: FeishuSdkReplyRequest): Promise<unknown> | unknown; patch?: (request: FeishuSdkPatchRequest) => Promise<unknown> | unknown; create?: (request: FeishuSdkCreateRequest) => Promise<unknown> | unknown } } };
 }
 
 type RentalActionStatus = 'processing' | 'completed' | 'failed' | 'cancelled';
@@ -475,6 +481,15 @@ async function replyCard(client: FeishuSdkClient, messageId: string, card: Feish
   return readReplyMessageId(result);
 }
 
+async function sendCardToOpenId(client: FeishuSdkClient, openId: string, card: FeishuCardPayload): Promise<void> {
+  const create = client.im.v1.message.create;
+  if (!create) throw new Error('Feishu SDK message.create is unavailable for bot menu events');
+  await create({
+    params: { receive_id_type: 'open_id' },
+    data: { receive_id: openId, content: JSON.stringify(card), msg_type: 'interactive' },
+  });
+}
+
 async function updateCard(client: FeishuSdkClient, messageId: string, card: FeishuCardPayload): Promise<boolean> {
   const patch = client.im.v1.message.patch;
   if (!patch) return false;
@@ -602,7 +617,36 @@ export function createFeishuSdkBot(config: FeishuSdkBotConfig): FeishuSdkBot {
     return { ...message, metadata: { ...message.metadata, [MESSAGE_ID_CLAIMED_METADATA_KEY]: true } };
   }
 
+  async function handleMenuEvent(data: unknown): Promise<void> {
+    const menuEvent = extractFeishuBotMenuEvent(data);
+    if (!menuEvent?.openId) return;
+    const startedAt = Date.now();
+    logInfo(formatRuntimeLog({
+      level: 'info',
+      component: 'feishu-bot',
+      event: 'bot_menu.received',
+      actionName: menuEvent.eventKey,
+    }));
+    try {
+      await sendCardToOpenId(client, menuEvent.openId, await buildFeishuBotMenuConsoleCard(menuEvent, outputDir));
+      logInfo(formatRuntimeLog({
+        level: 'info',
+        component: 'feishu-bot',
+        event: 'bot_menu.reply.completed',
+        actionName: menuEvent.eventKey,
+        elapsedMs: Date.now() - startedAt,
+      }));
+    } catch (error) {
+      logError(error, { messageId: `bot_menu:${menuEvent.eventKey}`, phase: 'reply' });
+    }
+  }
+
+  const menuEventHandlers = Object.fromEntries(
+    FEISHU_BOT_MENU_EVENT_TYPES.map((eventType) => [eventType, handleMenuEvent]),
+  ) as Record<string, (data: unknown) => Promise<unknown>>;
+
   eventDispatcher.register({
+    ...menuEventHandlers,
     'im.message.receive_v1': async (data: unknown) => {
       const message = extractSdkTextMessage(data);
       if (!message) return;

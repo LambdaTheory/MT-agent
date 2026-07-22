@@ -22,7 +22,7 @@ import { recordAgentLearningEvent } from '../agentLearning/store.js';
 import { handleLinkRegistryGovernanceCardAction } from '../linkRegistry/governanceSession.js';
 import { handleLinkRegistryMaintenanceCardAction } from '../linkRegistry/maintenanceSession.js';
 import type { ClosedOrderRegistryPathsInput } from '../closedOrderFeedback/runtime.js';
-import { replyFeishuMessageCard, replyFeishuMessageText, type FeishuAppSendResult, type FeishuCardPayload, type FeishuReplyConfig } from '../notify/feishuApp.js';
+import { replyFeishuMessageCard, replyFeishuMessageText, sendFeishuAppCard, type FeishuAppConfig, type FeishuAppSendResult, type FeishuCardPayload, type FeishuReplyConfig } from '../notify/feishuApp.js';
 import { handleOperationsLearningFeedback, handleOperationsLearningStop } from '../operationsLearningLoop/session.js';
 import { findLatestReportContext } from './reportStore.js';
 import { resolveQueryFullListText } from './queryFullListAction.js';
@@ -66,6 +66,8 @@ import { createRentalPriceSkillClient, executeRentalOperationConfirmRequest, par
 import type { LlmIntentProposalProvider } from './llmIntentProposal.js';
 import type { BotIntent, BotResponse, FeishuBotDispatchResult, FeishuBotIncomingTextMessage, FeishuMessageEvent } from './types.js';
 import { handleUrlVerification, verifyFeishuSignature } from './verify.js';
+import { buildFeishuBotMenuConsoleCard, extractFeishuBotMenuEvent } from './menuConsole.js';
+import { checkHealth } from '../health/healthService.js';
 
 export interface FeishuBotServerConfig {
   port: number;
@@ -81,6 +83,7 @@ export interface FeishuBotServerConfig {
   dispatchMessage?: (message: FeishuBotIncomingTextMessage) => Promise<FeishuBotDispatchResult>;
   replyText?: (config: FeishuReplyConfig, text: string) => Promise<FeishuAppSendResult>;
   replyCard?: (config: FeishuReplyConfig, card: FeishuCardPayload) => Promise<FeishuAppSendResult>;
+  sendCard?: (config: FeishuAppConfig, card: FeishuCardPayload) => Promise<FeishuAppSendResult>;
   rentalPriceClient?: RentalPriceSkillClient;
   activityAutomationClient?: ActivityAutomationSkillClient;
   closedOrderFetchImpl?: typeof fetch;
@@ -1173,8 +1176,13 @@ export function startFeishuBotServer(config: FeishuBotServerConfig) {
     ...message,
     metadata: { ...message.metadata, [MESSAGE_ID_CLAIMED_METADATA_KEY]: true },
   }));
+  const sendCard = config.sendCard ?? sendFeishuAppCard;
 
   const server = createServer(async (req, res) => {
+    if (req.method === 'GET' && req.url?.split('?')[0] === '/health') {
+      const report = await checkHealth({ outputDir: config.outputDir });
+      return writeJson(res, report.status === 'fail' ? 503 : 200, report);
+    }
     if (req.method !== 'POST') return writeJson(res, 404, { error: 'not found' });
 
     const body = await readBody(req);
@@ -1182,6 +1190,18 @@ export function startFeishuBotServer(config: FeishuBotServerConfig) {
     const payload = JSON.parse(body) as FeishuMessageEvent & { type?: string; challenge?: string; token?: string };
     const verification = handleUrlVerification(payload, config.verificationToken);
     if (verification) return writeJson(res, 200, verification);
+
+    const menuEvent = extractFeishuBotMenuEvent(payload);
+    if (menuEvent) {
+      writeJson(res, 200, { ok: true });
+      if (menuEvent.openId) {
+        const card = await buildFeishuBotMenuConsoleCard(menuEvent, config.outputDir);
+        await sendCard({ appId: config.appId, appSecret: config.appSecret, receiveIdType: 'open_id', receiveId: menuEvent.openId }, card).catch((error) => {
+          logPostAckError(error, { messageId: `bot_menu:${menuEvent.eventKey}`, phase: 'send-card' });
+        });
+      }
+      return;
+    }
 
     if (isCardActionTrigger(payload)) {
       const validSignature = verifyFeishuSignature({
