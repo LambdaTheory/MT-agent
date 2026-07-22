@@ -389,7 +389,7 @@ describe('agent rental price preview multiplier handling', () => {
       std: { rent1day: '90.00', rent7day: '510.00' },
       creator: { rent1day: '130.00', rent7day: '670.00' },
     });
-    expect(auditPreviewFromRead).toHaveBeenCalledWith('901', expect.any(Object), { rent1day: '80.00', rent7day: '470.00' }, { rent1day: '80.00', rent7day: '470.00' });
+    expect(auditPreviewFromRead).toHaveBeenCalledWith('901', expect.any(Object), { rent1day: '80.00', rent7day: '470.00' }, { std: { rent1day: '80.00', rent7day: '470.00' } });
     expect(vasRead).not.toHaveBeenCalled();
     expect(vasApply).not.toHaveBeenCalled();
     const plannedWrites = auditPreviewFromRead.mock.calls.map(([, , fields, artifact]) => ({ fields, artifact }));

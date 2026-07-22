@@ -573,6 +573,50 @@ test("actionBatchRead converts newPage failure into a structured batch error", a
   assert.deepEqual(result.errors, [{ productId: "761", error: "page creation failed" }]);
 });
 
+test("actionBatchRead retries once after a product tab redirects to login", async () => {
+  let loginCount = 0;
+  let newPageCount = 0;
+  let mainUrl = "about:blank";
+  pwRunner.__setConfigForTest({
+    saas: {
+      loginUrl: "https://example.test/web/index.php?c=user&a=login",
+      productDetailUrl: "https://example.test/web/index.php?r=goods.edit&id={productId}",
+      credentials: { username: "user", password: "secret" },
+    },
+    selectors: {
+      login: { username: "#user", password: "#pass", submitButton: "#submit" },
+      product: { rent1day: "input.option_rent1day_{specId}" },
+    },
+  });
+  pwRunner.__setPageForTest({
+    async goto() { loginCount++; mainUrl = "https://example.test/web/index.php?r=dashboard"; },
+    url() { return mainUrl; },
+    async $() { return null; },
+  });
+  pwRunner.__setContextForTest({
+    async newPage() {
+      newPageCount++;
+      const tab = newPageCount === 1
+        ? makeFakeTab({ redirectUrl: "https://example.test/web/index.php?c=user&a=login" })
+        : makeFakeTab({
+            specs: [{ specId: "3862", title: "默认规格" }],
+            rentFields: { "3862": {} },
+            elements: { "input.option_rent1day_3862": { value: "22.00", tag: "input" } },
+          });
+      tab.close = async () => {};
+      return tab;
+    },
+  });
+
+  const result = await pwRunner.actionBatchRead(["761"], ["rent1day"]);
+
+  assert.equal(loginCount, 1);
+  assert.equal(newPageCount, 2);
+  assert.equal(result.status, "ok");
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.results["761"].values["3862"].rent1day, "22.00");
+});
+
 test("legacy login propagates an untrusted-origin login failure", async () => {
   pwRunner.__setConfigForTest({
     saas: { loginUrl: "https://trusted.example/login", credentials: { username: "user", password: "secret" } },

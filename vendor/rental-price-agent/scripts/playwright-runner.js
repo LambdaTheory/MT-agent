@@ -2965,6 +2965,29 @@ async function readProductOnTab(tab, productId, fields, explicitFields = false) 
 
 const BATCH_READ_CONCURRENCY = Math.max(1, Number(process.env.RENTAL_PRICE_AGENT_BATCH_READ_CONCURRENCY || 6));
 
+function isLoginRedirectError(error) {
+  return String(error || "").includes("redirected to login");
+}
+
+async function readProductBatch(productIds, fields, explicitFields, results, errors, warnings) {
+  for (let i = 0; i < productIds.length; i += BATCH_READ_CONCURRENCY) {
+    const chunk = productIds.slice(i, i + BATCH_READ_CONCURRENCY).map(String);
+    const jobs = chunk.map(async pid => {
+      let tab = null;
+      try {
+        tab = await context.newPage();
+        results[pid] = await readProductOnTab(tab, pid, fields, explicitFields);
+        if (results[pid].warnings && results[pid].warnings.length > 0) warnings.push(...results[pid].warnings.map(w => ({ productId: pid, ...w })));
+      } catch (err) {
+        errors.push({ productId: pid, error: err.message });
+      } finally {
+        if (tab) await tab.close().catch(() => {});
+      }
+    });
+    await Promise.all(jobs);
+  }
+}
+
 // --- Batch read: parallel multi-tab read (default max 6 concurrent) ---
 async function actionBatchRead(productIds, fields) {
   if (!Array.isArray(productIds) || productIds.length === 0) {
@@ -2977,21 +3000,19 @@ async function actionBatchRead(productIds, fields) {
   const errors = [];
   const warnings = [];
 
-  for (let i = 0; i < productIds.length; i += BATCH_READ_CONCURRENCY) {
-    const chunk = productIds.slice(i, i + BATCH_READ_CONCURRENCY).map(String);
-    const jobs = chunk.map(async pid => {
-      let tab = null;
-      try {
-        tab = await context.newPage();
-        results[pid] = await readProductOnTab(tab, pid, flds, explicitFields);
-        if (results[pid].warnings && results[pid].warnings.length > 0) warnings.push(...results[pid].warnings.map(w => ({ productId: pid, ...w })));
-      } catch (err) {
-        errors.push({ productId: pid, error: err.message });
-      } finally {
-        if (tab) await tab.close().catch(() => {});
-      }
-    });
-    await Promise.all(jobs);
+  await readProductBatch(productIds, flds, explicitFields, results, errors, warnings);
+
+  const loginRedirectProductIds = errors
+    .filter(item => isLoginRedirectError(item.error))
+    .map(item => item.productId);
+  if (loginRedirectProductIds.length > 0) {
+    const login = await actionLogin();
+    if (!login || login.status !== "error") {
+      const nonLoginErrors = errors.filter(item => !isLoginRedirectError(item.error));
+      errors.length = 0;
+      errors.push(...nonLoginErrors);
+      await readProductBatch(loginRedirectProductIds, flds, explicitFields, results, errors, warnings);
+    }
   }
 
   const hasPartial = Object.values(results).some(r => r.status === "partial") || warnings.some(w => w.level === "error");
