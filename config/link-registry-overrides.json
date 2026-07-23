@@ -2,110 +2,6 @@
   "version": 1,
   "entries": [
     {
-      "internalProductId": "1012",
-      "sameSkuGroupId": "fujifilm-instax-wide-400",
-      "categoryId": "camera",
-      "categoryName": "相机",
-      "productType": "instant-camera",
-      "shortName": "Wide 400",
-      "confidence": 0.95,
-      "updatedAt": "2026-07-16",
-      "reason": "approved_product_group_audit"
-    },
-    {
-      "internalProductId": "1013",
-      "sameSkuGroupId": "fujifilm-instax-wide-400",
-      "categoryId": "camera",
-      "categoryName": "相机",
-      "productType": "instant-camera",
-      "shortName": "Wide 400",
-      "confidence": 0.95,
-      "updatedAt": "2026-07-16",
-      "reason": "approved_product_group_audit"
-    },
-    {
-      "internalProductId": "1015",
-      "sameSkuGroupId": "fujifilm-instax-wide-400",
-      "categoryId": "camera",
-      "categoryName": "相机",
-      "productType": "instant-camera",
-      "shortName": "Wide 400",
-      "confidence": 0.95,
-      "updatedAt": "2026-07-16",
-      "reason": "approved_product_group_audit"
-    },
-    {
-      "internalProductId": "1030",
-      "sameSkuGroupId": "samsung-galaxy-s23-ultra",
-      "categoryId": "phone",
-      "categoryName": "手机",
-      "productType": "smartphone",
-      "shortName": "S23U",
-      "aliases": [
-        "S23U",
-        "s23u",
-        "Galaxy S23 Ultra"
-      ],
-      "confidence": 0.95,
-      "updatedAt": "2026-07-16",
-      "reason": "approved_product_group_audit"
-    },
-    {
-      "internalProductId": "1031",
-      "sameSkuGroupId": "vivo-x300-pro",
-      "categoryId": "phone",
-      "categoryName": "手机",
-      "productType": "smartphone",
-      "shortName": "vivo X300 Pro",
-      "confidence": 0.95,
-      "updatedAt": "2026-07-16",
-      "reason": "approved_product_group_audit"
-    },
-    {
-      "internalProductId": "1076",
-      "productName": "IXUS 130",
-      "shortName": "canon-ixus-130",
-      "sameSkuGroupId": "canon-ixus-130",
-      "status": "active",
-      "listingState": "on_sale",
-      "statusObservedAt": "2026-07-20T07:11:19.162Z",
-      "updatedAt": "2026-07-20",
-      "reason": "inactive_refresh_success"
-    },
-    {
-      "internalProductId": "1077",
-      "productName": "Osmo Nano",
-      "shortName": "dji-osmo-nano",
-      "sameSkuGroupId": "dji-osmo-nano",
-      "status": "active",
-      "listingState": "on_sale",
-      "statusObservedAt": "2026-07-20T07:11:19.162Z",
-      "updatedAt": "2026-07-20",
-      "reason": "inactive_refresh_success"
-    },
-    {
-      "internalProductId": "1078",
-      "productName": "Osmo Nano",
-      "shortName": "dji-osmo-nano",
-      "sameSkuGroupId": "dji-osmo-nano",
-      "status": "active",
-      "listingState": "on_sale",
-      "statusObservedAt": "2026-07-20T07:11:19.162Z",
-      "updatedAt": "2026-07-20",
-      "reason": "inactive_refresh_success"
-    },
-    {
-      "internalProductId": "1079",
-      "productName": "SQ1",
-      "shortName": "fujifilm-instax-square-sq1",
-      "sameSkuGroupId": "fujifilm-instax-square-sq1",
-      "status": "active",
-      "listingState": "on_sale",
-      "statusObservedAt": "2026-07-20T07:11:19.162Z",
-      "updatedAt": "2026-07-20",
-      "reason": "inactive_refresh_success"
-    },
-    {
       "internalProductId": "218",
       "sameSkuGroupId": "vivo-蔡司-2-35x增距镜-神器",
       "confidence": 0.95,
@@ -300,7 +196,7 @@
       "confidence": 0.95,
       "reason": "link_registry_maintenance_review",
       "maintainer": "group_review_csv",
-      "updatedAt": "2026-07-21",
+      "updatedAt": "2026-07-22",
       "sameSkuGroupId": "canon-sx740",
       "categoryId": "camera",
       "categoryName": "相机",
@@ -402,7 +298,7 @@
       "productType": "smartphone",
       "shortName": "x200 u",
       "confidence": 0.95,
-      "updatedAt": "2026-07-21",
+      "updatedAt": "2026-07-22",
       "reason": "link_registry_maintenance_review"
     },
     {
@@ -413,7 +309,7 @@
       "productType": "gimbal-camera",
       "shortName": "Pocket 3",
       "confidence": 0.95,
-      "updatedAt": "2026-07-21",
+      "updatedAt": "2026-07-22",
       "reason": "link_registry_maintenance_review"
     },
     {
@@ -721,7 +617,7 @@
       "confidence": 0.95,
       "reason": "link_registry_maintenance_review",
       "maintainer": "group_review_csv",
-      "updatedAt": "2026-07-21",
+      "updatedAt": "2026-07-22",
       "categoryId": "camera",
       "categoryName": "相机",
       "productType": "instant-camera"
@@ -1904,7 +1800,7 @@
       "confidence": 0.95,
       "reason": "link_registry_maintenance_review",
       "maintainer": "codex",
-      "updatedAt": "2026-07-21"
+      "updatedAt": "2026-07-22"
     },
     {
       "internalProductId": "762",
@@ -1936,7 +1832,7 @@
       "confidence": 0.95,
       "reason": "link_registry_maintenance_review",
       "maintainer": "codex",
-      "updatedAt": "2026-07-21"
+      "updatedAt": "2026-07-22"
     },
     {
       "internalProductId": "764",
@@ -2861,6 +2757,14 @@
       "reason": "inactive_refresh_success"
     },
     {
+      "internalProductId": "972",
+      "status": "removed",
+      "listingState": "delisted",
+      "statusObservedAt": "2026-07-22T01:33:39.715Z",
+      "updatedAt": "2026-07-21",
+      "reason": "inactive_refresh_success"
+    },
+    {
       "internalProductId": "976",
       "status": "removed",
       "listingState": "delisted",
@@ -2922,6 +2826,121 @@
       "confidence": 0.95,
       "updatedAt": "2026-07-16",
       "reason": "approved_product_group_audit"
+    },
+    {
+      "internalProductId": "1012",
+      "sameSkuGroupId": "fujifilm-instax-wide-400",
+      "categoryId": "camera",
+      "categoryName": "相机",
+      "productType": "instant-camera",
+      "shortName": "Wide 400",
+      "confidence": 0.95,
+      "updatedAt": "2026-07-16",
+      "reason": "approved_product_group_audit"
+    },
+    {
+      "internalProductId": "1013",
+      "sameSkuGroupId": "fujifilm-instax-wide-400",
+      "categoryId": "camera",
+      "categoryName": "相机",
+      "productType": "instant-camera",
+      "shortName": "Wide 400",
+      "confidence": 0.95,
+      "updatedAt": "2026-07-16",
+      "reason": "approved_product_group_audit"
+    },
+    {
+      "internalProductId": "1015",
+      "sameSkuGroupId": "fujifilm-instax-wide-400",
+      "categoryId": "camera",
+      "categoryName": "相机",
+      "productType": "instant-camera",
+      "shortName": "Wide 400",
+      "confidence": 0.95,
+      "updatedAt": "2026-07-16",
+      "reason": "approved_product_group_audit"
+    },
+    {
+      "internalProductId": "1030",
+      "sameSkuGroupId": "samsung-galaxy-s23-ultra",
+      "categoryId": "phone",
+      "categoryName": "手机",
+      "productType": "smartphone",
+      "shortName": "S23U",
+      "aliases": [
+        "S23U",
+        "s23u",
+        "Galaxy S23 Ultra"
+      ],
+      "confidence": 0.95,
+      "updatedAt": "2026-07-16",
+      "reason": "approved_product_group_audit"
+    },
+    {
+      "internalProductId": "1031",
+      "sameSkuGroupId": "vivo-x300-pro",
+      "categoryId": "phone",
+      "categoryName": "手机",
+      "productType": "smartphone",
+      "shortName": "vivo X300 Pro",
+      "confidence": 0.95,
+      "updatedAt": "2026-07-16",
+      "reason": "approved_product_group_audit"
+    },
+    {
+      "internalProductId": "1076",
+      "productName": "IXUS 130",
+      "shortName": "canon-ixus-130",
+      "sameSkuGroupId": "canon-ixus-130",
+      "status": "active",
+      "listingState": "on_sale",
+      "statusObservedAt": "2026-07-20T07:11:19.162Z",
+      "updatedAt": "2026-07-20",
+      "reason": "inactive_refresh_success"
+    },
+    {
+      "internalProductId": "1077",
+      "productName": "Osmo Nano",
+      "shortName": "dji-osmo-nano",
+      "sameSkuGroupId": "dji-osmo-nano",
+      "status": "active",
+      "listingState": "on_sale",
+      "statusObservedAt": "2026-07-20T07:11:19.162Z",
+      "updatedAt": "2026-07-20",
+      "reason": "inactive_refresh_success"
+    },
+    {
+      "internalProductId": "1078",
+      "productName": "Osmo Nano",
+      "shortName": "dji-osmo-nano",
+      "sameSkuGroupId": "dji-osmo-nano",
+      "status": "active",
+      "listingState": "on_sale",
+      "statusObservedAt": "2026-07-20T07:11:19.162Z",
+      "updatedAt": "2026-07-20",
+      "reason": "inactive_refresh_success"
+    },
+    {
+      "internalProductId": "1079",
+      "productName": "SQ1",
+      "shortName": "fujifilm-instax-square-sq1",
+      "sameSkuGroupId": "fujifilm-instax-square-sq1",
+      "status": "active",
+      "listingState": "on_sale",
+      "statusObservedAt": "2026-07-20T07:11:19.162Z",
+      "updatedAt": "2026-07-20",
+      "reason": "inactive_refresh_success"
+    },
+    {
+      "internalProductId": "1080",
+      "productName": "Osmo Nano",
+      "shortName": "dji-osmo-nano",
+      "sameSkuGroupId": "dji-osmo-nano",
+      "status": "active",
+      "listingState": "on_sale",
+      "statusObservedAt": "2026-07-22T01:33:39.715Z",
+      "updatedAt": "2026-07-21",
+      "reason": "inactive_refresh_success"
     }
   ],
   "sameSkuGroupRules": [
