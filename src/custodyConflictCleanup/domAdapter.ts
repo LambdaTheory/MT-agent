@@ -180,13 +180,19 @@ export class PlaywrightCustodyConflictAdapter implements CustodyConflictCleanupA
         return false;
       })(${serializeBrowserArgument(targetPage)})`,
     );
+    let directTransitionError: Error | null = null;
     if (directClicked) {
-      const directSnapshot = await this.waitForPageTransition(before, PAGE_TRANSITION_TIMEOUT_MS, targetPage);
-      targetPage = effectiveTargetPage(pageNumber, directSnapshot);
-      if (directSnapshot.pageNumber === targetPage) return directSnapshot;
+      try {
+        const directSnapshot = await this.waitForPageTransition(before, PAGE_TRANSITION_TIMEOUT_MS, targetPage);
+        targetPage = effectiveTargetPage(pageNumber, directSnapshot);
+        if (directSnapshot.pageNumber === targetPage) return directSnapshot;
+      } catch (error) {
+        directTransitionError = error instanceof Error ? error : new Error(String(error));
+        console.warn(`Direct custody pagination click did not settle; falling back to step pagination: ${directTransitionError.message}`);
+      }
     }
 
-    let snapshot = await this.readCurrentPage();
+    let snapshot = directTransitionError ? await this.readCurrentPage() : before;
     targetPage = effectiveTargetPage(pageNumber, snapshot);
     for (let attempts = 0; attempts < 300 && snapshot.pageNumber !== targetPage; attempts += 1) {
       const direction = snapshot.pageNumber < targetPage ? 'next' : 'prev';

@@ -121,6 +121,14 @@ describe('custody conflict cleanup source contract', () => {
     expect(text).toContain('Unable to restore custody table page');
   });
 
+  it('falls back to step pagination when a direct page-number click times out', async () => {
+    const text = await source('../src/custodyConflictCleanup/domAdapter.ts');
+
+    expect(text).toContain('Direct custody pagination click did not settle');
+    expect(text).toContain('directTransitionError');
+    expect(text).toContain('let snapshot = directTransitionError ? await this.readCurrentPage() : before;');
+  });
+
   it('distinguishes page-count shrink recovery from genuine navigation failure', async () => {
     const text = await source('../src/custodyConflictCleanup/domAdapter.ts');
 
