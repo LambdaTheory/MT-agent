@@ -271,11 +271,34 @@ npm run closed-order-observation:report
 - PM2 重启不会自动续跑已中断的真实改价任务；如果执行中断，必须根据 verify 产物核对已完成商品，只补执行缺口，避免重复减价。
 - MT-agent 生成的改价审计/执行产物写入 `vendor/.rental-price-agent-data/artifacts/mt-agent-audit`，不污染 lifecycle `tasks` 状态目录。
 
-### 5.8 其他辅助命令
+### 5.8 支付宝托管冲突预览
+
+入口命令：
+
+```powershell
+npm run custody-conflict-cleanup
+```
+
+这条命令是 preview-only 工具，用于复用当前 `browserProfileDir` 登录态和当前商户子账号选择，打开支付宝托管页扫描「已下架但仍显式托管」的商品行。它会按页面分页逐页预览候选，适用于类似 39 页规模的托管表巡检；运行结果只生成审计，不会点击取消托管，也不接受 `--execute` 或 `--confirm-cancel-custody` 等写入参数。
+
+审计文件写入：
+
+```text
+output/custody-conflict-cleanup/audit-*.json
+```
+
+安全边界：
+
+- CLI 只能发现候选、记录预览和输出审计路径，不能执行真实取消托管。
+- 真实取消托管属于商品/链接副作用，必须后续进入明确的飞书确认卡路径，由用户确认后再执行。
+- 命令复用现有浏览器 profile、登录检测和 `selectSubAccountIfNeeded` 子账号选择流程；页面出现账号选择时会按配置的子账号编码/名称处理，运行时仍应确认最终商户身份正确。
+
+### 5.9 其他辅助命令
 
 常用命令还包括：
 
 ```powershell
+npm run custody-conflict-cleanup
 npm run probe-page-size
 npm run probe-exposure-page
 npm run capture-dashboard
@@ -324,6 +347,7 @@ npm run rental-price-skill:install
   - `FEISHU_BOT_ENCRYPT_KEY`
   - `FEISHU_BOT_CALLBACK_SIGNATURE_SECRET`：HTTP 回调模式下敏感卡片操作必须配置请求签名密钥；不要复用 Encrypt Key。
   - `MT_AGENT_INACTIVE_REFRESH_APPROVER_IDS`：“跑失活刷新”执行审批白名单。填写允许审批的飞书 `open_id`/`user_id`，支持逗号、分号或空白分隔；留空会 fail closed，任何人都不能审批执行。
+  - `MT_AGENT_CUSTODY_CLEANUP_APPROVER_IDS`：“支付宝托管冲突清理”执行审批白名单。填写允许审批的飞书 `open_id`/`user_id`，支持逗号、分号或空白分隔；留空会 fail closed，任何人都不能确认执行取消托管。
 - LLM：
   - `LLM_PROVIDER`
   - `LLM_BASE_URL`

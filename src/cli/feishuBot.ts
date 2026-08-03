@@ -6,7 +6,7 @@ import { createAuditShutdownAdapter, type ShutdownAuditLogger } from '../audit/s
 import type { AuditConfig } from '../audit/types.js';
 import { startClosedOrderPriceAlertMonitor } from '../closedOrderFeedback/priceAlertMonitor.js';
 import { loadEnv } from '../config/loadEnv.js';
-import { parseInactiveRefreshApproverIds } from '../feishuBot/inactiveRefreshAuthorization.js';
+import { parseCustodyCleanupApproverIds, parseInactiveRefreshApproverIds } from '../feishuBot/inactiveRefreshAuthorization.js';
 import { startFeishuBotServer, type FeishuBotServerConfig } from '../feishuBot/server.js';
 import { createLlmProviderFromEnv, formatLlmProviderEnvSummary, summarizeLlmProviderEnv } from '../llm/openAiCompatibleProvider.js';
 
@@ -52,6 +52,7 @@ export async function runFeishuBotCli(dependencies: FeishuBotCliDependencies = {
     callbackSignatureSecret: env.FEISHU_BOT_CALLBACK_SIGNATURE_SECRET,
     outputDir: env.MT_AGENT_OUTPUT_DIR ?? 'output',
     inactiveRefreshApproverIds: parseInactiveRefreshApproverIds(env.MT_AGENT_INACTIVE_REFRESH_APPROVER_IDS),
+    custodyCleanupApproverIds: parseCustodyCleanupApproverIds(env.MT_AGENT_CUSTODY_CLEANUP_APPROVER_IDS),
     auditLogger,
     ...(llmProvider ? { agentPlannerProvider: createAgentPlannerProvider(llmProvider), agentExploreProvider: llmProvider } : {}),
   });

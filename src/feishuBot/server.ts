@@ -49,7 +49,7 @@ import {
 import { continueAgentPlannerStepsAfterResponse, executeAgentToolRequestWithContinuation } from './agentToolContinuation.js';
 import { agentExploreLedgerContextFromRequest } from './agentExploreAttribution.js';
 import { loadAgentToolConfirmRequestFromValue } from './agentToolConfirmStore.js';
-import { canApproveInactiveRefresh } from './inactiveRefreshAuthorization.js';
+import { canApproveCustodyCleanup, canApproveInactiveRefresh } from './inactiveRefreshAuthorization.js';
 import { loadClarificationContext, verifyClarificationKey } from './clarificationStore.js';
 import { handleInactiveRefreshExecuteSelect } from './inactiveRefreshExecuteSelect.js';
 import { handleRefreshActivityStrategySelect } from './refreshActivityStrategySelect.js';
@@ -93,6 +93,7 @@ export interface FeishuBotServerConfig {
   agentPlannerProvider?: AgentPlannerProvider;
   agentExploreProvider?: LlmProvider;
   inactiveRefreshApproverIds?: readonly string[];
+  custodyCleanupApproverIds?: readonly string[];
   auditLogger?: AuditWriter;
   confirmationContextLoader?: ConfirmationContextLoader;
   now?: () => Date;
@@ -443,6 +444,10 @@ function inactiveRefreshUnauthorizedCard(): FeishuCardPayload {
   return statusCard('失活刷新审批无权限', '你的飞书账号不在失活刷新审批白名单中，未执行任何复制或下架。', 'red');
 }
 
+function custodyCleanupUnauthorizedCard(): FeishuCardPayload {
+  return statusCard('托管冲突清理审批无权限', '你的飞书账号不在托管冲突清理审批白名单中，未执行任何取消托管。', 'red');
+}
+
 async function unauthorizedInactiveRefreshApprovalCard(payload: FeishuCardActionEvent, config: FeishuBotServerConfig): Promise<FeishuCardPayload | undefined> {
   const value = cardActionValue(payload);
   const actionName = readString(value?.action);
@@ -454,6 +459,9 @@ async function unauthorizedInactiveRefreshApprovalCard(payload: FeishuCardAction
   const request = await loadAgentToolConfirmRequestFromValue(config.outputDir ?? 'output', value);
   if (request?.toolName === 'operations.inactiveRefreshExecute' && !canApproveInactiveRefresh(actorIds, config.inactiveRefreshApproverIds)) {
     return inactiveRefreshUnauthorizedCard();
+  }
+  if (request?.toolName === 'operations.custodyCleanupExecute' && !canApproveCustodyCleanup(actorIds, config.custodyCleanupApproverIds)) {
+    return custodyCleanupUnauthorizedCard();
   }
   return undefined;
 }
@@ -698,6 +706,9 @@ async function handleCardActionTrigger(
     }
     if (request.toolName === 'operations.inactiveRefreshExecute' && !canApproveInactiveRefresh(extractCardReviewerIds(payload), config.inactiveRefreshApproverIds)) {
       return inactiveRefreshUnauthorizedCard();
+    }
+    if (request.toolName === 'operations.custodyCleanupExecute' && !canApproveCustodyCleanup(extractCardReviewerIds(payload), config.custodyCleanupApproverIds)) {
+      return custodyCleanupUnauthorizedCard();
     }
     const claim = claimServerCardAction(messageId, agentToolClaimFamily(value), actionName);
     if (!claim.claimed) {
