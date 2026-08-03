@@ -29,6 +29,8 @@
     "daily-mission-daemon": "tsx src/cli/dailyMissionDaemon.ts",
     "daily-mission:inactive-refresh-preview": "tsx src/cli/dailyMissionInactiveRefreshPreview.ts",
     "activity-automation:scout": "tsx src/cli/activityAutomation.ts",
+    "custody-conflict-cleanup": "tsx src/cli/custodyConflictCleanup.ts",
+    "custody-conflict-cleanup:confirm": "tsx src/cli/custodyConflictCleanupConfirm.ts",
     "capture-dashboard": "tsx src/cli/captureDashboard.ts",
     "capture-dashboard-batch": "tsx src/cli/captureDashboardBatch.ts",
     "agent:dry-run": "tsx src/cli/agentDryRun.ts",
