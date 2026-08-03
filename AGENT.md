@@ -163,6 +163,7 @@ MT-agent/
 | `captureDashboardBatch.ts` | `capture-dashboard-batch` | 指定多个业务数据日的访问页批量补抓；一次 Playwright 登录循环多日 |
 | `probePageSize.ts` | `probe-page-size` | 分页大小探测 |
 | `probeExposurePage.ts` | `probe-exposure-page` | 曝光页结构探测 |
+| `custodyConflictCleanup.ts` | `custody-conflict-cleanup` | 支付宝托管冲突预览；CLI 只读扫描并写审计，真实取消托管必须走明确飞书确认卡 |
 | `operationsLearningLoopPreview.ts` | `operations-learning-loop:preview` | 运营学习闭环预览 |
 
 ### 4.2 `src/crawler/`：页面抓取与登录态
