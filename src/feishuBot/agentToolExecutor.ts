@@ -135,6 +135,8 @@ import { buildInactiveRefreshPlan } from '../operations/inactiveRefresh/planner.
 import { buildInactiveRefreshPlanCard } from '../operations/inactiveRefresh/card.js';
 import { executeInactiveRefreshPlan } from '../operations/inactiveRefresh/execute.js';
 import { saveInactiveRefreshPlan } from '../operations/inactiveRefresh/planStore.js';
+import { executeCustodyCleanupPlan } from '../custodyConflictCleanup/execute.js';
+import { prepareCustodyCleanupConfirmationCard } from '../custodyConflictCleanup/confirmationCard.js';
 
 export interface AgentToolExecutionOptions {
   rentalPriceClient?: RentalPriceSkillClient;
@@ -3370,6 +3372,29 @@ function readInactiveRefreshExecuteArgs(args: Record<string, unknown>): { planRe
   return { planRef, confirmationKey };
 }
 
+function readCustodyCleanupExecuteArgs(args: Record<string, unknown>): { planRef: string; confirmationKey: string } {
+  const { planRef, confirmationKey } = args;
+  if (typeof planRef !== 'string' || !/^custody-cleanup-plan-[a-f0-9]{24}$/.test(planRef)) throw new Error('valid custody cleanup planRef is required');
+  if (typeof confirmationKey !== 'string' || !/^[a-f0-9]{64}$/.test(confirmationKey)) throw new Error('valid custody cleanup confirmationKey is required');
+  return { planRef, confirmationKey };
+}
+
+async function custodyCleanupConfirmResponse(outputDir: string, args: Record<string, unknown>): Promise<BotResponse> {
+  const auditPath = requireString(args.auditPath, 'auditPath');
+  const result = await prepareCustodyCleanupConfirmationCard({ auditPath, outputDir });
+  return {
+    text: [
+      '支付宝托管冲突清理确认卡已生成。',
+      `计划：${result.plan.planRef}`,
+      `候选：${result.plan.candidates.length}`,
+      `有效期至：${result.plan.expiresAt}`,
+      `计划文件：${result.planPath}`,
+    ].join('\n'),
+    card: result.card,
+    metadata: { toolName: 'operations.custodyCleanupConfirm', ok: true, planRef: result.plan.planRef, candidateCount: result.plan.candidates.length, requestRef: result.requestRef },
+  };
+}
+
 async function inactiveRefreshPlanResponse(outputDir: string, args: Record<string, unknown>, options: AgentToolExecutionOptions): Promise<BotResponse> {
   const date = typeof args.date === 'string' ? args.date : (await findLatestReportContext(outputDir))?.context.date;
   if (!date) return { text: '还没有找到公域日报上下文。', metadata: { toolName: 'operations.inactiveRefreshPlan', ok: false } };
@@ -4087,6 +4112,13 @@ async function executeAgentToolRequestInternal(
     case 'operations.inactiveRefreshExecute': {
       const { planRef, confirmationKey } = readInactiveRefreshExecuteArgs(request.arguments);
       return executeInactiveRefreshPlan({ outputDir, planRef, confirmationKey, client: options.rentalPriceClient ?? createRentalPriceSkillClient(), ledgerContext: options.ledgerContext, closedOrderRegistryPaths: options.closedOrderRegistryPaths });
+    }
+    case 'operations.custodyCleanupConfirm':
+      return custodyCleanupConfirmResponse(outputDir, request.arguments);
+    case 'operations.custodyCleanupExecute': {
+      const { planRef, confirmationKey } = readCustodyCleanupExecuteArgs(request.arguments);
+      const config = await loadConfig();
+      return executeCustodyCleanupPlan({ config: { ...config, outputDir }, planRef, confirmationKey });
     }
     case 'rental.daemonStatus':
     case 'rental.platformSearch':

@@ -826,6 +826,23 @@ const inactiveRefreshExecuteArgumentsSchema = {
   required: ['planRef', 'confirmationKey'],
   additionalProperties: false,
 };
+const custodyCleanupConfirmArgumentsSchema = {
+  type: 'object',
+  properties: {
+    auditPath: { type: 'string', minLength: 1 },
+  },
+  required: ['auditPath'],
+  additionalProperties: false,
+};
+const custodyCleanupExecuteArgumentsSchema = {
+  type: 'object',
+  properties: {
+    planRef: { type: 'string', pattern: '^custody-cleanup-plan-[a-f0-9]{24}$' },
+    confirmationKey: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+  },
+  required: ['planRef', 'confirmationKey'],
+  additionalProperties: false,
+};
 const rentalPriceChangeArgumentsSchema = {
   type: 'object',
   not: { required: ['discount', 'adjustmentAmount'] },
@@ -1376,6 +1393,21 @@ const agentTools: AgentToolDefinition[] = [
     requiresConfirmation: true,
     plannerVisible: false,
     inputSchema: inactiveRefreshExecuteArgumentsSchema,
+  },
+  {
+    name: 'operations.custodyCleanupConfirm',
+    description: '从明确给定的支付宝托管冲突 preview 审计文件生成飞书确认卡；确认前只导入审计、保存不可变计划和确认请求，不执行取消托管。',
+    risk: 'read',
+    requiresConfirmation: false,
+    inputSchema: custodyCleanupConfirmArgumentsSchema,
+  },
+  {
+    name: 'operations.custodyCleanupExecute',
+    description: '确认后按已持久化 planRef 串行取消支付宝已下架商品的显式托管状态。仅由托管冲突确认卡内部调用，不面向 LLM 规划器开放。',
+    risk: 'high',
+    requiresConfirmation: true,
+    plannerVisible: false,
+    inputSchema: custodyCleanupExecuteArgumentsSchema,
   },
   {
     name: 'operations.operationReview',

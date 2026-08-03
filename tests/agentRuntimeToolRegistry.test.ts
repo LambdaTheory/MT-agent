@@ -53,6 +53,8 @@ describe('agent runtime tool registry', () => {
       'operations.refreshActivityExecute',
       'operations.inactiveRefreshPlan',
       'operations.inactiveRefreshExecute',
+      'operations.custodyCleanupConfirm',
+      'operations.custodyCleanupExecute',
       'operations.operationReview',
       'closedOrder.syncFeedback',
       'closedOrder.runObservationReport',
@@ -216,6 +218,8 @@ describe('agent runtime tool registry', () => {
     expect(findAgentTool('publicTraffic.refreshDashboard')).toMatchObject({ risk: 'write', requiresConfirmation: true });
     expect(findAgentTool('operations.refreshActivityPlan')).toMatchObject({ risk: 'read', requiresConfirmation: false });
     expect(findAgentTool('operations.refreshActivityExecute')).toMatchObject({ risk: 'high', requiresConfirmation: true });
+    expect(findAgentTool('operations.custodyCleanupConfirm')).toMatchObject({ risk: 'read', requiresConfirmation: false });
+    expect(findAgentTool('operations.custodyCleanupExecute')).toMatchObject({ risk: 'high', requiresConfirmation: true, plannerVisible: false });
     expect(findAgentTool('closedOrder.syncFeedback')).toMatchObject({ risk: 'write', requiresConfirmation: false });
     expect(findAgentTool('closedOrder.runObservationReport')).toMatchObject({ risk: 'write', requiresConfirmation: false });
     expect(findAgentTool('rental.daemonStatus')).toMatchObject({ risk: 'read', requiresConfirmation: false });
@@ -385,6 +389,7 @@ describe('agent runtime tool registry', () => {
       'publicTraffic.refreshDashboard',
       'operations.refreshActivityPlan',
       'operations.inactiveRefreshPlan',
+      'operations.custodyCleanupConfirm',
       'operations.operationReview',
       'closedOrder.syncFeedback',
       'closedOrder.runObservationReport',

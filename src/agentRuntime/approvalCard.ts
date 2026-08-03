@@ -137,6 +137,8 @@ const TOOL_DISPLAY_NAMES: Record<string, string> = {
   'publicTraffic.refreshDashboard': '补抓访问页',
   'operations.refreshActivityPlan': '活跃度刷新计划',
   'operations.refreshActivityExecute': '执行活跃度刷新',
+  'operations.custodyCleanupConfirm': '托管冲突清理确认卡',
+  'operations.custodyCleanupExecute': '执行托管冲突清理',
 };
 
 function displayToolName(toolName: string): string {
