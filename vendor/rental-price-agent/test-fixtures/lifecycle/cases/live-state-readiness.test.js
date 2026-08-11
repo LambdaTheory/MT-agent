@@ -93,6 +93,22 @@ module.exports.register = async function register({ test, assert, helpers }) {
     if (linked) assert.ok(result.blockers.includes("STATE_DOCUMENT_UNSAFE"));
   });
 
+  test("live-readiness: orphaned lock-recovery quarantine directories are ignored, not unknown", async () => {
+    const { layout, releaseContract } = await makeStateFixture(helpers, "live-readiness-lock-recovery-quarantine");
+    const { evaluateLiveStateReadiness } = require(path.join(SKILL_DIR, "scripts", "lib", "live-state-readiness.js"));
+    const quarantineDir = path.join(layout.tasksDir, "_index.json.migration.lock.recovery-" + "a".repeat(24));
+    await fs.promises.mkdir(quarantineDir, { recursive: true });
+    await fs.promises.writeFile(path.join(quarantineDir, "owner.json"), JSON.stringify({ lockKind: "migration", ownerPid: 1 }));
+    const before = await helpers.hashTree(layout.dataRoot);
+    const result = evaluateLiveStateReadiness(layout, releaseContract);
+    const after = await helpers.hashTree(layout.dataRoot);
+
+    assert.equal(result.readyForWrites, true);
+    assert.deepEqual(result.blockers, []);
+    assert.equal(before, after);
+    assert.ok(fs.existsSync(quarantineDir));
+  });
+
   test("live-readiness: runtime config loading never migrates legacy config", async () => {
     const { layout } = await makeStateFixture(helpers, "runtime-config-read-only");
     const legacy = completeConfig();

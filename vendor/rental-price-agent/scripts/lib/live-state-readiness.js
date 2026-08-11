@@ -79,6 +79,22 @@ function parseEnv(filePath, requiredNames, fileSystem = fs) {
   return { blocker: [...requiredNames].some(name => !names.has(name)) ? "ENV_INCOMPLETE" : null, digest: sha256(text) };
 }
 
+// lease-lock.js quarantines a stale lock directory it cannot verify recovery for by
+// renaming it to "<lockPath>.recovery-<hex>" instead of deleting it (forensic evidence).
+// On the happy path it deletes the quarantine directory itself once recovery is proven
+// safe, but under lock contention (e.g. many concurrent price-change previews writing
+// _index.json at once) a losing recovery attempt can leave this directory orphaned
+// forever. It carries no task state of its own, so it must not be treated as an unknown
+// state document — doing so would permanently block every future mutation command until
+// a human manually deletes it.
+const LOCK_RECOVERY_QUARANTINE_PATTERN = /\.lock\.recovery-[0-9a-f]+$/i;
+
+function isLockRecoveryQuarantineDir(entry, fileSystem, entryPath) {
+  if (!LOCK_RECOVERY_QUARANTINE_PATTERN.test(entry.name)) return false;
+  const state = stateOf(entryPath, fileSystem);
+  return state.present && !state.stat.isSymbolicLink() && state.stat.isDirectory();
+}
+
 function collectStateDocuments(layout, fileSystem = fs) {
   const documents = [];
   const unknown = [];
@@ -102,6 +118,7 @@ function collectStateDocuments(layout, fileSystem = fs) {
         else scan(entryPath, true);
       } else if (entry.name === "_index.json" && !inBatches) add(entryPath, "task-index");
       else if (entry.name.endsWith(".json")) add(entryPath, entry.name.startsWith("changes_") ? "recovery" : inBatches ? "batch" : "task");
+      else if (isLockRecoveryQuarantineDir(entry, fileSystem, entryPath)) continue;
       else unknown.push(entryPath);
     }
   }

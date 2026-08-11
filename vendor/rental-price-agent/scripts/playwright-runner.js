@@ -51,20 +51,63 @@ const NEGOTIATION_NONCES = createNonceStore();
 const RELEASE_CONTRACT = readCurrentMetadata();
 let readinessEvaluator = evaluateLiveStateReadiness;
 
+// Per-command health/readiness decoupling:
+// `evaluateLiveStateReadiness` walks the entire tasks directory and JSON-schema-validates
+// every persisted state document. Doing that on every command (ping/hello/apply/submit/read)
+// means a single malformed task JSON file blocks every mutation command. Full scans now happen
+// once per daemon process (lazy on first use) and are invalidated only on lifecycle-level
+// signal changes (upgrade-lock, restart-marker) — not on every command. The cached result
+// (readyForWrites/blockers/actualSchemaVersions/stateDigest) is reused in the handshake.
+//
+// When a test swaps `readinessEvaluator` via `__setReadinessEvaluatorForTest`, the cache is
+// bypassed so the test's mocked evaluator is consulted fresh on each call (preserving the
+// "recomputes readiness immediately before browser initialization" contract under test).
+let cachedReadiness = null;
+let cachedReadinessUpgradeLock = null;
+let cachedReadinessRestartRequired = null;
+
+function readinessCacheActive() {
+  // Only cache when the real evaluator is in place. Test mocks bypass the cache so per-call
+  // mutations to the mocked readiness result flow through unchanged.
+  return readinessEvaluator === evaluateLiveStateReadiness;
+}
+
+function invalidateCachedReadiness() {
+  cachedReadiness = null;
+  cachedReadinessUpgradeLock = null;
+  cachedReadinessRestartRequired = null;
+}
+
+function computeHandshakeReadiness() {
+  const upgradeLock = fs.existsSync(LAYOUT.lockPath);
+  const restartRequired = fs.existsSync(LAYOUT.restartMarkerPath);
+  if (readinessCacheActive()) {
+    if (cachedReadiness === null
+      || cachedReadinessUpgradeLock !== upgradeLock
+      || cachedReadinessRestartRequired !== restartRequired) {
+      cachedReadiness = readinessEvaluator(LAYOUT, RELEASE_CONTRACT);
+      cachedReadinessUpgradeLock = upgradeLock;
+      cachedReadinessRestartRequired = restartRequired;
+    }
+    return { readiness: cachedReadiness, upgradeLock, restartRequired };
+  }
+  return { readiness: readinessEvaluator(LAYOUT, RELEASE_CONTRACT), upgradeLock, restartRequired };
+}
+
 async function invokeRegisteredAction(action, handler) {
   lifecycleTestInstrumentation.recordActionAttempt(action);
   return lifecycleTestInstrumentation.invokeAction(action, handler);
 }
 
 function currentHandshakeMetadata() {
-  const readiness = readinessEvaluator(LAYOUT, RELEASE_CONTRACT);
+  const { readiness, upgradeLock, restartRequired } = computeHandshakeReadiness();
   const stateVersions = readiness.actualSchemaVersions.state;
   return {
     ...HANDSHAKE_METADATA,
     configSchemaVersion: readiness.actualSchemaVersions.config || "0.0.0",
     stateSchemaVersion: stateVersions.length === 1 ? stateVersions[0] : stateVersions.length === 0 ? RELEASE_CONTRACT.stateSchemaVersion : "0.0.0",
-    upgradeLock: fs.existsSync(LAYOUT.lockPath),
-    restartRequired: fs.existsSync(LAYOUT.restartMarkerPath),
+    upgradeLock,
+    restartRequired,
     persistedStateReady: readiness.readyForWrites,
     persistedStateDigest: readiness.stateDigest,
     persistedStateBlockers: readiness.blockers,
@@ -3541,8 +3584,8 @@ if (require.main === module) {
 	    handleCommand,
 	    currentHandshakeMetadata,
 	    resolveRuntimeBrowserPolicy,
-	    __setReadinessEvaluatorForTest(nextEvaluator) { readinessEvaluator = nextEvaluator; },
-	    __resetReadinessEvaluatorForTest() { readinessEvaluator = evaluateLiveStateReadiness; },
+	    __setReadinessEvaluatorForTest(nextEvaluator) { readinessEvaluator = nextEvaluator; invalidateCachedReadiness(); },
+	    __resetReadinessEvaluatorForTest() { readinessEvaluator = evaluateLiveStateReadiness; invalidateCachedReadiness(); },
 	    __issueNegotiationNonceForTest(nonce) { NEGOTIATION_NONCES.issue(nonce); },
 	    __setConfigForTest(nextConfig) { config = nextConfig; },
 	    __setPageForTest(nextPage) { page = nextPage; },

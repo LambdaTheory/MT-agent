@@ -139,6 +139,47 @@ function doUpdate(taskId, field, value) {
   return { status: "ok", taskId, updated: { [field]: value } };
 }
 
+function doUpdateMany(taskId, fieldsJson) {
+  if (!taskId) die("Task ID required.");
+  if (!fieldsJson) die("Fields JSON required.");
+
+  let fields;
+  try {
+    fields = JSON.parse(fieldsJson);
+  } catch {
+    die("Fields must be valid JSON.");
+  }
+  if (typeof fields !== "object" || fields === null || Array.isArray(fields)) {
+    die("Fields must be a JSON object of field:value pairs.");
+  }
+
+  const index = loadIndex();
+  const idxEntry = index.find((t) => t.taskId === taskId);
+  if (!idxEntry) die("Task not found: " + taskId);
+
+  const taskFile = STORE_DIR + "/" + taskId + ".json";
+  if (!fs.existsSync(taskFile)) die("Task file not found: " + taskFile);
+
+  const task = loadTask(taskFile);
+  const timestamp = new Date().toISOString();
+
+  for (const [field, value] of Object.entries(fields)) {
+    task[field] = value;
+    if (field === "status") {
+      task.history.push({ timestamp, action: "status_change", status: value });
+      idxEntry.status = value;
+    }
+  }
+  task.updatedAt = timestamp;
+  idxEntry.updatedAt = timestamp;
+
+  fs.writeFileSync(taskFile, JSON.stringify(task, null, 2), "utf-8");
+  saveIndex(index);
+
+  log("Task " + taskId + " updated (batch): " + Object.keys(fields).join(", "));
+  return { status: "ok", taskId, updated: fields };
+}
+
 function doAddEvidence(taskId, type, filePath) {
   if (!taskId) die("Task ID required.");
   if (!type) die("Evidence type required (e.g. screenshot_before, screenshot_after, verify_result).");
@@ -204,6 +245,9 @@ function main() {
     case "update":
       result = doUpdate(args[1], args[2], args[3]);
       break;
+    case "update-many":
+      result = doUpdateMany(args[1], args[2]);
+      break;
     case "add-evidence":
       result = doAddEvidence(args[1], args[2], args[3]);
       break;
@@ -214,7 +258,7 @@ function main() {
       result = doGet(args[1]);
       break;
     default:
-      die("Unknown action: " + action + ". Available: create, update, add-evidence, list, get");
+      die("Unknown action: " + action + ". Available: create, update, update-many, add-evidence, list, get");
   }
 
   output(result);

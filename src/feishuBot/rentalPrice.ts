@@ -8,6 +8,7 @@ import { validateAgentToolArguments } from '../agentRuntime/planner.js';
 import { hasPriceAdjustmentConflict } from './priceChangeContract.js';
 import { readPriceMultiplierArgument } from './priceMultiplier.js';
 import type { FeishuCardPayload } from '../notify/feishuApp.js';
+import { readCanonicalNumericId, readCanonicalOpaqueId } from './idCanonicalization.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -65,6 +66,17 @@ export interface RentalPriceExecutionResult {
   ok: boolean;
   lines: string[];
   audit?: { taskId?: string; status: 'completed' | 'verify_failed' | 'failed' | 'untracked'; resultFile?: string; rollbackFile?: string };
+  pricing?: {
+    phase: string;
+    expectedFieldCount?: number;
+    specCount?: number;
+    applyStatus?: string;
+    submitStatus?: string;
+    submitDetail?: string;
+    verifyStatus?: string;
+    retrySafe?: boolean;
+    resultFile?: string;
+  };
 }
 
 export type PriceFieldMap = Record<string, string>;
@@ -396,9 +408,9 @@ export interface RentalPriceSkillClient {
 
 export interface RentalSpecRemoveItemConfirmRequest {
   productId: string;
-  specDimId: string;
+  specDimId: string | number;
   dimensionTitle?: string;
-  itemId?: string;
+  itemId?: string | number;
   itemTitle: string;
   keyword?: string;
 }
@@ -430,7 +442,15 @@ const SPEC_REMOVE_CONFIRM_MAX_ITEMS = 50;
 const SPEC_REMOVE_BULK_WARNING_ITEMS = 12;
 const PLATFORM_SEARCH_ALL_DEFAULT_LIMIT = 100;
 const PLATFORM_SEARCH_ALL_MAX_LIMIT = 200;
+const RENTAL_PRICE_APPLY_MAX_FIELD_COUNT = 30;
+const RENTAL_PRICE_APPLY_MAX_SPEC_COUNT = 8;
 const STABLE_RENTAL_SKILL_VERSION = '1.0.0';
+// The one evidence-type tag that is actually read back (by assertAppliedAuditEvidence,
+// via readEvidencePath) to decide whether a task is rollback-eligible. Every other
+// evidence type ('chunk_verify_result', 'execution_result', 'rollback_execution_result',
+// 'rollback_verify_result') is write-only forensic detail that nothing currently reads,
+// so a typo there is silently tolerated; a typo in this one silently breaks rollback.
+const VERIFY_RESULT_EVIDENCE_TYPE = 'verify_result';
 
 type RentalDaemonActionClass = 'diagnostic' | 'safe-read' | 'mutation' | 'lifecycle-control';
 
@@ -684,9 +704,9 @@ function specRemoveDisplayElements(request: RentalOperationConfirmRequest): Reco
   const omitted = request.items.length - shownItems.length;
   const rows = shownItems.map((item) => ({
     productId: item.productId,
-    dimension: item.dimensionTitle ? `${item.dimensionTitle} (${item.specDimId})` : item.specDimId,
+    dimension: item.dimensionTitle ? `${item.dimensionTitle} (${item.specDimId})` : String(item.specDimId),
     itemTitle: item.itemTitle,
-    itemId: item.itemId ?? '-',
+    itemId: item.itemId !== undefined ? String(item.itemId) : '-',
     keyword: item.keyword ?? request.keyword,
   }));
   return [
@@ -843,6 +863,61 @@ function sanitizedDaemonSubmitEvidence(submit: Record<string, unknown>): Record<
   if (sideEffectPossible !== undefined) evidence.sideEffectPossible = sideEffectPossible;
   if (retrySafe !== undefined) evidence.retrySafe = retrySafe;
   return evidence;
+}
+
+// Mirrors sanitizedDaemonSubmitEvidence for the 'apply' command. Previously, every
+// apply-failure branch (single-shot, chunked, rollback) discarded the daemon's actual
+// error message/detail/url entirely — only the bare status ('error') survived into the
+// task record and the Feishu card, making these failures permanently undiagnosable.
+function sanitizedDaemonApplyEvidence(apply: Record<string, unknown>): Record<string, unknown> {
+  const evidence: Record<string, unknown> = { status: commandStatus(apply) };
+  for (const key of ['code', 'errorCode', 'reason'] as const) {
+    const value = boundedString(apply[key]);
+    if (value) evidence[key] = value;
+  }
+  const message = boundedString(apply.message);
+  const detail = boundedString(apply.detail);
+  const currentUrl = sanitizeDiagnosticUrl(apply.currentUrl ?? apply.url);
+  const sideEffectPossible = optionalBoolean(apply, 'sideEffectPossible');
+  const retrySafe = optionalBoolean(apply, 'retrySafe');
+  if (message) evidence.message = message;
+  if (detail) evidence.detail = detail;
+  if (currentUrl) evidence.currentUrl = currentUrl;
+  if (sideEffectPossible !== undefined) evidence.sideEffectPossible = sideEffectPossible;
+  if (retrySafe !== undefined) evidence.retrySafe = retrySafe;
+  return evidence;
+}
+
+// The daemon's submit-outcome classifier only ever reports 'error' for a confidently
+// failed save and 'ok' for a confidently successful one; 'unknown' is its own signal
+// for "the response couldn't be classified, don't trust this status alone" — covering
+// many distinct detail strings (response_timeout, body_read_timeout, http_redirect_3xx,
+// empty_response, malformed_json, unfamiliar_json, inspection_truncated,
+// no_matching_ajax_response, unfamiliar_response, and more). Every one of these is the
+// same "the save may have gone through, verify by reading the page back" case, so this
+// only needs to check the status, not enumerate every detail string that can produce it.
+function isReconcileableSubmitUnknown(submit: Record<string, unknown>): boolean {
+  return commandStatus(submit) === 'unknown';
+}
+
+function verifiedReadbackIdentity(response: Record<string, unknown>, expectedProductId: string): boolean {
+  return commandStatus(response) === 'ok' && optionalString(response, 'productId') === expectedProductId;
+}
+
+// Single source of truth for "does this readback prove the expected price fields were
+// persisted": used by every apply/submit/verify path below (single-shot execute, chunked
+// execute, single-shot rollback, and the chunked-aggregate cross-check) so the match
+// predicate can never drift between call sites the way it previously did (rollback's copy
+// had already picked up a `rollback*`-prefixed variable naming divergence from the forward
+// path's copy before this was collapsed).
+function verifyReadbackMatches(verified: Record<string, unknown> | null, productId: string, expected: PriceChangeArtifact): { ok: boolean; fieldsMatch: boolean; matchedFieldCount: number; expectedFieldCount: number } {
+  const expectedFieldCount = priceArtifactFieldCount(expected);
+  if (!verified) return { ok: false, fieldsMatch: false, matchedFieldCount: 0, expectedFieldCount };
+  const perSpec = isPerSpecPriceArtifact(expected);
+  const fieldsMatch = perSpec ? verifiedPerSpecFields(verified, expected as PerSpecPriceFieldMap) : verifiedFields(verified, expected as PriceFieldMap);
+  const matchedFieldCount = perSpec ? countVerifiedPerSpecFields(verified, expected as PerSpecPriceFieldMap) : countVerifiedFields(verified, expected as PriceFieldMap);
+  const ok = verifiedReadbackIdentity(verified, productId) && fieldsMatch && expectedFieldCount > 0 && matchedFieldCount === expectedFieldCount;
+  return { ok, fieldsMatch, matchedFieldCount, expectedFieldCount };
 }
 
 function firstStringField(value: unknown, keys: string[]): string | null {
@@ -1128,6 +1203,59 @@ function priceArtifactFieldCount(value: PriceChangeArtifact): number {
     : Object.keys(value).length;
 }
 
+function priceArtifactSpecCount(value: PriceChangeArtifact): number {
+  return isPerSpecPriceArtifact(value) ? Object.keys(value).length : 1;
+}
+
+function priceApplyPressureBlockReason(value: PriceChangeArtifact): string | null {
+  const fieldCount = priceArtifactFieldCount(value);
+  const specCount = priceArtifactSpecCount(value);
+  if (fieldCount > RENTAL_PRICE_APPLY_MAX_FIELD_COUNT) {
+    return `改价字段过多：${fieldCount} 个字段超过安全上限 ${RENTAL_PRICE_APPLY_MAX_FIELD_COUNT}，请拆分为更小批次后重新预览确认。`;
+  }
+  if (specCount > RENTAL_PRICE_APPLY_MAX_SPEC_COUNT) {
+    return `改价规格过多：${specCount} 个规格超过安全上限 ${RENTAL_PRICE_APPLY_MAX_SPEC_COUNT}，请拆分为更小批次后重新预览确认。`;
+  }
+  return null;
+}
+
+// A single spec can only ever surface the fields in PRICE_FIELD_NAMES (17 max today),
+// so this can never exceed RENTAL_PRICE_APPLY_MAX_FIELD_COUNT in practice. Kept as a
+// defensive backstop: if the price field schema ever grows past the chunk cap, a single
+// oversized spec cannot be safely auto-chunked (it would still violate the per-chunk cap on
+// its own) and must fall back to the hard-reject path instead of silent chunking.
+function oversizedSpecId(value: PerSpecPriceFieldMap): string | null {
+  for (const [specId, fields] of Object.entries(value)) {
+    if (Object.keys(fields).length > RENTAL_PRICE_APPLY_MAX_FIELD_COUNT) return specId;
+  }
+  return null;
+}
+
+// Greedily groups whole specs (never splitting one spec's fields across chunks) into
+// batches that each respect the field-count and spec-count safety caps, so a large
+// multi-spec price change can be executed as several smaller apply+submit rounds
+// instead of being rejected outright.
+function chunkPerSpecPriceArtifact(value: PerSpecPriceFieldMap): PerSpecPriceFieldMap[] {
+  const chunks: PerSpecPriceFieldMap[] = [];
+  let current: PerSpecPriceFieldMap = {};
+  let currentFieldCount = 0;
+  let currentSpecCount = 0;
+  for (const [specId, fields] of Object.entries(value)) {
+    const fieldCount = Object.keys(fields).length;
+    if (currentSpecCount > 0 && (currentFieldCount + fieldCount > RENTAL_PRICE_APPLY_MAX_FIELD_COUNT || currentSpecCount + 1 > RENTAL_PRICE_APPLY_MAX_SPEC_COUNT)) {
+      chunks.push(current);
+      current = {};
+      currentFieldCount = 0;
+      currentSpecCount = 0;
+    }
+    current[specId] = fields;
+    currentFieldCount += fieldCount;
+    currentSpecCount += 1;
+  }
+  if (currentSpecCount > 0) chunks.push(current);
+  return chunks;
+}
+
 function multiSpecAuditEvidence(audit: RentalPriceAuditReference | undefined): boolean {
   const specIds = new Set((audit?.diff ?? []).map((diff) => diff.specId).filter((value): value is string => Boolean(value)));
   return specIds.size > 1;
@@ -1249,16 +1377,23 @@ async function createAuditPreview(rootDir: string, productId: string, current: R
       const taskResult = await runNodeJson(taskStoreScript, ['create', `改价 商品 ${productId}`, changesFile]);
       taskId = typeof taskResult.taskId === 'string' && AUDIT_TASK_ID_PATTERN.test(taskResult.taskId) ? taskResult.taskId : undefined;
       if (taskId) {
-        await runNodeJson(taskStoreScript, ['update', taskId, 'rollbackFile', rollbackFile]).catch(() => ({}));
-        await runNodeJson(taskStoreScript, ['update', taskId, 'changesFile', changesFile]).catch(() => ({}));
-        await runNodeJson(taskStoreScript, ['update', taskId, 'currentValuesFile', currentValuesFile]).catch(() => ({}));
-        await runNodeJson(taskStoreScript, ['update', taskId, 'diffFile', diffFile]).catch(() => ({}));
-        await runNodeJson(taskStoreScript, ['update', taskId, 'changesSha256', changesSha256]).catch(() => ({}));
-        await runNodeJson(taskStoreScript, ['update', taskId, 'rollbackSha256', rollbackSha256]).catch(() => ({}));
-        await runNodeJson(taskStoreScript, ['update', taskId, 'currentSnapshotSha256', currentSnapshotSha256]).catch(() => ({}));
-        await runNodeJson(taskStoreScript, ['update', taskId, 'expectedFieldCount', String(expectedFieldCount)]).catch(() => ({}));
-        await runNodeJson(taskStoreScript, ['update', taskId, 'planHash', boundPlanHash]).catch(() => ({}));
-        if (previewFile) await runNodeJson(taskStoreScript, ['update', taskId, 'previewFile', previewFile]).catch(() => ({}));
+        // A single batched write instead of one task-store invocation per field: each
+        // invocation takes the same file lock on the shared task index, so collapsing
+        // ~9 lock cycles into 1 per product preview is what actually reduces contention
+        // under concurrent batch previews (see BATCH_READ_AUDIT_CONCURRENCY).
+        const batchedFields: Record<string, string> = {
+          rollbackFile,
+          changesFile,
+          currentValuesFile,
+          diffFile,
+          changesSha256,
+          rollbackSha256,
+          currentSnapshotSha256,
+          expectedFieldCount: String(expectedFieldCount),
+          planHash: boundPlanHash,
+          ...(previewFile ? { previewFile } : {}),
+        };
+        await runNodeJson(taskStoreScript, ['update-many', taskId, JSON.stringify(batchedFields)]).catch(() => ({}));
       }
     } catch {
       taskId = undefined;
@@ -1329,7 +1464,7 @@ function safeAuditForExecution(rootDir: string, audit: RentalPriceAuditReference
   };
 }
 
-async function updateAuditTask(rootDir: string, audit: RentalPriceAuditReference | undefined, status: 'completed' | 'verify_failed' | 'failed' | 'rolled_back' | 'rollback_failed' | 'rollback_verify_failed', resultFile?: string, evidenceType = 'verify_result'): Promise<void> {
+async function updateAuditTask(rootDir: string, audit: RentalPriceAuditReference | undefined, status: 'completed' | 'verify_failed' | 'failed' | 'rolled_back' | 'rollback_failed' | 'rollback_verify_failed', resultFile?: string, evidenceType = VERIFY_RESULT_EVIDENCE_TYPE): Promise<void> {
   if (!audit?.taskId || !AUDIT_TASK_ID_PATTERN.test(audit.taskId)) return;
   const taskStoreScript = join(rootDir, 'scripts', 'task-store.js');
   if (!(await fileExists(taskStoreScript))) return;
@@ -1409,7 +1544,7 @@ function readEvidencePath(rootDir: string, evidence: unknown, type: string): str
 
 async function assertAppliedAuditEvidence(rootDir: string, task: Record<string, unknown>, changesFile: string, expectedFieldCount: number): Promise<void> {
   if (readString(task.status) !== 'completed') throw new Error('回滚审计不完整：原改价任务尚未成功完成，不能执行回滚。');
-  const verifyResultFile = readEvidencePath(rootDir, task.evidence, 'verify_result');
+  const verifyResultFile = readEvidencePath(rootDir, task.evidence, VERIFY_RESULT_EVIDENCE_TYPE);
   if (!verifyResultFile || !(await fileExists(verifyResultFile))) throw new Error('回滚审计不完整：缺少原改价验证证据，不能执行回滚。');
   const verifyResult = await readJsonRecord(verifyResultFile);
   const verifyExpectedFieldCount = readPositiveInteger(verifyResult.expectedFieldCount);
@@ -1657,6 +1792,42 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
     const nonce = randomUUID();
     const negotiation = await negotiate(daemonUrl, daemonToken, actionClassForDaemonCommand(action), nonce);
     return postDaemon(daemonUrl, daemonToken, { ...command, _negotiation: negotiation });
+  }
+
+  // We (mt-agent), not the skill, invented "verify": read the page again right after a
+  // submit and compare it against what we expect. The skill only knows about a generic
+  // 'read' action, so a save-success redirect that is still mid-flight when our own
+  // verify read navigates can make Playwright throw "Navigation ... is interrupted by
+  // another navigation ...". That is a timing loss, not evidence the save failed — retry
+  // this specific, identifiable error exactly once after letting the page settle.
+  const NAVIGATION_INTERRUPTED_PATTERN = /is interrupted by another navigation/;
+  async function readForVerify(productId: string): Promise<Record<string, unknown>> {
+    const first = await send({ action: 'read', productId });
+    const message = optionalString(first, 'message');
+    if (commandStatus(first) !== 'error' || !message || !NAVIGATION_INTERRUPTED_PATTERN.test(message)) return first;
+    await new Promise((resolve) => setTimeout(resolve, 4000));
+    return send({ action: 'read', productId });
+  }
+
+  // Shared submit-ambiguity reconciliation: an 'unknown' submit does not mean the save
+  // failed — it may have gone through and only our own response wait timed out. Read the
+  // page back and compare against what was expected before declaring failure. Used by every
+  // submit-unknown branch (single-shot execute, chunked execute, single-shot rollback,
+  // chunked rollback) so this logic exists in exactly one place.
+  async function reconcileSubmitUnknown(productId: string, submit: Record<string, unknown>, expected: PriceChangeArtifact): Promise<{
+    reconcileable: boolean;
+    verified: Record<string, unknown> | null;
+    verifyStatus: string;
+    fieldsMatch: boolean;
+    matchedFieldCount: number;
+    expectedFieldCount: number;
+    reconciled: boolean;
+  }> {
+    const reconcileable = isReconcileableSubmitUnknown(submit);
+    const verified = reconcileable ? await readForVerify(productId) : null;
+    const verifyStatus = verified ? commandStatus(verified) : 'skipped';
+    const match = verifyReadbackMatches(verified, productId, expected);
+    return { reconcileable, verified, verifyStatus, ...match, reconciled: match.ok };
   }
 
   return {
@@ -1993,35 +2164,293 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
         ...(audit?.taskId ? [`auditTask: ${audit.taskId}`] : []),
         ...(audit?.rollbackFile ? [`rollbackFile: ${audit.rollbackFile}`] : []),
       ];
-      const apply = await send({ action: 'apply', productId: request.productId, changesFile });
-      const applyStatus = commandStatus(apply);
-      if (applyStatus !== 'ok') {
-        await updateAuditTask(rootDir, audit, 'failed');
+      const specCount = priceArtifactSpecCount(changes);
+      const pressureBlockReason = priceApplyPressureBlockReason(changes);
+      const oversizedSpec = isPerSpecPriceArtifact(changes) ? oversizedSpecId(changes) : null;
+
+      // Executes one product's oversized per-spec price change as several smaller
+      // apply+submit rounds (one per chunk), instead of rejecting it outright. Each
+      // chunk reuses the exact same daemon apply/submit/reconcile sequence as the
+      // normal single-shot path below, just scoped to a subset of specs. A chunk is
+      // only ever considered successful when submit is confirmed ok, or submit was
+      // ambiguous and a readback confirms that exact chunk's fields were persisted —
+      // anything else stops the loop immediately so later chunks never run against a
+      // page whose prior save outcome is unconfirmed.
+      async function executeChunkedPriceApply(fullChanges: PerSpecPriceFieldMap): Promise<RentalPriceExecutionResult> {
+        const chunks = chunkPerSpecPriceArtifact(fullChanges);
+        const chunkOutcomes: Array<{ index: number; ok: boolean; specIds: string[]; fieldCount: number; lines: string[] }> = [];
+        let overallOk = true;
+        for (let index = 0; index < chunks.length; index += 1) {
+          const chunkChanges = chunks[index];
+          const specIds = Object.keys(chunkChanges);
+          const chunkFieldCount = priceArtifactFieldCount(chunkChanges);
+          const chunkChangesFile = join(artifactDir, `changes-chunk-${index + 1}-${request.productId}-${timestampToken()}.json`);
+          await writeJsonFile(chunkChangesFile, chunkChanges);
+
+          const chunkApply = await send({ action: 'apply', productId: request.productId, changesFile: chunkChangesFile });
+          const chunkApplyStatus = commandStatus(chunkApply);
+          if (chunkApplyStatus !== 'ok') {
+            const chunkApplyEvidence = sanitizedDaemonApplyEvidence(chunkApply);
+            const chunkResultFile = join(artifactDir, `execution-chunk-${index + 1}-apply-failure-${request.productId}-${timestampToken()}.json`);
+            await writeJsonFile(chunkResultFile, {
+              productId: request.productId,
+              chunkIndex: index + 1,
+              totalChunks: chunks.length,
+              ok: false,
+              phase: 'chunk-apply',
+              specIds,
+              expectedFields: chunkChanges,
+              expectedFieldCount: chunkFieldCount,
+              applyStatus: chunkApplyStatus,
+              apply: chunkApplyEvidence,
+              submitStatus: 'skipped',
+              verifyStatus: 'skipped',
+              changesFile: chunkChangesFile,
+              createdAt: new Date().toISOString(),
+            });
+            await updateAuditTask(rootDir, audit, 'failed', chunkResultFile, 'execution_result');
+            const chunkApplyMessage = optionalString(chunkApply, 'message');
+            chunkOutcomes.push({ index, ok: false, specIds, fieldCount: chunkFieldCount, lines: [`apply: ${chunkApplyStatus}`, ...(chunkApplyMessage ? [`applyMessage: ${chunkApplyMessage}`] : []), 'submit: skipped'] });
+            overallOk = false;
+            break;
+          }
+
+          const chunkSubmit = await send({ action: 'submit', expectedProductId: request.productId });
+          const chunkSubmitStatus = commandStatus(chunkSubmit);
+          let chunkVerifyStatus = 'skipped';
+          let chunkOk = chunkSubmitStatus === 'ok';
+          if (!chunkOk) {
+            const chunkReconcile = await reconcileSubmitUnknown(request.productId, chunkSubmit, chunkChanges);
+            chunkVerifyStatus = chunkReconcile.verifyStatus;
+            chunkOk = chunkReconcile.reconciled;
+          }
+
+          const chunkResultFile = join(artifactDir, `execution-chunk-${index + 1}-${chunkOk ? 'ok' : 'failed'}-${request.productId}-${timestampToken()}.json`);
+          await writeJsonFile(chunkResultFile, {
+            productId: request.productId,
+            chunkIndex: index + 1,
+            totalChunks: chunks.length,
+            ok: chunkOk,
+            specIds,
+            expectedFields: chunkChanges,
+            expectedFieldCount: chunkFieldCount,
+            applyStatus: chunkApplyStatus,
+            submitStatus: chunkSubmitStatus,
+            verifyStatus: chunkVerifyStatus,
+            changesFile: chunkChangesFile,
+            createdAt: new Date().toISOString(),
+          });
+          // Deliberately NOT tagged 'verify_result': rollback's assertAppliedAuditEvidence()
+          // reads the *last* 'verify_result' evidence entry and requires its field count to
+          // equal the whole task's expectedFieldCount. Tagging a per-chunk (partial) result as
+          // 'verify_result' would make that check compare a chunk's subset count against the
+          // full total and fail rollback for every chunked task. A single aggregate
+          // 'verify_result' covering the full field count is written once, after the loop,
+          // instead.
+          await updateAuditTask(rootDir, audit, chunkOk ? 'completed' : 'failed', chunkResultFile, chunkOk ? 'chunk_verify_result' : 'execution_result');
+
+          chunkOutcomes.push({ index, ok: chunkOk, specIds, fieldCount: chunkFieldCount, lines: [`apply: ${chunkApplyStatus}`, `submit: ${chunkSubmitStatus}`, `verify: ${chunkVerifyStatus}`] });
+          if (!chunkOk) {
+            overallOk = false;
+            break;
+          }
+        }
+
+        const completedChunks = chunkOutcomes.filter((outcome) => outcome.ok).length;
+        const summaryFile = join(artifactDir, `execution-chunked-summary-${request.productId}-${timestampToken()}.json`);
+        await writeJsonFile(summaryFile, {
+          productId: request.productId,
+          ok: overallOk,
+          totalChunks: chunks.length,
+          completedChunks,
+          chunks: chunkOutcomes,
+          rollbackFile: audit?.rollbackFile,
+          createdAt: new Date().toISOString(),
+        });
+        await setAuditTaskResult(rootDir, audit, 'execution', {
+          productId: request.productId,
+          ok: overallOk,
+          phase: 'chunked_apply',
+          totalChunks: chunks.length,
+          completedChunks,
+          resultFile: summaryFile,
+          createdAt: new Date().toISOString(),
+        });
+        let aggregateOk = overallOk;
+        let aggregateVerifyStatus = 'skipped';
+        let aggregateResultFile = summaryFile;
+        if (overallOk) {
+          // Each chunk only proved that ITS OWN subset of fields matched right after its own
+          // submit — it never re-reads the fields any earlier chunk wrote. A later chunk's
+          // save could silently clobber an earlier chunk's fields (e.g. a page-level default
+          // reset triggered by a different spec's save) without any single chunk's own
+          // readback ever detecting it. So this reads the WHOLE product back exactly once
+          // more, after every chunk has reported success, and cross-checks every field across
+          // every spec against the full plan before declaring the task complete — instead of
+          // blindly asserting matchedFieldCount === expectedFieldCount from the union of
+          // per-chunk oks.
+          const aggregateVerified = await readForVerify(request.productId);
+          aggregateVerifyStatus = commandStatus(aggregateVerified);
+          const aggregateMatch = verifyReadbackMatches(aggregateVerified, request.productId, fullChanges);
+          aggregateOk = aggregateMatch.ok;
+          const aggregateVerifyFile = join(artifactDir, `verify-chunked-${request.productId}-${timestampToken()}.json`);
+          await writeJsonFile(aggregateVerifyFile, {
+            productId: request.productId,
+            ok: aggregateOk,
+            expectedFields: fullChanges,
+            expectedFieldCount,
+            matchedFieldCount: aggregateMatch.matchedFieldCount,
+            fieldsMatch: aggregateMatch.fieldsMatch,
+            verifyStatus: aggregateVerifyStatus,
+            verified: aggregateVerified,
+            changesFile,
+            rollbackFile: audit?.rollbackFile,
+            totalChunks: chunks.length,
+            createdAt: new Date().toISOString(),
+          });
+          aggregateResultFile = aggregateVerifyFile;
+          await updateAuditTask(rootDir, audit, aggregateOk ? 'completed' : 'verify_failed', aggregateVerifyFile, VERIFY_RESULT_EVIDENCE_TYPE);
+        } else {
+          await updateAuditTask(rootDir, audit, 'failed');
+        }
+
+        return {
+          productId: request.productId,
+          ok: aggregateOk,
+          lines: [
+            `改价已自动分为 ${chunks.length} 批执行：完成 ${completedChunks}/${chunks.length} 批`,
+            ...chunkOutcomes.map((outcome) => `批次 ${outcome.index + 1}/${chunks.length}（规格 ${outcome.specIds.join(', ')}，${outcome.fieldCount} 字段）：${outcome.ok ? '成功' : '失败'} — ${outcome.lines.join('，')}`),
+            ...(overallOk ? [`汇总核验: ${aggregateOk ? '通过' : '不匹配'}`] : []),
+            ...auditLines,
+            `汇总文件: ${aggregateResultFile}`,
+          ],
+          ...(audit ? { audit: { ...(audit.taskId ? { taskId: audit.taskId } : {}), status: audit.taskId ? (overallOk ? (aggregateOk ? 'completed' : 'verify_failed') : 'failed') : 'untracked', resultFile: aggregateResultFile, ...(audit.rollbackFile ? { rollbackFile: audit.rollbackFile } : {}) } } : {}),
+          pricing: {
+            phase: overallOk ? 'chunked_verify' : 'chunked_apply',
+            expectedFieldCount,
+            specCount,
+            applyStatus: overallOk ? 'ok' : 'partial_or_failed',
+            submitStatus: overallOk ? 'ok' : 'partial_or_failed',
+            verifyStatus: overallOk ? aggregateVerifyStatus : 'skipped',
+            retrySafe: true,
+            resultFile: aggregateResultFile,
+          },
+        };
+      }
+
+      if (pressureBlockReason && isPerSpecPriceArtifact(changes) && !oversizedSpec) {
+        return executeChunkedPriceApply(changes);
+      }
+      if (pressureBlockReason) {
+        const blockedReason = oversizedSpec
+          ? `改价字段过多：规格 ${oversizedSpec} 单独就有 ${Object.keys((changes as PerSpecPriceFieldMap)[oversizedSpec]).length} 个字段，超过单批安全上限 ${RENTAL_PRICE_APPLY_MAX_FIELD_COUNT}，无法自动分批，请人工拆分该规格后重新预览确认。`
+          : pressureBlockReason;
+        const resultFile = join(artifactDir, `execution-blocked-${request.productId}-${timestampToken()}.json`);
+        const createdAt = new Date().toISOString();
+        const executionResult = {
+          productId: request.productId,
+          ok: false,
+          phase: 'pre_apply_pressure_guard',
+          expectedFields: changes,
+          expectedFieldCount,
+          specCount,
+          applyStatus: 'skipped',
+          submitStatus: 'skipped',
+          verifyStatus: 'skipped',
+          changesFile,
+          rollbackFile: audit?.rollbackFile,
+          reason: blockedReason,
+          retrySafe: true,
+          createdAt,
+        };
+        const taskExecutionSummary = {
+          productId: request.productId,
+          ok: false,
+          phase: 'pre_apply_pressure_guard',
+          expectedFieldCount,
+          specCount,
+          applyStatus: 'skipped',
+          submitStatus: 'skipped',
+          verifyStatus: 'skipped',
+          retrySafe: true,
+          resultFile,
+          createdAt,
+        };
+        await writeJsonFile(resultFile, executionResult);
+        await updateAuditTask(rootDir, audit, 'failed', resultFile, 'execution_result');
+        await setAuditTaskResult(rootDir, audit, 'execution', taskExecutionSummary);
         return {
           productId: request.productId,
           ok: false,
-          lines: [`apply: ${applyStatus}`, 'submit: skipped', 'verify: skipped', ...auditLines],
-          ...(audit ? { audit: { ...(audit.taskId ? { taskId: audit.taskId } : {}), status: audit.taskId ? 'failed' : 'untracked', ...(audit.rollbackFile ? { rollbackFile: audit.rollbackFile } : {}) } } : {}),
+          lines: ['apply: skipped', 'submit: skipped', 'verify: skipped', blockedReason, ...auditLines, ...(audit ? [`resultFile: ${resultFile}`] : [])],
+          ...(audit ? { audit: { ...(audit.taskId ? { taskId: audit.taskId } : {}), status: audit.taskId ? 'failed' : 'untracked', resultFile, ...(audit.rollbackFile ? { rollbackFile: audit.rollbackFile } : {}) } } : {}),
+          pricing: {
+            phase: 'pre_apply_pressure_guard',
+            expectedFieldCount,
+            specCount,
+            applyStatus: 'skipped',
+            submitStatus: 'skipped',
+            verifyStatus: 'skipped',
+            retrySafe: true,
+            resultFile,
+          },
+        };
+      }
+      const apply = await send({ action: 'apply', productId: request.productId, changesFile });
+      const applyStatus = commandStatus(apply);
+      if (applyStatus !== 'ok') {
+        const applyEvidence = sanitizedDaemonApplyEvidence(apply);
+        const resultFile = join(artifactDir, `execution-apply-failure-${request.productId}-${timestampToken()}.json`);
+        const createdAt = new Date().toISOString();
+        await writeJsonFile(resultFile, {
+          productId: request.productId,
+          ok: false,
+          phase: 'apply',
+          expectedFields: changes,
+          expectedFieldCount,
+          applyStatus,
+          apply: applyEvidence,
+          submitStatus: 'skipped',
+          verifyStatus: 'skipped',
+          changesFile,
+          rollbackFile: audit?.rollbackFile,
+          createdAt,
+        });
+        await updateAuditTask(rootDir, audit, 'failed', resultFile, 'execution_result');
+        await setAuditTaskResult(rootDir, audit, 'execution', { productId: request.productId, ok: false, phase: 'apply', applyStatus, submitStatus: 'skipped', verifyStatus: 'skipped', resultFile, createdAt });
+        const applyMessage = optionalString(apply, 'message');
+        return {
+          productId: request.productId,
+          ok: false,
+          lines: [`apply: ${applyStatus}`, ...(applyMessage ? [`applyMessage: ${applyMessage}`] : []), 'submit: skipped', 'verify: skipped', ...auditLines, `resultFile: ${resultFile}`],
+          ...(audit ? { audit: { ...(audit.taskId ? { taskId: audit.taskId } : {}), status: audit.taskId ? 'failed' : 'untracked', resultFile, ...(audit.rollbackFile ? { rollbackFile: audit.rollbackFile } : {}) } } : {}),
+          pricing: { phase: 'apply', expectedFieldCount, specCount, applyStatus, submitStatus: 'skipped', verifyStatus: 'skipped', resultFile },
         };
       }
 
       const submit = await send({ action: 'submit', expectedProductId: request.productId });
       const submitStatus = commandStatus(submit);
       if (submitStatus !== 'ok') {
-        const resultFile = join(artifactDir, `execution-failure-${request.productId}-${timestampToken()}.json`);
         const sideEffectPossible = optionalBoolean(submit, 'sideEffectPossible') ?? true;
         const retrySafe = optionalBoolean(submit, 'retrySafe') ?? false;
         const submitEvidence = sanitizedDaemonSubmitEvidence(submit);
+        const { reconcileable, verified, verifyStatus, fieldsMatch, matchedFieldCount, reconciled } = await reconcileSubmitUnknown(request.productId, submit, changes);
+        const phase = reconciled ? 'verify_after_submit_unknown' : 'submit';
+        const resultFile = join(artifactDir, `${reconciled ? 'verify-after-submit-unknown' : 'execution-failure'}-${request.productId}-${timestampToken()}.json`);
         const executionResult = {
           productId: request.productId,
-          ok: false,
-          phase: 'submit',
+          ok: reconciled,
+          phase,
           expectedFields: changes,
           expectedFieldCount,
+          matchedFieldCount,
           applyStatus,
           submitStatus,
           submit: submitEvidence,
-          verifyStatus: 'skipped',
+          verifyStatus,
+          fieldsMatch,
+          submitUnknownReconciled: reconciled,
+          ...(verified ? { verified } : {}),
           changesFile,
           rollbackFile: audit?.rollbackFile,
           sideEffectPossible,
@@ -2030,42 +2459,53 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
         };
         const taskExecutionSummary = {
           productId: request.productId,
-          ok: false,
-          phase: 'submit',
+          ok: reconciled,
+          phase,
           applyStatus,
           submitStatus,
-          verifyStatus: 'skipped',
+          verifyStatus,
           sideEffectPossible,
           retrySafe,
+          submitUnknownReconciled: reconciled,
           resultFile,
           createdAt: executionResult.createdAt,
         };
         await writeJsonFile(resultFile, executionResult);
-        await updateAuditTask(rootDir, audit, 'failed', resultFile, 'execution_result');
+        await updateAuditTask(rootDir, audit, reconciled ? 'completed' : 'failed', resultFile, reconciled ? VERIFY_RESULT_EVIDENCE_TYPE : 'execution_result');
         await setAuditTaskResult(rootDir, audit, 'execution', taskExecutionSummary);
         const submitMessage = optionalString(submit, 'message');
         return {
           productId: request.productId,
-          ok: false,
+          ok: reconciled,
           lines: [
             `apply: ${applyStatus}`,
             `submit: ${submitStatus}`,
-            'verify: skipped',
+            `verify: ${verifyStatus}`,
+            ...(reconcileable ? [`reconcile: ${reconciled ? 'matched' : 'mismatch'}`] : []),
             ...(submitMessage ? [`submitMessage: ${submitMessage}`] : []),
             `sideEffectPossible: ${sideEffectPossible}`,
             `retrySafe: ${retrySafe}`,
             ...auditLines,
             ...(audit ? [`resultFile: ${resultFile}`] : []),
           ],
-          ...(audit ? { audit: { ...(audit.taskId ? { taskId: audit.taskId } : {}), status: audit.taskId ? 'failed' : 'untracked', resultFile, ...(audit.rollbackFile ? { rollbackFile: audit.rollbackFile } : {}) } } : {}),
+          ...(audit ? { audit: { ...(audit.taskId ? { taskId: audit.taskId } : {}), status: audit.taskId ? (reconciled ? 'completed' : 'failed') : 'untracked', resultFile, ...(audit.rollbackFile ? { rollbackFile: audit.rollbackFile } : {}) } } : {}),
+          pricing: {
+            phase,
+            expectedFieldCount,
+            specCount,
+            applyStatus,
+            submitStatus,
+            submitDetail: optionalString(submit, 'detail'),
+            verifyStatus,
+            retrySafe,
+            resultFile,
+          },
         };
       }
 
-      const verified = await send({ action: 'read', productId: request.productId });
+      const verified = await readForVerify(request.productId);
       const verifyStatus = commandStatus(verified);
-      const matchedFieldCount = isPerSpecPriceArtifact(changes) ? countVerifiedPerSpecFields(verified, changes) : countVerifiedFields(verified, changes);
-      const fieldsMatch = isPerSpecPriceArtifact(changes) ? verifiedPerSpecFields(verified, changes) : verifiedFields(verified, changes);
-      const ok = verifyStatus !== 'error' && fieldsMatch && expectedFieldCount > 0 && matchedFieldCount === expectedFieldCount;
+      const { ok, fieldsMatch, matchedFieldCount } = verifyReadbackMatches(verified, request.productId, changes);
       const auditStatus: 'completed' | 'verify_failed' = ok ? 'completed' : 'verify_failed';
       const resultFile = join(artifactDir, `verify-${request.productId}-${timestampToken()}.json`);
       await writeJsonFile(resultFile, {
@@ -2089,6 +2529,7 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
         ok,
         lines: [`apply: ${applyStatus}`, `submit: ${submitStatus}`, `verify: ${verifyStatus}`, `fields: ${fieldsMatch ? 'matched' : 'mismatch'}`, ...auditLines, ...(audit ? [`verifyFile: ${resultFile}`] : [])],
         ...(audit ? { audit: { ...(audit.taskId ? { taskId: audit.taskId } : {}), status: audit.taskId ? auditStatus : 'untracked', resultFile, ...(audit.rollbackFile ? { rollbackFile: audit.rollbackFile } : {}) } } : {}),
+        pricing: { phase: 'verify', expectedFieldCount, specCount, applyStatus, submitStatus, verifyStatus, retrySafe: true, resultFile },
       };
     },
     async applyPerSpec(productId, specFields) {
@@ -2105,35 +2546,247 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
         ...(audit.taskId ? [`auditTask: ${audit.taskId}`] : []),
         ...(audit.rollbackFile ? [`rollbackFile: ${audit.rollbackFile}`] : []),
       ];
-      const apply = await send({ action: 'apply', productId, changesFile: audit.rollbackFile });
-      const applyStatus = commandStatus(apply);
-      if (applyStatus !== 'ok') {
-        await updateAuditTask(rootDir, audit, 'rollback_failed');
+      const rollbackPressureBlockReason = priceApplyPressureBlockReason(fields);
+      const rollbackOversizedSpec = isPerSpecPriceArtifact(fields) ? oversizedSpecId(fields) : null;
+
+      // Mirrors executeChunkedPriceApply. A rollback file is the inverse of a forward price
+      // plan that may itself have needed chunking to stay under the daemon's per-apply
+      // field/spec-count safety caps — without this, rolling back that exact same plan would
+      // re-hit those same caps in a single all-or-nothing apply and fail outright.
+      async function executeChunkedRollbackApply(fullFields: PerSpecPriceFieldMap): Promise<RentalPriceRollbackResult> {
+        const chunks = chunkPerSpecPriceArtifact(fullFields);
+        const chunkOutcomes: Array<{ index: number; ok: boolean; specIds: string[]; fieldCount: number; lines: string[] }> = [];
+        let overallOk = true;
+        for (let index = 0; index < chunks.length; index += 1) {
+          const chunkFields = chunks[index];
+          const specIds = Object.keys(chunkFields);
+          const chunkFieldCount = priceArtifactFieldCount(chunkFields);
+          const chunkFieldsFile = join(artifactDir, `rollback-chunk-${index + 1}-${productId}-${timestampToken()}.json`);
+          await writeJsonFile(chunkFieldsFile, chunkFields);
+
+          const chunkApply = await send({ action: 'apply', productId, changesFile: chunkFieldsFile });
+          const chunkApplyStatus = commandStatus(chunkApply);
+          if (chunkApplyStatus !== 'ok') {
+            const chunkApplyEvidence = sanitizedDaemonApplyEvidence(chunkApply);
+            const chunkResultFile = join(artifactDir, `rollback-chunk-${index + 1}-apply-failure-${productId}-${timestampToken()}.json`);
+            await writeJsonFile(chunkResultFile, {
+              productId,
+              chunkIndex: index + 1,
+              totalChunks: chunks.length,
+              ok: false,
+              phase: 'rollback-chunk-apply',
+              specIds,
+              expectedFields: chunkFields,
+              expectedFieldCount: chunkFieldCount,
+              applyStatus: chunkApplyStatus,
+              apply: chunkApplyEvidence,
+              submitStatus: 'skipped',
+              verifyStatus: 'skipped',
+              rollbackFile: audit.rollbackFile,
+              changesFile: chunkFieldsFile,
+              createdAt: new Date().toISOString(),
+            });
+            await updateAuditTask(rootDir, audit, 'rollback_failed', chunkResultFile, 'rollback_execution_result');
+            const chunkApplyMessage = optionalString(chunkApply, 'message');
+            chunkOutcomes.push({ index, ok: false, specIds, fieldCount: chunkFieldCount, lines: [`apply: ${chunkApplyStatus}`, ...(chunkApplyMessage ? [`applyMessage: ${chunkApplyMessage}`] : []), 'submit: skipped'] });
+            overallOk = false;
+            break;
+          }
+
+          const chunkSubmit = await send({ action: 'submit', expectedProductId: productId });
+          const chunkSubmitStatus = commandStatus(chunkSubmit);
+          let chunkVerifyStatus = 'skipped';
+          let chunkOk = chunkSubmitStatus === 'ok';
+          if (!chunkOk) {
+            const chunkReconcile = await reconcileSubmitUnknown(productId, chunkSubmit, chunkFields);
+            chunkVerifyStatus = chunkReconcile.verifyStatus;
+            chunkOk = chunkReconcile.reconciled;
+          }
+
+          const chunkResultFile = join(artifactDir, `rollback-chunk-${index + 1}-${chunkOk ? 'ok' : 'failed'}-${productId}-${timestampToken()}.json`);
+          await writeJsonFile(chunkResultFile, {
+            productId,
+            chunkIndex: index + 1,
+            totalChunks: chunks.length,
+            ok: chunkOk,
+            specIds,
+            expectedFields: chunkFields,
+            expectedFieldCount: chunkFieldCount,
+            applyStatus: chunkApplyStatus,
+            submitStatus: chunkSubmitStatus,
+            verifyStatus: chunkVerifyStatus,
+            rollbackFile: audit.rollbackFile,
+            changesFile: chunkFieldsFile,
+            createdAt: new Date().toISOString(),
+          });
+          // Same reasoning as the forward chunked path: a per-chunk (partial) result is
+          // deliberately tagged distinctly from the final aggregate rollback verify result,
+          // so nothing downstream can mistake a partial chunk for the whole rollback's proof.
+          await updateAuditTask(rootDir, audit, chunkOk ? 'rolled_back' : 'rollback_failed', chunkResultFile, chunkOk ? 'rollback_chunk_verify_result' : 'rollback_execution_result');
+
+          chunkOutcomes.push({ index, ok: chunkOk, specIds, fieldCount: chunkFieldCount, lines: [`apply: ${chunkApplyStatus}`, `submit: ${chunkSubmitStatus}`, `verify: ${chunkVerifyStatus}`] });
+          if (!chunkOk) {
+            overallOk = false;
+            break;
+          }
+        }
+
+        const completedChunks = chunkOutcomes.filter((outcome) => outcome.ok).length;
+        const summaryFile = join(artifactDir, `rollback-chunked-summary-${productId}-${timestampToken()}.json`);
+        await writeJsonFile(summaryFile, {
+          productId,
+          ok: overallOk,
+          totalChunks: chunks.length,
+          completedChunks,
+          chunks: chunkOutcomes,
+          rollbackFile: audit.rollbackFile,
+          createdAt: new Date().toISOString(),
+        });
+        await setAuditTaskResult(rootDir, audit, 'rollbackExecution', {
+          productId,
+          ok: overallOk,
+          phase: 'rollback_chunked_apply',
+          totalChunks: chunks.length,
+          completedChunks,
+          resultFile: summaryFile,
+          createdAt: new Date().toISOString(),
+        });
+
+        let aggregateOk = overallOk;
+        let aggregateVerifyStatus = 'skipped';
+        let aggregateResultFile = summaryFile;
+        if (overallOk) {
+          // Same cross-check as the forward chunked path (#6): re-read the whole product once
+          // more after every chunk reports success, instead of trusting the union of per-chunk
+          // oks — a later chunk's save could have silently clobbered an earlier chunk's fields.
+          const aggregateVerified = await readForVerify(productId);
+          aggregateVerifyStatus = commandStatus(aggregateVerified);
+          const aggregateMatch = verifyReadbackMatches(aggregateVerified, productId, fullFields);
+          aggregateOk = aggregateMatch.ok;
+          const aggregateVerifyFile = join(artifactDir, `rollback-verify-chunked-${productId}-${timestampToken()}.json`);
+          await writeJsonFile(aggregateVerifyFile, {
+            productId,
+            ok: aggregateOk,
+            expectedFields: fullFields,
+            expectedFieldCount: priceArtifactFieldCount(fullFields),
+            matchedFieldCount: aggregateMatch.matchedFieldCount,
+            fieldsMatch: aggregateMatch.fieldsMatch,
+            verifyStatus: aggregateVerifyStatus,
+            verified: aggregateVerified,
+            rollbackFile: audit.rollbackFile,
+            totalChunks: chunks.length,
+            createdAt: new Date().toISOString(),
+          });
+          aggregateResultFile = aggregateVerifyFile;
+          await updateAuditTask(rootDir, audit, aggregateOk ? 'rolled_back' : 'rollback_verify_failed', aggregateVerifyFile, 'rollback_verify_result');
+        } else {
+          await updateAuditTask(rootDir, audit, 'rollback_failed');
+        }
+
+        return {
+          productId,
+          ok: aggregateOk,
+          lines: [
+            `回滚已自动分为 ${chunks.length} 批执行：完成 ${completedChunks}/${chunks.length} 批`,
+            ...chunkOutcomes.map((outcome) => `批次 ${outcome.index + 1}/${chunks.length}（规格 ${outcome.specIds.join(', ')}，${outcome.fieldCount} 字段）：${outcome.ok ? '成功' : '失败'} — ${outcome.lines.join('，')}`),
+            ...(overallOk ? [`汇总核验: ${aggregateOk ? '通过' : '不匹配'}`] : []),
+            ...auditLines,
+            `汇总文件: ${aggregateResultFile}`,
+          ],
+          audit: { ...(audit.taskId ? { taskId: audit.taskId } : {}), status: audit.taskId ? (overallOk ? (aggregateOk ? 'rolled_back' : 'rollback_verify_failed') : 'rollback_failed') : 'untracked', resultFile: aggregateResultFile, ...(audit.rollbackFile ? { rollbackFile: audit.rollbackFile } : {}) },
+        };
+      }
+
+      if (rollbackPressureBlockReason && isPerSpecPriceArtifact(fields) && !rollbackOversizedSpec) {
+        return executeChunkedRollbackApply(fields);
+      }
+      if (rollbackPressureBlockReason) {
+        const blockedReason = rollbackOversizedSpec
+          ? `回滚字段过多：规格 ${rollbackOversizedSpec} 单独就有 ${Object.keys((fields as PerSpecPriceFieldMap)[rollbackOversizedSpec]).length} 个字段，超过单批安全上限 ${RENTAL_PRICE_APPLY_MAX_FIELD_COUNT}，无法自动分批，请人工处理后联系管理员手动回滚。`
+          : rollbackPressureBlockReason;
+        const resultFile = join(artifactDir, `rollback-blocked-${productId}-${timestampToken()}.json`);
+        const createdAt = new Date().toISOString();
+        await writeJsonFile(resultFile, {
+          productId,
+          ok: false,
+          phase: 'rollback_pre_apply_pressure_guard',
+          expectedFields: fields,
+          expectedFieldCount: priceArtifactFieldCount(fields),
+          applyStatus: 'skipped',
+          submitStatus: 'skipped',
+          verifyStatus: 'skipped',
+          rollbackFile: audit.rollbackFile,
+          reason: blockedReason,
+          createdAt,
+        });
+        await updateAuditTask(rootDir, audit, 'rollback_failed', resultFile, 'rollback_execution_result');
+        await setAuditTaskResult(rootDir, audit, 'rollbackExecution', { productId, ok: false, phase: 'rollback_pre_apply_pressure_guard', applyStatus: 'skipped', submitStatus: 'skipped', verifyStatus: 'skipped', resultFile, createdAt });
         return {
           productId,
           ok: false,
-          lines: [`rollbackApply: ${applyStatus}`, 'submit: skipped', 'verify: skipped', ...auditLines],
-          audit: { ...(audit.taskId ? { taskId: audit.taskId } : {}), status: audit.taskId ? 'rollback_failed' : 'untracked', ...(audit.rollbackFile ? { rollbackFile: audit.rollbackFile } : {}) },
+          lines: ['rollbackApply: skipped', 'submit: skipped', 'verify: skipped', blockedReason, ...auditLines, `resultFile: ${resultFile}`],
+          audit: { ...(audit.taskId ? { taskId: audit.taskId } : {}), status: audit.taskId ? 'rollback_failed' : 'untracked', resultFile, ...(audit.rollbackFile ? { rollbackFile: audit.rollbackFile } : {}) },
+        };
+      }
+
+      const apply = await send({ action: 'apply', productId, changesFile: audit.rollbackFile });
+      const applyStatus = commandStatus(apply);
+      if (applyStatus !== 'ok') {
+        const applyEvidence = sanitizedDaemonApplyEvidence(apply);
+        const resultFile = join(artifactDir, `rollback-apply-failure-${productId}-${timestampToken()}.json`);
+        const createdAt = new Date().toISOString();
+        await writeJsonFile(resultFile, {
+          productId,
+          ok: false,
+          phase: 'rollback-apply',
+          expectedFields: fields,
+          expectedFieldCount: priceArtifactFieldCount(fields),
+          applyStatus,
+          apply: applyEvidence,
+          submitStatus: 'skipped',
+          verifyStatus: 'skipped',
+          rollbackFile: audit.rollbackFile,
+          createdAt,
+        });
+        await updateAuditTask(rootDir, audit, 'rollback_failed', resultFile, 'rollback_execution_result');
+        await setAuditTaskResult(rootDir, audit, 'rollbackExecution', { productId, ok: false, phase: 'rollback-apply', applyStatus, submitStatus: 'skipped', verifyStatus: 'skipped', resultFile, createdAt });
+        const applyMessage = optionalString(apply, 'message');
+        return {
+          productId,
+          ok: false,
+          lines: [`rollbackApply: ${applyStatus}`, ...(applyMessage ? [`applyMessage: ${applyMessage}`] : []), 'submit: skipped', 'verify: skipped', ...auditLines, `resultFile: ${resultFile}`],
+          audit: { ...(audit.taskId ? { taskId: audit.taskId } : {}), status: audit.taskId ? 'rollback_failed' : 'untracked', resultFile, ...(audit.rollbackFile ? { rollbackFile: audit.rollbackFile } : {}) },
         };
       }
 
       const submit = await send({ action: 'submit', expectedProductId: productId });
       const submitStatus = commandStatus(submit);
       if (submitStatus !== 'ok') {
-        const resultFile = join(artifactDir, `rollback-execution-failure-${productId}-${timestampToken()}.json`);
+        // Same submit-ambiguity reconciliation as the forward execute() path: an
+        // 'unknown'/response_timeout submit does not mean the rollback failed — the
+        // save may have gone through and only our own response wait timed out. Read
+        // the page back and compare against the rollback target before giving up,
+        // instead of declaring rollback_failed on every ambiguous submit outcome.
+        const { reconcileable, verified, verifyStatus: rollbackVerifyStatus, fieldsMatch: rollbackFieldsMatch, matchedFieldCount: rollbackMatchedFieldCount, expectedFieldCount: rollbackExpectedFieldCount, reconciled } = await reconcileSubmitUnknown(productId, submit, fields);
         const sideEffectPossible = optionalBoolean(submit, 'sideEffectPossible') ?? true;
         const retrySafe = optionalBoolean(submit, 'retrySafe') ?? false;
         const submitEvidence = sanitizedDaemonSubmitEvidence(submit);
+        const phase = reconciled ? 'rollback_verify_after_submit_unknown' : 'rollback-submit';
+        const resultFile = join(artifactDir, `${reconciled ? 'rollback-verify-after-submit-unknown' : 'rollback-execution-failure'}-${productId}-${timestampToken()}.json`);
         const executionResult = {
           productId,
-          ok: false,
-          phase: 'rollback-submit',
+          ok: reconciled,
+          phase,
           expectedFields: fields,
-          expectedFieldCount: priceArtifactFieldCount(fields),
+          expectedFieldCount: rollbackExpectedFieldCount,
+          matchedFieldCount: rollbackMatchedFieldCount,
           applyStatus,
           submitStatus,
           submit: submitEvidence,
-          verifyStatus: 'skipped',
+          verifyStatus: rollbackVerifyStatus,
+          fieldsMatch: rollbackFieldsMatch,
+          submitUnknownReconciled: reconciled,
+          ...(verified ? { verified } : {}),
           rollbackFile: audit.rollbackFile,
           sideEffectPossible,
           retrySafe,
@@ -2141,43 +2794,42 @@ export function createRentalPriceSkillClient(options: RentalPriceSkillClientOpti
         };
         const taskExecutionSummary = {
           productId,
-          ok: false,
-          phase: 'rollback-submit',
+          ok: reconciled,
+          phase,
           applyStatus,
           submitStatus,
-          verifyStatus: 'skipped',
+          verifyStatus: rollbackVerifyStatus,
           sideEffectPossible,
           retrySafe,
+          submitUnknownReconciled: reconciled,
           resultFile,
           createdAt: executionResult.createdAt,
         };
         await writeJsonFile(resultFile, executionResult);
-        await updateAuditTask(rootDir, audit, 'rollback_failed', resultFile, 'rollback_execution_result');
+        await updateAuditTask(rootDir, audit, reconciled ? 'rolled_back' : 'rollback_failed', resultFile, reconciled ? 'rollback_verify_result' : 'rollback_execution_result');
         await setAuditTaskResult(rootDir, audit, 'rollbackExecution', taskExecutionSummary);
         const submitMessage = optionalString(submit, 'message');
         return {
           productId,
-          ok: false,
+          ok: reconciled,
           lines: [
             `rollbackApply: ${applyStatus}`,
             `submit: ${submitStatus}`,
-            'verify: skipped',
+            `verify: ${rollbackVerifyStatus}`,
+            ...(reconcileable ? [`reconcile: ${reconciled ? 'matched' : 'mismatch'}`] : []),
             ...(submitMessage ? [`submitMessage: ${submitMessage}`] : []),
             `sideEffectPossible: ${sideEffectPossible}`,
             `retrySafe: ${retrySafe}`,
             ...auditLines,
             `resultFile: ${resultFile}`,
           ],
-          audit: { ...(audit.taskId ? { taskId: audit.taskId } : {}), status: audit.taskId ? 'rollback_failed' : 'untracked', resultFile, ...(audit.rollbackFile ? { rollbackFile: audit.rollbackFile } : {}) },
+          audit: { ...(audit.taskId ? { taskId: audit.taskId } : {}), status: audit.taskId ? (reconciled ? 'rolled_back' : 'rollback_failed') : 'untracked', resultFile, ...(audit.rollbackFile ? { rollbackFile: audit.rollbackFile } : {}) },
         };
       }
 
-      const verified = await send({ action: 'read', productId });
+      const verified = await readForVerify(productId);
       const verifyStatus = commandStatus(verified);
-      const expectedFieldCount = priceArtifactFieldCount(fields);
-      const matchedFieldCount = isPerSpecPriceArtifact(fields) ? countVerifiedPerSpecFields(verified, fields) : countVerifiedFields(verified, fields);
-      const fieldsMatch = isPerSpecPriceArtifact(fields) ? verifiedPerSpecFields(verified, fields) : verifiedFields(verified, fields);
-      const ok = verifyStatus !== 'error' && fieldsMatch && expectedFieldCount > 0 && matchedFieldCount === expectedFieldCount;
+      const { ok, fieldsMatch, matchedFieldCount, expectedFieldCount } = verifyReadbackMatches(verified, productId, fields);
       const auditStatus: 'rolled_back' | 'rollback_verify_failed' = ok ? 'rolled_back' : 'rollback_verify_failed';
       const resultFile = join(artifactDir, `rollback-verify-${productId}-${timestampToken()}.json`);
       await writeJsonFile(resultFile, {
@@ -2504,8 +3156,7 @@ function readString(value: unknown): string | null {
 }
 
 function readProductId(value: unknown): string | null {
-  const raw = readString(value);
-  return raw && /^\d+$/.test(raw) ? raw : null;
+  return readCanonicalNumericId(value);
 }
 
 function parseSpecRemoveItems(value: unknown): RentalSpecRemoveItemConfirmRequest[] | null {
@@ -2514,9 +3165,9 @@ function parseSpecRemoveItems(value: unknown): RentalSpecRemoveItemConfirmReques
   for (const item of value) {
     if (!isRecord(item)) return null;
     const productId = readProductId(item.productId);
-    const specDimId = readString(item.specDimId);
+    const specDimId = readCanonicalOpaqueId(item.specDimId);
     const dimensionTitle = readString(item.dimensionTitle) ?? undefined;
-    const itemId = readString(item.itemId) ?? undefined;
+    const itemId = readCanonicalOpaqueId(item.itemId) ?? undefined;
     const itemTitle = readString(item.itemTitle);
     const keyword = readString(item.keyword) ?? undefined;
     if (!productId || !specDimId || !itemTitle) return null;
@@ -2646,12 +3297,12 @@ function readRentalOperationConfirmRequestRecord(request: Record<string, unknown
     return days && /^\d+(?:,\d+)*$/.test(days) ? { action, productId, days, ...metadata } : null;
   }
   if (action === 'spec-add-and-refresh') {
-    const specDimId = readString(request.specDimId);
+    const specDimId = readCanonicalOpaqueId(request.specDimId);
     const itemTitle = readString(request.itemTitle);
     return specDimId && itemTitle ? { action, productId, specDimId, itemTitle, ...metadata } : null;
   }
   if (action === 'spec-add-item') {
-    const specDimId = readString(request.specDimId);
+    const specDimId = readCanonicalOpaqueId(request.specDimId);
     const itemTitle = readString(request.itemTitle);
     return specDimId && itemTitle ? { action, productId, specDimId, itemTitle, ...metadata } : null;
   }
@@ -2757,8 +3408,8 @@ export async function executeRentalOperationConfirmRequest(client: RentalPriceSk
       for (const item of request.items) {
         results.push(await client.specRemoveItem({
           productId: item.productId,
-          specDimId: item.specDimId,
-          ...(item.itemId ? { itemId: item.itemId } : {}),
+          specDimId: String(item.specDimId),
+          ...(item.itemId ? { itemId: String(item.itemId) } : {}),
           itemTitle: item.itemTitle,
         }));
       }

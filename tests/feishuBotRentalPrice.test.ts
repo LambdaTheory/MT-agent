@@ -1,6 +1,8 @@
+import { execFile } from 'node:child_process';
 import { copyFile, mkdir, mkdtemp, readdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
+import { promisify } from 'node:util';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { executeAgentToolRequest } from '../src/feishuBot/agentToolExecutor.js';
 import { parseBotIntent } from '../src/feishuBot/intent.js';
@@ -11,6 +13,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+const execFileAsync = promisify(execFile);
 const HASH = 'a'.repeat(64);
 
 function fakeClient(): RentalPriceSkillClient & { previews: unknown[]; executions: unknown[]; copies: unknown[]; delists: unknown[]; tenancySets: unknown[]; specDiscovers: unknown[]; specAdds: unknown[]; specRemoves: unknown[] } {
@@ -620,6 +623,42 @@ describe('rental price skill client copy diagnostics', () => {
     expect(rolledBackTask.evidence.some((item) => item.type === 'rollback_verify_result')).toBe(true);
   }, 30000);
 
+  it('retries a verify read once when it fails with a transient navigation-interrupted error', async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), 'mt-agent-rental-price-verify-nav-retry-'));
+    await copyRentalPriceAuditScripts(rootDir);
+    const dataRoot = join(dirname(rootDir), `.${basename(rootDir)}-data`);
+    const currentValues = { rent1day: '30.00' };
+    let readCallCount = 0;
+    vi.stubGlobal('fetch', vi.fn(async (_input, init) => {
+      const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+      if (body.action === 'read') {
+        readCallCount += 1;
+        if (readCallCount === 2) {
+          return new Response(JSON.stringify({
+            status: 'error',
+            message: 'page.goto: Navigation to "https://example.test/goods.edit?id=761" is interrupted by another navigation to "https://example.test/goods?id=761&tab=basic"',
+          }));
+        }
+        return new Response(JSON.stringify({ status: 'ok', productId: '761', values: currentValues, specs: [] }));
+      }
+      if (body.action === 'apply' && typeof body.changesFile === 'string') {
+        const changes = JSON.parse(await readFile(body.changesFile, 'utf8')) as Record<string, string>;
+        if (typeof changes.rent1day === 'string') currentValues.rent1day = changes.rent1day;
+        return new Response(JSON.stringify({ status: 'ok' }));
+      }
+      return new Response(JSON.stringify({ status: 'ok' }));
+    }));
+    const client = createRentalPriceSkillClient({ rootDir, daemonUrl: 'http://127.0.0.1:9223' });
+
+    const preview = await client.preview({ mode: 'explicit_fields', productId: '761', fields: { rent1day: '29.00' } });
+    const result = await client.execute({ mode: 'explicit_fields', productId: '761', fields: preview.fields, audit: preview.audit });
+
+    expect(result.ok).toBe(true);
+    expect(readCallCount).toBe(3);
+    const task = JSON.parse(await readFile(join(dataRoot, 'tasks', `${preview.audit?.taskId}.json`), 'utf8')) as { status: string };
+    expect(task.status).toBe('completed');
+  }, 30000);
+
   it('recovers rollback metadata from bound artifacts when completed task records missed one audit field', async () => {
     const rootDir = await mkdtemp(join(tmpdir(), 'mt-agent-rental-price-rollback-recover-'));
     await copyRentalPriceAuditScripts(rootDir);
@@ -740,6 +779,187 @@ describe('rental price skill client copy diagnostics', () => {
     });
     expect(task.results.execution).not.toHaveProperty('submit');
     expect(task.results.execution).not.toHaveProperty('expectedFields');
+  }, 30000);
+
+  it('reconciles submit timeout as success when delayed readback matches target prices', async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), 'mt-agent-rental-price-submit-reconcile-'));
+    await copyRentalPriceAuditScripts(rootDir);
+    const dataRoot = join(dirname(rootDir), `.${basename(rootDir)}-data`);
+    const currentValues = { rent1day: '88.00' };
+    const commands: Array<Record<string, unknown>> = [];
+    vi.stubGlobal('fetch', vi.fn(async (_input, init) => {
+      const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+      commands.push(body);
+      if (body.action === 'read') {
+        return new Response(JSON.stringify({ status: 'ok', productId: '876', values: currentValues, specs: [] }));
+      }
+      if (body.action === 'apply' && typeof body.changesFile === 'string') {
+        const changes = JSON.parse(await readFile(body.changesFile, 'utf8')) as Record<string, string>;
+        if (typeof changes.rent1day === 'string') currentValues.rent1day = changes.rent1day;
+        return new Response(JSON.stringify({ status: 'ok', appliedCount: 1 }));
+      }
+      if (body.action === 'submit') {
+        return new Response(JSON.stringify({
+          status: 'unknown',
+          detail: 'response_timeout',
+          sideEffectPossible: true,
+          retrySafe: false,
+        }));
+      }
+      return new Response(JSON.stringify({ status: 'ok' }));
+    }));
+    const client = createRentalPriceSkillClient({ rootDir, daemonUrl: 'http://127.0.0.1:9223' });
+
+    const preview = await client.preview({ mode: 'explicit_fields', productId: '876', fields: { rent1day: '80.00' } });
+    const result = await client.execute({ mode: 'explicit_fields', productId: '876', fields: preview.fields, audit: preview.audit });
+
+    expect(result.ok).toBe(true);
+    expect(result.lines.join('\n')).toContain('submit: unknown');
+    expect(result.lines.join('\n')).toContain('reconcile: matched');
+    expect(result.audit?.status).toBe('completed');
+    expect(commands.filter((command) => command.action === 'read')).toHaveLength(2);
+
+    const task = JSON.parse(await readFile(join(dataRoot, 'tasks', `${preview.audit?.taskId}.json`), 'utf8')) as {
+      status: string;
+      results: { execution?: Record<string, unknown> };
+    };
+    expect(task.status).toBe('completed');
+    expect(task.results.execution).toMatchObject({
+      productId: '876',
+      ok: true,
+      phase: 'verify_after_submit_unknown',
+      applyStatus: 'ok',
+      submitStatus: 'unknown',
+      verifyStatus: 'ok',
+      submitUnknownReconciled: true,
+    });
+  }, 30000);
+
+  it('keeps submit timeout failed when delayed readback status is not ok even if prices match', async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), 'mt-agent-rental-price-submit-reconcile-read-unknown-'));
+    await copyRentalPriceAuditScripts(rootDir);
+    const dataRoot = join(dirname(rootDir), `.${basename(rootDir)}-data`);
+    const currentValues = { rent1day: '88.00' };
+    const commands: Array<Record<string, unknown>> = [];
+    let readCount = 0;
+    vi.stubGlobal('fetch', vi.fn(async (_input, init) => {
+      const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+      commands.push(body);
+      if (body.action === 'read') {
+        readCount += 1;
+        return new Response(JSON.stringify({
+          status: readCount === 1 ? 'ok' : 'unknown',
+          productId: '876',
+          values: currentValues,
+          specs: [],
+        }));
+      }
+      if (body.action === 'apply' && typeof body.changesFile === 'string') {
+        const changes = JSON.parse(await readFile(body.changesFile, 'utf8')) as Record<string, string>;
+        if (typeof changes.rent1day === 'string') currentValues.rent1day = changes.rent1day;
+        return new Response(JSON.stringify({ status: 'ok', appliedCount: 1 }));
+      }
+      if (body.action === 'submit') {
+        return new Response(JSON.stringify({
+          status: 'unknown',
+          detail: 'response_timeout',
+          sideEffectPossible: true,
+          retrySafe: false,
+        }));
+      }
+      return new Response(JSON.stringify({ status: 'ok' }));
+    }));
+    const client = createRentalPriceSkillClient({ rootDir, daemonUrl: 'http://127.0.0.1:9223' });
+
+    const preview = await client.preview({ mode: 'explicit_fields', productId: '876', fields: { rent1day: '80.00' } });
+    const result = await client.execute({ mode: 'explicit_fields', productId: '876', fields: preview.fields, audit: preview.audit });
+
+    expect(result.ok).toBe(false);
+    expect(result.lines.join('\n')).toContain('submit: unknown');
+    expect(result.lines.join('\n')).toContain('verify: unknown');
+    expect(result.lines.join('\n')).toContain('reconcile: mismatch');
+    expect(result.audit?.status).toBe('failed');
+    expect(commands.filter((command) => command.action === 'submit')).toHaveLength(1);
+    expect(commands.filter((command) => command.action === 'read')).toHaveLength(2);
+
+    const task = JSON.parse(await readFile(join(dataRoot, 'tasks', `${preview.audit?.taskId}.json`), 'utf8')) as {
+      status: string;
+      results: { execution?: Record<string, unknown> };
+    };
+    expect(task.status).toBe('failed');
+    expect(task.results.execution).toMatchObject({
+      productId: '876',
+      ok: false,
+      phase: 'submit',
+      applyStatus: 'ok',
+      submitStatus: 'unknown',
+      verifyStatus: 'unknown',
+      submitUnknownReconciled: false,
+    });
+  }, 30000);
+
+  it('automatically chunks price changes across many specs into safe batches instead of blocking them outright', async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), 'mt-agent-rental-price-pressure-guard-'));
+    await copyRentalPriceAuditScripts(rootDir);
+    const dataRoot = join(dirname(rootDir), `.${basename(rootDir)}-data`);
+    const values = Object.fromEntries(Array.from({ length: 31 }, (_, index) => [`spec-${index + 1}`, { rent1day: '88.00' }])) as Record<string, Record<string, string>>;
+    const fields = Object.fromEntries(Array.from({ length: 31 }, (_, index) => [`spec-${index + 1}`, { rent1day: '80.00' }]));
+    const commands: Array<Record<string, unknown>> = [];
+    vi.stubGlobal('fetch', vi.fn(async (_input, init) => {
+      const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+      commands.push(body);
+      if (body.action === 'read') {
+        return new Response(JSON.stringify({
+          status: 'ok',
+          productId: '876',
+          values,
+          specs: Object.keys(values).map((specId) => ({ specId, title: specId })),
+        }));
+      }
+      if (body.action === 'apply' && typeof body.changesFile === 'string') {
+        const chunkChanges = JSON.parse(await readFile(body.changesFile, 'utf8')) as Record<string, Record<string, string>>;
+        for (const [specId, specFields] of Object.entries(chunkChanges)) {
+          values[specId] = { ...values[specId], ...specFields };
+        }
+        return new Response(JSON.stringify({ status: 'ok', appliedCount: 1 }));
+      }
+      return new Response(JSON.stringify({ status: 'ok' }));
+    }));
+    const client = createRentalPriceSkillClient({ rootDir, daemonUrl: 'http://127.0.0.1:9223' });
+    const audit = await client.auditPreviewFromRead?.('876', { status: 'ok', productId: '876', values, specs: Object.keys(values).map((specId) => ({ specId, title: specId })) }, { rent1day: '80.00' }, fields);
+
+    const result = await client.execute({ mode: 'explicit_fields', productId: '876', fields: { rent1day: '80.00' }, audit: audit ?? undefined });
+
+    expect(result.ok).toBe(true);
+    expect(result.lines.join('\n')).toContain('改价已自动分为 4 批执行：完成 4/4 批');
+    expect(result.pricing).toMatchObject({
+      phase: 'chunked_verify',
+      expectedFieldCount: 31,
+      specCount: 31,
+      applyStatus: 'ok',
+      submitStatus: 'ok',
+      verifyStatus: 'ok',
+      retrySafe: true,
+    });
+    expect(commands.filter((command) => command.action === 'apply')).toHaveLength(4);
+    expect(commands.filter((command) => command.action === 'submit')).toHaveLength(4);
+    const applyChunkSizes: number[] = [];
+    for (const command of commands.filter((entry) => entry.action === 'apply')) {
+      const changesFile = command.changesFile;
+      if (typeof changesFile === 'string') applyChunkSizes.push(Object.keys(JSON.parse(await readFile(changesFile, 'utf8'))).length);
+    }
+    expect(applyChunkSizes).toEqual([8, 8, 8, 7]);
+
+    const task = JSON.parse(await readFile(join(dataRoot, 'tasks', `${audit?.taskId}.json`), 'utf8')) as {
+      status: string;
+      results: { execution?: Record<string, unknown> };
+    };
+    expect(task.status).toBe('completed');
+    expect(task.results.execution).toMatchObject({
+      phase: 'chunked_apply',
+      totalChunks: 4,
+      completedChunks: 4,
+    });
   }, 30000);
 
   it('persists rollback submit failure details after rollback apply succeeds without running verify', async () => {
@@ -1012,6 +1232,91 @@ describe('rental price skill client copy diagnostics', () => {
     expect(await readdir(join(dataRoot, 'tasks'))).not.toContainEqual(expect.stringMatching(/^mt-agent-|^rollback_|^preview_/));
   }, 30000);
 
+  it('automatically chunks a per-spec price apply that exceeds the safety limits into several apply+submit rounds and succeeds', async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), 'mt-agent-rental-price-chunked-success-'));
+    await copyRentalPriceAuditScripts(rootDir);
+    const specIds = Array.from({ length: 17 }, (_, index) => `s${index + 1}`);
+    const currentValues: Record<string, Record<string, string>> = {};
+    for (const specId of specIds) currentValues[specId] = { rent1day: '100.00', rent2day: '200.00' };
+    const applyChanges: Array<Record<string, Record<string, string>>> = [];
+    vi.stubGlobal('fetch', vi.fn(async (_input, init) => {
+      const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+      if (body.action === 'read') {
+        return new Response(JSON.stringify({
+          status: 'ok',
+          productId: '900',
+          specs: specIds.map((specId) => ({ specId, title: specId })),
+          values: currentValues,
+        }));
+      }
+      if (body.action === 'apply' && typeof body.changesFile === 'string') {
+        const changes = JSON.parse(await readFile(body.changesFile, 'utf8')) as Record<string, Record<string, string>>;
+        applyChanges.push(changes);
+        for (const [specId, fields] of Object.entries(changes)) Object.assign(currentValues[specId], fields);
+        return new Response(JSON.stringify({ status: 'ok' }));
+      }
+      return new Response(JSON.stringify({ status: 'ok' }));
+    }));
+    const client = createRentalPriceSkillClient({ rootDir, daemonUrl: 'http://127.0.0.1:9223' });
+
+    const preview = await client.preview({ mode: 'global_adjustment', productId: '900', adjustmentAmount: -10, scope: 'rent_fields' });
+    expect(preview.audit?.diff?.length).toBe(34);
+
+    const result = await client.execute({ mode: 'explicit_fields', productId: '900', fields: preview.fields, audit: preview.audit });
+
+    expect(result.ok).toBe(true);
+    expect(applyChanges).toHaveLength(3);
+    expect(applyChanges.map((chunk) => Object.keys(chunk).length)).toEqual([8, 8, 1]);
+    expect(result.lines.join('\n')).toContain('改价已自动分为 3 批执行：完成 3/3 批');
+    for (const specId of specIds) expect(currentValues[specId]).toStrictEqual({ rent1day: '90.00', rent2day: '190.00' });
+
+    const rollbackResult = await client.rollback!({ taskId: preview.audit!.taskId! });
+    expect(rollbackResult.ok).toBe(true);
+    for (const specId of specIds) expect(currentValues[specId]).toStrictEqual({ rent1day: '100.00', rent2day: '200.00' });
+  }, 90000);
+
+  it('stops after the first failed chunk during automatic chunking and never attempts the remaining chunks', async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), 'mt-agent-rental-price-chunked-failure-'));
+    await copyRentalPriceAuditScripts(rootDir);
+    const specIds = Array.from({ length: 17 }, (_, index) => `s${index + 1}`);
+    const currentValues: Record<string, Record<string, string>> = {};
+    for (const specId of specIds) currentValues[specId] = { rent1day: '100.00', rent2day: '200.00' };
+    let applyCallCount = 0;
+    const applyChanges: Array<Record<string, Record<string, string>>> = [];
+    vi.stubGlobal('fetch', vi.fn(async (_input, init) => {
+      const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+      if (body.action === 'read') {
+        return new Response(JSON.stringify({
+          status: 'ok',
+          productId: '900',
+          specs: specIds.map((specId) => ({ specId, title: specId })),
+          values: currentValues,
+        }));
+      }
+      if (body.action === 'apply' && typeof body.changesFile === 'string') {
+        applyCallCount += 1;
+        if (applyCallCount === 2) return new Response(JSON.stringify({ status: 'error', message: 'daemon rejected second chunk' }));
+        const changes = JSON.parse(await readFile(body.changesFile, 'utf8')) as Record<string, Record<string, string>>;
+        applyChanges.push(changes);
+        for (const [specId, fields] of Object.entries(changes)) Object.assign(currentValues[specId], fields);
+        return new Response(JSON.stringify({ status: 'ok' }));
+      }
+      return new Response(JSON.stringify({ status: 'ok' }));
+    }));
+    const client = createRentalPriceSkillClient({ rootDir, daemonUrl: 'http://127.0.0.1:9223' });
+
+    const preview = await client.preview({ mode: 'global_adjustment', productId: '900', adjustmentAmount: -10, scope: 'rent_fields' });
+    const result = await client.execute({ mode: 'explicit_fields', productId: '900', fields: preview.fields, audit: preview.audit });
+
+    expect(result.ok).toBe(false);
+    expect(applyCallCount).toBe(2);
+    expect(applyChanges).toHaveLength(1);
+    expect(result.lines.join('\n')).toContain('完成 1/3 批');
+    expect(result.lines.join('\n')).toContain('批次 2/3');
+    for (const specId of specIds.slice(0, 8)) expect(currentValues[specId]).toStrictEqual({ rent1day: '90.00', rent2day: '190.00' });
+    for (const specId of specIds.slice(8)) expect(currentValues[specId]).toStrictEqual({ rent1day: '100.00', rent2day: '200.00' });
+  }, 30000);
+
   it('rejects price execution without audit artifacts before daemon apply', async () => {
     const rootDir = await mkdtemp(join(tmpdir(), 'mt-agent-rental-price-fallback-artifacts-'));
     const dataRoot = join(dirname(rootDir), `.${basename(rootDir)}-data`);
@@ -1034,6 +1339,43 @@ describe('rental price skill client copy diagnostics', () => {
     expect(applyChangesFiles).toEqual([]);
     expect(await readdir(join(dataRoot, 'tasks'))).not.toContainEqual(expect.stringMatching(/^mt-agent-|^verify-|^rollback-verify/));
   });
+
+  it('writes several task-store fields in a single update-many call instead of one call per field', async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), 'mt-agent-task-store-update-many-'));
+    await copyRentalPriceAuditScripts(rootDir);
+    const dataRoot = join(dirname(rootDir), `.${basename(rootDir)}-data`);
+    await mkdir(join(dataRoot, 'tasks'), { recursive: true });
+    const taskStoreScript = join(rootDir, 'scripts', 'task-store.js');
+    const changesFile = join(rootDir, 'changes.json');
+    await writeFile(changesFile, JSON.stringify({ rent1day: '80.00' }), 'utf8');
+
+    const runTaskStore = async (args: string[]) => {
+      const { stdout } = await execFileAsync(process.execPath, [taskStoreScript, ...args], { cwd: dirname(taskStoreScript) });
+      return JSON.parse(stdout) as Record<string, unknown>;
+    };
+
+    const created = await runTaskStore(['create', '改价 商品 761', changesFile]);
+    const taskId = created.taskId as string;
+    expect(taskId).toMatch(/^task_\d+_[a-f0-9]+$/);
+
+    const fields = {
+      rollbackFile: join(rootDir, 'rollback.json'),
+      changesSha256: HASH,
+      rollbackSha256: HASH,
+      expectedFieldCount: '1',
+      status: 'completed',
+    };
+    const updateResult = await runTaskStore(['update-many', taskId, JSON.stringify(fields)]);
+    expect(updateResult).toMatchObject({ status: 'ok', taskId, updated: fields });
+
+    const fetched = await runTaskStore(['get', taskId]);
+    const task = fetched.task as Record<string, unknown>;
+    expect(task).toMatchObject(fields);
+    expect((task.history as Array<{ action: string; status?: string }>).some((entry) => entry.action === 'status_change' && entry.status === 'completed')).toBe(true);
+
+    const index = JSON.parse(await readFile(join(dataRoot, 'tasks', '_index.json'), 'utf8')) as { tasks: Array<{ taskId: string; status: string }> };
+    expect(index.tasks.find((entry) => entry.taskId === taskId)?.status).toBe('completed');
+  }, 30000);
 });
 
 async function copyRentalPriceAuditScripts(rootDir: string): Promise<void> {

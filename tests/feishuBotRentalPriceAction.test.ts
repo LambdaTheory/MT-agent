@@ -633,6 +633,32 @@ describe('rental price card action', () => {
     expect(parseRentalOperationConfirmRequest({ request: { action: 'spec-remove-items', productId: '761', keyword: 'handle', items: [{ productId: 'abc', specDimId: 'kit', itemTitle: 'handle' }] } })).toBeNull();
   });
 
+  it('accepts numeric spec ids from daemon-backed spec removal cards', () => {
+    const specRemoveRequest = {
+      action: 'spec-remove-items' as const,
+      productId: '1054',
+      query: '1054,1052,1039,1037',
+      keyword: '端午租期',
+      items: [
+        { productId: '1054', specDimId: 2059, dimensionTitle: '租期', itemId: 5764, itemTitle: '端午租期', keyword: '端午租期' },
+        { productId: '1052', specDimId: 2053, dimensionTitle: '租期', itemId: 5748, itemTitle: '端午租期', keyword: '端午租期' },
+      ],
+    };
+
+    const confirmValue = readButtonValue(buildRentalOperationConfirmCard(specRemoveRequest, 'test reason'), 'rental_operation_confirm_submit');
+
+    expect(parseRentalOperationConfirmRequest(confirmValue)).toEqual({
+      action: 'spec-remove-items',
+      productId: '1054',
+      query: '1054,1052,1039,1037',
+      keyword: '端午租期',
+      items: [
+        { productId: '1054', specDimId: '2059', dimensionTitle: '租期', itemId: '5764', itemTitle: '端午租期', keyword: '端午租期' },
+        { productId: '1052', specDimId: '2053', dimensionTitle: '租期', itemId: '5748', itemTitle: '端午租期', keyword: '端午租期' },
+      ],
+    });
+  });
+
   it('shows a structured audit table for spec removal confirmations without changing callback payloads', () => {
     const specRemoveRequest = {
       action: 'spec-remove-items' as const,
@@ -702,7 +728,9 @@ describe('rental price card action', () => {
         },
       });
 
-      expect(result).toMatchObject({ productId: '761', ok: false, lines: ['apply: partial', 'submit: skipped', 'verify: skipped', `rollbackFile: ${rollbackFile}`] });
+      expect(result).toMatchObject({ productId: '761', ok: false });
+      expect(result.lines).toEqual(expect.arrayContaining(['apply: partial', 'submit: skipped', 'verify: skipped', `rollbackFile: ${rollbackFile}`]));
+      expect(result.lines.some((line) => line.startsWith('resultFile: '))).toBe(true);
       expect(commands).toEqual(['hello', 'apply']);
     } finally {
       globalThis.fetch = originalFetch;

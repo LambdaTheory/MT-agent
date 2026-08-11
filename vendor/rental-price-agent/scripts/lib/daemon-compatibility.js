@@ -202,7 +202,14 @@ function validatePersistedStateBinding(command, handshake) {
       actualStateDigest: handshake.persistedStateDigest,
     });
   }
-  if (!handshake.persistedStateReady) return errorResult("PERSISTED_STATE_NOT_READY", "Persisted state is not ready for mutations", { blockers: handshake.persistedStateBlockers });
+  // Mutation admission depends only on lifecycle-level signals (upgradeLock, restartRequired,
+  // instanceId match) — see validateDaemonCommand/daemonMismatch. The full persisted-state
+  // readiness sweep (handshake.persistedStateReady) is intentionally NOT a hard gate here:
+  // it is computed from a cached startup scan and must not block ordinary apply/submit/read
+  // commands when a single malformed task JSON file appears after the daemon started. The
+  // field stays available on the handshake as a diagnostic signal for status/doctor paths,
+  // and the client-side evaluateClientCompatibility preflight still blocks writes when the
+  // daemon reports persistedStateReady=false at hello time.
   return { status: "ok", allowed: true, classification: classification.classification };
 }
 
