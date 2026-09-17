@@ -10,8 +10,13 @@ describe('parseLlmJsonObject', () => {
     expect(() => parseLlmJsonObject('  ')).toThrow('LLM output is empty');
   });
 
-  it('rejects markdown fenced JSON', () => {
-    expect(() => parseLlmJsonObject('```json\n{"tool":"x"}\n```')).toThrow('LLM output must be a bare JSON object');
+  it('strips a full markdown code fence around JSON (e.g. Gemini flash tends to add one despite instructions not to)', () => {
+    expect(parseLlmJsonObject('```json\n{"tool":"x"}\n```')).toEqual({ tool: 'x' });
+    expect(parseLlmJsonObject('```\n{"tool":"x"}\n```')).toEqual({ tool: 'x' });
+  });
+
+  it('still fails loudly on a partial/unbalanced fence', () => {
+    expect(() => parseLlmJsonObject('```json\n{"tool":"x"}')).toThrow('Invalid LLM JSON output');
   });
 
   it('rejects non-object JSON values', () => {
